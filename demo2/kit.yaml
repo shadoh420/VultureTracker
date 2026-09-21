@@ -1,0 +1,79 @@
+# Sample recipe for demo2 ("Iron Relay"): every WAV in samples/surge/ is rendered from this file.
+#   python -m vulturetracker synth demo2/kit.yaml            # render all
+#   python -m vulturetracker synth demo2/kit.yaml --only 'bass*'
+# Notes use tracker names (C-5 = MIDI 60 = middle C). Times are seconds; phrase times are beats.
+# Patch names: 'Category/Name' (Surge factory) or '3rdparty/Author/Category/Name'.
+# Browse candidates with: python -m vulturetracker audition 'Pads/*' -o pads.wav
+
+out_dir: ../samples/surge
+sample_rate: 44100
+defaults: {velocity: 110, hold: 0.5, tail: 0.5, normalize: -1.0, mono: true}
+
+samples:
+  # --- drums: one-shots, mono, rendered at C-5 and played back at C-5
+  kick:      {patch: Percussion/Kick Tech 1, note: C-5, hold: 0.3, tail: 0.4}
+  snare:     {patch: Percussion/Snare Tight, note: C-5, hold: 0.2, tail: 0.4}
+  hat:       {patch: 3rdparty/Cybersoda/Drums/Nice Hat, note: C-5, hold: 0.05, tail: 0.25}
+  hat_open:  {patch: 3rdparty/Cybersoda/Drums/Acoustic HiHat, note: C-5, hold: 0.4, tail: 0.5}
+  crash:     {patch: 3rdparty/Cybersoda/Drums/Acoustic Crash, note: C-5, hold: 0.2, tail: 3.0}
+  riser:     {patch: 3rdparty/Cybersoda/Drums/Acoustic Crash, note: C-5, hold: 0.2, tail: 3.0, reverse: true}
+  tom:       {patch: Percussion/Synth Tom 1, note: C-5, root_offset: -12, hold: 0.2, tail: 0.5}
+
+  # --- bass: one sample per octave so low notes aren't just a slowed-down high sample
+  bass:
+    patch: Basses/Distorted Bass
+    notes: [C-4, C-5]    # -> bass_c3.wav, bass_c4.wav (named by the pitch they sound at)
+    root_offset: -12     # this patch sounds an octave below the key played
+    hold: 1.2
+    tail: 0.3
+
+  # --- pads: long stereo notes with a baked crossfade loop, so they sustain forever in the tracker
+  pad:
+    patch: Pads/MKS-70 Warm Pad
+    note: C-5
+    root_offset: -12
+    hold: 7.0
+    tail: 0.0
+    mono: false
+    loop: {start: 2.5, end: 6.5, crossfade: 1.0}
+  choir:
+    patch: Pads/Retro Choir
+    note: C-5
+    hold: 7.0
+    tail: 0.0
+    mono: false
+    loop: {start: 2.5, end: 6.5, crossfade: 1.0}
+
+  # --- stab: the patch plays a minor chord from one key; classic 90s chord sample
+  stab:      {patch: Chords/Minor Chord Retro Stab, note: C-5, root_offset: -12, hold: 0.25, tail: 0.6}  # sounds a C-4 minor 7th chord
+
+  # --- lead: sustained, looped so long notes can hold with vibrato
+  lead:
+    patch: Leads/Moogy Saw
+    note: C-5
+    hold: 3.0
+    tail: 0.0
+    loop: {start: 1.0, end: 2.8, crossfade: 0.3}
+
+  # --- arp: eight 16th notes of a D minor arpeggio at the song tempo (140 BPM), rendered as ONE sample.
+  # The song retriggers slices of it with Oxx (sample offset) every 8th note and transposes it per chord.
+  arp:
+    patch: Plucks/FM Pluck
+    velocity: 100
+    tail: 0.4
+    root_offset: -12     # FM Pluck sounds an octave down
+    phrase:
+      bpm: 140
+      root: D-5
+      length: 2          # beats
+      notes: [[D-5, 0, 0.2], [A-5, 0.25, 0.2], [D-6, 0.5, 0.2], [F-6, 0.75, 0.2],
+              [A-6, 1, 0.2], [F-6, 1.25, 0.2], [D-6, 1.5, 0.2], [A-5, 1.75, 0.2]]
+
+  # --- sweep: a long filter-sweep polysynth note for the breakdown
+  sweep:
+    patch: Polysynths/Filter Sweep
+    note: D-4
+    root_offset: -12
+    hold: 5.0
+    tail: 1.5
+    mono: false

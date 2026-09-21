@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>VultureTracker</title><link rel="icon" href="/icon.png">
+<style>
+:root{--bg:#0a0c0d;--panel:#14171a;--panel2:#0e1113;--bar:#161a1c;--ink:#d6dcdf;--dim:#79848a;--mid:#8d979c;--hi:#e4eaed;--acc:#7ee787;--accd:#1f3a26;--blue:#5f7d94;--amber:#d9a441;--red:#d7726a;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;--stemsw:268px;--railw:340px}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:12px/1.4 'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{overflow:auto hidden}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-track{background:#0e1113}::-webkit-scrollbar-thumb{background:#242a2e;border:2px solid #0e1113;border-radius:6px}::-webkit-scrollbar-thumb:hover{background:#333b40}
+input,select,button{font:inherit;color:inherit;background:var(--panel2);border:0;outline:0}
+input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
+#app{display:flex;flex-direction:column;height:100%;min-width:1180px;background:#101314}
+.top{display:flex;align-items:center;gap:14px;height:34px;flex:none;padding:0 10px 0 12px;background:var(--bar);box-shadow:inset 0 -1px 0 #090b0c,inset 0 1px 0 #2a3135}
+.logo{display:flex;align-items:center;gap:7px}.logo i{width:9px;height:9px;background:var(--acc);transform:rotate(45deg)}.logo b{font-size:11px;letter-spacing:.16em;color:#c3cbcf}
+.chip{display:flex;align-items:center;gap:8px;padding:3px 8px;cursor:pointer;background:var(--panel2);box-shadow:inset 1px 1px 0 #070809,inset -1px -1px 0 #252b2f;font:11px/1 var(--mono)}.chip b{font:700 9px/1 'Helvetica Neue',Helvetica,Arial,sans-serif;letter-spacing:.12em;color:var(--dim)}.chip:hover{box-shadow:inset 0 0 0 1px #2d5a3a}.chip:hover b{color:var(--acc)}
+.meta{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
+.dirty{display:flex;align-items:center;gap:7px;padding:3px 8px;cursor:pointer;background:#1d1a12;box-shadow:inset 1px 1px 0 #332d1d;font-size:10.5px;color:#e0b664}.dirty i{width:6px;height:6px;border-radius:50%;background:var(--amber)}.dirty b{letter-spacing:.1em;font-size:10px;color:var(--amber)}
+.tabs{display:flex;align-items:stretch;gap:2px;height:28px;flex:none;padding:0 10px;background:var(--panel2);box-shadow:inset 0 -1px 0 #090b0c}
+.tab{padding:0 14px;display:flex;align-items:center;font-size:10.5px;letter-spacing:.14em;font-weight:700;color:var(--dim);cursor:pointer}.tab.on{color:var(--acc);background:#14171a;box-shadow:inset 0 2px 0 var(--acc)}
+.kbd{padding:2px 5px;font:9.5px/1 var(--mono);color:var(--acc);background:#0f1a12;box-shadow:inset 1px 1px 0 #24382a}
+.k{font-size:9.5px;letter-spacing:.14em;font-weight:700;color:var(--dim)}
+.main{flex:1;min-height:0;display:none;gap:2px;padding:2px;background:var(--bg)}.main.on{display:flex}
+.col{display:flex;flex-direction:column;gap:2px;min-width:0;min-height:0}
+.panel{background:var(--panel);box-shadow:inset 1px 1px 0 #21272a,inset -1px -1px 0 #080a0b}
+.ph{display:flex;align-items:center;justify-content:space-between;padding:7px 10px 6px;box-shadow:inset 0 -1px 0 #0a0c0d;position:sticky;top:0;background:var(--panel);z-index:1}
+.pb{padding:10px}
+.mono{font-family:var(--mono)}
+.row{display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;font-size:10.5px}.row span:first-child{color:var(--mid)}.row span:last-child{font:11px/1 var(--mono);color:var(--ink)}
+.btn{padding:5px 10px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:var(--dim);background:#151a1c;box-shadow:inset 1px 1px 0 #232a2d,inset -1px -1px 0 #0a0c0d;user-select:none;display:inline-block;white-space:nowrap}.btn:hover{color:var(--acc)}.btn.on{color:#0c1a0f;background:var(--acc)}
+.btn.sm{padding:3px 6px;font-size:9px}.btn.dimb{color:#4a5255}
+.btn.big{padding:9px 16px;font-size:11.5px;color:#9df0a5;background:var(--accd);text-align:center}.btn.big:hover{background:#274030}
+.btn.warn{color:#1a1508;background:var(--amber)}
+.grid{display:grid;gap:1px;font-size:8.5px;color:var(--dim)}
+.cn{overflow:hidden;white-space:nowrap;text-align:right;padding-right:5px;font-family:var(--mono);letter-spacing:.03em;color:var(--mid)}.cn.off{color:#4a5255}.cn .fb{display:inline-block;width:3px;margin-left:5px;vertical-align:middle}
+.cell{background:#0f1416;cursor:pointer}.cell.used{background:var(--fam,#22302a)}.cell.used:not(.slot){opacity:.7}.cell.slot{background:#3c6b48}.cell.sel{outline:1px solid var(--acc);outline-offset:-1px}.cell.sel.slot{background:var(--acc)}.cell.off,.cell.used.off{opacity:.25}
+.rl{display:flex;align-items:center;cursor:pointer;font:8px/1 var(--mono);color:var(--dim)}.rl.sel{color:var(--acc)}
+.cand{display:flex;gap:0;background:var(--panel);cursor:pointer;box-shadow:inset 1px 1px 0 #21272a,inset -1px -1px 0 #080a0b}.cand.sel{background:#1a2a1f;box-shadow:inset 0 0 0 1px #2d5a3a}.cand.rej{opacity:.45}
+.cand .key{width:34px;flex:none;display:grid;place-items:center;font:700 14px/1 var(--mono);color:var(--dim);background:#0f1416}.cand.sel .key{color:#0c1a0f;background:var(--acc)}
+.cand .body{flex:1;min-width:0;padding:8px 10px 9px}
+.name{font-size:12.5px;font-weight:600;color:var(--hi)}.src{font:10px/1.4 var(--mono);color:var(--dim);word-break:break-all}
+.tag{font-size:9px;letter-spacing:.1em;font-weight:700;padding:1px 5px;background:#0f1416;color:var(--blue);margin-left:6px}.tag.acc{color:var(--acc)}.tag.red{color:var(--red)}
+.wave{height:34px;background:#0b0e0f;box-shadow:inset 1px 1px 0 #07080a}.wave svg{display:block;width:100%;height:100%}
+.nums{display:flex;gap:0}.num{width:72px;flex:none;display:flex;flex-direction:column;justify-content:center;padding-left:8px}.num b{font-size:9px;letter-spacing:.1em;color:var(--dim)}.num span{font:11px/1 var(--mono);color:var(--ink)}
+.stars{display:flex;gap:1px}.stars i{font-style:normal;cursor:pointer;font-size:13px;color:#2a3236;padding:0 1px}.stars i.on{color:var(--acc)}
+.rej{padding:3px 7px;cursor:pointer;font-size:9.5px;letter-spacing:.1em;font-weight:700;color:var(--dim);background:#0f1416}.rej.on{color:var(--red)}
+.note{flex:1;min-width:0;padding:5px 8px;font-size:11px}
+.bar{flex:1;height:5px;background:#0b0e0f}.bar i{display:block;height:100%;background:var(--acc);width:40%;animation:pulse 1s infinite alternate}@keyframes pulse{from{opacity:.4}to{opacity:1}}
+.fail{margin-top:8px;display:flex;align-items:flex-start;gap:8px;padding:7px 8px;background:#1d1414;font:10.5px/1.5 var(--mono);color:#e0a09a}.fail b{font-family:inherit;color:var(--red);letter-spacing:.1em;font-size:10px;flex:none}
+.bottom{flex:none;height:60px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--bar);box-shadow:inset 0 1px 0 #2a3135}
+.play{width:36px;height:36px;display:grid;place-items:center;cursor:pointer;font-size:15px;color:#0c1a0f;background:var(--acc)}
+.prog{position:relative;height:9px;background:#0b0e0f;cursor:pointer}.prog i{position:absolute;left:0;top:0;bottom:0;background:rgba(126,231,135,.25)}.prog b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--acc)}
+table{border-collapse:collapse;width:100%;font-size:11px}th{text-align:left;font-size:9px;letter-spacing:.1em;color:var(--dim);padding:4px 8px;box-shadow:inset 0 -1px 0 #0a0c0d;white-space:nowrap}td{padding:4px 8px;box-shadow:inset 0 -1px 0 #0a0c0d;font-family:var(--mono);font-size:10.5px;white-space:nowrap}
+#slots{table-layout:fixed}th.r,td.r{text-align:right}td.file{overflow:hidden;text-overflow:ellipsis;color:var(--dim)}td.sans{font-family:inherit;font-size:11.5px;overflow:hidden;text-overflow:ellipsis}td.dimc{color:#4a5255}
+tr.on td{background:rgba(126,231,135,.05)}tr.on td.sans{color:var(--acc);font-weight:600}tr.on td:first-child{box-shadow:inset 2px 0 0 var(--acc),inset 0 -1px 0 #0a0c0d}
+.modal{position:fixed;inset:0;background:rgba(6,8,9,.8);display:none;align-items:center;justify-content:center;z-index:9}.modal.on{display:flex}.box{width:860px;max-height:90%;overflow:auto;background:var(--panel);box-shadow:inset 1px 1px 0 #2a3135;padding:14px}
+.dl{font:10.5px/1.5 var(--mono);white-space:pre;padding:0 10px}.dl.add{color:var(--acc);background:#10201a}.dl.del{color:var(--red);background:#20120f}.dl.hd{color:var(--blue)}
+.empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:var(--mid);padding:20px}
+textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px/1.5 var(--mono);padding:6px 8px;resize:vertical}
+.err{color:var(--red);font:10.5px/1.5 var(--mono);white-space:pre-wrap}
+/* song overview: stems rail, pattern rail, resize handles */
+.handle{width:5px;flex:none;cursor:col-resize;display:flex;align-items:center;justify-content:center;background:#0d1012}.handle:hover{background:#1b2a20}.handle i{width:1px;height:26px;background:#2c3438}
+.stem{display:flex;align-items:center;gap:5px;padding:3px 4px;font:9.5px/1 var(--mono);white-space:nowrap}.stem.off{opacity:.55}.stem.solo{background:rgba(126,231,135,.07)}
+.stem .fb{width:3px;height:13px;flex:none}.stem .n{width:17px;flex:none;color:#5c6569}.stem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;letter-spacing:.03em;color:#c3cbcf}.stem.off .nm{color:var(--dim)}
+.ms{width:15px;height:15px;flex:none;display:grid;place-items:center;cursor:pointer;font:700 8.5px/1 var(--mono);color:#6d777c;background:#1a1f21;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d}.ms:hover{color:var(--ink)}.ms.m{color:#0d1a11;background:var(--amber);box-shadow:none}.ms.s{color:#0d1a11;background:var(--acc);box-shadow:none}
+.stem .pan{width:26px;flex:none;text-align:right;font-size:9px;color:#6d777c}.vol{width:34px;flex:none;height:4px;background:#0b0e0f;box-shadow:inset 1px 1px 0 #070809}.vol i{display:block;height:100%;background:#5c6a70}.stem.off .vol i{background:#333a3d}
+.stem .smp{width:38px;flex:none;text-align:right;font-size:9px;color:#5c6569;overflow:hidden}
+.state{padding:2px 6px;font-size:8.5px;letter-spacing:.12em;font-weight:700;color:var(--dim);background:#1b2124}.state.on{color:#0d1a11;background:var(--acc)}
+.badge{flex:none;padding:3px 7px;white-space:nowrap;font:10px/1.3 var(--mono);color:var(--acc);background:#16201a}
+#patscroll{position:relative}
+.pathead{display:flex;position:sticky;top:0;z-index:2;background:var(--panel);padding:4px 0 3px;box-shadow:inset 0 -1px 0 #0a0c0d;font:8.5px/1 var(--mono);color:var(--dim);white-space:nowrap}.pathead span{width:86px;flex:none;overflow:hidden}.pathead span:first-child{width:26px;position:sticky;left:0;z-index:1;background:var(--panel)}.pathead span.off{color:#4a5255}
+.pt{display:flex;font:10px/15px var(--mono);white-space:pre}.pt.b4{background:rgba(255,255,255,.022)}.pt.b16{background:rgba(143,176,196,.055)}.pt.play{background:rgba(126,231,135,.13)}
+.rn{width:26px;flex:none;position:sticky;left:0;z-index:1;background:var(--panel);color:#4a5255;font-variant-numeric:tabular-nums}.pt.b4 .rn{background:#161a1c;color:#6d777c}.pt.b16 .rn{background:#171c20;color:#8fb0c4}.pt.play .rn{background:#1b2c20;color:var(--acc)}
+.pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pt.play .pc .n{color:#eaf6ec}
+</style></head><body><div id="app">
+<div class="top">
+  <div class="logo"><i></i><b>VULTURETRACKER</b></div>
+  <div class="chip" id="songchip" title="open another song" onclick="renderStart()"><span id="chipname"></span><b>OPEN…</b></div><span class="meta" id="songmeta"></span>
+  <div style="flex:1"></div>
+  <div class="dirty" id="dirty" style="display:none" onclick="act('reload')"><i></i>song changed on disk <b>RELOAD</b></div>
+  <span class="meta" id="queue"></span>
+  <span class="btn" onclick="toggle('keys')">?</span>
+</div>
+<div class="tabs">
+  <div class="tab on" data-t="tryout" onclick="tab('tryout')">TRYOUT</div>
+  <div class="tab" data-t="overview" onclick="tab('overview')">SONG OVERVIEW</div>
+  <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
+</div>
+
+<div class="main on" id="t-tryout">
+  <div class="col" style="width:320px;flex:none">
+    <div class="panel" style="flex:none">
+      <div class="ph"><span class="k">SAMPLE SLOT</span><select id="slotsel" onchange="act('slot',{slot:+this.value})" style="font:11px var(--mono);padding:2px 4px"></select></div>
+      <div class="pb" id="slotinfo"></div>
+    </div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto">
+      <div class="ph"><span class="k">SECTION TO LOOP</span><span class="mono" id="looplabel" style="font-size:10px;color:#c3cbcf"></span></div>
+      <div class="pb">
+        <div style="display:flex;gap:2px;margin-bottom:10px"><span class="btn" id="p1" style="flex:1;text-align:center;padding:5px 6px" onclick="preset(1)">1 ORDER</span><span class="btn" id="p4" style="flex:1;text-align:center;padding:5px 6px" onclick="preset(4)">4 ORDERS</span><span class="btn" id="pall" style="flex:1;text-align:center;padding:5px 6px" onclick="preset(0)">WHOLE SONG</span></div>
+        <div id="layers"></div>
+        <div style="margin-top:8px;font-size:10px;color:var(--dim)">click an order to start the loop there · bright cells: where this slot plays</div>
+      </div>
+    </div>
+  </div>
+  <div class="col" style="flex:1">
+    <div class="panel" style="flex:none">
+      <div class="ph"><span class="k">CANDIDATES <span id="candcount" style="font-weight:400;letter-spacing:0;color:var(--mid)"></span></span>
+        <span style="display:flex;gap:2px;align-items:center">
+          <span class="btn on" id="f-all" onclick="setFilter('all')">ALL</span><span class="btn" id="f-star" onclick="setFilter('star')">★ SHORTLIST</span><span class="btn" id="f-un" onclick="setFilter('un')">UNRATED</span>
+          <span class="k" style="margin-left:10px">sort</span><span class="btn on" id="s-added" onclick="setSort('added')">ADDED</span><span class="btn" id="s-dist" onclick="setSort('dist')">DISTANCE</span><span class="btn" id="s-rating" onclick="setSort('rating')">RATING</span>
+        </span></div>
+      <div style="display:flex;gap:6px;padding:8px 10px">
+        <input id="globs" placeholder="add candidate WAVs: a path or glob, relative to the song (e.g. cand/hat_*.wav or C:/kits/**/*.wav)" style="flex:1;padding:5px 8px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')addCands()">
+        <span class="btn" onclick="addCands()">ADD</span>
+      </div>
+    </div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto;background:var(--panel2)" id="cands"></div>
+  </div>
+  <div class="col" style="width:340px;flex:none">
+    <div class="panel" style="flex:1;min-height:0;overflow:auto">
+      <div class="ph"><span class="k">CHOSEN CANDIDATE</span><span class="kbd" id="selkey"></span></div>
+      <div class="pb" id="chosen"></div>
+    </div>
+  </div>
+</div>
+
+<div class="main" id="t-overview" style="overflow-x:auto">
+  <div class="panel col" style="width:var(--stemsw);flex:none">
+    <div class="ph" style="position:static"><span class="k">STEMS · <span id="stemsn"></span></span><span class="state" id="stemstate"></span></div>
+    <div id="stemlist" style="flex:1;min-height:0;overflow:auto;padding:4px 6px"></div>
+    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems')" title="one WAV per playing channel, next to the song">EXPORT STEMS</span><span class="btn" onclick="resetStems()">RESET</span></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
+  </div>
+  <div class="handle" onmousedown="drag(event,'--stemsw',1,200,420)"><i></i></div>
+  <div class="col" style="flex:1;min-width:560px">
+    <div class="panel" style="flex:none;max-height:50%;overflow:auto">
+      <div class="ph" style="gap:10px;justify-content:flex-start"><span class="k" style="white-space:nowrap">ARRANGEMENT · <span id="arrlabel"></span></span><span style="flex:1;min-width:0;font-size:10.5px;color:#6d777c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">click an order to set the tryout section</span><span class="badge" id="ovlabel"></span><span class="btn" style="color:#9df0a5;background:#1f3326" onclick="tab('tryout')">SEND TO TRYOUT →</span></div>
+      <div class="pb" id="arr"></div>
+    </div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto">
+      <div class="ph"><span class="k">SAMPLE SLOTS · <span id="slotn"></span></span><span class="meta">measurements from the WAVs on disk</span></div>
+      <table id="slots"></table>
+    </div>
+  </div>
+  <div class="handle" onmousedown="drag(event,'--railw',-1,232,820)"><i></i></div>
+  <div class="panel col" style="width:var(--railw);flex:none">
+    <div style="flex:none;padding:7px 10px;box-shadow:inset 0 -1px 0 #0a0c0d">
+      <div style="display:flex;align-items:baseline;gap:8px"><span class="k" id="pattitle" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">PATTERN VIEW</span><span class="mono" id="patrow" style="font-size:10px;color:var(--acc);white-space:nowrap"></span></div>
+      <div id="patctl" style="margin-top:6px"></div>
+    </div>
+    <div id="patscroll" style="flex:1;min-height:0;overflow:auto"><div id="pat"></div></div>
+    <div style="flex:none;padding:7px 10px 9px;box-shadow:inset 0 1px 0 #0a0c0d;font-size:10px;line-height:1.55;color:var(--dim)">follows the playhead while the tryout plays · edits happen in the YAML or your tracker, this view never writes</div>
+  </div>
+</div>
+
+<div class="main" id="t-export">
+  <div class="panel" style="flex:1;overflow:auto">
+    <div class="ph"><span class="k">RENDER &amp; EXPORT</span></div>
+    <div class="pb">
+      <div style="display:flex;gap:8px"><span class="btn big" onclick="act('build',{render:false})">BUILD .IT</span><span class="btn big" onclick="act('build',{render:true})">BUILD + RENDER WAV</span></div>
+      <div style="margin-top:8px;font-size:10.5px;color:var(--dim)">writes next to the song, then verifies the module with libopenmpt</div>
+      <div id="buildout" style="margin-top:14px" class="mono"></div>
+      <div id="songerr" class="err" style="margin-top:14px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="bottom">
+  <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
+  <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
+    <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span></div>
+    <div class="prog" id="prog" onclick="seek(event)"><i id="progfill"></i><b id="proghead"></b></div>
+    <div style="display:flex;gap:12px"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf"></span><span style="font-size:10px;color:var(--dim)">switching candidates keeps the position</span></div>
+  </div>
+  <div style="display:flex;gap:2px">
+    <span class="btn on" id="m-mix" onclick="setSolo(false)">IN MIX <span class="kbd">M</span></span>
+    <span class="btn" id="m-solo" onclick="setSolo(true)">SOLO <span class="kbd">S</span></span>
+  </div>
+</div>
+<audio id="audio" loop></audio>
+
+<div class="modal" id="diffmodal" onclick="if(event.target===this)toggle('diff',false)"><div class="box">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><span class="k" style="color:var(--acc)" id="difftitle">APPLY</span><div style="flex:1"></div><span class="meta">nothing is written until you confirm</span></div>
+  <div id="difflines" style="background:#0b0e0f;padding:6px 0;max-height:60vh;overflow:auto"></div>
+  <div style="display:flex;gap:10px;margin-top:12px;align-items:center"><span class="btn big" onclick="applySel()">WRITE SONG &amp; REBUILD <span class="kbd">⏎</span></span><span class="btn" onclick="toggle('diff',false)">CANCEL ESC</span></div>
+</div></div>
+<div class="modal" id="startmodal" style="background:#0a0c0d"><div class="box" style="width:640px">
+  <div style="display:flex;align-items:center;margin-bottom:18px"><div class="logo"><i></i><b>VULTURETRACKER</b></div><div style="flex:1"></div><span class="btn" id="startclose" style="display:none" onclick="toggle('start',false)">CLOSE <span class="kbd">ESC</span></span></div>
+  <div style="font-size:15px;font-weight:600;color:var(--hi)">Open a song</div>
+  <div style="margin-top:4px;font-size:11.5px;color:var(--mid)">A song is a YAML file; the tryout screen renders candidate samples inside it.</div>
+  <div style="margin-top:16px;display:flex;gap:6px"><input id="openpath" placeholder="path to song.yaml" style="flex:1;padding:7px 9px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')openSong(this.value)"><span class="btn" onclick="openSong($('openpath').value)">OPEN</span><span class="btn big" onclick="browse()">BROWSE…</span></div>
+  <div id="recentlist" style="margin-top:18px"></div>
+  <div id="demolist" style="margin-top:14px"></div>
+</div></div>
+<div class="modal" id="keysmodal" onclick="toggle('keys',false)"><div class="box" style="width:520px">
+  <div class="k" style="color:var(--acc);margin-bottom:10px">KEYBOARD</div>
+  <div class="row"><span>1–9, 0</span><span>pick candidate 1–10</span></div><div class="row"><span>↑ ↓</span><span>previous / next candidate</span></div>
+  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>M / S</span><span>in mix / solo the sample</span></div>
+  <div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
+  <div class="row"><span>Esc</span><span>close</span></div>
+</div></div>
+</div>
+<script>
+let S=null,sel=null,solo=false,filter='all',sort='added',diffId=null,focus=null,PAT={key:null,rows:null,order:-1,active:[],row:-2};
+let hexRows=false;try{hexRows=localStorage.hexrows==='1'}catch(e){}
+// channel families guessed from names: colour the stems and arrangement, and pick the DRUMS set
+const FAMS=[[/kick|snare|hat|hh|perc|drum|break|clap|tom|cym|ride|crash|shak|tamb|rim|conga|bongo/i,'#6b7378'],[/bass|\bsub\b/i,'#7a7268'],[/pad|bed|choir|string|chord|motif|vox|voice|organ/i,'#657080'],[/riff|lead|melod|arp|synth|pluck|seq/i,'#6d7a72'],[/fx|noise|rise|sweep|swell|gong|hit|impact|sfx/i,'#746b7a']];
+const fam=name=>FAMS.findIndex(([re])=>re.test(name)),famCol=name=>{const i=fam(name);return i<0?'':FAMS[i][1]},rowNum=i=>hexRows?i.toString(16).toUpperCase().padStart(2,'0'):pad(i);
+const $=id=>document.getElementById(id),audio=$('audio'),shown={};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtT=t=>`${Math.floor(t/60)}:${(t%60).toFixed(2).padStart(5,'0')}`,pad=n=>String(n).padStart(2,'0');
+const secs=v=>v==null?'—':v.toFixed(v<1?3:2)+' s', hz=v=>v==null?'—':Math.round(v).toLocaleString()+' Hz';
+// in-place update: touch the DOM only when the markup changed, and keep the scroll position when it did
+function put(id,h){if(shown[id]===h)return;shown[id]=h;const el=$(id),t=el.scrollTop,l=el.scrollLeft;el.innerHTML=h;el.scrollTop=t;el.scrollLeft=l}
+async function act(name,body){const r=await fetch('/api/'+name,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(j.error)alert(j.error);await refresh();return j}
+async function refresh(){const j=await (await fetch('/api/state')).json();const had=!!(S&&S.song);S=j;
+  if(!S.song){if(!$('startmodal').classList.contains('on'))renderStart();return}
+  if(!had)toggle('start',false);  // only the no-song → song transition closes the start screen; a routine poll never does
+  render()}
+async function renderStart(){const j=await (await fetch('/api/start')).json();const li=(p,extra)=>`<div class="row" style="cursor:pointer;padding:6px 8px;background:#0f1416;margin-bottom:2px" onclick="openSong(${JSON.stringify(p).replace(/"/g,'&quot;')})"><span style="font:11px var(--mono);color:var(--ink)">${esc(p.replace(/\\/g,'/').split('/').slice(-2).join('/'))}</span><span style="color:var(--dim);font-size:10px">${esc(extra||p)}</span></div>`;
+  $('recentlist').innerHTML=(j.recent||[]).length?`<div class="k" style="margin-bottom:6px">RECENT</div>`+j.recent.map(p=>li(p)).join(''):'';
+  $('demolist').innerHTML=(j.demos||[]).length?`<div class="k" style="margin-bottom:6px">DEMOS</div>`+j.demos.map(p=>li(p,'demo')).join(''):'';
+  $('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
+function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src')}
+async function openSong(p){if(!p)return;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
+async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t))}
+function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
+function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
+function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
+function preset(n){const o=S.orders,f=S.song.facts;if(!f)return;const start=o?o[0]:0;act('orders',{orders:n?[start,Math.min(start+n,f.orders.length)]:null})}
+function setStart(i){const o=S.orders,f=S.song.facts;const len=o?o[1]-o[0]:4;act('orders',{orders:[i,Math.min(i+len,f.orders.length)]})}
+function loopLabel(){const f=S.song.facts;if(!f)return '';if(!S.orders)return `whole song · ${fmtT(f.duration)}`;const [a,b]=S.orders,os=f.orders.slice(a,b);const t=os.reduce((s,o)=>s+o.seconds,0),bars=os.reduce((s,o)=>s+o.bars,0);return `ord ${a}${b-a>1?'–'+(b-1):''} · ${bars} bars · ${fmtT(t)}`}
+function visible(){let c=S.candidates.filter(x=>filter==='all'||(filter==='star'?x.stars>0&&!x.rejected:!x.stars&&!x.rejected));if(sort==='dist')c=[...c].sort((a,b)=>(a.dist??1e9)-(b.dist??1e9));if(sort==='rating')c=[...c].sort((a,b)=>b.stars-a.stars||(a.dist??1e9)-(b.dist??1e9));return c}
+function wavesvg(m,fill,h){return m&&m.wave?`<svg viewBox="0 0 100 ${h||24}" preserveAspectRatio="none"><polygon points="${m.wave}" fill="${fill}" opacity=".85"/></svg>`:''}
+const audible=c=>S.solo!=null?S.solo===c:!S.muted.includes(c);
+function grid(f,inSel,h){const n=f.orders.length,wide=h>9;let out=`<div class="grid" style="grid-template-columns:${wide?78:34}px repeat(${n},minmax(0,1fr))"><div></div>${f.orders.map((o,i)=>`<div class="rl ${inSel(i)?'sel':''}" style="height:${h}px" onclick="setStart(${i})" title="${esc(o.pattern)}">${i%4?'':i}</div>`).join('')}`;
+  f.channels.forEach((ch,c)=>{const off=audible(c)?'':' off',col=famCol(ch);out+=`<div class="cn${off}" style="font-size:${wide?8.5:8}px;line-height:${h}px" title="${esc(ch)}">${esc((wide?ch:ch.slice(0,5)).toUpperCase())}${wide?`<i class="fb" style="height:${h-2}px;background:${col||'transparent'}"></i>`:''}</div>`+f.orders.map((o,i)=>{const u=f.use[i][c];return `<div class="cell ${u.length?'used':''} ${u.includes(S.slot)?'slot':''} ${inSel(i)?'sel':''}${off}" style="height:${h}px${col?';--fam:'+col:''}" onclick="setStart(${i})" title="ord ${i} ${esc(o.pattern)}: samples ${u.join(' ')}"></div>`}).join('')});
+  return out+'</div>'}
+function render(){
+  const f=S.song.facts,name=S.song.path.replace(/\\/g,'/').split('/');
+  put('chipname',`<span style="color:var(--dim)">${esc(name.slice(-2,-1)[0])}/</span>${esc(name.slice(-1)[0])}`);
+  $('songmeta').textContent=f?`${f.title} · ${f.bpm} BPM · tempo ${f.tempo} speed ${f.speed} · ${f.channels.length} ch · ${f.patterns} pat · ${f.samples.length} slots · ${fmtT(f.duration)}`:'song has errors — see RENDER & EXPORT';
+  $('dirty').style.display=S.song.dirty?'flex':'none';
+  $('queue').textContent=`render queue ${S.queue} · cache ${S.cache}`;
+  $('songerr').textContent=S.song.error?S.song.error.join('\n'):'';
+  // slot
+  const ents=S.song.sample_entries;put('slotsel',Object.keys(ents).map(k=>`<option value="${k}" ${+k===S.slot?'selected':''}>${pad(k)} ${esc(ents[k].name||'')}</option>`).join(''));
+  const e=S.slot_entry,r=S.ref;
+  put('slotinfo',`<div style="display:flex;align-items:baseline;gap:8px"><span class="mono" style="font-size:20px;font-weight:700;color:var(--acc)">${pad(S.slot)}</span><span class="name" style="font-size:14px">${esc(e.name||'')}</span></div>
+   <div class="src" style="margin-top:6px">${esc(e.file||'')}</div>
+   ${r&&!r.error?`<div class="src" style="margin-top:3px">${r.rate} Hz · ${r.bits}-bit ${r.stereo?'stereo':'mono'} · loop ${r.loop?'on':'off'}${r.root?' · root '+r.root:''}</div>
+   <div style="margin-top:9px;padding-top:9px;box-shadow:inset 0 1px 0 #0a0c0d">${measRows(r)}</div>`:`<div class="err" style="margin-top:6px">${esc(r?r.error:'no file')}</div>`}
+   <div style="margin-top:9px;padding:7px 8px;background:#0f1416"><div class="k" style="color:var(--blue)">REFERENCE</div><div class="src">the sample in the song now; DIST is measured against it</div></div>`);
+  // section
+  $('looplabel').textContent=$('looplabel2').textContent=loopLabel();
+  const len=S.orders?S.orders[1]-S.orders[0]:0;$('p1').classList.toggle('on',len===1);$('p4').classList.toggle('on',len===4);$('pall').classList.toggle('on',!S.orders);
+  if(f){const inSel=i=>S.orders?i>=S.orders[0]&&i<S.orders[1]:true;
+    put('layers',grid(f,inSel,9));
+    put('arr',grid(f,inSel,11));$('ovlabel').textContent=loopLabel();$('arrlabel').textContent=`${f.orders.length} ORD × ${f.channels.length} CH`;
+    renderStems(f);renderSlots(f,ents);showPattern(viewOrder())}
+  // candidates
+  const cs=visible(),best=S.candidates.filter(c=>!c.current&&c.dist!=null).sort((a,b)=>a.dist-b.dist)[0];
+  if(sel!=null&&!S.candidates.some(c=>c.id===sel))sel=null;
+  $('candcount').textContent=`${S.candidates.length} candidates · ${S.candidates.filter(c=>c.stars).length} starred · ${S.candidates.filter(c=>c.status==='rendering'||c.status==='queued').length} rendering · ${S.candidates.filter(c=>c.status==='failed').length} failed`;
+  if(!S.candidates.length)put('cands',`<div class="empty"><div style="font-size:15px;font-weight:600;color:#c3cbcf">No candidates for slot ${pad(S.slot)} yet</div><div style="margin-top:8px;max-width:420px;font-size:11.5px">Type a path or glob above. Render candidates first with <span class="mono">vulturetracker synth recipe.yaml</span> or <span class="mono">audition</span>, or point at any folder of WAVs. Each candidate is rendered inside the song with only this slot swapped.</div></div>`);
+  else put('cands',`<div style="display:flex;flex-direction:column;gap:2px">`+cs.map((c,i)=>{const m=c.meas||{},keyn=S.candidates.indexOf(c);const st=c.status;return `<div class="cand ${c.id===sel?'sel':''} ${c.rejected?'rej':''}" onclick="pick(${c.id})">
+    <div class="key">${(keyn+1)%10}</div><div class="body">
+    <div style="display:flex;align-items:baseline;min-width:0"><span class="name">${esc(c.name)}</span>${c.current?'<span class="tag">CURRENT</span>':''}${best&&best.id===c.id?'<span class="tag">CLOSEST</span>':''}${c.id===sel&&!audio.paused?'<span class="tag acc">● PLAYING</span>':''}<div style="flex:1"></div><span class="rej" onclick="event.stopPropagation();act('remove',{id:${c.id}})" title="remove from list">✕</span></div>
+    <div class="src">${esc(c.src)}${m.rate?` · ${m.rate} Hz · ${m.bits}-bit ${m.stereo?'stereo':'mono'}${m.root?' · root '+m.root:''}${m.loop?' · loop':''}`:''}</div>
+    ${m.error?`<div class="fail"><b>UNREADABLE</b>${esc(m.error)}</div>`:''}
+    ${st==='failed'?`<div class="fail"><b>RENDER FAILED</b><span style="flex:1">${esc(c.error)}</span><span class="btn" onclick="event.stopPropagation();act('retry',{id:${c.id}})">RETRY</span></div>`:''}
+    ${st==='queued'||st==='rendering'?`<div style="margin-top:9px;display:flex;align-items:center;gap:10px"><div class="bar"><i></i></div><span style="font-size:10px;color:var(--dim)">${st==='rendering'?'rendering in the song…':'queued'}</span></div>`:''}
+    <div style="margin-top:8px;display:flex;align-items:stretch;gap:10px"><div class="wave" style="flex:1">${wavesvg(m,'#7ee787')}</div><div class="wave" style="width:68px;flex:none">${bandsvg(m,S.ref)}</div>
+      <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
+    <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
+    </div></div>`}).join('')+'</div>');
+  renderChosen();updateAudio();renderBuild();
+}
+function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
+function measRows(m){if(!m||m.error)return '';return [['duration',secs(m.duration)],['detected pitch',m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'],['spectral centroid',hz(m.centroid)],['decay to −40 dB',secs(m.decay)],['attack to peak',m.attack==null?'—':Math.round(m.attack*1000)+' ms'],['flatness (noise)',m.flatness==null?'—':m.flatness.toFixed(2)]].map(([k,v])=>`<div class="row"><span>${k}</span><span>${v}</span></div>`).join('')}
+function renderChosen(){const c=S.candidates.find(x=>x.id===sel);$('selkey').textContent=c?`KEY ${(S.candidates.indexOf(c)+1)%10}`:'';
+  if(!c){put('chosen',`<div style="padding:20px 6px;text-align:center;font-size:11.5px;line-height:1.6;color:var(--mid)">Pick a candidate with <span class="kbd">1</span>–<span class="kbd">0</span> or a click to hear it in the song and see its measurements against the current sample here.</div>`);return}
+  const m=c.meas||{},r=S.ref||{},d=(a,b,f)=>a==null||b==null?'':f(a-b);
+  const rows=[['duration',secs(m.duration),secs(r.duration),d(m.duration,r.duration,x=>(x>0?'+':'')+x.toFixed(2))],['pitch',m.pitch||'—',r.pitch||'—',m.pitch&&r.pitch?(m.pitch===r.pitch?'=':'≠'):''],['centroid',hz(m.centroid),hz(r.centroid),m.centroid&&r.centroid?((m.centroid/r.centroid-1)*100).toFixed(0).replace(/^(\d)/,'+$1')+'%':''],['decay −40',secs(m.decay),secs(r.decay),d(m.decay,r.decay,x=>(x>0?'+':'')+x.toFixed(2))],['attack',m.attack==null?'—':Math.round(m.attack*1000)+' ms',r.attack==null?'—':Math.round(r.attack*1000)+' ms',''],['flatness',m.flatness==null?'—':m.flatness.toFixed(2),r.flatness==null?'—':r.flatness.toFixed(2),d(m.flatness,r.flatness,x=>(x>0?'+':'')+x.toFixed(2))]];
+  const curve=(pts,col)=>pts?`<polyline points="${pts.map((v,i)=>`${i*100/(pts.length-1)},${20-v*19}`).join(' ')}" fill="none" stroke="${col}" stroke-width="1"/>`:'';
+  put('chosen',`<div class="name" style="font-size:13.5px">${esc(c.name)}</div><div class="src" style="margin-top:5px">${esc(c.path)}</div>
+   <div class="wave" style="margin-top:10px;height:56px">${wavesvg(m,'#7ee787')}</div>
+   <div class="k" style="margin-top:12px">MEASURED · <span style="color:var(--blue)">VS CURRENT</span></div>
+   <div style="display:flex;padding:4px 0;font-size:9px;letter-spacing:.1em;color:var(--dim)"><span style="flex:1"></span><span style="width:64px;text-align:right">OURS</span><span style="width:64px;text-align:right">REF</span><span style="width:54px;text-align:right">Δ</span></div>
+   ${rows.map(([k,a,b,dd])=>`<div style="display:flex;align-items:baseline;padding:4px 0;box-shadow:inset 0 -1px 0 #0a0c0d;font-size:10.5px"><span style="flex:1;color:#a8b1b6">${k}</span><span class="mono" style="width:64px;text-align:right">${a}</span><span class="mono" style="width:64px;text-align:right;color:var(--dim)">${b}</span><span class="mono" style="width:54px;text-align:right;color:var(--blue)">${dd}</span></div>`).join('')}
+   <div style="margin-top:12px;display:flex;gap:8px"><div style="flex:1"><div class="k">DECAY CURVE</div><div class="wave" style="margin-top:4px;height:44px"><svg viewBox="0 0 100 20" preserveAspectRatio="none">${curve(r.decay_curve,'#3f525f')}${curve(m.decay_curve,'#7ee787')}</svg></div></div>
+   <div style="flex:1"><div class="k">OCTAVE BANDS</div><div class="wave" style="margin-top:4px;height:44px">${bandsvg(m,r)}</div></div></div>
+   ${c.current?`<div style="margin-top:14px;text-align:center;font-size:10.5px;color:var(--dim)">this is the sample in the song now</div>`:`<div class="btn big" style="margin-top:14px;display:block" onclick="showDiff(${c.id})">USE THIS FOR SLOT ${pad(S.slot)} <span class="kbd">U</span></div><div style="margin-top:6px;text-align:center;font-size:10px;color:var(--dim)">shows the YAML change before anything is written</div>`}`)}
+function renderBuild(){const b=S.build;if(!b){put('buildout','');return}
+  if(b.status!=='done'){put('buildout',b.status==='failed'?`<div class="err">${esc(b.error)}</div>`:`<span style="color:var(--amber)">${b.status}…</span>`);return}
+  put('buildout',`<div>wrote ${esc(b.it)} · ${b.bytes.toLocaleString()} bytes</div>${b.wav?`<div>rendered ${esc(b.wav)} · ${fmtT(b.seconds)}</div>`:''}${b.mismatches.length?`<div class="err">${esc(b.mismatches.join('\n'))}</div>`:'<div style="color:var(--acc)">libopenmpt agrees with the song</div>'}${b.warnings.map(w=>`<div style="color:var(--amber)">${esc(w)}</div>`).join('')}`)}
+// ---- song overview: stems
+const smpList=a=>{const r=[];for(let i=0;i<a.length;){let j=i;while(j+1<a.length&&a[j+1]===a[j]+1)j++;r.push(j-i>=2?pad(a[i])+'–'+pad(a[j]):a.slice(i,j+1).map(pad).join('·'));i=j+1}return r.join('·')};
+function renderStems(f){const n=f.channels.length;$('stemsn').textContent=`${n} CHANNELS`;
+  put('stemlist',f.channels.map((ch,c)=>{const on=audible(c),m=S.muted.includes(c),so=S.solo===c,p=f.pan[c],used=[...new Set(f.use.flatMap(o=>o[c]))].sort((a,b)=>a-b);
+    return `<div class="stem ${on?'':'off'} ${so?'solo':''}"><span class="n">${pad(c+1)}</span><span class="ms ${m?'m':''}" onclick="muteCh(${c})" title="mute">M</span><span class="ms ${so?'s':''}" onclick="soloCh(${c})" title="solo">S</span><i class="fb" style="background:${famCol(ch)||'#333a3d'}"></i><span class="nm" title="${esc(ch)}">${esc(ch.toUpperCase())}</span><span class="pan" title="pan ${p}">${p===100?'S':p===32?'C':(p<32?'L':'R')+Math.round(Math.abs(p-32)/32*99)}</span><span class="vol" title="volume ${f.volume[c]}"><i style="width:${Math.round(f.volume[c]/64*100)}%"></i></span><span class="smp" title="samples ${used.map(pad).join(' ')||'none'}">${smpList(used)}</span></div>`}).join(''));
+  const nm=S.muted.length,dirty=S.solo!=null||nm>0,st=$('stemstate'),x=S.stems,busy=x&&(x.status==='queued'||x.status==='rendering');
+  st.textContent=busy?'EXPORTING':S.queue&&dirty?'RE-RENDERING':S.solo!=null?'SOLO':nm?`${nm} MUTED`:'ALL AUDIBLE';st.classList.toggle('on',dirty||busy);
+  $('stemhint').textContent=busy?`exporting stems ${x.done} / ${x.total} → ${x.dir}`:x&&x.status==='done'?`wrote ${x.total} stems to ${x.dir}`:x&&x.status==='failed'?`stems export failed: ${x.error}`:dirty?`tryout renders skip ${S.solo!=null?'every channel but '+pad(S.solo+1):nm+' muted channel'+(nm>1?'s':'')} · the YAML is untouched`:'M or S re-renders the tryout section without those channels · EXPORT STEMS writes one WAV per playing channel'}
+function muteCh(c){const m=S.muted.includes(c)?S.muted.filter(x=>x!==c):[...S.muted,c];act('mute',{muted:m,solo:S.solo===c?null:S.solo})}
+function soloCh(c){act('mute',{muted:S.muted,solo:S.solo===c?null:c})}
+function resetStems(){act('mute',{muted:[],solo:null})}
+function renderSlots(f,ents){const sm=S.song.slot_meas||{};$('slotn').textContent=f.samples.length;
+  put('slots',`<tr><th style="width:28px">#</th><th style="width:120px">NAME</th><th>FILE</th><th class="r" style="width:58px">C5 RATE</th><th class="r" style="width:62px">LENGTH</th><th class="r" style="width:46px">PITCH</th><th class="r" style="width:66px">CENTROID</th><th class="r" style="width:62px">DECAY</th><th class="r" style="width:40px">LOOP</th><th style="width:74px"></th></tr>`+f.samples.map(s=>{const m=sm[s.num]||{},on=s.num===S.slot,file=(ents[s.num]||{}).file||'';
+    return `<tr class="${on?'on':''}"><td>${pad(s.num)}</td><td class="sans" title="${esc(s.name)}">${esc(s.name)}</td><td class="file" title="${esc(file)}">${esc(file)}</td><td class="r">${s.c5_speed}</td><td class="r">${s.length.toFixed(3)} s</td><td class="r">${m.pitch||'—'}</td><td class="r">${m.centroid==null?'—':Math.round(m.centroid).toLocaleString()}</td><td class="r">${secs(m.decay)}</td><td class="r ${s.loop?'':'dimc'}">${s.loop?'loop':'—'}</td><td style="text-align:right"><span class="btn sm ${on?'on':''}" onclick="act('slot',{slot:${s.num}});tab('tryout')">${on?'IN TRYOUT':'TRY OUT'}</span></td></tr>`}).join(''))}
+// ---- song overview: pattern view (read only; follows the playhead while the tryout plays)
+function playPos(){if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;const f=S.song.facts,[a,b]=S.orders||[0,f.orders.length];let t=audio.currentTime;
+  for(let i=a;i<b;i++){const o=f.orders[i];if(t<o.seconds||i===b-1)return {o:i,row:Math.max(0,Math.min(o.rows-1,Math.floor(t/o.seconds*o.rows)))};t-=o.seconds}return null}
+function viewOrder(){const p=playPos();return p?p.o:S.orders?S.orders[0]:0}
+function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const key=`${S.song.mtime}|${o.index}`;
+  if(PAT.key!==key){PAT={key,rows:null,order:oi,active:[],row:-2};fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key){PAT.rows=j.rows;renderPat()}})}
+  PAT.order=oi;renderPat()}
+function drumChannels(){return S.song.facts.channels.map((c,i)=>fam(c)===0?i:-1).filter(i=>i>=0)}
+function setHex(v){hexRows=v;try{localStorage.hexrows=v?'1':'0'}catch(e){}renderPat()}
+function setFocus(x){const n=S.song.facts.channels.length;if(x===null)focus=null;else if(x==='all')focus=[...Array(n).keys()];else if(x==='drums')focus=drumChannels();else{const f=(focus||PAT.active).slice(),k=f.indexOf(x);if(k>=0){if(f.length>1)f.splice(k,1)}else f.push(x);focus=f.sort((a,b)=>a-b)}renderPat()}
+function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows;if(!o)return;
+  $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · READ ONLY`;
+  if(!rows){put('pat','<div style="padding:30px;text-align:center;color:var(--dim)">loading…</div>');put('patctl','');$('patrow').textContent='';return}
+  const n=f.channels.length,empty='... .. ... ...';PAT.active=f.channels.map((_,c)=>rows.some(r=>r[c]!==empty)?c:-1).filter(c=>c>=0);
+  const drums=drumChannels(),fo=focus||PAT.active,fits=Math.max(1,Math.floor((parseInt(getComputedStyle(document.documentElement).getPropertyValue('--railw'))-26-18)/86));
+  put('patctl',`<div style="display:flex;align-items:center;gap:6px"><span class="btn sm ${focus?'':'on'}" onclick="setFocus(null)">ACTIVE ${PAT.active.length}</span>${drums.length?`<span class="btn sm ${focus&&focus.join()===drums.join()?'on':''}" onclick="setFocus('drums')">DRUMS</span>`:''}<span class="btn sm ${focus&&focus.length===n?'on':''}" onclick="setFocus('all')">ALL ${n}</span><span class="btn sm ${hexRows?'on':''}" onclick="setHex(!hexRows)" title="hex row numbers">HEX</span><span style="flex:1;min-width:0;text-align:right;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${fo.length<=fits?'#6d777c':'var(--amber)'}">${fo.length<=fits?`all ${fo.length} fit`:`${fo.length} picked · ${fits} fit, scroll for ${fo.length-fits}`}</span></div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:6px">${f.channels.map((_,c)=>`<span class="btn sm ${fo.includes(c)?'on':PAT.active.includes(c)?'':'dimb'}" onclick="setFocus(${c})">${pad(c+1)}</span>`).join('')}</div>`);
+  const cell=s=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'';return `<span class="pc"><span class="n${z(a)}">${a}</span> <span class="i${z(b)}">${b}</span> <span class="v${z(c)}">${c}</span> <span class="e${z(d)}">${d}</span></span>`};
+  const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}">${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}</span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%16?i%4?'':'b4':'b16'}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map(c=>cell(r[c])).join('')}</div>`).join('')}</div>`);
+  if(shown.pat!==was)PAT.row=-2;followPlayhead()}
+function followPlayhead(){const p=playPos();if(p&&p.o!==PAT.order){showPattern(p.o);return}const r=p?p.row:-1;
+  $('patrow').textContent=PAT.rows?(r>=0?`row ${rowNum(r)} / ${PAT.rows.length}`:`${PAT.rows.length} rows`):'';
+  if(PAT.row===r)return;PAT.row=r;const el=$('pat');el.querySelectorAll('.pt.play').forEach(e=>e.classList.remove('play'));
+  if(r>=0){const e=el.querySelector(`.pt[data-r="${r}"]`),sc=$('patscroll');if(!e)return;e.classList.add('play');if(e.offsetTop<sc.scrollTop+20||e.offsetTop+15>sc.scrollTop+sc.clientHeight)sc.scrollTop=e.offsetTop-sc.clientHeight/3}}
+function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseInt(getComputedStyle(document.documentElement).getPropertyValue(v));
+  const mv=ev=>document.documentElement.style.setProperty(v,Math.max(min,Math.min(max,w0+sign*(ev.clientX-x0)))+'px'),up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);document.body.style.cursor='';if(PAT.order>=0)renderPat()};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up);document.body.style.cursor='col-resize'}
+// ---- audio
+let lastSrc='';
+function pick(id){sel=id;render()}
+function srcFor(c){return c?(solo?`/raw/${c.id}`:c.status==='ready'?`/wav/${c.key}`:''):''}
+function updateAudio(){const c=S.candidates.find(x=>x.id===sel);const src=srcFor(c);
+  $('nowname').textContent=c?c.name:'';$('nowmode').textContent=c?(solo?'· sample alone':c.status==='ready'?'· in the song, this slot swapped':'· '+c.status):'';
+  if(src!==lastSrc){lastSrc=src;const t=audio.currentTime,was=!audio.paused;if(!src){audio.pause();audio.removeAttribute('src');return}
+    audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(t,Math.max(0,audio.duration-.05));if(was)audio.play()},{once:true});audio.load()}}
+function togglePlay(){if(!audio.src){const c=visible()[0];if(c)pick(c.id);if(!audio.src)return}audio.paused?audio.play():audio.pause()}
+function setSolo(v){solo=v;$('m-mix').classList.toggle('on',!v);$('m-solo').classList.toggle('on',v);updateAudio()}
+function seek(e){if(!isFinite(audio.duration))return;audio.currentTime=audio.duration*(e.offsetX/e.currentTarget.clientWidth)}
+audio.addEventListener('play',render);audio.addEventListener('pause',render);
+setInterval(()=>{const d=audio.duration||0,t=audio.currentTime||0;$('progfill').style.width=$('proghead').style.left=d?(100*t/d)+'%':'0';$('pos').textContent=d?`${fmtT(t)} / ${fmtT(d)}`:'';$('playbtn').textContent=audio.paused?'▶':'❚❚';
+  if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-overview').classList.contains('on'))followPlayhead()},100);
+// ---- apply
+async function showDiff(id){diffId=id;const d=await (await fetch('/api/diff/'+id)).json();$('difftitle').textContent=`APPLY TO SLOT ${pad(S.slot)} · ${d.path}${d.redump?' · WARNING: the slot is not a one-line mapping, the whole file will be re-dumped and comments lost':''}`;
+  $('difflines').innerHTML=d.lines.map(l=>`<div class="dl ${l.startsWith('+')?'add':l.startsWith('-')?'del':l.startsWith('@')?'hd':''}">${esc(l)}</div>`).join('')||'<div class="dl">no change</div>';toggle('diff',true)}
+async function applySel(){toggle('diff',false);await act('apply',{id:diffId});tab('export')}
+// ---- keys
+document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;const cs=visible(),i=cs.findIndex(c=>c.id===sel);
+  if(e.key==='Escape'){toggle('diff',false);toggle('keys',false);if(S.song)toggle('start',false)}
+  else if(e.key==='Enter'&&$('diffmodal').classList.contains('on'))applySel();
+  else if(e.key===' '){e.preventDefault();togglePlay()}
+  else if(/^[0-9]$/.test(e.key)){const n=e.key==='0'?9:+e.key-1;if(S.candidates[n])pick(S.candidates[n].id)}
+  else if(e.key==='ArrowDown'&&cs.length){e.preventDefault();pick(cs[Math.min(cs.length-1,i+1)].id)}
+  else if(e.key==='ArrowUp'&&cs.length){e.preventDefault();pick(cs[Math.max(0,i-1)].id)}
+  else if(e.key==='m'||e.key==='M')setSolo(false);else if(e.key==='s'||e.key==='S')setSolo(true);
+  else if((e.key==='u'||e.key==='U')&&sel!=null)showDiff(sel);
+  else if((e.key==='x'||e.key==='X')&&sel!=null){const c=S.candidates.find(x=>x.id===sel);act('rate',{id:sel,rejected:!c.rejected})}
+  else if(e.key==='?')toggle('keys')});
+refresh();setInterval(()=>{if(document.activeElement.tagName!=='INPUT')refresh()},1000);
+</script></body></html>

@@ -1,0 +1,64 @@
+# Sample recipe for demo3 (Undertow): the melodic sounds, rendered from free synth plugins, plus two CC0
+# orchestral cymbals. The drums come from demo3/drums.yaml (a royalty-free pack that must not be redistributed).
+# Render: python -m vulturetracker synth demo3/kit.yaml   (setup: python tools/fetch_instruments.py, see SAMPLING.md)
+#
+# Sample rates follow the ones measured in UT99's Run / Nether Animal / Foregone Destruction modules: pads,
+# strings and choir sit at 10.5-11 kHz, bass and lead at 22-24 kHz, all 16-bit (no bitcrush). The lead is a
+# soft DX7 Rhodes at the same 22 kHz, chosen by ear for a subdued line.
+out_dir: ../samples/demo3
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true}
+
+samples:
+  bass:  # OB-Xd (Oberheim OB-X emulation), round analog bass
+    patch: "obxd:001 - Bass 1/Bass Round Bass"
+    note: E-2
+    hold: 0.45
+    tail: 0.4
+    fx: [{resample: {target_sample_rate: 22050}}]
+  lead:  # Dexed (DX7) Rhodes, played softly and rounded off for a subdued, dream-like line: low-pass takes the
+    # hammer off, chorus and a long reverb tail are printed in. Chosen by ear from a tryout, then confirmed by
+    # measurement (259 ms attack to peak, 2.2 s decay, 750 Hz centroid: the softest and longest of the finalists).
+    patch: "dexed:SynprezFM_02/FmRhodes18"
+    note: E-5
+    root_offset: -12      # the voice sounds an octave below the key: this file is an E-4
+    velocity: 60
+    hold: 2.5
+    tail: 1.5
+    fx_tail: 2.5
+    fx:
+      - lowpass_filter: {cutoff_frequency_hz: 3200}
+      - chorus: {rate_hz: 0.6, depth: 0.25, centre_delay_ms: 9, mix: 0.35}
+      - reverb: {room_size: 0.88, damping: 0.6, wet_level: 0.42, dry_level: 0.7, width: 1.0}
+      - resample: {target_sample_rate: 22050}
+  gate:  # OB-Xd string machine, an open E-F#-B-E chord that Dxy volume slides chop (transposes to any root)
+    patch: "obxd:008 - Pads and Strings 1/OBXD Strings"
+    chord: [E-4, F#4, B-4, E-5]
+    hold: 4.3
+    tail: 0.2
+    fx: [{resample: {target_sample_rate: 11025}}]
+  strings:  # Dexed (DX7) string pad, held under the lead; looped
+    patch: "dexed:SynprezFM_21/106STRINGS"
+    note: E-4
+    hold: 7.0
+    tail: 0.5
+    mono: false
+    loop: {start: 2.5, end: 6.5, crossfade: 1.0}
+    fx_tail: 0.5
+    fx: [{reverb: {room_size: 0.8, wet_level: 0.35, dry_level: 0.8}}, {resample: {target_sample_rate: 11025}}]
+
+  # ---------------------------------------------------------------- CC0 cymbals (VSCO 2 CE; python tools/fetch_cc0.py)
+  swell:  # suspended cymbal crescendo: the riser into each section
+    file: ../tools/cc0/vsco2/Percussion/susCymb1-cresc-Short_v1.wav
+    mono: false
+    length: 3.0           # swells to its peak at 1.4 s, then rings
+    fade_out: 1.2
+    fx_tail: 0.3
+    fx: [{resample: {target_sample_rate: 22050}}]
+  gong:
+    file: ../tools/cc0/vsco2/Percussion/gongHit_mf.wav
+    mono: false
+    length: 5.0
+    fade_out: 2.5
+    fx_tail: 0.3
+    fx: [{lowpass_filter: {cutoff_frequency_hz: 5000}}, {resample: {target_sample_rate: 11025}}]

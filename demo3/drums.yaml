@@ -1,0 +1,28 @@
+# Drum recipe for demo3 (Undertow): Roland TR-8 (808/909 models) hits from MusicRadar's free "hardware drum
+# machine samples" pack. Its terms allow use in your music but not redistribution, so the pack (fetched by
+# tools/fetch_instruments.py) and these renders stay out of the repo: they go to samples/local/, which is gitignored.
+# 22 kHz 16-bit, like the drum hits in UT99's Foregone Destruction (its D4/RY30 hits are 44 kHz; Run's are 8 kHz).
+# Render: python -m vulturetracker synth demo3/drums.yaml
+out_dir: ../samples/local/demo3
+sample_rate: 44100
+defaults:
+  normalize: -1.0
+  mono: true
+  fx_tail: 0.05
+  fx: [{resample: {target_sample_rate: 22050}}]
+
+samples:
+  kick: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Kick 01.wav"}
+  snare: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Snare 02.wav"}
+  rim: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Rim 01.wav"}
+  hat: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Closed Hat 02.wav"}
+  hat_open: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Open Hat 01.wav"}
+  ride: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Ride 01.wav"}
+  tom: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Tom 03.wav"}
+  crash: {file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Crash 01.wav"}
+  revcrash:  # reversed after the reverb, so the reverb tail becomes a swell into the hit
+    file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Roland TR-8/Tr-8 Crash 01.wav"
+    mono: false
+    reverse: true
+    fx_tail: 1.5
+    fx: [{reverb: {room_size: 0.85, wet_level: 0.45, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]

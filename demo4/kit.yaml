@@ -1,0 +1,47 @@
+# Chord sounds for demo4 (Vantage): Surge XT factory patches, chosen by measurement against the targets the song
+# wants rather than against any recording: dark beds (centroid around 200 Hz at 11 kHz, a slow swell), bright chord
+# stabs (a 30-130 ms attack, centroid around 1 kHz at 22 kHz) and a vowel-like choir. Every chord is rooted on E and
+# rendered so that C-5 in the song plays the file at its own rate (the song sets base_note: C-5).
+# Candidates and their measurements live in samples/local/demo4-cand/ (gitignored); re-pick any of them in the app.
+# Render: python -m vulturetracker synth demo4/kit.yaml   (setup: python tools/fetch_surge.py, see SAMPLING.md)
+out_dir: ../samples/demo4
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, velocity: 100, tail: 0.5}
+
+samples:
+  bed1:  # the minor bed: E minor, low and dark, looped; retriggered every pattern in the song
+    patch: "Pads/Burden"
+    chord: [E-2, B-2, E-3, G-3, B-3, E-4]
+    hold: 6.0
+    loop: {start: 2.5, end: 5.5, crossfade: 1.0}
+    fx: [{resample: {target_sample_rate: 11025}}]
+  bed2:  # the major bed: G major (the relative major), swells in mid-pattern
+    patch: "Pads/Burden"
+    chord: [G-2, D-3, G-3, B-3, D-4, G-4]
+    hold: 6.0
+    loop: {start: 2.5, end: 5.5, crossfade: 1.0}
+    fx: [{resample: {target_sample_rate: 11025}}]
+  motif1:  # E add9
+    patch: "Plucks/Nolla"
+    chord: [E-3, G#3, B-3, F#4]
+    hold: 2.5
+    loop: {start: 1.4, end: 2.4, crossfade: 0.5}
+    fx: [{resample: {target_sample_rate: 22050}}]
+  motif2:  # E7sus4 over D
+    patch: "Plucks/Nolla"
+    chord: [D-3, E-3, A-3, B-3, D-4]
+    hold: 2.5
+    loop: {start: 1.4, end: 2.4, crossfade: 0.5}
+    fx: [{resample: {target_sample_rate: 22050}}]
+  motif3:  # E minor 9
+    patch: "Plucks/Nolla"
+    chord: [E-3, G-3, B-3, D-4, F#4]
+    hold: 2.5
+    loop: {start: 1.4, end: 2.4, crossfade: 0.5}
+    fx: [{resample: {target_sample_rate: 22050}}]
+  choir:  # an E minor add9 cluster over a low B, vowel-like
+    patch: "Polysynths/Ahh Polly"
+    chord: [B-2, E-4, F#4, G-4, B-4, E-5]
+    hold: 4.0
+    loop: {start: 1.0, end: 3.5, crossfade: 0.8}
+    fx: [{resample: {target_sample_rate: 11025}}]

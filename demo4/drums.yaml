@@ -1,0 +1,25 @@
+# Drum recipe for demo4 (Vantage): a snare and an open hat from MusicRadar's free "hardware drum machine samples"
+# pack (usable in music, not redistributable: the pack and these renders stay out of the repo in samples/local/,
+# gitignored; tools/fetch_instruments.py fetches the pack). The kick, ride and crashes come from demo3/drums.yaml.
+# Render: python -m vulturetracker synth demo4/drums.yaml
+#
+# Chosen by measurement for the style's drum character (octave-band spectrum plus the decay over the first 180 ms):
+# - snare: Jomox Airbase 99 "Snare 12" (2-4 kHz crack, little body); its own tail is short, so a room is printed in
+#   for a plateau from 80 to 240 ms and a decay to -40 dB at half a second; a high-pass takes off the body.
+# - hat: Alesis HR-16b "Open Hat 03", a short cymbal-like open hat; a cut around 1.2 kHz, a 4 kHz peak and a
+#   low-pass carve the hole between body and shimmer. Every hit is cut by the next one in the pattern, so it stays short here.
+out_dir: ../samples/local/demo4
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, fx_tail: 0.05}
+
+samples:
+  snare:
+    file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Jomox Airbase 99/Jomox Snare 12.wav"
+    fx_tail: 0.8
+    fx: [{highpass_filter: {cutoff_frequency_hz: 260}}, {reverb: {room_size: 0.45, damping: 0.7, wet_level: 0.35, dry_level: 0.7}}]
+  hat:
+    file: "../tools/royalty-free/musicradar-drum-machines/Drum Hardware/Hits/Alesis HR-16b/Alesis Open Hat 03.wav"
+    length: 0.6
+    fade_out: 0.05
+    fx: [{peak_filter: {cutoff_frequency_hz: 1200, gain_db: -9, q: 0.7}}, {peak_filter: {cutoff_frequency_hz: 4000, gain_db: 5, q: 2.0}},
+         {lowpass_filter: {cutoff_frequency_hz: 6000}}]
