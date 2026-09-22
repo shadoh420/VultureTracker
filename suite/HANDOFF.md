@@ -262,6 +262,8 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
    brief, then drums and bass as a two-bar loop with candidates the user picks in the tryout, then one layer at a time,
    and the full form only after every sound is approved. The group-per-piece plan (groups 2-5) is dropped; the group
    analysis in `scratch/ut99-clean/` stays useful as measurement tooling.
-3. Program side: round 5 (PATTERN tab, one NOTE button, `U` clears the slot's list) is uncommitted; commit and release
-   0.2.2 when the user says. The corrected 0.2.1 release body waits for an explicit yes (`gh release edit v0.2.1
-   --notes-file`).
+3. Program side: done on the user's word (2026-09-22 13:35): round 5 committed (6d7b4ca), the suite committed
+   (b83b2c6, the three tryout picks copied into samples/nadir so the song builds from the repository), "Version 0.2.2"
+   (80c1504), all pushed with tag v0.2.2; GitHub release 0.2.2 with the exe (SHA256 76eae8a9..., smoke-tested
+   headless on demo2: the PATTERN tab and the single NOTE button are in the bundled page); the 0.2.1 release body
+   repaired (plain UTF-8, the arrow back). Nothing is pending on the program side.
