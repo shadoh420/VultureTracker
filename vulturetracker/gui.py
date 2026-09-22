@@ -159,8 +159,21 @@ def facts_of(mod, warnings):
     rows_per_bar = mod.row_highlight[1] or 16
     orders = []
     use = []  # per order: per channel: sorted sample numbers triggered
-    t = 0.0
-    for o in mod.orders:
+    # order timing comes from libopenmpt, so speed, tempo, break and jump effects count; an order that playback
+    # never reaches lasts 0 s
+    from .itwriter import write_it
+    from .openmpt import LoadedModule
+    with LoadedModule(write_it(mod)) as lm:
+        duration = lm.duration()
+        starts = {i: lm.order_start(i) for i, o in enumerate(mod.orders) if o < 254}
+        for i, t in starts.items():
+            if t <= 0.0 and i != min(starts):  # never entered: libopenmpt seeks into the hidden subsong starting there
+                starts[i] = duration
+            elif t >= duration:  # row 0 is skipped by a break into the pattern: it starts at its first row that plays
+                rows = len(mod.patterns[mod.orders[i]].rows)
+                starts[i] = next((v for v in (lm.order_start(i, r) for r in range(1, rows)) if v < duration), duration)
+    points = sorted({*starts.values(), duration})
+    for i, o in enumerate(mod.orders):
         if o >= 254:
             continue
         pat = mod.patterns[o]
@@ -175,15 +188,15 @@ def facts_of(mod, warnings):
                     smp = mod.instruments[cell.instrument - 1].keymap[cell.note][1]
                     if smp:
                         per_ch[ch].add(smp)
-        secs = len(pat.rows) * mod.speed * 2.5 / mod.tempo
-        orders.append({"pattern": pat.name, "index": o, "rows": len(pat.rows), "bars": len(pat.rows) / rows_per_bar, "start": t, "seconds": secs})
+        start = starts[i]
+        secs = next((p for p in points if p > start), start) - start
+        orders.append({"pattern": pat.name, "index": o, "rows": len(pat.rows), "bars": len(pat.rows) / rows_per_bar, "start": start, "seconds": secs})
         use.append([sorted(s) for s in per_ch])
-        t += secs
     return {
         "title": mod.title, "tempo": mod.tempo, "speed": mod.speed, "bpm": round(mod.tempo * 24 / mod.speed / 4),
         "channels": [c.name or f"Ch {i + 1}" for i, c in enumerate(mod.channels)],
         "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels],
-        "patterns": len(mod.patterns), "duration": t, "orders": orders, "use": use,
+        "patterns": len(mod.patterns), "duration": duration, "orders": orders, "use": use,
         "samples": [{"num": i + 1, "name": s.name, "c5_speed": s.c5_speed, "length": s.length / s.c5_speed if s.c5_speed else 0,
                      "loop": s.loop is not None, "bits": s.bits} for i, s in enumerate(mod.samples)],
         "warnings": warnings,
@@ -241,7 +254,7 @@ class State:
                 self.error = e.errors
             self.song = api.from_yaml(self.text)
             self.meas = {}
-            files = [str((self.base_dir / v["file"]).resolve()) for v in (self.song.get("samples") or {}).values()
+            files = self.files = [str((self.base_dir / v["file"]).resolve()) for v in (self.song.get("samples") or {}).values()
                      if isinstance(v, dict) and v.get("file")]
             threading.Thread(target=lambda: [self.measured(f) for f in files if Path(f).exists()], daemon=True).start()
             if self.meta["slot"] not in self.song.get("samples", {}):
@@ -282,12 +295,16 @@ class State:
         return sorted(set(self.meta.get("muted") or []))
 
     def key(self, cand):
-        p = Path(cand)
-        try:
-            stamp = f"{p.stat().st_mtime}:{p.stat().st_size}"
-        except OSError:
-            stamp = "missing"
-        return hashlib.sha1(f"{self.text}|{self.slot}|{self.orders}|{self.silenced()}|{cand}|{stamp}".encode()).hexdigest()[:16]
+        """Render cache key: song text, slot, section, mutes, the candidate, and the stamp of every WAV in the mix (a
+        sample re-rendered in place under the same path must not serve the old mix)."""
+        def stamp(f):
+            try:
+                st = Path(f).stat()
+                return f"{f}={st.st_mtime}:{st.st_size}"
+            except OSError:
+                return f"{f}=missing"
+        stamps = "|".join(stamp(f) for f in [cand, *self.files])
+        return hashlib.sha1(f"{self.text}|{self.slot}|{self.orders}|{self.silenced()}|{stamps}".encode()).hexdigest()[:16]
 
     def measured(self, path):
         if path not in self.meas:
@@ -374,24 +391,33 @@ class State:
     # ---- apply
 
     def patched_text(self, cand):
-        """Song text with the slot pointed at `cand`: a one-line edit when the slot is a flow mapping, else a full
-        re-dump (comments lost, so the diff says so)."""
+        """Song text with the slot pointed at `cand`. The slot's own lines are re-dumped in their original layout (a
+        one-line flow mapping or an indented block) and the rest of the document, comments included, is untouched; only
+        when the slot's lines cannot be found is the whole song re-dumped (comments lost, so the diff says so)."""
         import copy
         song = copy.deepcopy(self.song)
         entry = api.swap_sample(song, self.slot, cand)
-        rel = os.path.relpath(cand, self.base_dir).replace(os.sep, "/")
-        entry["file"] = rel
-        flow = yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()
-        line_re = re.compile(rf"^(\s+){self.slot}:(\s*)\{{.*\}}\s*$")
+        entry["file"] = os.path.relpath(cand, self.base_dir).replace(os.sep, "/")
         lines = self.text.splitlines(keepends=True)
         in_samples = False
         for i, line in enumerate(lines):
             if re.match(r"^\S", line):
                 in_samples = line.startswith("samples:")
-            elif in_samples and line_re.match(line):
-                m = line_re.match(line)
-                lines[i] = f"{m.group(1)}{self.slot}:{m.group(2)}{flow}{'\n' if line.endswith('\n') else ''}"
+                continue
+            m = in_samples and re.match(rf"^(\s+){self.slot}:(\s*)(\{{.*\}})?\s*$", line)
+            if not m:
+                continue
+            indent = m.group(1)
+            if m.group(3):
+                flow = yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()
+                lines[i] = f"{indent}{self.slot}:{m.group(2)}{flow}{'\n' if line.endswith('\n') else ''}"
                 return "".join(lines), False
+            j = i + 1  # the block is the following lines indented deeper than the key
+            while j < len(lines) and lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) > len(indent):
+                j += 1
+            block = yaml.safe_dump(entry, default_flow_style=False, width=10 ** 6, sort_keys=False)
+            lines[i:j] = [line] + [f"{indent}  {b}\n" for b in block.splitlines()]
+            return "".join(lines), False
         return api.to_yaml(song), True
 
     def diff(self, cand):

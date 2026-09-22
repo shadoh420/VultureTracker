@@ -37,7 +37,7 @@ python -m vulturetracker import some.it -o some.yaml                  # existing
 ## GUI: choosing samples in context
 
 ```
-python -m vulturetracker gui demo4/vantage.yaml
+python -m vulturetracker gui demo2/iron_relay.yaml
 ```
 
 opens the app in its own window (`pip install pywebview`; without it, or with `--browser`, it opens in your
@@ -46,7 +46,7 @@ no song to get the open-a-song screen with recent songs and the demos. Pick a sa
 a section of the song, add candidate WAVs by path or glob, and each candidate is rendered inside the song with
 only that slot swapped. Keys `1`–`0` switch candidates without losing the playback position, `S`/`M` toggle
 the sample alone vs. in the mix, stars/reject/notes are kept per candidate beside the song
-(`<song>.tryout.json`), and `U` shows the one-line YAML change before writing it. The Song Overview tab has a stems rail (mute or solo
+(`<song>.tryout.json`), and `U` shows the YAML change before writing it. The Song Overview tab has a stems rail (mute or solo
 channels and the tryout re-renders without them; EXPORT STEMS writes one WAV per playing channel to
 `<song>_stems/`), the arrangement grid and slot table, and a read-only pattern view that follows the selected
 order and the playhead. Render & Export builds the `.it` (and a WAV) and verifies it with libopenmpt.
@@ -123,7 +123,8 @@ Four demos:
   samples. Its patterns are laid out by `demo/gen_demo.py`.
 
 Each generator holds the musical choices (chords, rhythms, melodies) as Python data and rewrites the
-patterns in its song file. Rerun it after changing those choices, or just edit the YAML directly.
+patterns in its song file. The song file is the source of truth and the generator is its scaffold: rerunning it
+discards any hand edits made to the patterns since, so either keep composing in the generator or stop rerunning it.
 
 ## Using your own samples
 

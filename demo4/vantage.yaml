@@ -11,7 +11,9 @@
 # demo4/drums.yaml picks a snare and an open hat from MusicRadar's free drum-machine pack and prints a room onto
 # the snare (samples/local/demo4/, not redistributable, so not in the repo); the kick, ride and crashes are
 # demo3's TR-8 renders (samples/local/demo3/, python -m vulturetracker synth demo3/drums.yaml).
-# The patterns below are laid out by demo4/gen_patterns.py; edit either this file or the generator.
+# The patterns below are laid out by demo4/gen_patterns.py. This file is the source of truth and the generator is its
+# scaffold: rerunning it rewrites everything after `patterns:` and discards hand edits made here since, so port such
+# edits into the generator or stop rerunning it.
 # Build: python -m vulturetracker build demo4/vantage.yaml --render demo4/vantage.wav
 # PROVENANCE.md records what this demo took from its reference track and what was changed to keep it its own.
 #

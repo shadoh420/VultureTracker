@@ -1,4 +1,4 @@
-"""GUI state tests: measurement, the order/channel usage map, and the one-line YAML apply. No HTTP, no browser."""
+"""GUI state tests: measurement, the order/channel usage map, and the in-place YAML apply. No HTTP, no browser."""
 import json
 import math
 import tempfile
@@ -107,6 +107,41 @@ class TestGui(unittest.TestCase):
         self.assertEqual(set(api.tryout_render(base, 1, cand, self.dir, RATE)), {0})
         base = gui.mute_channels(api.tryout_song(self.dir / "song.yaml"), [1])
         self.assertNotEqual(set(api.tryout_render(base, 1, cand, self.dir, RATE)), {0})
+
+    def test_facts_timing_follows_effects(self):
+        row = 6 * 2.5 / 125
+
+        def timeline(text):  # per order (start, seconds) in rows, and the duration in rows
+            f = gui.song_facts(text, self.dir, "song")
+            return [(round(o["start"] / row, 3), round(o["seconds"] / row, 3)) for o in f["orders"]], round(f["duration"] / row, 3)
+
+        # p1 breaks to p2 after one row
+        self.assertEqual(timeline(SONG.replace("00: C-5 01 ... ... |", "00: C-5 01 ... C00 |")), ([(0, 1), (1, 4)], 5))
+        # p1 breaks into row 2 of p2 after two rows
+        self.assertEqual(timeline(SONG.replace("01: ... .. ... ... | ... .. ... ...\n      02: ... .. ... ... | C-5 02",
+                                               "01: ... .. ... C02 | ... .. ... ...\n      02: ... .. ... ... | C-5 02")), ([(0, 2), (2, 2)], 4))
+        # p1 jumps to order 2 after one row; order 1 never plays
+        self.assertEqual(timeline(SONG.replace("00: C-5 01 ... ... |", "00: C-5 01 ... B02 |").replace("orders: [p1, p2]", "orders: [p1, p2, p2]")),
+                         ([(0, 1), (5, 0), (1, 4)], 5))
+
+    def test_key_stamps_every_sample_in_the_mix(self):
+        st = gui.State(self.dir / "song.yaml")
+        cand = str(self.dir / "cand.wav")
+        k = st.key(cand)
+        write_wav(self.dir / "b.wav", RATE, [sine(770, seconds=0.2)])  # another slot's WAV re-rendered in place
+        self.assertNotEqual(st.key(cand), k)
+
+    def test_patch_keeps_block_mapping_and_comments(self):
+        text = SONG.replace("  2: {file: b.wav, name: B tone}\n",
+                            "  2:\n    file: b.wav  # the B tone\n    name: B tone\n  # slot 3 would come next\n")
+        (self.dir / "song.yaml").write_text(text, encoding="utf-8")
+        st = gui.State(self.dir / "song.yaml")
+        st.meta["slot"] = 2
+        new, redump = st.patched_text(str(self.dir / "cand.wav"))
+        self.assertFalse(redump)
+        self.assertIn("# a comment that must survive the apply", new)
+        self.assertIn("  1: {file: a.wav, name: A tone}\n  2:\n    file: cand.wav\n    name: cand\n    base_note: E-5\n"
+                      "  # slot 3 would come next\npatterns:", new)
 
     def test_stems_export(self):
         st = gui.State(self.dir / "song.yaml")

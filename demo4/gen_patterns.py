@@ -9,7 +9,8 @@ chord is rooted on E; the motion is voicing changes over the pedal.
 Grid: speed 5 at tempo 140 (168 BPM), 1 row = a 16th, 16 rows = a bar, 64 rows = a 4-bar pattern of two 2-bar
 halves. Rhythms are 16th indexes within a bar (0..15).
 
-Run: python demo4/gen_patterns.py   (then: python -m vulturetracker build demo4/vantage.yaml)
+Run: python demo4/gen_patterns.py   (rewrites everything after `patterns:` in vantage.yaml, discarding hand edits made
+there; then: python -m vulturetracker build demo4/vantage.yaml)
 """
 import io
 import sys

@@ -32,6 +32,7 @@ for fname, res, args in [
     ("openmpt_free_string", None, [_P]),
     ("openmpt_get_library_version", C.c_uint32, []),
     ("openmpt_module_get_duration_seconds", C.c_double, [_P]),
+    ("openmpt_module_set_position_order_row", C.c_double, [_P, C.c_int32, C.c_int32]),
     ("openmpt_module_get_metadata", _P, [_P, C.c_char_p]),
     ("openmpt_module_get_num_channels", C.c_int32, [_P]),
     ("openmpt_module_get_num_instruments", C.c_int32, [_P]),
@@ -113,6 +114,16 @@ class LoadedModule:
         g = lambda cmd: _lib.openmpt_module_get_pattern_row_channel_command(self._mod, pattern, row, channel, cmd)
         text = self.cell_text(pattern, row, channel)
         return {"note": g(0), "instrument": g(1), "volume": g(4), "effect_text": text[-3:], "param": g(5), "text": text}
+
+    def duration(self):
+        """Seconds one pass of the song plays for, as libopenmpt computes it."""
+        return _lib.openmpt_module_get_duration_seconds(self._mod)
+
+    def order_start(self, order, row=0):
+        """Second at which `row` of `order` plays in one pass of the song, as libopenmpt plays it (speed, tempo, break and
+        jump effects included). Seeks the module there. A position that never plays comes back as 0.0 (libopenmpt seeks
+        into the hidden subsong that starts at an order playback never enters) or as the whole duration (a skipped row)."""
+        return _lib.openmpt_module_set_position_order_row(self._mod, order, row)
 
     def info(self):
         m = self._mod
