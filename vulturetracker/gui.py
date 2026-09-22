@@ -855,6 +855,10 @@ class State:
         with self.lock:
             new, _ = self.patched_text(cand)
             self.write_song(new)
+            self.meta["candidates"].pop(str(self.slot), None)  # the choice is made: the slot's list goes (ratings stay, keyed by file)
+            if self.want == cand:
+                self.want = None
+            self.save_meta()
             self.reload(archive=False)
         self._put(0, ("build", False))
 

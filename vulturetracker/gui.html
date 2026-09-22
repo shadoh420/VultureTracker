@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>VultureTracker</title><link rel="icon" href="/icon.png">
 <style>
-:root{--bg:#0a0c0d;--panel:#14171a;--panel2:#0e1113;--bar:#161a1c;--ink:#d6dcdf;--dim:#79848a;--mid:#8d979c;--hi:#e4eaed;--acc:#7ee787;--accd:#1f3a26;--blue:#5f7d94;--amber:#d9a441;--red:#d7726a;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;--stemsw:380px;--railw:340px}
+:root{--bg:#0a0c0d;--panel:#14171a;--panel2:#0e1113;--bar:#161a1c;--ink:#d6dcdf;--dim:#79848a;--mid:#8d979c;--hi:#e4eaed;--acc:#7ee787;--accd:#1f3a26;--blue:#5f7d94;--amber:#d9a441;--red:#d7726a;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;--stemsw:380px}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:12px/1.4 'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
 body{overflow:auto hidden}
 *{box-sizing:border-box}
@@ -78,7 +78,6 @@ input[type=range]{-webkit-appearance:none;flex:1;min-width:30px;height:4px;margi
 /* listening notes: the tag bar under the player, channel chips, the notes tab */
 .notesbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 12px 6px;background:var(--panel2);box-shadow:inset 0 1px 0 #2a3135}
 .tagb{padding:5px 9px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:#c3cbcf;background:#1b2124;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d;user-select:none;white-space:nowrap}.tagb:hover{color:var(--hi);background:#232a2e}
-.tagb.loud{color:var(--red)}.tagb.quiet{color:#8fb0c4}.tagb.hate{color:var(--amber)}.tagb.busy{color:#c9a0d8}.tagb.keep{color:var(--acc)}
 .chipc{padding:2px 6px;cursor:pointer;font:9.5px/1.3 var(--mono);color:var(--dim);background:#0f1416;box-shadow:inset 0 0 0 1px #1f262a;white-space:nowrap;user-select:none}.chipc:hover{color:var(--ink)}.chipc.on{color:#0c1a0f;background:var(--acc);box-shadow:none}.chipc.off{opacity:.35}
 .noterow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}.noterow.full{padding:6px 8px;background:var(--panel);box-shadow:inset 1px 1px 0 #21272a,inset -1px -1px 0 #080a0b}
 option.hascand{color:var(--acc);font-weight:700}
@@ -94,6 +93,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="tabs">
   <div class="tab on" data-t="tryout" onclick="tab('tryout')">TRYOUT</div>
   <div class="tab" data-t="overview" onclick="tab('overview')">SONG OVERVIEW</div>
+  <div class="tab" data-t="pattern" onclick="tab('pattern')">PATTERN</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
 </div>
@@ -152,14 +152,15 @@ option.hascand{color:var(--acc);font-weight:700}
       <table id="slots"></table>
     </div>
   </div>
-  <div class="handle" onmousedown="drag(event,'--railw',-1,232,820)"><i></i></div>
-  <div class="panel col" style="width:var(--railw);flex:none">
+</div>
+
+<div class="main" id="t-pattern">
+  <div class="panel col" style="flex:1;min-width:0">
     <div style="flex:none;padding:7px 10px;box-shadow:inset 0 -1px 0 #0a0c0d">
-      <div style="display:flex;align-items:baseline;gap:8px"><span class="k" id="pattitle" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">PATTERN VIEW</span><span class="mono" id="patrow" style="font-size:10px;color:var(--acc);white-space:nowrap"></span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span class="k" id="pattitle" style="white-space:nowrap">PATTERN VIEW</span><span class="mono" id="patrow" style="font-size:10px;color:var(--acc);white-space:nowrap"></span><span style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">follows the playhead while the tryout plays · read only: edits happen in the YAML or your tracker</span></div>
       <div id="patctl" style="margin-top:6px"></div>
     </div>
     <div id="patscroll" style="flex:1;min-height:0;overflow:auto"><div id="pat"></div></div>
-    <div style="flex:none;padding:7px 10px 9px;box-shadow:inset 0 1px 0 #0a0c0d;font-size:10px;line-height:1.55;color:var(--dim)">follows the playhead while the tryout plays · edits happen in the YAML or your tracker, this view never writes</div>
   </div>
 </div>
 
@@ -198,7 +199,7 @@ option.hascand{color:var(--acc);font-weight:700}
 </div>
 <div class="notesbar">
   <span class="k" style="white-space:nowrap" title="a note lands at the playhead: the order and row, what is playing, and the channels sounding there">MARK THE PLAYHEAD</span>
-  <span class="tagb loud" onclick="addNote('too loud')">TOO LOUD</span><span class="tagb quiet" onclick="addNote('too quiet')">TOO QUIET</span><span class="tagb hate" onclick="addNote('hate this sound')">HATE THIS SOUND</span><span class="tagb busy" onclick="addNote('too busy')">TOO BUSY</span><span class="tagb keep" onclick="addNote('keep')">KEEP</span><span class="tagb" onclick="addNote('note')">NOTE… <span class="kbd">N</span></span>
+  <span class="tagb" onclick="addNote()">NOTE… <span class="kbd">N</span></span>
   <div style="flex:1;min-width:0"></div><span class="btn" onclick="tab('notes')">ALL NOTES</span>
   <div id="notelast" style="flex-basis:100%;min-width:0;display:flex;align-items:center;gap:6px"></div>
 </div>
@@ -220,7 +221,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="modal" id="keysmodal" onclick="toggle('keys',false)"><div class="box" style="width:520px">
   <div class="k" style="color:var(--acc);margin-bottom:10px">KEYBOARD</div>
   <div class="row"><span>1–9, 0</span><span>pick candidate 1–10</span></div><div class="row"><span>↑ ↓</span><span>previous / next candidate</span></div>
-  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 %, the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead (the tag buttons do the same with a tag)</span></div>
+  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 %, the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead</span></div>
   <div class="row"><span>SONG</span><span>play the song itself (no candidate swapped, the faders applied)</span></div><div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
   <div class="row"><span>Esc</span><span>close</span></div>
 </div></div>
@@ -250,7 +251,7 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
 function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src')}
 async function openSong(p){if(!p)return;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
 async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t))}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -374,7 +375,7 @@ function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows;if
   $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · READ ONLY`;
   if(!rows){put('pat','<div style="padding:30px;text-align:center;color:var(--dim)">loading…</div>');put('patctl','');$('patrow').textContent='';return}
   const n=f.channels.length,empty='... .. ... ...';PAT.active=f.channels.map((_,c)=>rows.some(r=>r[c]!==empty)?c:-1).filter(c=>c>=0);
-  const drums=drumChannels(),fo=focus||PAT.active,fits=Math.max(1,Math.floor((parseInt(getComputedStyle(document.documentElement).getPropertyValue('--railw'))-26-18)/86));
+  const drums=drumChannels(),fo=focus||PAT.active,fits=Math.max(1,Math.floor(($('patscroll').clientWidth-26-18)/86));
   put('patctl',`<div style="display:flex;align-items:center;gap:6px"><span class="btn sm ${focus?'':'on'}" onclick="setFocus(null)">ACTIVE ${PAT.active.length}</span>${drums.length?`<span class="btn sm ${focus&&focus.join()===drums.join()?'on':''}" onclick="setFocus('drums')">DRUMS</span>`:''}<span class="btn sm ${focus&&focus.length===n?'on':''}" onclick="setFocus('all')">ALL ${n}</span><span class="btn sm ${hexRows?'on':''}" onclick="setHex(!hexRows)" title="hex row numbers">HEX</span><span style="flex:1;min-width:0;text-align:right;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${fo.length<=fits?'#6d777c':'var(--amber)'}">${fo.length<=fits?`all ${fo.length} fit`:`${fo.length} picked · ${fits} fit, scroll for ${fo.length-fits}`}</span></div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:6px">${f.channels.map((_,c)=>`<span class="btn sm ${fo.includes(c)?'on':PAT.active.includes(c)?'':'dimb'}" onclick="setFocus(${c})">${pad(c+1)}</span>`).join('')}</div>`);
   const cell=s=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'';return `<span class="pc"><span class="n${z(a)}">${a}</span> <span class="i${z(b)}">${b}</span> <span class="v${z(c)}">${c}</span> <span class="e${z(d)}">${d}</span></span>`};
   const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}">${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}</span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%16?i%4?'':'b4':'b16'}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map(c=>cell(r[c])).join('')}</div>`).join('')}</div>`);
@@ -410,25 +411,25 @@ function renderLive(){const f=S&&S.song&&S.song.facts;if(!f){put('live','');retu
   put('live',rows?rows.map(([c,s,h])=>`<span class="chipc ${S.solo===c?'on':''} ${audible(c)?'':'off'}" onclick="soloCh(${c})" title="channel ${pad(c+1)} ${esc(f.channels[c])} · slot ${s?pad(s)+' '+esc(sName(s)):'?'}${h?' · a looped tone':''} · click to solo this channel (playback rewinds a second when the soloed render lands), again to unsolo">${esc(f.channels[c].toUpperCase())} ${s?pad(s):'??'}${h?'~':''}</span>`).join(''):'')}
 audio.addEventListener('play',render);audio.addEventListener('pause',render);
 setInterval(()=>{const d=audio.duration||0,t=audio.currentTime||0;$('progfill').style.width=$('proghead').style.left=d?(100*t/d)+'%':'0';$('pos').textContent=d?`${fmtT(t)} / ${fmtT(d)}`:'';$('playbtn').textContent=audio.paused?'▶':'❚❚';
-  renderLive();if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-overview').classList.contains('on'))followPlayhead()},100);
+  renderLive();if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-pattern').classList.contains('on'))followPlayhead()},100);
 // ---- listening notes: a tag at the playhead; the server adds the channels sounding there and writes <song>.notes.json + .md
 let lastNote=null;
-function noteRow(n,full){const picked=n.channels||[],tagc=n.tag==='keep'?'acc':n.tag==='too loud'||n.tag==='hate this sound'?'red':'';
-  return `<div class="noterow ${full?'full':''}"><span class="mono" style="font-size:10.5px;color:#c3cbcf;white-space:nowrap">${fmtT(n.time)} · ord ${pad(n.order)} ${esc(n.pattern)} · row ${pad(n.row)}</span><span class="tag ${tagc}" style="margin:0">${esc(n.tag.toUpperCase())}</span>
+function noteRow(n,full){const picked=n.channels||[];
+  return `<div class="noterow ${full?'full':''}"><span class="mono" style="font-size:10.5px;color:#c3cbcf;white-space:nowrap">${fmtT(n.time)} · ord ${pad(n.order)} ${esc(n.pattern)} · row ${pad(n.row)}</span>
    ${(n.sounding||[]).map(s=>`<span class="chipc ${picked.includes(s.ch)?'on':''}" onclick="toggleCh(${n.id},${s.ch})" title="channel ${pad(s.ch+1)} ${esc(s.name)}: sample ${s.sample?pad(s.sample):'?'} ${esc(s.note)}, ${s.ago} rows ago${s.loop?', a looped tone':''} · click if this is the one you mean">${esc(s.name.toUpperCase())} ${s.sample?pad(s.sample):'??'}${s.loop&&s.ago>0?'~':''}</span>`).join('')}
    <input class="note" style="flex:1;min-width:140px" value="${esc(n.text)}" placeholder="words, if any" onchange="act('noteedit',{id:${n.id},text:this.value})">
    ${full?`<span class="src" style="white-space:nowrap">${esc(n.playing.source)}${n.playing.candidate?' '+esc(n.playing.candidate):''}${n.playing.muted&&n.playing.muted.length?' · '+n.playing.muted.length+' muted':''}${n.version&&S.version&&n.version.hash!==S.version.hash?' · older version '+esc(n.version.hash):''}</span>`:''}
    <span class="rej" onclick="act('noteedit',{id:${n.id},delete:true})" title="delete this note">✕</span></div>`}
-async function addNote(tag){const f=S&&S.song&&S.song.facts;if(!f)return;const c=S.candidates.find(x=>x.id===sel),alone=solo&&!!c;
+async function addNote(){const tag='note',f=S&&S.song&&S.song.facts;if(!f)return;const c=S.candidates.find(x=>x.id===sel),alone=solo&&!!c;
   const p=alone||!isFinite(audio.duration)?{o:S.orders?S.orders[0]:0,row:0}:posAt(audio.currentTime);
   const j=await act('note',{order:p.o,row:p.row,tag,source:c?(alone?'sample alone':'candidate'):'song',candidate:c?c.name:null});
-  if(j&&j.id){lastNote=j.id;render();if(tag==='note'){const inp=$('notelast').querySelector('input');if(inp)inp.focus()}}}
+  if(j&&j.id){lastNote=j.id;render();const inp=$('notelast').querySelector('input');if(inp)inp.focus()}}
 function toggleCh(id,ch){const n=(S.notes||[]).find(x=>x.id===id);if(!n)return;const c=n.channels.includes(ch)?n.channels.filter(x=>x!==ch):[...n.channels,ch];act('noteedit',{id,channels:c})}
 function renderNotes(f){const ns=S.notes||[];$('notesn').textContent=ns.length?`· ${ns.length}`:'';$('notecount').textContent=ns.length;
   $('notepaths').textContent=(ns.length?`${S.notes_path} · report ${S.notes_path.replace(/\.json$/,'.md')}, rewritten on every change`:'nothing written yet for this version of the song')+((S.archives||[]).length?` · earlier versions: ${S.archives.join(', ')}`:'');
   const last=ns.find(n=>n.id===lastNote)||ns[ns.length-1];
-  put('notelast',last?noteRow(last,false):`<span style="font-size:10px;color:var(--dim)">click a tag while it plays: the note lands at the playhead with the channels sounding there · then click the channel you mean and add words if you like</span>`);
-  put('notelist',ns.length?[...ns].sort((a,b)=>a.order-b.order||a.row-b.row||a.id-b.id).map(n=>noteRow(n,true)).join(''):`<div class="empty"><div style="font-size:15px;font-weight:600;color:#c3cbcf">No notes yet</div><div style="margin-top:8px;max-width:480px;font-size:11.5px">Play the song or a candidate and click a tag in the bar below at the moment you hear something. The note records the position, what was playing and which channels were sounding there; click the channel you mean. Everything lands in <span class="mono">${esc(S.notes_path)}</span> and a report next to it; the song file is never touched.</div>${(S.archives||[]).length?`<div style="margin-top:10px;max-width:480px;font-size:11px;color:var(--dim)">Notes on earlier versions of the song were moved beside it when it changed: <span class="mono">${esc(S.archives.join(', '))}</span></div>`:''}</div>`)}
+  put('notelast',last?noteRow(last,false):`<span style="font-size:10px;color:var(--dim)">press N or click NOTE while it plays: the note lands at the playhead with the channels sounding there · then click the channel you mean and add words if you like</span>`);
+  put('notelist',ns.length?[...ns].sort((a,b)=>a.order-b.order||a.row-b.row||a.id-b.id).map(n=>noteRow(n,true)).join(''):`<div class="empty"><div style="font-size:15px;font-weight:600;color:#c3cbcf">No notes yet</div><div style="margin-top:8px;max-width:480px;font-size:11.5px">Play the song or a candidate and press N (or click NOTE below) at the moment you hear something. The note records the position, what was playing and which channels were sounding there; click the channel you mean. Everything lands in <span class="mono">${esc(S.notes_path)}</span> and a report next to it; the song file is never touched.</div>${(S.archives||[]).length?`<div style="margin-top:10px;max-width:480px;font-size:11px;color:var(--dim)">Notes on earlier versions of the song were moved beside it when it changed: <span class="mono">${esc(S.archives.join(', '))}</span></div>`:''}</div>`)}
 // solo in song: mute every channel that never plays the tryout slot (the mixer's mute list, so candidates render the same way)
 function slotChans(){const f=S.song.facts;return f.channels.map((_,c)=>c).filter(c=>f.use.some(u=>u[c].includes(S.slot)))}
 function soloActive(){const f=S.song.facts;if(!f||S.solo!=null)return false;const p=slotChans();return p.length>0&&f.channels.every((_,c)=>p.includes(c)!==S.muted.includes(c))}
@@ -449,7 +450,7 @@ document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagNam
   else if(e.key==='ArrowUp'&&cs.length){e.preventDefault();pick(cs[Math.max(0,i-1)].id)}
   else if(e.key==='m'||e.key==='M')setSolo(false);else if(e.key==='s'||e.key==='S')setSolo(true);
   else if(e.key==='u'||e.key==='U')useSel();
-  else if(e.key==='n'||e.key==='N')addNote('note');
+  else if(e.key==='n'||e.key==='N')addNote();
   else if((e.key==='x'||e.key==='X')&&sel!=null){const c=S.candidates.find(x=>x.id===sel);act('rate',{id:sel,rejected:!c.rejected})}
   else if(e.key==='?')toggle('keys')});
 setSpeed(speed);refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);

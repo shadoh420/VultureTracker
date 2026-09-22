@@ -107,7 +107,8 @@ class TestGui(unittest.TestCase):
         self.assertIn("  1: {file: cand.wav, name: cand, base_note: E-5}\n", text)
         self.assertIn("  2: {file: b.wav, name: B tone}", text)
         meta = json.loads((self.dir / "song.tryout.json").read_text())
-        self.assertEqual(meta["candidates"]["1"], [str((self.dir / "cand.wav").resolve())])
+        self.assertNotIn("1", meta["candidates"])  # the choice is made: U clears the slot's list
+        self.assertEqual(st.snapshot()["candidates"], [])
 
     def test_pattern_rows_and_mutes(self):
         from vulturetracker import api
