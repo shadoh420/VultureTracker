@@ -54,7 +54,7 @@ class TestGui(unittest.TestCase):
         write_wav(self.dir / "a.wav", RATE, [sine(440)], root_note=69)
         write_wav(self.dir / "b.wav", RATE, [sine(880)])
         write_wav(self.dir / "cand.wav", RATE, [sine(660)], root_note=64)
-        (self.dir / "song.yaml").write_text(SONG, encoding="utf-8")
+        (self.dir / "song.yaml").write_bytes(SONG.encode("utf-8"))  # LF on every platform (write_text would give CRLF on Windows)
         self.states = []
 
     def state(self):
@@ -252,6 +252,19 @@ class TestGui(unittest.TestCase):
         st.edit_note(n["id"], {"delete": True})
         self.assertEqual(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8")), [])
         self.assertEqual(st.snapshot()["cand_counts"], {})
+
+    def test_apply_keeps_line_endings(self):
+        st = self.state()
+        st.meta["slot"] = 1
+        st.apply(str(self.dir / "cand.wav"))
+        self.assertNotIn(b"\r\n", (self.dir / "song.yaml").read_bytes())  # an LF file stays LF
+        (self.dir / "song.yaml").write_bytes(SONG.replace("\n", "\r\n").encode("utf-8"))
+        st2 = self.state()
+        st2.meta["slot"] = 2
+        st2.apply(str(self.dir / "cand.wav"))
+        data = (self.dir / "song.yaml").read_bytes()
+        self.assertEqual(data.count(b"\r\n"), data.count(b"\n"))  # a CRLF file stays CRLF
+        self.assertIn(b"  2: {file: cand.wav, name: cand, base_note: E-5}\r\n", data)
 
     def test_want_and_priorities(self):
         st = self.state()

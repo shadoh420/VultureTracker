@@ -356,7 +356,9 @@ class State:
 
     def reload(self):
         with self.lock:
-            self.text = self.song_path.read_text(encoding="utf-8")
+            raw = self.song_path.read_bytes()
+            self.crlf = b"\r\n" in raw
+            self.text = raw.decode("utf-8").replace("\r\n", "\n")
             self.mtime = self.song_path.stat().st_mtime
             try:
                 self.mod, warnings = load_song_text(self.text, self.base_dir, str(self.song_path))
@@ -382,6 +384,10 @@ class State:
 
     def save_meta(self):
         self.meta_path.write_text(json.dumps(self.meta, indent=1), encoding="utf-8")
+
+    def write_song(self, text):
+        """The song file, written with the line endings it had (write_text would turn every LF into CRLF on Windows)."""
+        self.song_path.write_bytes(text.replace("\n", "\r\n" if self.crlf else "\n").encode("utf-8"))
 
     def _put(self, prio, job):
         self.jobs.put((prio, next(self._seq), job))
@@ -821,14 +827,14 @@ class State:
     def apply(self, cand):
         with self.lock:
             new, _ = self.patched_text(cand)
-            self.song_path.write_text(new, encoding="utf-8")
+            self.write_song(new)
             self.reload()
         self._put(0, ("build", False))
 
     def apply_mix(self):
         with self.lock:
             new, _ = self.mix_text()
-            self.song_path.write_text(new, encoding="utf-8")
+            self.write_song(new)
             self.meta["mix"] = {}
             self.save_meta()
             self.reload()
