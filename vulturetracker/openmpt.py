@@ -46,6 +46,7 @@ for fname, res, args in [
     ("openmpt_module_format_pattern_row_channel", _P, [_P, C.c_int32, C.c_int32, C.c_int32, C.c_size_t, C.c_int]),
     ("openmpt_module_get_pattern_row_channel_command", C.c_uint8, [_P, C.c_int32, C.c_int32, C.c_int32, C.c_int]),
     ("openmpt_module_set_repeat_count", C.c_int, [_P, C.c_int32]),
+    ("openmpt_module_set_render_param", C.c_int, [_P, C.c_int, C.c_int32]),
     ("openmpt_module_ctl_set_integer", C.c_int, [_P, C.c_char_p, C.c_int64]),
     ("openmpt_module_read_interleaved_stereo", C.c_size_t, [_P, C.c_int32, C.c_size_t, C.POINTER(C.c_int16)]),
 ]:
@@ -145,20 +146,36 @@ class LoadedModule:
             "warnings": list(self.log),
         }
 
-    def render(self, rate=44100, repeat=0, max_seconds=600, dither=0):
+    def render(self, rate=44100, repeat=0, max_seconds=600, dither=0, oversample=2):
         """Render to interleaved int16 stereo frames (bytes). repeat=0 plays once, N repeats N more times.
-        dither=0 (none) makes renders bit-identical between runs; libopenmpt's own default (1) adds random dither."""
+        dither=0 (none) makes renders bit-identical between runs; libopenmpt's own default (1) adds random dither.
+        `oversample` > 1 mixes at that multiple of `rate` and band-limits the result back down (a windowed-sinc
+        low-pass at 0.45 of `rate`, then decimation), so whatever the mixer puts above the Nyquist frequency of `rate`
+        (samples played above their own rate, interpolation images) is removed instead of folding back into the audible
+        range as aliasing. It needs numpy; without it the module is mixed at `rate` directly. The mixer's own
+        interpolation is set to its longest filter (an 8-tap windowed sinc)."""
+        try:
+            import numpy as np
+            from .resample import resample
+        except ImportError:
+            oversample = 1
+        _lib.openmpt_module_set_render_param(self._mod, 3, 8)      # OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH
         _lib.openmpt_module_set_repeat_count(self._mod, repeat)
         _lib.openmpt_module_ctl_set_integer(self._mod, b"dither", dither)
+        mix_rate = rate * max(1, int(oversample))
         chunk = 4096
         buf = (C.c_int16 * (chunk * 2))()
         out = bytearray()
-        limit = rate * max_seconds
+        limit = mix_rate * max_seconds
         frames = 0
         while frames < limit:
-            n = _lib.openmpt_module_read_interleaved_stereo(self._mod, rate, chunk, buf)
+            n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mix_rate, chunk, buf)
             if n == 0:
                 break
             out += bytes(buf)[: n * 4]
             frames += n
-        return bytes(out)
+        if mix_rate == rate:
+            return bytes(out)
+        x = np.frombuffer(bytes(out), dtype="<i2").reshape(-1, 2).astype(float)
+        y = np.stack([resample(x[:, c], mix_rate, rate) for c in range(2)], axis=1)
+        return np.clip(np.rint(y), -32768, 32767).astype("<i2").tobytes()

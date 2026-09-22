@@ -155,7 +155,7 @@ parameters are their constructor arguments. Names are case-insensitive, with or 
 | `compressor` | `threshold_db`, `ratio`, `attack_ms`, `release_ms` |
 | `highpass_filter`, `lowpass_filter` | `cutoff_frequency_hz` |
 | `ladder_filter` | `cutoff_hz`, `resonance`, `drive` (a 12 dB low-pass) |
-| `resample` | `target_sample_rate`: downsample and back, for early-sampler bandwidth and aliasing |
+| `resample` | `target_sample_rate`: downsample and back with a windowed sinc, for early-sampler bandwidth (band-limited: it removes what is above the new Nyquist frequency rather than aliasing it) |
 | `bitcrush` | `bit_depth`: 8 gives the hiss and grit of 8-bit samples |
 | `gain`, `limiter`, `pitch_shift` | `gain_db`; `threshold_db`; `semitones` |
 

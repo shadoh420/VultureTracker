@@ -156,8 +156,9 @@ def build(song_or_path, out_path, base_dir=None) -> dict:
     return {"path": str(out_path), "bytes": len(data), "warnings": warnings, "libopenmpt": got, "mismatches": mismatches}
 
 
-def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None) -> float:
-    """Render an .it file (or a song file, compiled in memory) to a WAV. Returns seconds rendered."""
+def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None, oversample=2) -> float:
+    """Render an .it file (or a song file, compiled in memory) to a WAV, mixed at `oversample` times `rate` and
+    band-limited down (see LoadedModule.render). Returns seconds rendered."""
     from .openmpt import LoadedModule
     import wave
     p = Path(str(it_or_song))
@@ -166,7 +167,7 @@ def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None) -> float:
     else:
         data = compile_song(it_or_song, base_dir)[0]
     with LoadedModule(data) as lm:
-        pcm = lm.render(rate, repeat)
+        pcm = lm.render(rate, repeat, oversample=oversample)
     with wave.open(str(wav_path), "wb") as w:
         w.setnchannels(2)
         w.setsampwidth(2)
@@ -175,9 +176,10 @@ def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None) -> float:
     return len(pcm) / 4 / rate
 
 
-def tryout_song(song_path, orders=None) -> dict:
-    """The song dict cut to an order slice `(start, stop)`, or the whole song when `orders` is None."""
-    base = load(song_path)
+def tryout_song(song_or_path, orders=None) -> dict:
+    """The song (a path, or a dict that is copied) cut to an order slice `(start, stop)`, or whole when `orders` is None."""
+    import copy
+    base = copy.deepcopy(song_or_path) if isinstance(song_or_path, dict) else load(song_or_path)
     if orders:
         base["orders"] = base["orders"][orders[0]:orders[1]]
         base["patterns"] = {k: v for k, v in base["patterns"].items() if k in base["orders"]}

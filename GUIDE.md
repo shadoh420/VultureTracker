@@ -45,12 +45,29 @@ default browser instead; either way it is served on localhost and nothing leaves
 no song to get the open-a-song screen with recent songs and the demos. Pick a sample slot and
 a section of the song, add candidate WAVs by path or glob, and each candidate is rendered inside the song with
 only that slot swapped. Keys `1`–`0` switch candidates without losing the playback position, `S`/`M` toggle
-the sample alone vs. in the mix, stars/reject/notes are kept per candidate beside the song
-(`<song>.tryout.json`), and `U` shows the YAML change before writing it. The Song Overview tab has a stems rail (mute or solo
-channels and the tryout re-renders without them; EXPORT STEMS writes one WAV per playing channel to
-`<song>_stems/`), the arrangement grid and slot table, and a read-only pattern view that follows the selected
-order and the playhead. Render & Export builds the `.it` (and a WAV) and verifies it with libopenmpt.
-Renders are cached in `<song dir>/.tryout/`.
+SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes every channel that never plays the slot,
+stars/reject/notes are kept per candidate beside the song (`<song>.tryout.json`), and `U` shows the YAML change before
+writing it. With no candidate picked, SONG plays the song itself. Slots that have candidates are marked in the slot list
+(`24 arp ▸ 5 candidates`); rejected candidates sink to the bottom of the list (their number keys stay). The candidate
+you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
+and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
+playhead with the slot each plays (a looped tone until its note-off, a one-shot until its sample runs out); click one
+to solo it. The Song Overview tab has a stems rail that is also a mixer: mute or solo channels, a volume and pan fader per
+channel, a MIX VOL master with the peak of what is playing, and a GAIN fader per sample slot in the slot table; every
+move re-renders the tryout at once (the section is compiled once and the values are patched into the module's header),
+and the meter next to each channel is that channel soloed, its RMS in dB over the active part of the section (the way
+`scratch/ut99-clean/compare.py` measures a module). Nothing is written until WRITE MIX → SONG, which shows the YAML
+change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place). EXPORT STEMS
+writes one WAV per playing channel to `<song>_stems/`. The tab also has the arrangement grid, the slot table and a
+read-only pattern view that follows the selected order and the playhead. Render & Export builds the `.it` (and a WAV)
+and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (the newest 60).
+
+**Listening notes.** The bar under the player drops a note at the playhead: TOO LOUD, TOO QUIET, HATE THIS SOUND,
+TOO BUSY, KEEP or NOTE… (`N`). A note records the time, order and row, what was playing (the song or a candidate, the
+mutes, the unwritten faders) and the channels sounding there (each channel's last note cell with its sample number;
+`~` marks a looped tone held from an earlier note); click the chip of the channel you mean and add words if you like.
+Notes live in `<song>.notes.json` and are rendered as `<song>.notes.md`, a report grouped by order (the tryout ratings
+at the end) for a collaborator who cannot listen; the NOTES tab lists and edits them. Nothing touches the song file.
 
 **Standalone binary:** `pip install pyinstaller && python tools/build_exe.py` produces `dist/vulturetracker.exe`,
 the whole CLI with libopenmpt bundled: `vulturetracker.exe gui song.yaml`. Double-clicking it opens the app on its
@@ -154,6 +171,13 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
 
 - Output is IT 2.14 format in instrument mode with uncompressed 8/16-bit samples, playable in
   OpenMPT, Schism Tracker, Impulse Tracker and anything built on libopenmpt.
+- Anti-aliasing. WAV renders are mixed at twice the output rate and band-limited back down with a windowed-sinc
+  low-pass (`render --oversample 1` turns it off), so content the mixer produces above the output's Nyquist frequency
+  is removed instead of folding into the audible range. Two things still create false frequencies inside a module:
+  playing a sample far above its own pitch (render multisamples with `notes:` and a keymap so no note plays a sample
+  more than about seven semitones up) and low-rate samples interpolated by the player (the module setting
+  `sample_rate: 44100` resamples every sample to the playback rate at compile time, band-limited, which removes that
+  imaging in every player at the cost of file size). `vulturetracker/resample.py` holds the resampler.
 - `import` keeps patterns, instruments, envelopes and samples. It drops embedded MIDI macros and
   OpenMPT-only extensions (with a warning).
 - `vulturetracker/api.py` exposes plain functions (`new_song`, `add_sample`, `add_instrument`,

@@ -25,3 +25,8 @@ dist/
 build/
 *.spec
 *_stems/
+
+# suite renders (the .it files embed every sample; the WAVs are large)
+suite/*/*.it
+suite/*/*.wav
+suite/*/*.mp3

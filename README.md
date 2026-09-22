@@ -27,7 +27,7 @@ Python 3.10+. Windows x64 has libopenmpt in `vendor/`; elsewhere install libopen
 ## Use
 
 ```
-python -m vulturetracker gui demo2/iron_relay.yaml         # the app: try candidate samples inside the song, mute/solo channels, read patterns, export stems
+python -m vulturetracker gui demo2/iron_relay.yaml         # the app: try candidate samples inside the song, mix, drop listening notes, read patterns, export stems
 python -m vulturetracker check song.yaml                   # validate; errors show file:line
 python -m vulturetracker build song.yaml --render song.wav # compile, verify with libopenmpt, render
 python -m vulturetracker import some.it -o some.yaml       # existing module -> song file + WAVs

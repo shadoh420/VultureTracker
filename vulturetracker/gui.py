@@ -1,17 +1,23 @@
 """`vulturetracker gui song.yaml`: a one-page tryout app served on localhost from the stdlib HTTP server.
 
 The page (gui.html) polls /api/state and posts actions; renders run on one worker thread and land as WAVs in
-`<song dir>/.tryout/`, keyed by song text + slot + section + muted channels + candidate, so re-picking a candidate is
-instant.
-Ratings, notes and the candidate list live in `<song>.tryout.json` beside the song, per slot."""
+`<song dir>/.tryout/`. The tryout section is compiled once per candidate (memoised); mutes, solo and the mixer's
+faders (channel volume and pan, mix volume, sample gain) are patched into that module's header before each render, so
+re-picking a candidate is instant and a fader move costs one render.
+Ratings, notes, the candidate list, mutes and the unwritten mix live in `<song>.tryout.json` beside the song.
+Listening notes (a tag dropped at the playhead, the channels sounding there, the listener's words) live in
+`<song>.notes.json` and are rendered as `<song>.notes.md`, a report for a collaborator who cannot listen."""
+import datetime
 import difflib
 import glob
 import hashlib
+import itertools
 import json
 import math
 import os
 import queue
 import re
+import struct
 import sys
 import threading
 import wave
@@ -23,6 +29,7 @@ import yaml
 
 from . import api
 from .notation import format_cell, format_note
+from .openmpt import LoadedModule
 from .song import SongError, load_song_text
 from .wavload import read_wav
 
@@ -195,7 +202,7 @@ def facts_of(mod, warnings):
     return {
         "title": mod.title, "tempo": mod.tempo, "speed": mod.speed, "bpm": round(mod.tempo * 24 / mod.speed / 4),
         "channels": [c.name or f"Ch {i + 1}" for i, c in enumerate(mod.channels)],
-        "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels],
+        "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels], "mix_volume": mod.mix_volume,
         "patterns": len(mod.patterns), "duration": duration, "orders": orders, "use": use,
         "samples": [{"num": i + 1, "name": s.name, "c5_speed": s.c5_speed, "length": s.length / s.c5_speed if s.c5_speed else 0,
                      "loop": s.loop is not None, "bits": s.bits} for i, s in enumerate(mod.samples)],
@@ -203,15 +210,113 @@ def facts_of(mod, warnings):
     }
 
 
-def mute_channels(song, idx):
-    """Flag channel indices `idx` muted in a song dict (in place): the IT channel-disable bit, which libopenmpt honours."""
-    chans = song["module"]["channels"]
-    if isinstance(chans, int):
-        chans = song["module"]["channels"] = [{} for _ in range(chans)]
-    for i in idx:
-        if i < len(chans):
-            chans[i] = {**(chans[i] or {}), "muted": True}
-    return song
+# ---------------------------------------------------------------- listening notes
+
+def sounding_table(mod, facts):
+    """Per order of `facts` (the playable orders, in order) and per row of its pattern: the channels sounding there. A
+    forward pass carries each channel's last note (the sample through the instrument's keymap, the note, the order and row
+    it started at, whether the sample loops); a note-off/cut/fade drops it, and a one-shot sample drops out once its
+    length has played at that order's row rate. A note without an instrument keeps the channel's last instrument (a slide
+    target, the tracker convention). Entry: ch, name, sample, note, order, loop, ago (rows since it started)."""
+    secs = [s.length / s.c5_speed if s.c5_speed else 0 for s in mod.samples]
+    state, last_ins = [None] * len(mod.channels), [0] * len(mod.channels)
+    table, abs_row = [], 0
+    for oi, mo in enumerate(k for k, o in enumerate(mod.orders) if o < 254):
+        pat = mod.patterns[mod.orders[mo]]
+        o = facts["orders"][oi] if oi < len(facts["orders"]) else None
+        row_s = o["seconds"] / len(pat.rows) if o and pat.rows else 0
+        rows = []
+        for r, row in enumerate(pat.rows):
+            for ch, c in enumerate(row):
+                if c.note is None:
+                    continue
+                if c.note >= 120:  # note off / cut / fade
+                    state[ch] = None
+                    continue
+                ins = last_ins[ch] = c.instrument or last_ins[ch]
+                smp = ins
+                if mod.instruments is not None:
+                    smp = mod.instruments[ins - 1].keymap[c.note][1] if 0 < ins <= len(mod.instruments) else 0
+                ok = 0 < smp <= len(mod.samples)
+                state[ch] = {"ch": ch, "name": mod.channels[ch].name or f"Ch {ch + 1}", "sample": smp if ok else None, "note": format_note(c.note),
+                             "order": oi, "loop": ok and mod.samples[smp - 1].loop is not None, "abs": abs_row + r, "secs": secs[smp - 1] if ok else None}
+            out = []
+            for s in state:
+                if s is None:
+                    continue
+                ago = abs_row + r - s["abs"]
+                if s["loop"] or s["secs"] is None or ago * row_s < s["secs"]:
+                    out.append({k: v for k, v in s.items() if k not in ("abs", "secs")} | {"ago": ago})
+            rows.append(out)
+        table.append(rows)
+        abs_row += len(pat.rows)
+    return table
+
+
+def patch_it(data, silenced=(), mix=None):
+    """The compiled module with channels `silenced` disabled (the IT channel-disable bit, which libopenmpt honours) and a
+    mix written into its header: channel volumes (header bytes 0x80..) and pans (0x40..), the mix volume (0x31) and per-slot
+    sample global volumes (the sample headers, via the offset table). Exactly what writing those values into the song
+    would render, without recompiling it."""
+    d = bytearray(data)
+    mix = mix or {}
+    for i, v in (mix.get("volume") or {}).items():
+        d[0x80 + int(i)] = int(v)
+    for i, p in (mix.get("pan") or {}).items():
+        d[0x40 + int(i)] = (d[0x40 + int(i)] & 0x80) | (100 if p == "surround" else int(p))
+    for i in silenced:
+        d[0x40 + i] |= 0x80
+    if mix.get("mix_volume") is not None:
+        d[0x31] = int(mix["mix_volume"])
+    if mix.get("sample_volume"):
+        nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
+        for slot, g in mix["sample_volume"].items():
+            if 1 <= int(slot) <= nsmp:
+                off = struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * (int(slot) - 1))[0]
+                d[off + 0x11] = int(g)
+    return bytes(d)
+
+
+def channel_levels(data, nch, cancel=None):
+    """Each channel soloed (every other channel's header volume zeroed, the way scratch/ut99-clean/compare.py measures a
+    module): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
+    `cancel()` true between channels abandons the pass (returns None)."""
+    import numpy as np
+    out = []
+    for ch in range(nch):
+        if cancel is not None and cancel():
+            return None
+        d = bytearray(data)
+        for other in range(nch):
+            if other != ch:
+                d[0x80 + other] = 0
+        with LoadedModule(bytes(d)) as lm:
+            x = np.frombuffer(lm.render(RATE, oversample=1), dtype="<i2").astype(np.float32).reshape(-1, 2) / 32768
+        e = np.mean(x ** 2, axis=1)
+        w = RATE // 2
+        seg = e[: len(e) // w * w].reshape(-1, w).mean(axis=1)
+        active = seg[seg > 1e-7]
+        db = lambda p: round(float(10 * np.log10(p + 1e-12)), 1)  # noqa: E731
+        out.append({"db": db(e.mean()) if len(e) else None, "active_db": db(active.mean()) if len(active) else None,
+                    "active_s": len(active) / 2})
+    return out
+
+
+def _write_pcm(path, pcm):
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(2)
+        f.setsampwidth(2)
+        f.setframerate(RATE)
+        f.writeframes(pcm)
+
+
+def _peak(pcm):
+    """Peak of interleaved int16 PCM, 0..1 (1.0: libopenmpt's mixer clipped)."""
+    try:
+        import numpy as np
+        return round(float(np.abs(np.frombuffer(pcm, "<i2")).max()) / 32768, 3)
+    except (ImportError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------- state
@@ -223,12 +328,19 @@ class State:
         self.cache_dir = self.base_dir / ".tryout"
         self.cache_dir.mkdir(exist_ok=True)
         self.meta_path = self.song_path.with_name(self.song_path.stem + ".tryout.json")
-        self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None}
+        self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
         if self.meta_path.exists():
             self.meta.update(json.loads(self.meta_path.read_text(encoding="utf-8")))
+        self.notes_path = self.song_path.with_name(self.song_path.stem + ".notes.json")
+        self.notes = json.loads(self.notes_path.read_text(encoding="utf-8")) if self.notes_path.exists() else []
         self.lock = threading.RLock()
-        self.jobs = queue.Queue()
-        self.renders = {}     # cache key -> {"status", "error", "file"}
+        self.jobs = queue.PriorityQueue()  # (priority, sequence, job): what is playing first, then the song, the rest, meters last
+        self._seq = itertools.count()
+        self.want = None      # the candidate the page is listening to (None: the song itself), rendered first
+        self.sound_table = None  # per order per row: the channels sounding there (sounding_table), rebuilt on reload
+        self.renders = {}     # render key -> {"status", "error", "file", "peak"}
+        self.compiled = {}    # compile key -> .it bytes of the tryout section (a candidate swapped in), patched per render
+        self.meters = None    # soloed channel levels of the section with the unwritten mix applied
         self.meas = {}        # wav path -> measurement (memo)
         self.build = None     # last build/export result
         self.stems = None     # stems export progress
@@ -249,6 +361,7 @@ class State:
             try:
                 self.mod, warnings = load_song_text(self.text, self.base_dir, str(self.song_path))
                 self.facts = facts_of(self.mod, warnings)
+                self.sound_table = None
                 self.error = None
             except SongError as e:
                 self.error = e.errors
@@ -269,6 +382,17 @@ class State:
 
     def save_meta(self):
         self.meta_path.write_text(json.dumps(self.meta, indent=1), encoding="utf-8")
+
+    def _put(self, prio, job):
+        self.jobs.put((prio, next(self._seq), job))
+
+    def set_want(self, cand):
+        """The candidate the page is listening to (None: the song): its pending render jumps the queue."""
+        with self.lock:
+            self.want = cand
+            k = self.key(cand)
+            if self.renders.get(k, {}).get("status") == "queued":
+                self._put(1, (k, cand))
 
     # ---- candidates
 
@@ -294,17 +418,43 @@ class State:
             return [i for i in range(len(self.facts["channels"])) if i != self.meta["solo"]]
         return sorted(set(self.meta.get("muted") or []))
 
-    def key(self, cand):
-        """Render cache key: song text, slot, section, mutes, the candidate, and the stamp of every WAV in the mix (a
-        sample re-rendered in place under the same path must not serve the old mix)."""
+    def mix(self):
+        """The unwritten mix: {"volume": {ch: 0-64}, "pan": {ch: 0-64|surround}, "mix_volume": 0-128, "sample_volume": {slot: 0-64}}
+        (keys are strings: the meta round-trips through JSON)."""
+        return self.meta.get("mix") or {}
+
+    def set_mix(self, m):
+        mix = {}
+        for k, hi in (("volume", 64), ("pan", 64), ("sample_volume", 64)):
+            d = {str(int(i)): "surround" if k == "pan" and v == "surround" else max(0, min(hi, int(v)))
+                 for i, v in (m.get(k) or {}).items()}
+            if d:
+                mix[k] = d
+        if m.get("mix_volume") is not None:
+            mix["mix_volume"] = max(0, min(128, int(m["mix_volume"])))
+        with self.lock:
+            self.meta["mix"] = mix
+            self.save_meta()
+            self.queue_all()
+
+    def ckey(self, cand=None):
+        """Compile key: song text, slot, section, the candidate swapped in (None: the song as it is) and the stamp of every
+        WAV in the mix (a sample re-rendered in place under the same path must not serve the old mix)."""
         def stamp(f):
             try:
                 st = Path(f).stat()
                 return f"{f}={st.st_mtime}:{st.st_size}"
             except OSError:
                 return f"{f}=missing"
-        stamps = "|".join(stamp(f) for f in [cand, *self.files])
-        return hashlib.sha1(f"{self.text}|{self.slot}|{self.orders}|{self.silenced()}|{stamps}".encode()).hexdigest()[:16]
+        stamps = "|".join(stamp(f) for f in ([cand] if cand else []) + self.files)
+        return hashlib.sha1(f"{self.text}|{self.slot}|{self.orders}|{stamps}".encode()).hexdigest()[:16]
+
+    def key(self, cand=None):
+        """Render cache key: the compile key plus what is patched into the module's header, mutes and the unwritten mix."""
+        return hashlib.sha1(f"{self.ckey(cand)}|{self.silenced()}|{json.dumps(self.mix(), sort_keys=True)}".encode()).hexdigest()[:16]
+
+    def meter_key(self):
+        return hashlib.sha1(f"{self.ckey()}|{json.dumps(self.mix(), sort_keys=True)}".encode()).hexdigest()[:16]
 
     def measured(self, path):
         if path not in self.meas:
@@ -339,30 +489,51 @@ class State:
 
     def queue_all(self):
         with self.lock:
-            for c in self.cands():
+            for c in [None, *self.cands()]:  # the song as it is first, then the candidates
                 k = self.key(c)
                 if k not in self.renders:
                     f = self.cache_dir / f"{k}.wav"
                     if f.exists():
-                        self.renders[k] = {"status": "ready", "file": str(f), "error": None}
+                        self.renders[k] = {"status": "ready", "file": str(f), "error": None, "peak": _peak(f.read_bytes()[44:])}
                     else:
                         self.renders[k] = {"status": "queued", "file": str(f), "error": None}
-                        self.jobs.put((k, c))
+                        self._put(1 if c == self.want else 2 if c is None else 3, (k, c))
+            mk = self.meter_key()
+            if self.facts and (not self.meters or self.meters["key"] != mk):
+                self.meters = {"key": mk, "status": "queued", "levels": None, "mix": self.mix(), "error": None}
+                self._put(4, ("meters", mk))
+
+    def compiled_it(self, cand=None):
+        """The tryout section compiled with `cand` in the slot (None: the song as it is), memoised per compile key."""
+        ck = self.ckey(cand)
+        if ck not in self.compiled:
+            with self.lock:
+                base, slot = api.tryout_song(self.song, self.orders), self.slot
+            if cand:
+                api.swap_sample(base, slot, Path(cand).resolve())
+            it = api.compile_song(base, self.base_dir)[0]
+            while len(self.compiled) >= 8:
+                self.compiled.pop(next(iter(self.compiled)))
+            self.compiled[ck] = it
+        return self.compiled[ck]
 
     def retry(self, path):
         with self.lock:
             k = self.key(path)
             self.renders[k] = {"status": "queued", "file": str(self.cache_dir / f"{k}.wav"), "error": None}
-            self.jobs.put((k, path))
+            self._put(1, (k, path))
 
     def _worker(self):
         while True:
-            job = self.jobs.get()
+            job = self.jobs.get()[2]
             if job[0] == "build":
                 self._build(job[1])
                 continue
             if job[0] == "stems":
                 self._stems()
+                continue
+            if job[0] == "meters":
+                self._meters(job[1])
                 continue
             k, cand = job
             with self.lock:
@@ -372,72 +543,303 @@ class State:
                     self.renders.pop(k, None)
                     continue
                 self.renders[k]["status"] = "rendering"
-                base = mute_channels(api.tryout_song(self.song_path, self.orders), self.silenced())
-                slot = self.slot
+                silenced, mix = self.silenced(), self.mix()
             try:
-                pcm = api.tryout_render(base, slot, cand, self.base_dir, RATE)
+                with LoadedModule(patch_it(self.compiled_it(cand), silenced, mix)) as lm:
+                    pcm = lm.render(RATE)
                 out = self.cache_dir / f"{k}.wav"
-                with wave.open(str(out), "wb") as f:
-                    f.setnchannels(2)
-                    f.setsampwidth(2)
-                    f.setframerate(RATE)
-                    f.writeframes(pcm)
+                _write_pcm(out, pcm)
                 with self.lock:
-                    self.renders[k].update(status="ready", file=str(out))
+                    self.renders[k].update(status="ready", file=str(out), peak=_peak(pcm))
+                self._prune()
             except Exception as e:  # noqa: BLE001 - shown in the UI, worker must survive
                 with self.lock:
                     self.renders[k].update(status="failed", error=f"{type(e).__name__}: {e}")
 
-    # ---- apply
+    def _meters(self, mk):
+        with self.lock:
+            if not self.meters or self.meters["key"] != mk:
+                return
+            self.meters["status"] = "measuring"
+            mix, nch = self.meters["mix"], len(self.facts["channels"])
+        try:
+            levels = channel_levels(patch_it(self.compiled_it(), (), mix), nch, cancel=lambda: self.meters["key"] != mk)
+            with self.lock:
+                if levels is not None and self.meters["key"] == mk:
+                    self.meters.update(status="ready", levels=levels)
+        except Exception as e:  # noqa: BLE001
+            with self.lock:
+                if self.meters["key"] == mk:
+                    self.meters.update(status="failed", error=f"{type(e).__name__}: {e}")
+
+    def _prune(self, keep=60):
+        """Every mute or fader change leaves a render in the cache: keep the newest `keep` WAVs, re-queue what is current."""
+        with self.lock:
+            for p in sorted(self.cache_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime)[:-keep]:
+                p.unlink(missing_ok=True)
+                self.renders.pop(p.stem, None)
+            self.queue_all()
+
+    # ---- listening notes
+
+    def version(self):
+        """The song text the notes were made against: a short hash of the file and its modification time."""
+        return {"hash": hashlib.sha1(self.text.encode()).hexdigest()[:8],
+                "mtime": datetime.datetime.fromtimestamp(self.mtime).isoformat(timespec="seconds")}
+
+    def sounding(self, order, row):
+        """The channels sounding at (order, row) of the facts' order list (see sounding_table)."""
+        with self.lock:
+            if self.sound_table is None:
+                self.sound_table = sounding_table(self.mod, self.facts)
+                self._rescan_notes()
+            rows = self.sound_table[order] if 0 <= order < len(self.sound_table) else []
+            return rows[min(row, len(rows) - 1)] if rows else []
+
+    def _rescan_notes(self):
+        """Notes made against this very song text get their sounding lists recomputed from the fresh table (the rule can
+        improve; the listener's tag, words and picked channels are untouched)."""
+        v, changed = self.version()["hash"], False
+        for n in self.notes:
+            if (n.get("version") or {}).get("hash") == v and 0 <= n["order"] < len(self.sound_table):
+                rows = self.sound_table[n["order"]]
+                new = rows[min(n["row"], len(rows) - 1)] if rows else []
+                if new != n.get("sounding"):
+                    n["sounding"], changed = new, True
+        if changed:
+            self.save_notes()
+
+    def sounding_rows(self, order):
+        """One order for the page's live strip: per row, [channel, sample, looped] triples."""
+        self.sounding(order, 0)
+        rows = self.sound_table[order] if 0 <= order < len(self.sound_table) else []
+        return [[[e["ch"], e["sample"], int(e["loop"])] for e in r] for r in rows]
+
+    def add_note(self, body):
+        """A note at (order, row) of the facts' order list with what was playing; the channels sounding there and the song
+        version are filled in here. Saves the JSON and rewrites the report. Returns the note."""
+        f = self.facts
+        if not f:
+            raise ValueError("the song does not compile")
+        order = max(0, min(len(f["orders"]) - 1, int(body.get("order") or 0)))
+        o = f["orders"][order]
+        row = max(0, min(o["rows"] - 1, int(body.get("row") or 0)))
+        with self.lock:
+            note = {"id": max((n["id"] for n in self.notes), default=0) + 1, "when": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "version": self.version(), "order": order, "pattern": o["pattern"], "row": row,
+                    "time": round(o["start"] + o["seconds"] * row / o["rows"], 2),
+                    "tag": str(body.get("tag") or "note")[:40], "text": str(body.get("text") or "")[:2000],
+                    "channels": sorted({int(c) for c in body.get("channels") or []}),
+                    "sounding": self.sounding(order, row),
+                    "playing": {"source": str(body.get("source") or "song"), "candidate": body.get("candidate"), "slot": self.slot,
+                                "section": list(self.orders) if self.orders else None, "muted": self.silenced(), "mix": self.mix()}}
+            self.notes.append(note)
+            self.save_notes()
+        return note
+
+    def edit_note(self, nid, body):
+        with self.lock:
+            for n in self.notes:
+                if n["id"] == nid:
+                    if body.get("delete"):
+                        self.notes.remove(n)
+                    else:
+                        for k in ("text", "tag"):
+                            if k in body:
+                                n[k] = str(body[k])[:2000]
+                        if "channels" in body:
+                            n["channels"] = sorted({int(c) for c in body["channels"]})
+                    break
+            self.save_notes()
+
+    def save_notes(self):
+        self.notes_path.write_text(json.dumps(self.notes, indent=1), encoding="utf-8")
+        self.notes_path.with_suffix(".md").write_text(self.report(), encoding="utf-8")
+
+    def report(self):
+        """<song>.notes.md: the notes grouped by order, each with its tag, the channels the listener pointed at in bold, what
+        was sounding there, what was playing and their words; then the tryout ratings. For a collaborator who cannot listen."""
+        f, v = self.facts, self.version()
+        fmt = lambda t: f"{int(t // 60)}:{t % 60:04.1f}"  # noqa: E731
+        L = [f"# Listening notes: {f['title'] if f else self.song_path.stem}", "",
+             f"`{self.song_path.name}` version {v['hash']} ({v['mtime']}), {len(self.notes)} note{'s' if len(self.notes) != 1 else ''}.",
+             "Time is the position in the whole song where the listener clicked (allow up to a second of reaction delay); ord is",
+             "the order index, row the row in its pattern. **Bold** channels are the ones the listener pointed at; the others are",
+             "what was sounding there (sample number after the name; `~` marks a looped tone still held from an earlier note).", ""]
+        by = {}
+        for n in self.notes:
+            by.setdefault(n["order"], []).append(n)
+        for order in sorted(by):
+            o = f["orders"][order] if f and order < len(f["orders"]) else None
+            L += [f"## ord {order} `{o['pattern']}` ({fmt(o['start'])} to {fmt(o['start'] + o['seconds'])})" if o else f"## ord {order}", ""]
+            for n in sorted(by[order], key=lambda n: (n["row"], n["id"])):
+                picked = set(n.get("channels") or [])
+                snd = []
+                for s in n.get("sounding") or []:
+                    txt = f"{s['name']} {s['sample']:02d}" if s.get("sample") else s["name"]
+                    txt += "~" if s.get("loop") and s.get("ago", 0) > 0 else ""
+                    snd.append(f"**{txt}**" if s["ch"] in picked else txt)
+                p = n.get("playing") or {}
+                what = {"song": "the song", "candidate": f"candidate {p.get('candidate')} in slot {p.get('slot')}",
+                        "sample alone": f"the sample alone ({p.get('candidate')}, so the position is the section start)"}.get(p.get("source"), p.get("source") or "")
+                if p.get("muted") and f:
+                    what += ", muted: " + ", ".join(f["channels"][i] for i in p["muted"] if i < len(f["channels"]))
+                if p.get("mix"):
+                    what += ", unwritten faders " + json.dumps(p["mix"], separators=(",", ":"))
+                old = "" if (n.get("version") or {}).get("hash") == v["hash"] else f" (made against version {(n.get('version') or {}).get('hash')})"
+                L.append(f"- **{n['tag'].upper()}** at {fmt(n['time'])}, row {n['row']:02d}{old}: " + (", ".join(snd) or "nothing sounding")
+                         + f". Playing {what}." + (f' "{n["text"]}"' if n.get("text") else ""))
+            L.append("")
+        rated = []
+        for slot, cands in self.meta.get("candidates", {}).items():
+            for c in cands:
+                r = self.meta["ratings"].get(c) or {}
+                if r.get("stars") or r.get("rejected") or r.get("note"):
+                    rated.append(f"- slot {slot}: {Path(c).stem} " + ("rejected" if r.get("rejected") else "*" * int(r.get("stars") or 0))
+                                 + (f' "{r["note"]}"' if r.get("note") else ""))
+        if rated:
+            L += ["## Tryout ratings", ""] + rated + [""]
+        return "\n".join(L)
+
+    # ---- writing the song
+
+    ENTRY = r"^(\s+)({key})([ \t]*)(\{{.*\}})?([ \t]*(?:#.*)?)$"  # indent, key, spaces, one-line flow mapping, trailing comment
+
+    @staticmethod
+    def _redump(lines, i, m, entry, keys=None):
+        """Replace the mapping at line i (`m` matched ENTRY) with `entry` in its own layout: a one-line flow mapping stays
+        one line (with `keys`, only those scalar values are substituted inside it, so a hand-aligned line keeps its
+        spacing), a block (the deeper-indented lines that follow) is re-dumped as a block. Returns the number of lines
+        the entry now occupies."""
+        indent, key, sp, flow, tail = m.groups()
+        nl = "\n" if lines[i].endswith("\n") else ""
+        if flow and keys:
+            for k in (k for k in keys if k in entry):
+                flow, n = re.subn(rf"(\b{k}:\s*)[^,}}]*", rf"\g<1>{entry[k]}", flow)
+                if not n:
+                    flow = f"{{{k}: {entry[k]}}}" if flow.strip() == "{}" else flow[:-1].rstrip() + f", {k}: {entry[k]}}}"
+            lines[i] = f"{indent}{key}{sp}{flow}{tail}{nl}"
+            return 1
+        if flow:
+            lines[i] = f"{indent}{key}{sp}{yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()}{tail}{nl}"
+            return 1
+        j = i + 1
+        while j < len(lines) and lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) > len(indent):
+            j += 1
+        block = [f"{indent}  {b}\n" for b in yaml.safe_dump(entry, default_flow_style=False, width=10 ** 6, sort_keys=False).splitlines()]
+        lines[i:j] = [lines[i]] + block
+        return 1 + len(block)
+
+    def _edit_text(self, song, samples=(), channels=(), mix_volume=None, keys=None):
+        """Song text with sample slot entries `{slot: entry}`, channel entries `{index: entry}` and the module's mix_volume
+        written in place (`keys`: only those scalar keys change inside a one-line entry); the rest of the document,
+        comments included, is untouched. When a line cannot be found (a one-line `module:`, a block-style channel list)
+        the whole `song` dict is re-dumped instead (comments lost, so the diff says so). Returns (text, redumped)."""
+        samples, channels = dict(samples), dict(channels)
+        lines = self.text.splitlines(keepends=True)
+        pending = {("smp", k) for k in samples} | {("ch", k) for k in channels} | ({("mv",)} if mix_volume is not None else set())
+        section = sub = None
+        item = cind = mod_line = -1
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            ind, s, n = len(line) - len(line.lstrip()), line.strip(), 1
+            if not s or s.startswith("#"):
+                i += 1
+                continue
+            if ind == 0:
+                section, sub = line.split(":")[0], None
+                mod_line = i if section == "module" else mod_line
+            elif section == "samples":
+                m = re.match(self.ENTRY.format(key=r"\d+:"), line)
+                if m and int(m.group(2)[:-1]) in samples:
+                    n = self._redump(lines, i, m, samples[int(m.group(2)[:-1])], keys)
+                    pending.discard(("smp", int(m.group(2)[:-1])))
+            elif section == "module":
+                if s.startswith("channels:"):
+                    sub, item, cind = "ch", -1, ind
+                elif sub == "ch" and ind >= cind and s.startswith("-"):
+                    item += 1
+                    m = re.match(self.ENTRY.format(key="-"), line)
+                    if item in channels and m:
+                        n = self._redump(lines, i, m, channels[item], keys)
+                        pending.discard(("ch", item))
+                elif sub == "ch" and ind <= cind:
+                    sub = None
+                if mix_volume is not None and s.startswith("mix_volume:"):
+                    lines[i] = re.sub(r"(mix_volume:\s*)\S+", rf"\g<1>{mix_volume}", line)
+                    pending.discard(("mv",))
+            i += n
+        if ("mv",) in pending and 0 <= mod_line < len(lines) - 1 and re.match(r"^module:\s*$", lines[mod_line]):
+            ind = len(lines[mod_line + 1]) - len(lines[mod_line + 1].lstrip())
+            lines.insert(mod_line + 1, " " * ind + f"mix_volume: {mix_volume}\n")
+            pending.discard(("mv",))
+        if pending:
+            return api.to_yaml(song), True
+        return "".join(lines), False
 
     def patched_text(self, cand):
-        """Song text with the slot pointed at `cand`. The slot's own lines are re-dumped in their original layout (a
-        one-line flow mapping or an indented block) and the rest of the document, comments included, is untouched; only
-        when the slot's lines cannot be found is the whole song re-dumped (comments lost, so the diff says so)."""
+        """Song text with the slot pointed at `cand` (see _edit_text)."""
         import copy
         song = copy.deepcopy(self.song)
         entry = api.swap_sample(song, self.slot, cand)
         entry["file"] = os.path.relpath(cand, self.base_dir).replace(os.sep, "/")
-        lines = self.text.splitlines(keepends=True)
-        in_samples = False
-        for i, line in enumerate(lines):
-            if re.match(r"^\S", line):
-                in_samples = line.startswith("samples:")
-                continue
-            m = in_samples and re.match(rf"^(\s+){self.slot}:(\s*)(\{{.*\}})?\s*$", line)
-            if not m:
-                continue
-            indent = m.group(1)
-            if m.group(3):
-                flow = yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()
-                lines[i] = f"{indent}{self.slot}:{m.group(2)}{flow}{'\n' if line.endswith('\n') else ''}"
-                return "".join(lines), False
-            j = i + 1  # the block is the following lines indented deeper than the key
-            while j < len(lines) and lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) > len(indent):
-                j += 1
-            block = yaml.safe_dump(entry, default_flow_style=False, width=10 ** 6, sort_keys=False)
-            lines[i:j] = [line] + [f"{indent}  {b}\n" for b in block.splitlines()]
-            return "".join(lines), False
-        return api.to_yaml(song), True
+        return self._edit_text(song, samples={self.slot: entry})
+
+    def mix_text(self):
+        """Song text with the unwritten mix written in: module.channels volume/pan, module.mix_volume and the samples'
+        global_volume (the default note volume would be overridden by every cell that sets one)."""
+        import copy
+        mix, song = self.mix(), copy.deepcopy(self.song)
+        chans = song["module"]["channels"]
+        if isinstance(chans, int):
+            chans = song["module"]["channels"] = [{"name": f"Ch {i + 1}"} for i in range(chans)]
+        touched = {}
+        for k in ("volume", "pan"):
+            for i, v in (mix.get(k) or {}).items():
+                if int(i) < len(chans):
+                    chans[int(i)] = touched[int(i)] = {**(chans[int(i)] or {}), k: v}
+        if mix.get("mix_volume") is not None:
+            song["module"]["mix_volume"] = mix["mix_volume"]
+        smp = {}
+        for s, g in (mix.get("sample_volume") or {}).items():
+            if int(s) in song["samples"]:
+                song["samples"][int(s)]["global_volume"] = g
+                smp[int(s)] = song["samples"][int(s)]
+        return self._edit_text(song, samples=smp, channels=touched, mix_volume=mix.get("mix_volume"), keys=("volume", "pan", "global_volume"))
+
+    def _diff(self, new, redump):
+        d = list(difflib.unified_diff(self.text.splitlines(), new.splitlines(), self.song_path.name, self.song_path.name, lineterm="", n=2))
+        return {"lines": d, "redump": redump, "path": str(self.song_path)}
 
     def diff(self, cand):
-        new, redump = self.patched_text(cand)
-        d = list(difflib.unified_diff(self.text.splitlines(), new.splitlines(), str(self.song_path.name), str(self.song_path.name), lineterm="", n=2))
-        return {"lines": d, "redump": redump, "path": str(self.song_path)}
+        return self._diff(*self.patched_text(cand))
+
+    def mix_diff(self):
+        return self._diff(*self.mix_text())
 
     def apply(self, cand):
         with self.lock:
             new, _ = self.patched_text(cand)
             self.song_path.write_text(new, encoding="utf-8")
             self.reload()
-        self.jobs.put(("build", False))
+        self._put(0, ("build", False))
+
+    def apply_mix(self):
+        with self.lock:
+            new, _ = self.mix_text()
+            self.song_path.write_text(new, encoding="utf-8")
+            self.meta["mix"] = {}
+            self.save_meta()
+            self.reload()
+        self._put(0, ("build", False))
 
     # ---- build / export
 
     def request_build(self, render):
         with self.lock:
             self.build = {"status": "queued", "render": render}
-        self.jobs.put(("build", render))
+        self._put(0, ("build", render))
 
     def _build(self, render):
         with self.lock:
@@ -461,10 +863,11 @@ class State:
     def request_stems(self):
         with self.lock:
             self.stems = {"status": "queued", "done": 0, "total": 0, "dir": None, "error": None}
-        self.jobs.put(("stems", None))
+        self._put(0, ("stems", None))
 
     def _stems(self):
-        """One WAV per channel that plays anything, rendered with every other channel muted, in <song>_stems/."""
+        """One WAV per channel that plays anything, rendered with every other channel disabled, in <song>_stems/. The song
+        as written: the unwritten mix is not applied."""
         with self.lock:
             f = self.facts
             out_dir = self.song_path.with_name(self.song_path.stem + "_stems")
@@ -472,10 +875,11 @@ class State:
             self.stems = {"status": "rendering", "done": 0, "total": len(chans), "dir": str(out_dir), "error": None}
         try:
             out_dir.mkdir(exist_ok=True)
+            it = api.compile_song(self.song, self.base_dir)[0]
             for n, i in enumerate(chans):
                 name = re.sub(r"[^\w-]+", "_", f["channels"][i]).strip("_") or "ch"
-                song = mute_channels(api.tryout_song(self.song_path), [j for j in range(len(f["channels"])) if j != i])
-                api.render(song, out_dir / f"{i + 1:02d}-{name}.wav", rate=RATE, base_dir=self.base_dir)
+                with LoadedModule(patch_it(it, [j for j in range(len(f["channels"])) if j != i])) as lm:
+                    _write_pcm(out_dir / f"{i + 1:02d}-{name}.wav", lm.render(RATE))
                 with self.lock:
                     self.stems["done"] = n + 1
             with self.lock:
@@ -506,7 +910,7 @@ class State:
                 m = self.measured(c) if Path(c).exists() else {"error": "file not found"}
                 rating = self.meta["ratings"].get(c, {})
                 cands.append({"id": i, "path": c, "name": Path(c).stem, "src": os.path.relpath(c, self.base_dir).replace(os.sep, "/"),
-                              "key": k, "status": r["status"], "error": r.get("error"), "meas": m,
+                              "key": k, "status": r["status"], "error": r.get("error"), "peak": r.get("peak"), "meas": m,
                               "dist": distance(m, ref), "stars": rating.get("stars", 0), "rejected": rating.get("rejected", False),
                               "note": rating.get("note", ""), "current": c == cur})
             ents = self.song.get("samples", {})
@@ -516,6 +920,8 @@ class State:
                 m = self.meas.get(str(f)) if f else None  # filled in by the warm-up thread; blank until then
                 if m:
                     slot_meas[str(k)] = {x: m.get(x) for x in ("pitch", "centroid", "decay")}
+            ok = self.key()
+            own = self.renders.get(ok, {"status": "queued", "error": None})
             return {
                 "song": {"path": str(self.song_path), "dir": str(self.base_dir), "dirty": self.dirty(), "error": self.error,
                          "mtime": self.mtime, "facts": self.facts, "sample_entries": {str(k): v for k, v in ents.items()},
@@ -523,7 +929,11 @@ class State:
                 "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref,
                 "orders": list(self.orders) if self.orders else None,
                 "muted": sorted(set(self.meta.get("muted") or [])), "solo": self.meta.get("solo"),
+                "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak")},
+                "mix": self.mix(), "meters": self.meters,
                 "candidates": cands, "build": self.build, "stems": self.stems,
+                "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
+                "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
                 "queue": sum(1 for r in self.renders.values() if r["status"] in ("queued", "rendering")),
                 "cache": sum(1 for r in self.renders.values() if r["status"] == "ready"),
             }
@@ -608,6 +1018,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, st.pattern_rows(int(path[13:])))
             except (ValueError, IndexError, AttributeError):
                 return self._send(404, {"error": "no such pattern"})
+        if path.startswith("/api/sounding/"):
+            try:
+                return self._send(200, {"rows": st.sounding_rows(int(path[14:]))})
+            except (ValueError, IndexError, AttributeError, TypeError):
+                return self._send(404, {"error": "no such order"})
         if path.startswith("/wav/"):
             k = path[5:]
             r = st.renders.get(k)
@@ -620,6 +1035,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(c, "audio/wav")
         if path.startswith("/api/diff/"):
             return self._send(200, st.diff(st.cands()[int(path[10:])]))
+        if path == "/api/mixdiff":
+            return self._send(200, st.mix_diff())
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -661,10 +1078,20 @@ class Handler(BaseHTTPRequestHandler):
                     if k in body:
                         r[k] = body[k]
                 st.save_meta()
+            elif act == "want":
+                st.set_want(st.cands()[int(body["id"])] if body.get("id") is not None else None)
+            elif act == "note":
+                return self._send(200, st.add_note(body))
+            elif act == "noteedit":
+                st.edit_note(int(body["id"]), body)
             elif act == "retry":
                 st.retry(st.cands()[int(body["id"])])
             elif act == "apply":
                 st.apply(st.cands()[int(body["id"])])
+            elif act == "mix":
+                st.set_mix(body)
+            elif act == "applymix":
+                st.apply_mix()
             elif act == "reload":
                 st.reload()
             elif act == "build":

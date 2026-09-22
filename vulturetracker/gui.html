@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>VultureTracker</title><link rel="icon" href="/icon.png">
 <style>
-:root{--bg:#0a0c0d;--panel:#14171a;--panel2:#0e1113;--bar:#161a1c;--ink:#d6dcdf;--dim:#79848a;--mid:#8d979c;--hi:#e4eaed;--acc:#7ee787;--accd:#1f3a26;--blue:#5f7d94;--amber:#d9a441;--red:#d7726a;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;--stemsw:268px;--railw:340px}
+:root{--bg:#0a0c0d;--panel:#14171a;--panel2:#0e1113;--bar:#161a1c;--ink:#d6dcdf;--dim:#79848a;--mid:#8d979c;--hi:#e4eaed;--acc:#7ee787;--accd:#1f3a26;--blue:#5f7d94;--amber:#d9a441;--red:#d7726a;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;--stemsw:380px;--railw:340px}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:12px/1.4 'Helvetica Neue',Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
 body{overflow:auto hidden}
 *{box-sizing:border-box}
@@ -47,7 +47,7 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .fail{margin-top:8px;display:flex;align-items:flex-start;gap:8px;padding:7px 8px;background:#1d1414;font:10.5px/1.5 var(--mono);color:#e0a09a}.fail b{font-family:inherit;color:var(--red);letter-spacing:.1em;font-size:10px;flex:none}
 .bottom{flex:none;height:60px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--bar);box-shadow:inset 0 1px 0 #2a3135}
 .play{width:36px;height:36px;display:grid;place-items:center;cursor:pointer;font-size:15px;color:#0c1a0f;background:var(--acc)}
-.prog{position:relative;height:9px;background:#0b0e0f;cursor:pointer}.prog i{position:absolute;left:0;top:0;bottom:0;background:rgba(126,231,135,.25)}.prog b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--acc)}
+.prog{position:relative;height:11px;background:#0b0e0f;cursor:pointer}.prog i{position:absolute;left:0;top:0;bottom:0;background:rgba(126,231,135,.25)}.prog b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--acc)}
 table{border-collapse:collapse;width:100%;font-size:11px}th{text-align:left;font-size:9px;letter-spacing:.1em;color:var(--dim);padding:4px 8px;box-shadow:inset 0 -1px 0 #0a0c0d;white-space:nowrap}td{padding:4px 8px;box-shadow:inset 0 -1px 0 #0a0c0d;font-family:var(--mono);font-size:10.5px;white-space:nowrap}
 #slots{table-layout:fixed}th.r,td.r{text-align:right}td.file{overflow:hidden;text-overflow:ellipsis;color:var(--dim)}td.sans{font-family:inherit;font-size:11.5px;overflow:hidden;text-overflow:ellipsis}td.dimc{color:#4a5255}
 tr.on td{background:rgba(126,231,135,.05)}tr.on td.sans{color:var(--acc);font-weight:600}tr.on td:first-child{box-shadow:inset 2px 0 0 var(--acc),inset 0 -1px 0 #0a0c0d}
@@ -58,11 +58,16 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
 .err{color:var(--red);font:10.5px/1.5 var(--mono);white-space:pre-wrap}
 /* song overview: stems rail, pattern rail, resize handles */
 .handle{width:5px;flex:none;cursor:col-resize;display:flex;align-items:center;justify-content:center;background:#0d1012}.handle:hover{background:#1b2a20}.handle i{width:1px;height:26px;background:#2c3438}
-.stem{display:flex;align-items:center;gap:5px;padding:3px 4px;font:9.5px/1 var(--mono);white-space:nowrap}.stem.off{opacity:.55}.stem.solo{background:rgba(126,231,135,.07)}
+.stem{display:flex;align-items:center;gap:5px;padding:4px 4px 1px;font:9.5px/1 var(--mono);white-space:nowrap}.stem.off,.stem.off+.mix{opacity:.55}.stem.solo,.stem.solo+.mix{background:rgba(126,231,135,.07)}
 .stem .fb{width:3px;height:13px;flex:none}.stem .n{width:17px;flex:none;color:#5c6569}.stem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;letter-spacing:.03em;color:#c3cbcf}.stem.off .nm{color:var(--dim)}
 .ms{width:15px;height:15px;flex:none;display:grid;place-items:center;cursor:pointer;font:700 8.5px/1 var(--mono);color:#6d777c;background:#1a1f21;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d}.ms:hover{color:var(--ink)}.ms.m{color:#0d1a11;background:var(--amber);box-shadow:none}.ms.s{color:#0d1a11;background:var(--acc);box-shadow:none}
-.stem .pan{width:26px;flex:none;text-align:right;font-size:9px;color:#6d777c}.vol{width:34px;flex:none;height:4px;background:#0b0e0f;box-shadow:inset 1px 1px 0 #070809}.vol i{display:block;height:100%;background:#5c6a70}.stem.off .vol i{background:#333a3d}
-.stem .smp{width:38px;flex:none;text-align:right;font-size:9px;color:#5c6569;overflow:hidden}
+/* mixer rows under each stem: faders re-render the tryout, the meter is the channel soloed */
+.mix{display:flex;align-items:center;gap:4px;padding:1px 4px 5px 26px;font:8.5px/1 var(--mono);color:#5c6569;white-space:nowrap}
+input[type=range]{-webkit-appearance:none;flex:1;min-width:30px;height:4px;margin:0;padding:0;background:#0b0e0f;box-shadow:inset 1px 1px 0 #070809;cursor:pointer}input[type=range]:focus{box-shadow:inset 1px 1px 0 #070809}input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:7px;height:11px;background:#8d979c}input[type=range]:hover::-webkit-slider-thumb{background:var(--acc)}
+.mix .v{width:22px;flex:none;text-align:right;color:#c3cbcf}.chg{color:var(--amber)!important}
+.meter{width:46px;flex:none;height:5px;background:#0b0e0f;box-shadow:inset 1px 1px 0 #070809}.meter i{display:block;height:100%;background:#4f7d5b}.mix .db{width:32px;flex:none;text-align:right;color:#c3cbcf}
+.gain{width:38px;display:inline-block;vertical-align:middle}
+.stem .smp{width:78px;flex:none;text-align:right;font-size:9px;color:#5c6569;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .state{padding:2px 6px;font-size:8.5px;letter-spacing:.12em;font-weight:700;color:var(--dim);background:#1b2124}.state.on{color:#0d1a11;background:var(--acc)}
 .badge{flex:none;padding:3px 7px;white-space:nowrap;font:10px/1.3 var(--mono);color:var(--acc);background:#16201a}
 #patscroll{position:relative}
@@ -70,6 +75,13 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
 .pt{display:flex;font:10px/15px var(--mono);white-space:pre}.pt.b4{background:rgba(255,255,255,.022)}.pt.b16{background:rgba(143,176,196,.055)}.pt.play{background:rgba(126,231,135,.13)}
 .rn{width:26px;flex:none;position:sticky;left:0;z-index:1;background:var(--panel);color:#4a5255;font-variant-numeric:tabular-nums}.pt.b4 .rn{background:#161a1c;color:#6d777c}.pt.b16 .rn{background:#171c20;color:#8fb0c4}.pt.play .rn{background:#1b2c20;color:var(--acc)}
 .pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pt.play .pc .n{color:#eaf6ec}
+/* listening notes: the tag bar under the player, channel chips, the notes tab */
+.notesbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 12px 6px;background:var(--panel2);box-shadow:inset 0 1px 0 #2a3135}
+.tagb{padding:5px 9px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:#c3cbcf;background:#1b2124;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d;user-select:none;white-space:nowrap}.tagb:hover{color:var(--hi);background:#232a2e}
+.tagb.loud{color:var(--red)}.tagb.quiet{color:#8fb0c4}.tagb.hate{color:var(--amber)}.tagb.busy{color:#c9a0d8}.tagb.keep{color:var(--acc)}
+.chipc{padding:2px 6px;cursor:pointer;font:9.5px/1.3 var(--mono);color:var(--dim);background:#0f1416;box-shadow:inset 0 0 0 1px #1f262a;white-space:nowrap;user-select:none}.chipc:hover{color:var(--ink)}.chipc.on{color:#0c1a0f;background:var(--acc);box-shadow:none}.chipc.off{opacity:.35}
+.noterow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}.noterow.full{padding:6px 8px;background:var(--panel);box-shadow:inset 1px 1px 0 #21272a,inset -1px -1px 0 #080a0b}
+option.hascand{color:var(--acc);font-weight:700}
 </style></head><body><div id="app">
 <div class="top">
   <div class="logo"><i></i><b>VULTURETRACKER</b></div>
@@ -83,12 +95,13 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
   <div class="tab on" data-t="tryout" onclick="tab('tryout')">TRYOUT</div>
   <div class="tab" data-t="overview" onclick="tab('overview')">SONG OVERVIEW</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
+  <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
 </div>
 
 <div class="main on" id="t-tryout">
   <div class="col" style="width:320px;flex:none">
     <div class="panel" style="flex:none">
-      <div class="ph"><span class="k">SAMPLE SLOT</span><select id="slotsel" onchange="act('slot',{slot:+this.value})" style="font:11px var(--mono);padding:2px 4px"></select></div>
+      <div class="ph"><span class="k" style="white-space:nowrap">SLOT</span><select id="slotsel" onchange="act('slot',{slot:+this.value})" style="font:11px var(--mono);padding:2px 4px"></select></div>
       <div class="pb" id="slotinfo"></div>
     </div>
     <div class="panel" style="flex:1;min-height:0;overflow:auto">
@@ -126,7 +139,7 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
   <div class="panel col" style="width:var(--stemsw);flex:none">
     <div class="ph" style="position:static"><span class="k">STEMS · <span id="stemsn"></span></span><span class="state" id="stemstate"></span></div>
     <div id="stemlist" style="flex:1;min-height:0;overflow:auto;padding:4px 6px"></div>
-    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems')" title="one WAV per playing channel, next to the song">EXPORT STEMS</span><span class="btn" onclick="resetStems()">RESET</span></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
+    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px;margin-bottom:3px"><span class="btn" id="writemix" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="showDiff('/api/mixdiff','WRITE MIX TO SONG',()=>act('applymix'))" title="write the faders into the song file (module.channels volume/pan, mix_volume, sample global_volume); shows the change first">WRITE MIX → SONG</span><span class="btn" onclick="resetMix()" title="drop the unwritten fader values">RESET MIX</span></div><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems')" title="one WAV per playing channel, next to the song (the song as written)">EXPORT STEMS</span><span class="btn" onclick="resetStems()" title="clear mutes and solo">UNMUTE</span></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
   </div>
   <div class="handle" onmousedown="drag(event,'--stemsw',1,200,420)"><i></i></div>
   <div class="col" style="flex:1;min-width:560px">
@@ -162,17 +175,32 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
   </div>
 </div>
 
+<div class="main" id="t-notes">
+  <div class="panel" style="flex:1;overflow:auto">
+    <div class="ph"><span class="k">LISTENING NOTES · <span id="notecount"></span></span><span class="meta" id="notepaths"></span></div>
+    <div class="pb" id="notelist" style="display:flex;flex-direction:column;gap:2px"></div>
+  </div>
+</div>
+
 <div class="bottom">
   <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
   <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
     <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span></div>
-    <div class="prog" id="prog" onclick="seek(event)"><i id="progfill"></i><b id="proghead"></b></div>
-    <div style="display:flex;gap:12px"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf"></span><span style="font-size:10px;color:var(--dim)">switching candidates keeps the position</span></div>
+    <div class="prog" id="prog" onmousedown="seekDrag(event)" title="click or drag to seek"><i id="progfill"></i><b id="proghead"></b></div>
+    <div style="display:flex;gap:8px;align-items:center;min-width:0"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><span class="k" style="white-space:nowrap" title="the channels sounding at the playhead, with the slot each plays (from the pattern: a looped tone until its note-off, a one-shot until its sample runs out) · click one to solo it">SOUNDING</span><div id="live" style="flex:1;min-width:0;display:flex;gap:3px;overflow:hidden"></div></div>
   </div>
   <div style="display:flex;gap:2px">
+    <span class="btn" id="m-song" onclick="pick(null)" title="play the song itself: nothing swapped, the faders applied">SONG</span>
     <span class="btn on" id="m-mix" onclick="setSolo(false)">IN MIX <span class="kbd">M</span></span>
-    <span class="btn" id="m-solo" onclick="setSolo(true)">SOLO <span class="kbd">S</span></span>
+    <span class="btn" id="m-solo" onclick="setSolo(true)" title="the candidate's WAV by itself, not in the song">SAMPLE ALONE <span class="kbd">S</span></span>
+    <span class="btn" id="m-soloin" onclick="soloSlot()" title="the song with every channel that never plays this slot muted (the mutes stay until UNMUTE or a second click)">SOLO IN SONG</span>
   </div>
+</div>
+<div class="notesbar">
+  <span class="k" style="white-space:nowrap" title="a note lands at the playhead: the order and row, what is playing, and the channels sounding there">MARK THE PLAYHEAD</span>
+  <span class="tagb loud" onclick="addNote('too loud')">TOO LOUD</span><span class="tagb quiet" onclick="addNote('too quiet')">TOO QUIET</span><span class="tagb hate" onclick="addNote('hate this sound')">HATE THIS SOUND</span><span class="tagb busy" onclick="addNote('too busy')">TOO BUSY</span><span class="tagb keep" onclick="addNote('keep')">KEEP</span><span class="tagb" onclick="addNote('note')">NOTE… <span class="kbd">N</span></span>
+  <div style="flex:1;min-width:0"></div><span class="btn" onclick="tab('notes')">ALL NOTES</span>
+  <div id="notelast" style="flex-basis:100%;min-width:0;display:flex;align-items:center;gap:6px"></div>
 </div>
 <audio id="audio" loop></audio>
 
@@ -192,8 +220,8 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
 <div class="modal" id="keysmodal" onclick="toggle('keys',false)"><div class="box" style="width:520px">
   <div class="k" style="color:var(--acc);margin-bottom:10px">KEYBOARD</div>
   <div class="row"><span>1–9, 0</span><span>pick candidate 1–10</span></div><div class="row"><span>↑ ↓</span><span>previous / next candidate</span></div>
-  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>M / S</span><span>in mix / solo the sample</span></div>
-  <div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
+  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead (the tag buttons do the same with a tag)</span></div>
+  <div class="row"><span>SONG</span><span>play the song itself (no candidate swapped, the faders applied)</span></div><div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
   <div class="row"><span>Esc</span><span>close</span></div>
 </div></div>
 </div>
@@ -228,7 +256,7 @@ function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').valu
 function preset(n){const o=S.orders,f=S.song.facts;if(!f)return;const start=o?o[0]:0;act('orders',{orders:n?[start,Math.min(start+n,f.orders.length)]:null})}
 function setStart(i){const o=S.orders,f=S.song.facts;const len=o?o[1]-o[0]:4;act('orders',{orders:[i,Math.min(i+len,f.orders.length)]})}
 function loopLabel(){const f=S.song.facts;if(!f)return '';if(!S.orders)return `whole song · ${fmtT(f.duration)}`;const [a,b]=S.orders,os=f.orders.slice(a,b);const t=os.reduce((s,o)=>s+o.seconds,0),bars=os.reduce((s,o)=>s+o.bars,0);return `ord ${a}${b-a>1?'–'+(b-1):''} · ${bars} bars · ${fmtT(t)}`}
-function visible(){let c=S.candidates.filter(x=>filter==='all'||(filter==='star'?x.stars>0&&!x.rejected:!x.stars&&!x.rejected));if(sort==='dist')c=[...c].sort((a,b)=>(a.dist??1e9)-(b.dist??1e9));if(sort==='rating')c=[...c].sort((a,b)=>b.stars-a.stars||(a.dist??1e9)-(b.dist??1e9));return c}
+function visible(){let c=S.candidates.filter(x=>filter==='all'||(filter==='star'?x.stars>0&&!x.rejected:!x.stars&&!x.rejected));if(sort==='dist')c=[...c].sort((a,b)=>(a.dist??1e9)-(b.dist??1e9));if(sort==='rating')c=[...c].sort((a,b)=>b.stars-a.stars||(a.dist??1e9)-(b.dist??1e9));return [...c].sort((a,b)=>(a.rejected?1:0)-(b.rejected?1:0))}
 function wavesvg(m,fill,h){return m&&m.wave?`<svg viewBox="0 0 100 ${h||24}" preserveAspectRatio="none"><polygon points="${m.wave}" fill="${fill}" opacity=".85"/></svg>`:''}
 const audible=c=>S.solo!=null?S.solo===c:!S.muted.includes(c);
 function grid(f,inSel,h){const n=f.orders.length,wide=h>9;let out=`<div class="grid" style="grid-template-columns:${wide?78:34}px repeat(${n},minmax(0,1fr))"><div></div>${f.orders.map((o,i)=>`<div class="rl ${inSel(i)?'sel':''}" style="height:${h}px" onclick="setStart(${i})" title="${esc(o.pattern)}">${i%4?'':i}</div>`).join('')}`;
@@ -242,9 +270,10 @@ function render(){
   $('queue').textContent=`render queue ${S.queue} · cache ${S.cache}`;
   $('songerr').textContent=S.song.error?S.song.error.join('\n'):'';
   // slot
-  const ents=S.song.sample_entries;put('slotsel',Object.keys(ents).map(k=>`<option value="${k}" ${+k===S.slot?'selected':''}>${pad(k)} ${esc(ents[k].name||'')}</option>`).join(''));
+  const ents=S.song.sample_entries,cc=S.cand_counts||{},sname=k=>ents[k].name||((f&&f.samples.find(s=>s.num===+k))||{}).name||'';
+  put('slotsel',Object.keys(ents).map(k=>`<option value="${k}" class="${cc[k]?'hascand':''}" ${+k===S.slot?'selected':''}>${pad(k)} ${esc(sname(k))}${cc[k]?` ▸ ${cc[k]} candidate${cc[k]>1?'s':''}`:''}</option>`).join(''));
   const e=S.slot_entry,r=S.ref;
-  put('slotinfo',`<div style="display:flex;align-items:baseline;gap:8px"><span class="mono" style="font-size:20px;font-weight:700;color:var(--acc)">${pad(S.slot)}</span><span class="name" style="font-size:14px">${esc(e.name||'')}</span></div>
+  put('slotinfo',`<div style="display:flex;align-items:baseline;gap:8px"><span class="mono" style="font-size:20px;font-weight:700;color:var(--acc)">${pad(S.slot)}</span><span class="name" style="font-size:14px">${esc(e.name||sname(S.slot))}</span></div>
    <div class="src" style="margin-top:6px">${esc(e.file||'')}</div>
    ${r&&!r.error?`<div class="src" style="margin-top:3px">${r.rate} Hz · ${r.bits}-bit ${r.stereo?'stereo':'mono'} · loop ${r.loop?'on':'off'}${r.root?' · root '+r.root:''}</div>
    <div style="margin-top:9px;padding-top:9px;box-shadow:inset 0 1px 0 #0a0c0d">${measRows(r)}</div>`:`<div class="err" style="margin-top:6px">${esc(r?r.error:'no file')}</div>`}
@@ -255,7 +284,7 @@ function render(){
   if(f){const inSel=i=>S.orders?i>=S.orders[0]&&i<S.orders[1]:true;
     put('layers',grid(f,inSel,9));
     put('arr',grid(f,inSel,11));$('ovlabel').textContent=loopLabel();$('arrlabel').textContent=`${f.orders.length} ORD × ${f.channels.length} CH`;
-    renderStems(f);renderSlots(f,ents);showPattern(viewOrder())}
+    renderStems(f);renderSlots(f,ents);renderNotes(f);showPattern(viewOrder());$('m-soloin').classList.toggle('on',soloActive())}
   // candidates
   const cs=visible(),best=S.candidates.filter(c=>!c.current&&c.dist!=null).sort((a,b)=>a.dist-b.dist)[0];
   if(sel!=null&&!S.candidates.some(c=>c.id===sel))sel=null;
@@ -272,7 +301,7 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  renderChosen();updateAudio();renderBuild();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
 function measRows(m){if(!m||m.error)return '';return [['duration',secs(m.duration)],['detected pitch',m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'],['spectral centroid',hz(m.centroid)],['decay to −40 dB',secs(m.decay)],['attack to peak',m.attack==null?'—':Math.round(m.attack*1000)+' ms'],['flatness (noise)',m.flatness==null?'—':m.flatness.toFixed(2)]].map(([k,v])=>`<div class="row"><span>${k}</span><span>${v}</span></div>`).join('')}
@@ -288,27 +317,51 @@ function renderChosen(){const c=S.candidates.find(x=>x.id===sel);$('selkey').tex
    ${rows.map(([k,a,b,dd])=>`<div style="display:flex;align-items:baseline;padding:4px 0;box-shadow:inset 0 -1px 0 #0a0c0d;font-size:10.5px"><span style="flex:1;color:#a8b1b6">${k}</span><span class="mono" style="width:64px;text-align:right">${a}</span><span class="mono" style="width:64px;text-align:right;color:var(--dim)">${b}</span><span class="mono" style="width:54px;text-align:right;color:var(--blue)">${dd}</span></div>`).join('')}
    <div style="margin-top:12px;display:flex;gap:8px"><div style="flex:1"><div class="k">DECAY CURVE</div><div class="wave" style="margin-top:4px;height:44px"><svg viewBox="0 0 100 20" preserveAspectRatio="none">${curve(r.decay_curve,'#3f525f')}${curve(m.decay_curve,'#7ee787')}</svg></div></div>
    <div style="flex:1"><div class="k">OCTAVE BANDS</div><div class="wave" style="margin-top:4px;height:44px">${bandsvg(m,r)}</div></div></div>
-   ${c.current?`<div style="margin-top:14px;text-align:center;font-size:10.5px;color:var(--dim)">this is the sample in the song now</div>`:`<div class="btn big" style="margin-top:14px;display:block" onclick="showDiff(${c.id})">USE THIS FOR SLOT ${pad(S.slot)} <span class="kbd">U</span></div><div style="margin-top:6px;text-align:center;font-size:10px;color:var(--dim)">shows the YAML change before anything is written</div>`}`)}
+   ${c.current?`<div style="margin-top:14px;text-align:center;font-size:10.5px;color:var(--dim)">this is the sample in the song now</div>`:`<div class="btn big" style="margin-top:14px;display:block" onclick="useSel()">USE THIS FOR SLOT ${pad(S.slot)} <span class="kbd">U</span></div><div style="margin-top:6px;text-align:center;font-size:10px;color:var(--dim)">shows the YAML change before anything is written</div>`}`)}
 function renderBuild(){const b=S.build;if(!b){put('buildout','');return}
   if(b.status!=='done'){put('buildout',b.status==='failed'?`<div class="err">${esc(b.error)}</div>`:`<span style="color:var(--amber)">${b.status}…</span>`);return}
   put('buildout',`<div>wrote ${esc(b.it)} · ${b.bytes.toLocaleString()} bytes</div>${b.wav?`<div>rendered ${esc(b.wav)} · ${fmtT(b.seconds)}</div>`:''}${b.mismatches.length?`<div class="err">${esc(b.mismatches.join('\n'))}</div>`:'<div style="color:var(--acc)">libopenmpt agrees with the song</div>'}${b.warnings.map(w=>`<div style="color:var(--amber)">${esc(w)}</div>`).join('')}`)}
 // ---- song overview: stems
+const sName=n=>{const f=S&&S.song&&S.song.facts;return (f&&(f.samples.find(s=>s.num===n)||{}).name)||''};
 const smpList=a=>{const r=[];for(let i=0;i<a.length;){let j=i;while(j+1<a.length&&a[j+1]===a[j]+1)j++;r.push(j-i>=2?pad(a[i])+'–'+pad(a[j]):a.slice(i,j+1).map(pad).join('·'));i=j+1}return r.join('·')};
-function renderStems(f){const n=f.channels.length;$('stemsn').textContent=`${n} CHANNELS`;
-  put('stemlist',f.channels.map((ch,c)=>{const on=audible(c),m=S.muted.includes(c),so=S.solo===c,p=f.pan[c],used=[...new Set(f.use.flatMap(o=>o[c]))].sort((a,b)=>a-b);
-    return `<div class="stem ${on?'':'off'} ${so?'solo':''}"><span class="n">${pad(c+1)}</span><span class="ms ${m?'m':''}" onclick="muteCh(${c})" title="mute">M</span><span class="ms ${so?'s':''}" onclick="soloCh(${c})" title="solo">S</span><i class="fb" style="background:${famCol(ch)||'#333a3d'}"></i><span class="nm" title="${esc(ch)}">${esc(ch.toUpperCase())}</span><span class="pan" title="pan ${p}">${p===100?'S':p===32?'C':(p<32?'L':'R')+Math.round(Math.abs(p-32)/32*99)}</span><span class="vol" title="volume ${f.volume[c]}"><i style="width:${Math.round(f.volume[c]/64*100)}%"></i></span><span class="smp" title="samples ${used.map(pad).join(' ')||'none'}">${smpList(used)}</span></div>`}).join(''));
+const panLabel=p=>p===100?'S':p===32?'C':(p<32?'L':'R')+Math.round(Math.abs(p-32)/32*99);
+function mixVal(kind,i,def){const m=S.mix||{};if(kind==='mix_volume')return m.mix_volume!=null?m.mix_volume:def;return m[kind]&&m[kind][i]!=null?m[kind][i]:def}
+// meters: the server's last pass (each channel soloed, with the mix it had then); a fader moved since scales its channel until the next pass lands
+function meterDb(c,vol,mv){const M=S.meters,f=S.song.facts;if(!M||!M.levels||!M.levels[c]||M.levels[c].active_db==null)return null;const mm=M.mix||{};
+  const v0=mm.volume&&mm.volume[c]!=null?mm.volume[c]:f.volume[c],g0=mm.mix_volume!=null?mm.mix_volume:f.mix_volume,v=vol!=null?vol:mixVal('volume',c,f.volume[c]),g=mv!=null?mv:mixVal('mix_volume',null,f.mix_volume);
+  return v&&g&&v0&&g0?M.levels[c].active_db+20*Math.log10(v/v0)+20*Math.log10(g/g0):-Infinity}
+const meterW=db=>db==null||db===-Infinity?0:Math.max(0,Math.min(100,(db+60)/60*100)),dbText=db=>db==null?'—':db===-Infinity?'off':db.toFixed(1);
+function liveVol(el,c){lastInput=Date.now();$('mv'+c).textContent=el.value;const db=meterDb(c,+el.value);$('mb'+c).style.width=meterW(db)+'%';$('md'+c).textContent=dbText(db)}
+function liveMix(el){lastInput=Date.now();$('mmv').textContent=el.value;S.song.facts.channels.forEach((_,c)=>{const db=meterDb(c,null,+el.value);$('mb'+c).style.width=meterW(db)+'%';$('md'+c).textContent=dbText(db)})}
+function livePan(el,c){lastInput=Date.now();$('mp'+c).textContent=panLabel(+el.value)}
+function liveGain(el,n){lastInput=Date.now();$('sg'+n).textContent=el.value}
+// a fader back at the song's own value is no change; the server keeps the mix in <song>.tryout.json until WRITE MIX
+function setMix(kind,i,v){const f=S.song.facts,ents=S.song.sample_entries,m=JSON.parse(JSON.stringify(S.mix||{}));
+  const song=kind==='mix_volume'?f.mix_volume:kind==='volume'?f.volume[i]:kind==='pan'?f.pan[i]:((ents[i]||{}).global_volume??64);
+  if(kind==='mix_volume'){if(v===song)delete m.mix_volume;else m.mix_volume=v}else{m[kind]=m[kind]||{};if(v===song)delete m[kind][i];else m[kind][i]=v;if(!Object.keys(m[kind]).length)delete m[kind]}
+  act('mix',m)}
+function resetMix(){act('mix',{})}
+const nMix=()=>Object.values(S.mix||{}).reduce((k,v)=>k+(typeof v==='object'?Object.keys(v).length:1),0);
+function renderStems(f){const n=f.channels.length,mx=S.mix||{},M=S.meters,nmix=nMix();$('stemsn').textContent=`${n} CHANNELS`;
+  const mv=mixVal('mix_volume',null,f.mix_volume),pc=S.candidates.find(x=>x.id===sel),pk=pc?pc.peak:S.own&&S.own.peak;
+  put('stemlist',`<div class="mix" style="padding:7px 4px 8px;margin-bottom:3px;box-shadow:inset 0 -1px 0 #0a0c0d"><span class="k" style="color:var(--mid)">MIX VOL</span><input type="range" min="0" max="128" value="${mv}" oninput="liveMix(this)" onchange="setMix('mix_volume',null,+this.value)" title="module mix_volume 0–128 (song: ${f.mix_volume})"><span class="v ${mx.mix_volume!=null?'chg':''}" id="mmv" style="width:26px">${mv}</span><span class="db" style="width:auto;padding-left:4px;color:${pk>=.999?'var(--red)':'#8d979c'}" title="peak of the render that is playing (1.00: the mixer clipped)">${pk==null?'':pk>=.999?'CLIP':'PK '+pk.toFixed(2)}</span></div>`+
+   f.channels.map((ch,c)=>{const on=audible(c),m=S.muted.includes(c),so=S.solo===c,used=[...new Set(f.use.flatMap(o=>o[c]))].sort((a,b)=>a-b),v=mixVal('volume',c,f.volume[c]),p=mixVal('pan',c,f.pan[c]),db=meterDb(c),l=M&&M.levels&&M.levels[c];
+    return `<div class="stem ${on?'':'off'} ${so?'solo':''}"><span class="n">${pad(c+1)}</span><span class="ms ${m?'m':''}" onclick="muteCh(${c})" title="mute">M</span><span class="ms ${so?'s':''}" onclick="soloCh(${c})" title="solo">S</span><i class="fb" style="background:${famCol(ch)||'#333a3d'}"></i><span class="nm" title="${esc(ch)}">${esc(ch.toUpperCase())}</span><span class="smp" title="${esc(used.map(n=>pad(n)+' '+sName(n)).join(', ')||'plays no sample')}">${used.length===1?pad(used[0])+' '+esc(sName(used[0])):smpList(used)}</span></div>
+    <div class="mix"><span>VOL</span><input type="range" min="0" max="64" value="${v}" oninput="liveVol(this,${c})" onchange="setMix('volume',${c},+this.value)" title="channel volume 0–64 (song: ${f.volume[c]})"><span class="v ${mx.volume&&mx.volume[c]!=null?'chg':''}" id="mv${c}">${v}</span><span>PAN</span><input type="range" min="0" max="64" value="${p===100?32:p}" oninput="livePan(this,${c})" onchange="setMix('pan',${c},+this.value)" style="flex:.7" title="channel pan: 0 left · 32 centre · 64 right (song: ${panLabel(f.pan[c])})"><span class="v ${mx.pan&&mx.pan[c]!=null?'chg':''}" id="mp${c}">${panLabel(p)}</span><span class="meter" title="${l?`this channel soloed, over the tryout section: ${l.db} dB RMS whole, ${l.active_db==null?'silent':l.active_db+' dB'} over its active ${l.active_s} s`:M&&M.status==='failed'?'meters failed: '+M.error:'measuring…'}"><i id="mb${c}" style="width:${meterW(db)}%"></i></span><span class="db" id="md${c}">${dbText(db)}</span></div>`}).join(''));
   const nm=S.muted.length,dirty=S.solo!=null||nm>0,st=$('stemstate'),x=S.stems,busy=x&&(x.status==='queued'||x.status==='rendering');
-  st.textContent=busy?'EXPORTING':S.queue&&dirty?'RE-RENDERING':S.solo!=null?'SOLO':nm?`${nm} MUTED`:'ALL AUDIBLE';st.classList.toggle('on',dirty||busy);
-  $('stemhint').textContent=busy?`exporting stems ${x.done} / ${x.total} → ${x.dir}`:x&&x.status==='done'?`wrote ${x.total} stems to ${x.dir}`:x&&x.status==='failed'?`stems export failed: ${x.error}`:dirty?`tryout renders skip ${S.solo!=null?'every channel but '+pad(S.solo+1):nm+' muted channel'+(nm>1?'s':'')} · the YAML is untouched`:'M or S re-renders the tryout section without those channels · EXPORT STEMS writes one WAV per playing channel'}
+  st.textContent=busy?'EXPORTING':S.queue?'RENDERING':M&&M.status==='failed'?'NO METERS':M&&M.status!=='ready'?'MEASURING':S.solo!=null?'SOLO':nm?`${nm} MUTED`:nmix?`${nmix} UNWRITTEN`:'ALL AUDIBLE';st.classList.toggle('on',dirty||busy||nmix>0);
+  const wm=$('writemix');wm.textContent=nmix?`WRITE MIX → SONG · ${nmix}`:'WRITE MIX → SONG';wm.classList.toggle('dimb',!nmix);
+  $('stemhint').textContent=busy?`exporting stems ${x.done} / ${x.total} → ${x.dir}`:x&&x.status==='done'?`wrote ${x.total} stems to ${x.dir}`:x&&x.status==='failed'?`stems export failed: ${x.error}`:dirty?`tryout renders skip ${S.solo!=null?'every channel but '+pad(S.solo+1):nm+' muted channel'+(nm>1?'s':'')} · the YAML is untouched`:nmix?`${nmix} fader value${nmix>1?'s':''} unwritten: the tryout plays them, the song file does not have them yet · WRITE MIX shows the change first`:'faders re-render the tryout section; nothing is written until WRITE MIX · meter: the channel soloed, RMS in dB over its active part'}
 function muteCh(c){const m=S.muted.includes(c)?S.muted.filter(x=>x!==c):[...S.muted,c];act('mute',{muted:m,solo:S.solo===c?null:S.solo})}
 function soloCh(c){act('mute',{muted:S.muted,solo:S.solo===c?null:c})}
 function resetStems(){act('mute',{muted:[],solo:null})}
-function renderSlots(f,ents){const sm=S.song.slot_meas||{};$('slotn').textContent=f.samples.length;
-  put('slots',`<tr><th style="width:28px">#</th><th style="width:120px">NAME</th><th>FILE</th><th class="r" style="width:58px">C5 RATE</th><th class="r" style="width:62px">LENGTH</th><th class="r" style="width:46px">PITCH</th><th class="r" style="width:66px">CENTROID</th><th class="r" style="width:62px">DECAY</th><th class="r" style="width:40px">LOOP</th><th style="width:74px"></th></tr>`+f.samples.map(s=>{const m=sm[s.num]||{},on=s.num===S.slot,file=(ents[s.num]||{}).file||'';
-    return `<tr class="${on?'on':''}"><td>${pad(s.num)}</td><td class="sans" title="${esc(s.name)}">${esc(s.name)}</td><td class="file" title="${esc(file)}">${esc(file)}</td><td class="r">${s.c5_speed}</td><td class="r">${s.length.toFixed(3)} s</td><td class="r">${m.pitch||'—'}</td><td class="r">${m.centroid==null?'—':Math.round(m.centroid).toLocaleString()}</td><td class="r">${secs(m.decay)}</td><td class="r ${s.loop?'':'dimc'}">${s.loop?'loop':'—'}</td><td style="text-align:right"><span class="btn sm ${on?'on':''}" onclick="act('slot',{slot:${s.num}});tab('tryout')">${on?'IN TRYOUT':'TRY OUT'}</span></td></tr>`}).join(''))}
+function renderSlots(f,ents){const sm=S.song.slot_meas||{},mx=S.mix||{},cc=S.cand_counts||{};$('slotn').textContent=f.samples.length;
+  put('slots',`<tr><th style="width:28px">#</th><th style="width:104px">NAME</th><th>FILE</th><th class="r" style="width:56px">C5 RATE</th><th class="r" style="width:58px">LENGTH</th><th class="r" style="width:44px">PITCH</th><th class="r" style="width:60px">CENTROID</th><th class="r" style="width:56px">DECAY</th><th class="r" style="width:38px">LOOP</th><th style="width:66px" title="the sample's global_volume 0–64: scales every note it plays, whatever the cells say">GAIN</th><th style="width:74px"></th></tr>`+f.samples.map(s=>{const m=sm[s.num]||{},on=s.num===S.slot,file=(ents[s.num]||{}).file||'',g=mixVal('sample_volume',s.num,(ents[s.num]||{}).global_volume??64),gch=mx.sample_volume&&mx.sample_volume[s.num]!=null;
+    return `<tr class="${on?'on':''}"><td>${pad(s.num)}</td><td class="sans" title="${esc(s.name)}">${esc(s.name)}</td><td class="file" title="${esc(file)}">${esc(file)}</td><td class="r">${s.c5_speed}</td><td class="r">${s.length.toFixed(3)} s</td><td class="r">${m.pitch||'—'}</td><td class="r">${m.centroid==null?'—':Math.round(m.centroid).toLocaleString()}</td><td class="r">${secs(m.decay)}</td><td class="r ${s.loop?'':'dimc'}">${s.loop?'loop':'—'}</td><td><input type="range" class="gain" min="0" max="64" value="${g}" oninput="liveGain(this,${s.num})" onchange="setMix('sample_volume',${s.num},+this.value)"> <span id="sg${s.num}" class="${gch?'chg':''}">${g}</span></td><td style="text-align:right"><span class="btn sm ${on?'on':''}" onclick="act('slot',{slot:${s.num}});tab('tryout')">${on?'IN TRYOUT':cc[s.num]?`TRY OUT · ${cc[s.num]}`:'TRY OUT'}</span></td></tr>`}).join(''))}
 // ---- song overview: pattern view (read only; follows the playhead while the tryout plays)
-function playPos(){if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;const f=S.song.facts,[a,b]=S.orders||[0,f.orders.length];let t=audio.currentTime;
-  for(let i=a;i<b;i++){const o=f.orders[i];if(t<o.seconds||i===b-1)return {o:i,row:Math.max(0,Math.min(o.rows-1,Math.floor(t/o.seconds*o.rows)))};t-=o.seconds}return null}
+function posAt(t){const f=S.song.facts,[a,b]=S.orders||[0,f.orders.length];
+  for(let i=a;i<b;i++){const o=f.orders[i];if(t<o.seconds||i===b-1)return {o:i,row:Math.max(0,Math.min(o.rows-1,o.seconds?Math.floor(t/o.seconds*o.rows):0))};t-=o.seconds}return {o:a,row:0}}
+function playPos(){if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;return posAt(audio.currentTime)}
 function viewOrder(){const p=playPos();return p?p.o:S.orders?S.orders[0]:0}
 function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const key=`${S.song.mtime}|${o.index}`;
   if(PAT.key!==key){PAT={key,rows:null,order:oi,active:[],row:-2};fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key){PAT.rows=j.rows;renderPat()}})}
@@ -333,23 +386,55 @@ function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseIn
   const mv=ev=>document.documentElement.style.setProperty(v,Math.max(min,Math.min(max,w0+sign*(ev.clientX-x0)))+'px'),up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);document.body.style.cursor='';if(PAT.order>=0)renderPat()};
   addEventListener('mousemove',mv);addEventListener('mouseup',up);document.body.style.cursor='col-resize'}
 // ---- audio
-let lastSrc='';
-function pick(id){sel=id;render()}
-function srcFor(c){return c?(solo?`/raw/${c.id}`:c.status==='ready'?`/wav/${c.key}`:''):''}
-function updateAudio(){const c=S.candidates.find(x=>x.id===sel);const src=srcFor(c);
-  $('nowname').textContent=c?c.name:'';$('nowmode').textContent=c?(solo?'· sample alone':c.status==='ready'?'· in the song, this slot swapped':'· '+c.status):'';
-  if(src!==lastSrc){lastSrc=src;const t=audio.currentTime,was=!audio.paused;if(!src){audio.pause();audio.removeAttribute('src');return}
+let lastSrc='',lastInput=0;
+function pick(id){sel=id;render();act('want',{id})}
+function srcFor(c){return c?(solo?`/raw/${c.id}`:c.status==='ready'?`/wav/${c.key}`:''):S.own&&S.own.status==='ready'&&!solo?`/wav/${S.own.key}`:''}
+function updateAudio(){const c=S.candidates.find(x=>x.id===sel);const src=srcFor(c),o=S.own||{};
+  $('nowname').textContent=c?c.name:'the song as it is';$('nowmode').textContent=(c?(solo?'· sample alone':c.status==='ready'?'· in the song, this slot swapped':'· '+c.status):solo?'· pick a candidate to hear it alone':o.status==='ready'?(nMix()?'· with the unwritten faders':'· nothing swapped'):'· '+(o.error||o.status||''))+(S.solo!=null?' · channel '+pad(S.solo+1)+' soloed':S.muted.length?` · ${S.muted.length} channels muted`:'');
+  if(src!==lastSrc){const pending=c?(c.status==='queued'||c.status==='rendering'):(o.status==='queued'||o.status==='rendering');
+    if(!src){if(pending&&audio.src){$('nowmode').textContent+=' · re-rendering, the old mix plays until it lands';return}lastSrc=src;audio.pause();audio.removeAttribute('src');return}  // a re-render after a fader or mute change: keep playing the old one until the new one lands
+    lastSrc=src;const t=audio.currentTime,was=!audio.paused;
     audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(t,Math.max(0,audio.duration-.05));if(was)audio.play()},{once:true});audio.load()}}
-function togglePlay(){if(!audio.src){const c=visible()[0];if(c)pick(c.id);if(!audio.src)return}audio.paused?audio.play():audio.pause()}
+function togglePlay(){if(!audio.src){if(sel==null&&(!S.own||S.own.status!=='ready')){const c=visible()[0];if(c)pick(c.id)}if(!audio.src)return}audio.paused?audio.play():audio.pause()}
 function setSolo(v){solo=v;$('m-mix').classList.toggle('on',!v);$('m-solo').classList.toggle('on',v);updateAudio()}
-function seek(e){if(!isFinite(audio.duration))return;audio.currentTime=audio.duration*(e.offsetX/e.currentTarget.clientWidth)}
+function seekDrag(e){const el=$('prog'),to=ev=>{if(!isFinite(audio.duration))return;const r=el.getBoundingClientRect();audio.currentTime=audio.duration*Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))};
+  const up=()=>{removeEventListener('mousemove',to);removeEventListener('mouseup',up)};addEventListener('mousemove',to);addEventListener('mouseup',up);if(e.preventDefault)e.preventDefault();to(e)}
+// ---- sounding now: the channels sounding at the playhead (one fetch per order per song version)
+const SND={};
+function soundingAt(p){if(!p)return null;const key=`${S.song.mtime}|${p.o}`;if(SND[key]===undefined){SND[key]=null;fetch('/api/sounding/'+p.o).then(r=>r.json()).then(j=>{SND[key]=j.rows||null})}const t=SND[key];return t?t[Math.min(p.row,t.length-1)]:null}
+function renderLive(){const f=S&&S.song&&S.song.facts;if(!f){put('live','');return}const p=(solo||!isFinite(audio.duration))?null:posAt(audio.currentTime),rows=soundingAt(p);
+  put('live',rows?rows.map(([c,s,h])=>`<span class="chipc ${S.solo===c?'on':''} ${audible(c)?'':'off'}" onclick="soloCh(${c})" title="channel ${pad(c+1)} ${esc(f.channels[c])} · slot ${s?pad(s)+' '+esc(sName(s)):'?'}${h?' · a looped tone':''} · click to solo this channel, again to unsolo">${esc(f.channels[c].toUpperCase())} ${s?pad(s):'??'}${h?'~':''}</span>`).join(''):'')}
 audio.addEventListener('play',render);audio.addEventListener('pause',render);
 setInterval(()=>{const d=audio.duration||0,t=audio.currentTime||0;$('progfill').style.width=$('proghead').style.left=d?(100*t/d)+'%':'0';$('pos').textContent=d?`${fmtT(t)} / ${fmtT(d)}`:'';$('playbtn').textContent=audio.paused?'▶':'❚❚';
-  if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-overview').classList.contains('on'))followPlayhead()},100);
+  renderLive();if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-overview').classList.contains('on'))followPlayhead()},100);
+// ---- listening notes: a tag at the playhead; the server adds the channels sounding there and writes <song>.notes.json + .md
+let lastNote=null;
+function noteRow(n,full){const picked=n.channels||[],tagc=n.tag==='keep'?'acc':n.tag==='too loud'||n.tag==='hate this sound'?'red':'';
+  return `<div class="noterow ${full?'full':''}"><span class="mono" style="font-size:10.5px;color:#c3cbcf;white-space:nowrap">${fmtT(n.time)} · ord ${pad(n.order)} ${esc(n.pattern)} · row ${pad(n.row)}</span><span class="tag ${tagc}" style="margin:0">${esc(n.tag.toUpperCase())}</span>
+   ${(n.sounding||[]).map(s=>`<span class="chipc ${picked.includes(s.ch)?'on':''}" onclick="toggleCh(${n.id},${s.ch})" title="channel ${pad(s.ch+1)} ${esc(s.name)}: sample ${s.sample?pad(s.sample):'?'} ${esc(s.note)}, ${s.ago} rows ago${s.loop?', a looped tone':''} · click if this is the one you mean">${esc(s.name.toUpperCase())} ${s.sample?pad(s.sample):'??'}${s.loop&&s.ago>0?'~':''}</span>`).join('')}
+   <input class="note" style="flex:1;min-width:140px" value="${esc(n.text)}" placeholder="words, if any" onchange="act('noteedit',{id:${n.id},text:this.value})">
+   ${full?`<span class="src" style="white-space:nowrap">${esc(n.playing.source)}${n.playing.candidate?' '+esc(n.playing.candidate):''}${n.playing.muted&&n.playing.muted.length?' · '+n.playing.muted.length+' muted':''}${n.version&&S.version&&n.version.hash!==S.version.hash?' · older version '+esc(n.version.hash):''}</span>`:''}
+   <span class="rej" onclick="act('noteedit',{id:${n.id},delete:true})" title="delete this note">✕</span></div>`}
+async function addNote(tag){const f=S&&S.song&&S.song.facts;if(!f)return;const c=S.candidates.find(x=>x.id===sel),alone=solo&&!!c;
+  const p=alone||!isFinite(audio.duration)?{o:S.orders?S.orders[0]:0,row:0}:posAt(audio.currentTime);
+  const j=await act('note',{order:p.o,row:p.row,tag,source:c?(alone?'sample alone':'candidate'):'song',candidate:c?c.name:null});
+  if(j&&j.id){lastNote=j.id;render();if(tag==='note'){const inp=$('notelast').querySelector('input');if(inp)inp.focus()}}}
+function toggleCh(id,ch){const n=(S.notes||[]).find(x=>x.id===id);if(!n)return;const c=n.channels.includes(ch)?n.channels.filter(x=>x!==ch):[...n.channels,ch];act('noteedit',{id,channels:c})}
+function renderNotes(f){const ns=S.notes||[];$('notesn').textContent=ns.length?`· ${ns.length}`:'';$('notecount').textContent=ns.length;
+  $('notepaths').textContent=ns.length?`${S.notes_path} · report ${S.notes_path.replace(/\.json$/,'.md')}, rewritten on every change`:'nothing written yet';
+  const last=ns.find(n=>n.id===lastNote)||ns[ns.length-1];
+  put('notelast',last?noteRow(last,false):`<span style="font-size:10px;color:var(--dim)">click a tag while it plays: the note lands at the playhead with the channels sounding there · then click the channel you mean and add words if you like</span>`);
+  put('notelist',ns.length?[...ns].sort((a,b)=>a.order-b.order||a.row-b.row||a.id-b.id).map(n=>noteRow(n,true)).join(''):`<div class="empty"><div style="font-size:15px;font-weight:600;color:#c3cbcf">No notes yet</div><div style="margin-top:8px;max-width:480px;font-size:11.5px">Play the song or a candidate and click a tag in the bar below at the moment you hear something. The note records the position, what was playing and which channels were sounding there; click the channel you mean. Everything lands in <span class="mono">${esc(S.notes_path)}</span> and a report next to it; the song file is never touched.</div></div>`)}
+// solo in song: mute every channel that never plays the tryout slot (the mixer's mute list, so candidates render the same way)
+function slotChans(){const f=S.song.facts;return f.channels.map((_,c)=>c).filter(c=>f.use.some(u=>u[c].includes(S.slot)))}
+function soloActive(){const f=S.song.facts;if(!f||S.solo!=null)return false;const p=slotChans();return p.length>0&&f.channels.every((_,c)=>p.includes(c)!==S.muted.includes(c))}
+function soloSlot(){const f=S.song.facts;if(!f)return;if(soloActive())return act('mute',{muted:[],solo:null});const p=slotChans();if(!p.length)return alert(`slot ${pad(S.slot)} is not played anywhere`);act('mute',{muted:f.channels.map((_,c)=>c).filter(c=>!p.includes(c)),solo:null})}
 // ---- apply
-async function showDiff(id){diffId=id;const d=await (await fetch('/api/diff/'+id)).json();$('difftitle').textContent=`APPLY TO SLOT ${pad(S.slot)} · ${d.path}${d.redump?' · WARNING: the slot is not a one-line mapping, the whole file will be re-dumped and comments lost':''}`;
+let diffApply=null;
+async function showDiff(url,title,apply){diffApply=apply;const d=await (await fetch(url)).json();$('difftitle').textContent=`${title} · ${d.path}${d.redump?' · WARNING: a line could not be edited in place, the whole file will be re-dumped and comments lost':''}`;
   $('difflines').innerHTML=d.lines.map(l=>`<div class="dl ${l.startsWith('+')?'add':l.startsWith('-')?'del':l.startsWith('@')?'hd':''}">${esc(l)}</div>`).join('')||'<div class="dl">no change</div>';toggle('diff',true)}
-async function applySel(){toggle('diff',false);await act('apply',{id:diffId});tab('export')}
+function useSel(){const id=sel;if(id!=null)showDiff('/api/diff/'+id,`APPLY TO SLOT ${pad(S.slot)}`,()=>act('apply',{id}).then(()=>tab('export')))}
+async function applySel(){toggle('diff',false);if(diffApply)await diffApply()}
 // ---- keys
 document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;const cs=visible(),i=cs.findIndex(c=>c.id===sel);
   if(e.key==='Escape'){toggle('diff',false);toggle('keys',false);if(S.song)toggle('start',false)}
@@ -359,8 +444,9 @@ document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagNam
   else if(e.key==='ArrowDown'&&cs.length){e.preventDefault();pick(cs[Math.min(cs.length-1,i+1)].id)}
   else if(e.key==='ArrowUp'&&cs.length){e.preventDefault();pick(cs[Math.max(0,i-1)].id)}
   else if(e.key==='m'||e.key==='M')setSolo(false);else if(e.key==='s'||e.key==='S')setSolo(true);
-  else if((e.key==='u'||e.key==='U')&&sel!=null)showDiff(sel);
+  else if(e.key==='u'||e.key==='U')useSel();
+  else if(e.key==='n'||e.key==='N')addNote('note');
   else if((e.key==='x'||e.key==='X')&&sel!=null){const c=S.candidates.find(x=>x.id===sel);act('rate',{id:sel,rejected:!c.rejected})}
   else if(e.key==='?')toggle('keys')});
-refresh();setInterval(()=>{if(document.activeElement.tagName!=='INPUT')refresh()},1000);
+refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
 </script></body></html>

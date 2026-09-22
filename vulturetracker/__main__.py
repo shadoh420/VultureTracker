@@ -36,6 +36,8 @@ def main(argv=None):
     p.add_argument("-o", "--output", help="output .wav (default: next to the input)")
     p.add_argument("--repeat", type=int, default=0, help="extra times to loop the song (default 0)")
     p.add_argument("--rate", type=int, default=44100)
+    p.add_argument("--oversample", type=int, default=2,
+                   help="mix at this multiple of the rate and band-limit down, so nothing aliases (default 2; 1 = off)")
     p = sub.add_parser("info", help="load a module with libopenmpt and print its metadata")
     p.add_argument("module")
     p.add_argument("--json", action="store_true")
@@ -104,7 +106,7 @@ def main(argv=None):
 
         if args.cmd == "render":
             out = args.output or str(Path(args.module).with_suffix(".wav"))
-            secs = api.render(args.module, out, repeat=args.repeat, rate=args.rate)
+            secs = api.render(args.module, out, repeat=args.repeat, rate=args.rate, oversample=args.oversample)
             print(f"rendered {out} ({secs:.2f} s)")
             return 0
 

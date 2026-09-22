@@ -7,7 +7,7 @@ import yaml
 from . import notation
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
                     MAX_CHANNELS, ORDER_END, ORDER_SKIP)
-from .wavload import WavError, read_wav
+from .wavload import WavData, WavError, read_wav
 
 NNA = {"cut": 0, "continue": 1, "off": 2, "fade": 3}
 DCT = {"off": 0, "note": 1, "sample": 2, "instrument": 3}
@@ -208,13 +208,14 @@ def _numbered(ctx, m, where):
 # ---------------------------------------------------------------- sections
 
 MODULE_KEYS = ["title", "tempo", "speed", "global_volume", "mix_volume", "separation", "linear_slides",
-               "old_effects", "compatible_gxx", "channels", "message"]
+               "old_effects", "compatible_gxx", "channels", "message", "sample_rate"]
 CHANNEL_KEYS = ["name", "pan", "volume", "muted"]
 
 
 def _module(ctx, m, mod):
     where = "module"
     _check_keys(ctx, m, MODULE_KEYS, where)
+    ctx.sample_rate = _int(ctx, m, "sample_rate", 4000, 192000, None, where) if m.get("sample_rate") is not None else None
     for key, fn in [
         ("title", lambda: _text(ctx, m, "title", "", 25, where)),
         ("tempo", lambda: _int(ctx, m, "tempo", 32, 255, 125, where)),
@@ -270,7 +271,8 @@ LOOP_KEYS = ["start", "end", "type"]
 VIBRATO_KEYS = ["type", "speed", "depth", "rate"]
 
 
-def _loop(ctx, spec, line, wav, length, where):
+def _loop(ctx, spec, line, wav, length, where, scale=1.0):
+    """`scale` maps loop points given in the WAV file's own frames onto a resampled sample."""
     if spec is None or spec is False or spec == "none":
         return None
     if spec == "from_wav":
@@ -281,13 +283,29 @@ def _loop(ctx, spec, line, wav, length, where):
         return Loop(s, min(e, length), pp)
     m = _map(ctx, spec, line, where)
     _check_keys(ctx, m, LOOP_KEYS, where)
-    start = _int(ctx, m, "start", 0, length, 0, where)
-    end = _int(ctx, m, "end", 0, length, length, where)
+    src_len = round(length / scale)
+    start = round(_int(ctx, m, "start", 0, src_len, 0, where) * scale)
+    end = round(_int(ctx, m, "end", 0, src_len, src_len, where) * scale)
     if end <= start:
         ctx.error(m.line, f"{where}: end ({end}) must be greater than start ({start}); sample length is {length}")
         raise _Bad
     pp = _enum(ctx, m, "type", {"forward": False, "pingpong": True}, "forward", where)
     return Loop(start, end, pp)
+
+
+_RESAMPLED = {}  # (path, mtime, size, rate, bits) -> resampled channels: the GUI compiles the same song many times
+
+
+def _resampled(path, wav, target, resample_pcm):
+    """`wav.channels` resampled to `target`, memoised on the file's stamp (kept as compact arrays: a song's samples add up)."""
+    from array import array
+    st = path.stat()
+    k = (str(path), st.st_mtime, st.st_size, target, wav.out_bits)
+    if k not in _RESAMPLED:
+        while len(_RESAMPLED) >= 64:
+            _RESAMPLED.pop(next(iter(_RESAMPLED)))
+        _RESAMPLED[k] = [array("i", c) for c in resample_pcm(wav.channels, wav.rate, target, wav.out_bits)]
+    return [c.tolist() for c in _RESAMPLED[k]]
 
 
 def _sample(ctx, num, spec, line, base_dir):
@@ -309,6 +327,17 @@ def _sample(ctx, num, spec, line, base_dir):
     except WavError as e:
         ctx.error(_line(m, "file"), f"{where}: {e}")
         raise _Bad
+    scale = 1.0
+    target = getattr(ctx, "sample_rate", None)
+    if target and target != wav.rate:   # module sample_rate: band-limited resampling, so playback neither images nor aliases
+        try:
+            from .resample import resample_pcm
+        except ImportError:
+            ctx.error(_line(m, "file"), f"{where}: the module's sample_rate needs numpy (pip install numpy)")
+            raise _Bad
+        scale = target / wav.rate
+        wav = WavData(target, wav.bits, _resampled(path, wav, target, resample_pcm), wav.out_bits,
+                      [(round(s * scale), round(e * scale), pp) for s, e, pp in wav.loops], wav.root)
     smp = Sample()
     smp.name = _text(ctx, m, "name", path.stem[:25], 25, where)
     smp.filename = path.name[:12]
@@ -336,8 +365,8 @@ def _sample(ctx, num, spec, line, base_dir):
     else:
         base = _note(ctx, m, "base_note", "C-5", where)
         smp.c5_speed = round(wav.rate * 2 ** ((60 - base) / 12))
-    smp.loop = _loop(ctx, m.get("loop"), _line(m, "loop"), wav, smp.length, f"{where} loop")
-    smp.sustain_loop = _loop(ctx, m.get("sustain_loop"), _line(m, "sustain_loop"), wav, smp.length, f"{where} sustain_loop")
+    smp.loop = _loop(ctx, m.get("loop"), _line(m, "loop"), wav, smp.length, f"{where} loop", scale)
+    smp.sustain_loop = _loop(ctx, m.get("sustain_loop"), _line(m, "sustain_loop"), wav, smp.length, f"{where} sustain_loop", scale)
     if m.get("vibrato") is not None:
         v = _map(ctx, m["vibrato"], _line(m, "vibrato"), f"{where} vibrato")
         w = f"{where} vibrato"
