@@ -38,7 +38,7 @@ Run the app with no song, or double-click the exe, for the open-a-song screen.
 
 ## Docs
 
-- [GUIDE.md](GUIDE.md): the app in detail, the four demos, samples, tests, notes
+- [GUIDE.md](GUIDE.md): the app in detail, the four demos and the suite, samples, tests, notes
 - [SONG_FORMAT.md](SONG_FORMAT.md): the complete song format
 - [SAMPLING.md](SAMPLING.md): making samples with Surge XT, Dexed, OB-Xd and CC0 recordings
 - [PROVENANCE.md](PROVENANCE.md): what the demos derive from reference material

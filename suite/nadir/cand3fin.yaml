@@ -1,0 +1,37 @@
+# Finalists of the third batch (suite/nadir/cand3.yaml, measured by measure.py and by onset time), rendered the way
+# the kit will render the winner: at the song's root for the role, with the loop, the room and the rate. Octave-shifted
+# patches are played an octave up with root_offset -12, so the file's root is the wanted note and the sounding pitch
+# equals it (measure.py's pitch column). `_lp` variants add a 3 kHz ladder low-pass to see what it does to the centroid.
+# These are the tryout candidates for slots 24 (arp), 25 (seq) and 27 (lead); they get the kit's noise floor too.
+# Render: python -m vulturetracker synth suite/nadir/cand3fin.yaml && python suite/nadir/measure.py samples/local/nadir-cand3/fin
+out_dir: ../../samples/local/nadir-cand3/fin
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, velocity: 100, tail: 1.0}
+
+samples:
+  # ---- the lead at E-5 (the line spans G-4..A#5), looped
+  fin_lead_xpander:    {patch: "Polysynths/Xpander 1", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8},
+                        fx: &leadfx [{chorus: {rate_hz: 0.5, depth: 0.3, centre_delay_ms: 8, feedback: 0.05, mix: 0.35}}, {reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  fin_lead_xpander_lp: {patch: "Polysynths/Xpander 1", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8},
+                        fx: &leadlp [{ladder_filter: {cutoff_hz: 3000, resonance: 0.05}}, {chorus: {rate_hz: 0.5, depth: 0.3, centre_delay_ms: 8, feedback: 0.05, mix: 0.35}}, {reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  fin_lead_owl:        {patch: "Leads/Owl", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8}, fx: *leadfx}
+  fin_lead_owl_lp:     {patch: "Leads/Owl", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8}, fx: *leadlp}
+  fin_lead_generic:    {patch: "Leads/Generic", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8}, fx: *leadfx}
+  fin_lead_etwas:      {patch: "Leads/Etwas", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8}, fx: *leadfx}
+  fin_lead_violini:    {patch: "Leads/Violini Solo", note: E-5, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8}, fx: *leadfx}
+  fin_lead_oberheim:   {patch: "Polysynths/Oberheim Dreams", note: E-6, root_offset: -12, hold: 4.0, tail: 1.2, loop: {start: 1.6, end: 3.6, crossfade: 0.8}, fx: *leadfx}
+  # ---- the sequence voice at D-4 (the phrases span G-3..G-4), looped
+  fin_seq_xpander2:    {patch: "Polysynths/Xpander 2", note: D-5, root_offset: -12, hold: 3.5, tail: 1.4, loop: {start: 1.4, end: 3.2, crossfade: 0.7},
+                        fx: &seqfx [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  fin_seq_somewhere:   {patch: "Leads/Somewhere MW", note: D-4, hold: 3.5, tail: 1.4, loop: {start: 1.4, end: 3.2, crossfade: 0.7}, fx: *seqfx}
+  fin_seq_retro:       {patch: "Polysynths/Retrograde", note: D-4, hold: 3.5, tail: 1.4, loop: {start: 1.4, end: 3.2, crossfade: 0.7}, fx: *seqfx}
+  fin_seq_slowpoly:    {patch: "Polysynths/Slow Poly MW", note: D-4, hold: 3.5, tail: 1.4, loop: {start: 1.4, end: 3.2, crossfade: 0.7}, fx: *seqfx}
+  fin_seq_separate:    {patch: "Polysynths/Separate Ways", note: D-5, root_offset: -12, hold: 3.5, tail: 1.4, loop: {start: 1.4, end: 3.2, crossfade: 0.7}, fx: *seqfx}
+  fin_seq_mks70:       {patch: "Pads/MKS-70 Warm Pad", note: D-5, root_offset: -12, hold: 3.5, tail: 1.4, loop: {start: 1.4, end: 3.2, crossfade: 0.7}, fx: *seqfx}
+  # ---- the arp at D-4 (the cells span G-3..G-4), one shot
+  fin_arp_cottage:     {patch: "Leads/Cottage", note: D-5, root_offset: -12, hold: 0.3, tail: 0.9,
+                        fx: &arpfx [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  fin_arp_jupiter:     {patch: "Polysynths/Jupiter-8", note: D-5, root_offset: -12, hold: 0.3, tail: 0.9, fx: *arpfx}
+  fin_arp_gentle:      {patch: "Polysynths/Gentle", note: D-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  fin_arp_olsampler:   {patch: "Polysynths/Ol' Sampler", note: D-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  fin_arp_simple:      {patch: "Polysynths/Simplistic", note: D-5, root_offset: -12, hold: 0.3, tail: 0.9, fx: *arpfx}

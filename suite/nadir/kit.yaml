@@ -1,0 +1,88 @@
+# Synth sounds of Nadir: Surge XT factory patches picked by measurement (suite/nadir/cand.yaml, cand2.yaml, cand3.yaml
+# and cand3fin.yaml render the candidates, suite/nadir/measure.py tabulates them) with chorus and rooms printed in and
+# each stored at its role's rate. Plain patches have nothing between their harmonics and read as chiptune, so after this render
+# suite/nadir/gen_floor.py adds a noise floor shaped by each sound's own spectrum. The recorded string beds and the
+# violin line come from suite/nadir/gen_strings.py, the drums from gen_drums.py, the drone, pulse and wind from
+# gen_samples.py, the riff voice from demo4's near-sine (copied by gen_floor.py).
+# Every chord sample is rendered so that C-5 in the song plays it as voiced here. The bed patches stack an octave below
+# what is played and their top note dominates, so the voicings keep the pedal's fifth on top; the modes' colour notes
+# (the Dorian sixth, the Mixolydian third) live in the arp, the sequence and the violins.
+# v5: the synth beds hold only root and fifth (the v4 add9 voicings put A and Bb a semitone apart inside every pad and the
+# listener heard the drones clash with the lines); the third, sixth and ninth live in the lines alone.
+# Render: python -m vulturetracker synth suite/nadir/kit.yaml && python suite/nadir/gen_floor.py
+out_dir: ../../samples/nadir
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, velocity: 100, tail: 0.8}
+
+samples:
+  beda_g:   # bed A, open G (G D G D, v5), looped, retriggered each pattern
+    patch: "Pads/Moody Statement"
+    chord: [G-2, D-3, G-3, D-4]
+    hold: 7.0
+    loop: {start: 3.0, end: 6.5, crossfade: 1.2}
+    fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]
+  beda_c:   # bed A, open C (C G C G, v5) for the breakdown
+    patch: "Pads/Moody Statement"
+    chord: [C-3, G-3, C-4, G-4]
+    hold: 7.0
+    loop: {start: 3.0, end: 6.5, crossfade: 1.2}
+    fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]
+  bedb_bb:  # bed B, Bb major seventh (Bb F A D F), the slow swell of the B section
+    patch: "Pads/Distant"
+    chord: [A#2, F-3, A-3, D-4, F-4]
+    hold: 8.0
+    loop: {start: 4.5, end: 7.5, crossfade: 1.2}
+    fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]
+  bedb_g:   # bed B, open G (G D G D, v5: no seventh either, its F sat a semitone from the lines' E), swelling under the peaks and the B section
+    patch: "Pads/Distant"
+    chord: [G-2, D-3, G-3, D-4]
+    hold: 8.0
+    loop: {start: 4.5, end: 7.5, crossfade: 1.2}
+    fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]
+  choir:    # the choir call, G D G in a hall (v5 dropped the cluster's E, v6 its A: the ninth sat a semitone from the riff's and
+            # the melody's Bb on about 40 % of the peaks' rows); transposed in the song for another pedal if one returns
+    patch: "Pads/Choir Pad Thing"
+    chord: [G-3, D-4, G-4]
+    hold: 6.0
+    loop: {start: 3.0, end: 5.5, crossfade: 1.0}
+    fx: [{reverb: {room_size: 0.8, damping: 0.4, wet_level: 0.45, dry_level: 0.65}}, {resample: {target_sample_rate: 11025}}]
+  choir_hi: # the call an octave up (played at pitch instead of pitched up)
+    patch: "Pads/Choir Pad Thing"
+    chord: [G-4, D-5, G-5]
+    hold: 6.0
+    loop: {start: 3.0, end: 5.5, crossfade: 1.0}
+    fx: [{reverb: {room_size: 0.8, damping: 0.4, wet_level: 0.45, dry_level: 0.65}}, {resample: {target_sample_rate: 11025}}]
+  arp:      # the arp tone (v4): "Leads/Cottage", dark and quick (centroid about 360 Hz at D-4, 15 ms to -3 dB, rings
+            # 0.7 s), one sample rooted at D-4 since the cells span G-3..G-4; the patch sounds an octave down, so the
+            # key played is D-5
+    patch: "Leads/Cottage"
+    note: D-5
+    root_offset: -12
+    hold: 0.3
+    tail: 0.9
+    fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]
+  seq:      # the sequence voice (v4): "Polysynths/Xpander 2", the darkest steady finalist (centroid about 330 Hz at
+            # D-4, 120/200 ms to -10/-3 dB, hold within 2.4 dB of its peak), a long room, looped, rooted at D-4 (the
+            # phrases span G-3..G-4; the patch sounds an octave down)
+    patch: "Polysynths/Xpander 2"
+    note: D-5
+    root_offset: -12
+    hold: 3.5
+    tail: 1.4
+    loop: {start: 1.4, end: 3.2, crossfade: 0.7}
+    fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]
+  lead:     # the melody voice (v4): "Polysynths/Xpander 1", soft (110/155 ms to -10/-3 dB), dark with an octave
+            # under it (centroid about 640 Hz at E-5), steady (hold within 3.6 dB of its peak), chorus and a hall;
+            # looped, rooted at E-5 (the line spans G-4..A#5; the patch sounds an octave down)
+    patch: "Polysynths/Xpander 1"
+    note: E-6
+    root_offset: -12
+    hold: 4.0
+    tail: 1.2
+    loop: {start: 1.6, end: 3.6, crossfade: 0.8}
+    fx: [{chorus: {rate_hz: 0.5, depth: 0.3, centre_delay_ms: 8, feedback: 0.05, mix: 0.35}}, {reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]
+  revcrash: # the riser: the kit's crash reversed (samples/nadir/crash.wav from suite/nadir/gen_drums.py)
+    file: ../../samples/nadir/crash.wav
+    length: 2.6
+    reverse: true
+    fx_tail: 0.0

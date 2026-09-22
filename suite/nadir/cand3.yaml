@@ -1,0 +1,125 @@
+# Third candidate batch for Nadir (2026-09-22), for the melodic rework after the v3 verdict: the arp 8ths and the
+# violin line entering at 0:20 were "anemic", the dotted sequence in the Uni 1 detuned-saw tone was hated. Three
+# roles, each rendered with its role's room and rate so the measurements (suite/nadir/measure.py) compare like with
+# like: `lead_` (the melody voice, a held E-5 in the line's register), `arp3_` (a short G-4), `seq3_` (a held G-4 for the
+# sequence line). Wanted: dark (low centroid), soft attack for the lead and the sequence, no buzz (a low flatness
+# spread between the harmonics is fine, the floor script adds hiss later), a steady hold with some chorus movement.
+# No bells, plucks, pizzicati, squares, flutes or detuned saws are in this list on purpose.
+# Render: python -m vulturetracker synth suite/nadir/cand3.yaml && python suite/nadir/measure.py samples/local/nadir-cand3
+out_dir: ../../samples/local/nadir-cand3
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, velocity: 100, tail: 1.0}
+
+samples:
+  # ---- the melody voice: a held E-5, chorus, a hall, 22 kHz
+  lead_distance:  {patch: "Leads/In The Distance", note: E-5, hold: 2.0, tail: 1.2,
+                   fx: &leadfx [{chorus: {rate_hz: 0.5, depth: 0.3, centre_delay_ms: 8, feedback: 0.05, mix: 0.35}}, {reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  lead_hollow:    {patch: "Leads/Smoothy Hollow", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_somewhere: {patch: "Leads/Somewhere MW", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_sine:      {patch: "Leads/Sine Lead", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_simpler:   {patch: "Leads/Simpler Times", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_cottage:   {patch: "Leads/Cottage", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_fluff:     {patch: "Leads/Fluff", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_dome:      {patch: "Leads/Dome", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_light:     {patch: "Leads/Light", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_later:     {patch: "Leads/Later", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_mundane:   {patch: "Leads/Mundane", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_hof:       {patch: "Leads/Hof", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_photon:    {patch: "Leads/Photon", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_owl:       {patch: "Leads/Owl", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_classical: {patch: "Leads/Classical", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_violini:   {patch: "Leads/Violini Solo", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_gliss:     {patch: "Leads/Gliss Lead", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_fairy:     {patch: "Leads/Fairy", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_etwas:     {patch: "Leads/Etwas", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_generic:   {patch: "Leads/Generic", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_oberheim:  {patch: "Polysynths/Oberheim Dreams", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_ppgdreams: {patch: "Polysynths/PPG Dreams", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_juno:      {patch: "Polysynths/Juno-60 Strings", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_slowpoly:  {patch: "Polysynths/Slow Poly MW", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_gentle:    {patch: "Polysynths/Gentle", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_jupiter:   {patch: "Polysynths/Jupiter-8", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_prophet:   {patch: "Polysynths/Prophet VS", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_xpander:   {patch: "Polysynths/Xpander 1", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_polymoog:  {patch: "Polysynths/Polymoog", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_licht:     {patch: "Polysynths/Licht", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_mks70:     {patch: "Pads/MKS-70 Warm Pad", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_stretch:   {patch: "Pads/Stretch", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_comb:      {patch: "Pads/Subtle Comb Strings", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_still:     {patch: "Pads/Still", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_suitcase:  {patch: "Keys/Soft Suitcase", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  lead_ep1:       {patch: "Keys/EP 1", note: E-5, hold: 2.0, tail: 1.2, fx: *leadfx}
+  # ---- the arp tone: a short G-4, chorus, a short room, 16 kHz
+  arp3_gentle:    {patch: "Polysynths/Gentle", note: G-4, hold: 0.3, tail: 0.9,
+                   fx: &arpfx [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp3_olsampler: {patch: "Polysynths/Ol' Sampler", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_sinesaw7:  {patch: "Polysynths/Sine Saw 7", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_sinesaw:   {patch: "Polysynths/Sine Saw", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_simple:    {patch: "Polysynths/Simplistic", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_quasi:     {patch: "Polysynths/Quasi", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_polymoog:  {patch: "Polysynths/Polymoog", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_jupiter:   {patch: "Polysynths/Jupiter-8", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_prophet:   {patch: "Polysynths/Prophet VS", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_xpander:   {patch: "Polysynths/Xpander 1", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_oberheim:  {patch: "Polysynths/Oberheim Dreams", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_juno:      {patch: "Polysynths/Juno-60 Strings", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_oldie:     {patch: "Polysynths/Oldie", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_jim:       {patch: "Polysynths/Jim", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_analyse:   {patch: "Polysynths/Analyse", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_concave:   {patch: "Polysynths/Concave", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_sine:      {patch: "Leads/Sine Lead", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_hollow:    {patch: "Leads/Smoothy Hollow", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_fluff:     {patch: "Leads/Fluff", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_cottage:   {patch: "Leads/Cottage", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_mundane:   {patch: "Leads/Mundane", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_simpler:   {patch: "Leads/Simpler Times", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_distance:  {patch: "Leads/In The Distance", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_hof:       {patch: "Leads/Hof", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_light:     {patch: "Leads/Light", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_dome:      {patch: "Leads/Dome", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_owl:       {patch: "Leads/Owl", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_suitcase:  {patch: "Keys/Soft Suitcase", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_ep1:       {patch: "Keys/EP 1", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_mellow:    {patch: "Basses/Mellow", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_smoothie:  {patch: "Basses/Smoothie", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  arp3_slow:      {patch: "Basses/Slow", note: G-4, hold: 0.3, tail: 0.9, fx: *arpfx}
+  # ---- the sequence voice: a held G-4, a long room, 22 kHz
+  seq3_oberheim:  {patch: "Polysynths/Oberheim Dreams", note: G-4, hold: 1.0, tail: 1.4,
+                   fx: &seqfx [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  seq3_ppgdreams: {patch: "Polysynths/PPG Dreams", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_slowpoly:  {patch: "Polysynths/Slow Poly MW", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_juno:      {patch: "Polysynths/Juno-60 Strings", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_eyan:      {patch: "Polysynths/Eyan", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_waver:     {patch: "Polysynths/Waver", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_licht:     {patch: "Polysynths/Licht", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_quote:     {patch: "Polysynths/Quote", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_retro:     {patch: "Polysynths/Retrograde", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_separate:  {patch: "Polysynths/Separate Ways", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_taikonaut: {patch: "Polysynths/Taikonaut", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_tarnce:    {patch: "Polysynths/Tarnce", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_pasttense: {patch: "Polysynths/Past Tense", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_hombre:    {patch: "Polysynths/Hombre", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_oiro:      {patch: "Polysynths/Oiro", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_melon:     {patch: "Polysynths/Melon", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_xpander2:  {patch: "Polysynths/Xpander 2", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_prophet:   {patch: "Polysynths/Prophet VS", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_gentle:    {patch: "Polysynths/Gentle", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_comb:      {patch: "Pads/Subtle Comb Strings", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_still:     {patch: "Pads/Still", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_well:      {patch: "Pads/Well", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_winter:    {patch: "Pads/Winter Warmer", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_legacy:    {patch: "Pads/Legacy", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_semihaunt: {patch: "Pads/Semihaunt", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_ghost:     {patch: "Pads/Ghost Pad", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_mks70:     {patch: "Pads/MKS-70 Warm Pad", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_stretch:   {patch: "Pads/Stretch", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_worried:   {patch: "Pads/Worried", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_hmm:       {patch: "Pads/Hmm...", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_distance:  {patch: "Leads/In The Distance", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_somewhere: {patch: "Leads/Somewhere MW", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_hollow:    {patch: "Leads/Smoothy Hollow", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_sine:      {patch: "Leads/Sine Lead", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_dome:      {patch: "Leads/Dome", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_photon:    {patch: "Leads/Photon", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_fairy:     {patch: "Leads/Fairy", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}
+  seq3_cottage:   {patch: "Leads/Cottage", note: G-4, hold: 1.0, tail: 1.4, fx: *seqfx}

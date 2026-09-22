@@ -39,6 +39,25 @@ to be closer and was replaced, and how to keep it that way.
 - [x] Comments, the song header and the docs no longer name the reference's sample files or describe passages as
   copies of it.
 
+## The suite (suite/): pieces inspired by groups of the UT99 soundtrack
+
+The 30 soundtrack modules were extracted and measured locally (`scratch/ut99-clean/`, gitignored: played tempo and
+speed, spectrum, key, onsets, per-channel idioms, form) and sorted into five stylistic groups; each piece of the suite
+is written for one group. What a piece takes is descriptive (grids, layer roles, rhythmic and textural idioms, the
+shape of a form); no audio, no sample data, no measured sample table and no melodic cell is taken from any module,
+and no sound is chosen by matching a specific module's sample.
+
+- `suite/nadir/` (Nadir, the dark group: Skyward Fire, Seeker, Seeker 2, Enigma, Colossus, Nether Animal, Mechanism
+  Eight): a driving 144 BPM grid under a dark mood, a sub drone as the loudest layer, one modal pedal (a held root instead
+  of a chord progression; v6 dropped the breakdown's second colour), a dotted single-note pulse, a 16th arp, a
+  portamento riff with an echo (v6 dropped the dotted-8th sequence line), a choir cluster, a recorded drum bar chopped
+  with sample offsets in surround, long crescendo arcs with a one-pattern dip. Sounds: additive and noise models
+  written from descriptions (`gen_samples.py`), CC0 drums (`gen_drums.py`) and CC0 string sections (`gen_strings.py`),
+  Surge XT factory patches picked by measurement against the piece's own targets (`cand.yaml`, `cand2.yaml`,
+  `measure.py`, `kit.yaml`) and given noise floors (`gen_floor.py`). The finished render was compared with the group's measured
+  ranges (sub share, centroid, flatness, onsets, width, dynamics) to check it lives in the same world, which is a
+  check of character, not a copy of any track.
+
 ## Must never be committed (already gitignored, keep it that way)
 
 - [x] `scratch/ut99/`: extracted reference modules, their samples, imports and renders. Reference only, local only.

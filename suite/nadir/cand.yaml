@@ -1,0 +1,84 @@
+# Sound candidates for Nadir, rendered into the gitignored samples/local/nadir-cand/ and measured by
+# suite/nadir/measure.py (centroid, attack, decay, flatness) so the picks in kit.yaml are made against the piece's
+# targets: dark slow beds, a vowel-like choir cluster, a soft hollow arp tone, a subdued sequence voice, high strings
+# and low atmospheres. Render: python -m vulturetracker synth suite/nadir/cand.yaml
+out_dir: ../../samples/local/nadir-cand
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, velocity: 100, tail: 1.0}
+
+samples:
+  # ---- beds: the G Dorian voicing the song uses (G D A Bb E), 5 s holds
+  bed_distant:   {patch: "Pads/Distant", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_ghost:     {patch: "Pads/Ghost Pad", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_moody:     {patch: "Pads/Moody Statement", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_still:     {patch: "Pads/Still", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_well:      {patch: "Pads/Well", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_semihaunt: {patch: "Pads/Semihaunt", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_yeti:      {patch: "Pads/Yeti Funeral", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_winter:    {patch: "Pads/Winter Warmer", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_legacy:    {patch: "Pads/Legacy", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_endgame:   {patch: "Pads/Endgame", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_hmm:       {patch: "Pads/Hmm...", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_worried:   {patch: "Pads/Worried", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_verb:      {patch: "Pads/Verb Pad", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_comb:      {patch: "Pads/Subtle Comb Strings", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_sunday:    {patch: "Pads/Sunday", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_safety:    {patch: "Pads/Safety", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_comm:      {patch: "Pads/Communication", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_oberheim:  {patch: "Polysynths/Oberheim Dreams", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_ppgdreams: {patch: "Polysynths/PPG Dreams", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_slowpoly:  {patch: "Polysynths/Slow Poly MW", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_gentle:    {patch: "Polysynths/Gentle", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  bed_pasttense: {patch: "Polysynths/Past Tense", chord: [G-2, D-3, A-3, A#3, E-4], hold: 5.0}
+  # ---- choir clusters (G A D E G)
+  choir_ooh:     {patch: "Pads/Ooh", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_oah:     {patch: "Pads/Synth Choir MW O-Ah", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_thing:   {patch: "Pads/Choir Pad Thing", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_robo1:   {patch: "Pads/Robochoir 1", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_robo2:   {patch: "Pads/Robochoir 2", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_formant: {patch: "Pads/Formants MW", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_ppg:     {patch: "Polysynths/PPG Choir", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_ahhs:    {patch: "Polysynths/Poly Ahhs", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_lala:    {patch: "Polysynths/Poly Lala", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  choir_vocsolo: {patch: "Vocoder/Solo", chord: [G-3, A-3, D-4, E-4, G-4], hold: 4.0}
+  # ---- arp tones: one short G-4
+  arp_oldsquare: {patch: "Polysynths/Old Square", note: G-4, hold: 0.35, tail: 0.8}
+  arp_simple:    {patch: "Polysynths/Simplistic", note: G-4, hold: 0.35, tail: 0.8}
+  arp_gentle:    {patch: "Polysynths/Gentle", note: G-4, hold: 0.35, tail: 0.8}
+  arp_sinesaw:   {patch: "Polysynths/Sine Saw", note: G-4, hold: 0.35, tail: 0.8}
+  arp_quasi:     {patch: "Polysynths/Quasi", note: G-4, hold: 0.35, tail: 0.8}
+  arp_uni1:      {patch: "Polysynths/Uni 1", note: G-4, hold: 0.35, tail: 0.8}
+  arp_oldie:     {patch: "Polysynths/Oldie", note: G-4, hold: 0.35, tail: 0.8}
+  arp_olsampler: {patch: "Polysynths/Ol' Sampler", note: G-4, hold: 0.35, tail: 0.8}
+  arp_jim:       {patch: "Polysynths/Jim", note: G-4, hold: 0.35, tail: 0.8}
+  arp_mg:        {patch: "Polysynths/MG", note: G-4, hold: 0.35, tail: 0.8}
+  arp_mellow:    {patch: "Basses/Mellow", note: G-4, hold: 0.35, tail: 0.8}
+  arp_suitcase:  {patch: "Keys/Soft Suitcase", note: G-4, hold: 0.35, tail: 0.8}
+  arp_ep1:       {patch: "Keys/EP 1", note: G-4, hold: 0.35, tail: 0.8}
+  arp_windlow:   {patch: "Winds/Low", note: G-4, hold: 0.35, tail: 0.8}
+  # ---- sequence / riff voices: a held G-4
+  seq_dreamflute: {patch: "Winds/Dreamy Flute", note: G-4, hold: 1.2}
+  seq_tragic:     {patch: "Winds/Tragic Winds", note: G-4, hold: 1.2}
+  seq_windlow:    {patch: "Winds/Low", note: G-4, hold: 1.2}
+  seq_flute1:     {patch: "Winds/Flute 1", note: G-4, hold: 1.2}
+  seq_sinesaw7:   {patch: "Polysynths/Sine Saw 7", note: G-4, hold: 1.2}
+  seq_spacefm:    {patch: "Polysynths/Space FM", note: G-4, hold: 1.2}
+  seq_call:       {patch: "Polysynths/Call", note: G-4, hold: 1.2}
+  seq_eyan:       {patch: "Polysynths/Eyan", note: G-4, hold: 1.2}
+  seq_waver:      {patch: "Polysynths/Waver", note: G-4, hold: 1.2}
+  seq_suitcase:   {patch: "Keys/Soft Suitcase", note: G-4, hold: 1.2}
+  seq_stepporta:  {patch: "Polysynths/Step Portamento", note: G-4, hold: 1.2}
+  # ---- strings: a high held D-5
+  str_juno:       {patch: "Polysynths/Juno-60 Strings", note: D-5, hold: 4.0}
+  str_violini:    {patch: "Polysynths/Violini Poly", note: D-5, hold: 4.0}
+  str_comb:       {patch: "Pads/Subtle Comb Strings", note: D-5, hold: 4.0}
+  str_stretch:    {patch: "Pads/Stretch", note: D-5, hold: 4.0}
+  # ---- atmospheres
+  fx_ratherlow:   {patch: "FX/Rather Low", note: C-3, hold: 3.0}
+  fx_unsettler:   {patch: "FX/Unsettler", note: C-3, hold: 3.0}
+  fx_spooky:      {patch: "FX/Spooky Fish", note: C-3, hold: 3.0}
+  fx_aliens:      {patch: "FX/Aliens", note: C-3, hold: 3.0}
+  fx_radio:       {patch: "FX/Radio Noise", note: C-3, hold: 3.0}
+  fx_space1:      {patch: "FX/Space Adventure 1", note: C-3, hold: 3.0}
+  fx_space2:      {patch: "FX/Space Adventure 2", note: C-3, hold: 3.0}
+  fx_crackling:   {patch: "FX/Crackling", note: C-3, hold: 3.0}

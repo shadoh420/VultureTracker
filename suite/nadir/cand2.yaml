@@ -1,0 +1,64 @@
+# Second candidate batch for Nadir: the same roles with a room, chorus and the role's sample rate printed in, because
+# plain synth patches measured 40-60 dB purer than the sounds of the era and read as chiptune. Measured by
+# suite/nadir/measure.py (flatness is the number to watch: richer than about -30 dB).
+# Render: python -m vulturetracker synth suite/nadir/cand2.yaml
+out_dir: ../../samples/local/nadir-cand2
+sample_rate: 44100
+defaults: {normalize: -1.0, mono: true, velocity: 100, tail: 0.8}
+
+samples:
+  # ---- beds: the G minor add9 voicing, chorus and a room, 11 kHz
+  bed2_moody:    {patch: "Pads/Moody Statement", chord: [G-2, D-3, A-3, A#3, D-4], hold: 7.0, loop: {start: 3.0, end: 6.5, crossfade: 1.2},
+                  fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]}
+  bed2_distant:  {patch: "Pads/Distant", chord: [G-2, D-3, A-3, A#3, D-4], hold: 8.0, loop: {start: 4.5, end: 7.5, crossfade: 1.2},
+                  fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]}
+  bed2_legacy:   {patch: "Pads/Legacy", chord: [G-2, D-3, A-3, A#3, D-4], hold: 7.0, loop: {start: 3.0, end: 6.5, crossfade: 1.2},
+                  fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]}
+  bed2_sunday:   {patch: "Pads/Sunday", chord: [G-2, D-3, A-3, A#3, D-4], hold: 7.0, loop: {start: 3.0, end: 6.5, crossfade: 1.2},
+                  fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]}
+  bed2_oberheim: {patch: "Polysynths/Oberheim Dreams", chord: [G-2, D-3, A-3, A#3, D-4], hold: 7.0, loop: {start: 3.0, end: 6.5, crossfade: 1.2},
+                  fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]}
+  bed2_comb:     {patch: "Pads/Subtle Comb Strings", chord: [G-2, D-3, A-3, A#3, D-4], hold: 7.0, loop: {start: 3.0, end: 6.5, crossfade: 1.2},
+                  fx: [{chorus: {rate_hz: 0.35, depth: 0.35, centre_delay_ms: 9, feedback: 0.1, mix: 0.4}}, {reverb: {room_size: 0.75, damping: 0.5, wet_level: 0.4, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]}
+  # ---- choir clusters with a room
+  choir2_thing:  {patch: "Pads/Choir Pad Thing", chord: [G-3, A-3, D-4, E-4, G-4], hold: 6.0, loop: {start: 3.0, end: 5.5, crossfade: 1.0},
+                  fx: [{reverb: {room_size: 0.8, damping: 0.4, wet_level: 0.45, dry_level: 0.65}}, {resample: {target_sample_rate: 11025}}]}
+  choir2_ppg:    {patch: "Polysynths/PPG Choir", chord: [G-3, A-3, D-4, E-4, G-4], hold: 6.0, loop: {start: 3.0, end: 5.5, crossfade: 1.0},
+                  fx: [{reverb: {room_size: 0.8, damping: 0.4, wet_level: 0.45, dry_level: 0.65}}, {resample: {target_sample_rate: 11025}}]}
+  choir2_lala:   {patch: "Polysynths/Poly Lala", chord: [G-3, A-3, D-4, E-4, G-4], hold: 6.0, loop: {start: 3.0, end: 5.5, crossfade: 1.0},
+                  fx: [{reverb: {room_size: 0.8, damping: 0.4, wet_level: 0.45, dry_level: 0.65}}, {resample: {target_sample_rate: 11025}}]}
+  # ---- arp tones: a short note with chorus and a short room, 16 kHz
+  arp2_uni1:     {patch: "Polysynths/Uni 1", note: G-4, root_offset: -12, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp2_olsampler: {patch: "Polysynths/Ol' Sampler", note: G-4, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp2_jim:      {patch: "Polysynths/Jim", note: G-4, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp2_gentle:   {patch: "Polysynths/Gentle", note: G-4, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp2_sinesaw7: {patch: "Polysynths/Sine Saw 7", note: G-4, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp2_slowpoly: {patch: "Polysynths/Slow Poly MW", note: G-4, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  arp2_juno:     {patch: "Polysynths/Juno-60 Strings", note: G-4, hold: 0.3, tail: 0.9,
+                  fx: [{chorus: {rate_hz: 0.8, depth: 0.25, centre_delay_ms: 7, feedback: 0.0, mix: 0.35}}, {reverb: {room_size: 0.4, damping: 0.6, wet_level: 0.22, dry_level: 0.8}}, {resample: {target_sample_rate: 16000}}]}
+  # ---- sequence voices: a held note with a long room, 22 kHz
+  seq2_oberheim: {patch: "Polysynths/Oberheim Dreams", note: G-4, hold: 1.0, tail: 1.4,
+                  fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  seq2_comb:     {patch: "Pads/Subtle Comb Strings", note: G-4, hold: 1.0, tail: 1.4,
+                  fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  seq2_slowpoly: {patch: "Polysynths/Slow Poly MW", note: G-4, hold: 1.0, tail: 1.4,
+                  fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  seq2_ppgdreams: {patch: "Polysynths/PPG Dreams", note: G-4, hold: 1.0, tail: 1.4,
+                  fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  seq2_juno:     {patch: "Polysynths/Juno-60 Strings", note: G-4, hold: 1.0, tail: 1.4,
+                  fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  seq2_eyan:     {patch: "Polysynths/Eyan", note: G-4, hold: 1.0, tail: 1.4,
+                  fx: [{reverb: {room_size: 0.8, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 22050}}]}
+  # ---- riff voices: held and looped
+  riff2_oberheim: {patch: "Polysynths/Oberheim Dreams", note: G-4, hold: 3.5, loop: {start: 1.2, end: 3.0, crossfade: 0.6},
+                  fx: [{reverb: {room_size: 0.6, damping: 0.5, wet_level: 0.25, dry_level: 0.75}}, {resample: {target_sample_rate: 22050}}]}
+  riff2_comb:    {patch: "Pads/Subtle Comb Strings", note: G-4, hold: 3.5, loop: {start: 1.2, end: 3.0, crossfade: 0.6},
+                  fx: [{reverb: {room_size: 0.6, damping: 0.5, wet_level: 0.25, dry_level: 0.75}}, {resample: {target_sample_rate: 22050}}]}
+  riff2_demo4:   {file: ../../samples/demo4/riff.wav, note: E-5, loop: {start: 0.3, end: 0.7, crossfade: 0.15},
+                  fx: [{reverb: {room_size: 0.6, damping: 0.5, wet_level: 0.25, dry_level: 0.75}}]}

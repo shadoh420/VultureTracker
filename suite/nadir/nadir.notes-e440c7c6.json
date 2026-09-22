@@ -1,0 +1,1251 @@
+[
+ {
+  "id": 1,
+  "when": "2026-09-22T11:31:03",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 2,
+  "pattern": "i3",
+  "row": 2,
+  "time": 13.54,
+  "tag": "note",
+  "text": "the hat hits here in the intro are too similar to vantage",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "ago": 0,
+    "order": 2,
+    "loop": false
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "ago": 2,
+    "order": 2,
+    "loop": true
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "ago": 2,
+    "order": 2,
+    "loop": true
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "ago": 2,
+    "order": 2,
+    "loop": true
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "ago": 2,
+    "order": 2,
+    "loop": true
+   },
+   {
+    "ch": 18,
+    "name": "Wind",
+    "sample": 28,
+    "note": "C-5",
+    "ago": 130,
+    "order": 0,
+    "loop": true
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_lead_generic",
+   "slot": 27,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 2,
+  "when": "2026-09-22T11:33:24",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 3,
+  "pattern": "i4",
+  "row": 45,
+  "time": 24.69,
+  "tag": "too quiet",
+  "text": "",
+  "channels": [
+   10
+  ],
+  "sounding": [
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "ago": 1,
+    "order": 3,
+    "loop": false
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "ago": 3,
+    "order": 3,
+    "loop": true
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "ago": 45,
+    "order": 3,
+    "loop": true
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "ago": 45,
+    "order": 3,
+    "loop": true
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "ago": 45,
+    "order": 3,
+    "loop": true
+   },
+   {
+    "ch": 10,
+    "name": "Arp",
+    "sample": 24,
+    "note": "G-3",
+    "ago": 1,
+    "order": 3,
+    "loop": false
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "A#4",
+    "ago": 1,
+    "order": 3,
+    "loop": true
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "A#4",
+    "ago": 1,
+    "order": 3,
+    "loop": true
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 3,
+  "when": "2026-09-22T11:33:49",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 5,
+  "pattern": "a2",
+  "row": 37,
+  "time": 37.19,
+  "tag": "note",
+  "text": "one of the synth drones that is going on here sounds bad",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 5,
+    "loop": false,
+    "ago": 5
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 5,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "order": 5,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 5,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "order": 5,
+    "loop": true,
+    "ago": 37
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "order": 5,
+    "loop": true,
+    "ago": 37
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "order": 5,
+    "loop": true,
+    "ago": 37
+   },
+   {
+    "ch": 10,
+    "name": "Arp",
+    "sample": 24,
+    "note": "A-3",
+    "order": 5,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "E-5",
+    "order": 5,
+    "loop": true,
+    "ago": 5
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "E-5",
+    "order": 5,
+    "loop": true,
+    "ago": 5
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 4,
+  "when": "2026-09-22T11:35:12",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 6,
+  "pattern": "a3",
+  "row": 38,
+  "time": 43.96,
+  "tag": "note",
+  "text": "sounds a bit discordant here",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 6,
+    "loop": false,
+    "ago": 6
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 6,
+    "loop": false,
+    "ago": 2
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "order": 6,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 6,
+    "loop": true,
+    "ago": 2
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "order": 6,
+    "loop": true,
+    "ago": 38
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "order": 6,
+    "loop": true,
+    "ago": 38
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "order": 6,
+    "loop": true,
+    "ago": 38
+   },
+   {
+    "ch": 11,
+    "name": "Seq",
+    "sample": 25,
+    "note": "G-4",
+    "order": 6,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 12,
+    "name": "Seq echo",
+    "sample": 25,
+    "note": "D-4",
+    "order": 6,
+    "loop": true,
+    "ago": 0
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 5,
+  "when": "2026-09-22T11:35:29",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 7,
+  "pattern": "a4",
+  "row": 51,
+  "time": 51.98,
+  "tag": "note",
+  "text": "whatever arpeggio is happening here, i do not like",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 7,
+    "loop": false,
+    "ago": 3
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 7,
+    "loop": false,
+    "ago": 7
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "order": 7,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 7,
+    "loop": true,
+    "ago": 3
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "order": 7,
+    "loop": true,
+    "ago": 51
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "order": 7,
+    "loop": true,
+    "ago": 51
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "order": 7,
+    "loop": true,
+    "ago": 51
+   },
+   {
+    "ch": 11,
+    "name": "Seq",
+    "sample": 25,
+    "note": "G-3",
+    "order": 7,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 12,
+    "name": "Seq echo",
+    "sample": 25,
+    "note": "D-4",
+    "order": 7,
+    "loop": true,
+    "ago": 1
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 6,
+  "when": "2026-09-22T11:35:50",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 8,
+  "pattern": "a5",
+  "row": 50,
+  "time": 58.54,
+  "tag": "note",
+  "text": "slightly better",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 8,
+    "loop": false,
+    "ago": 2
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 8,
+    "loop": false,
+    "ago": 6
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "order": 8,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 8,
+    "loop": true,
+    "ago": 2
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "order": 8,
+    "loop": true,
+    "ago": 50
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "order": 8,
+    "loop": true,
+    "ago": 50
+   },
+   {
+    "ch": 8,
+    "name": "Bed B",
+    "sample": 19,
+    "note": "C-5",
+    "order": 8,
+    "loop": true,
+    "ago": 18
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "order": 8,
+    "loop": true,
+    "ago": 50
+   },
+   {
+    "ch": 10,
+    "name": "Arp",
+    "sample": 24,
+    "note": "A-3",
+    "order": 8,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "C-5",
+    "order": 8,
+    "loop": true,
+    "ago": 2
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "C-5",
+    "order": 8,
+    "loop": true,
+    "ago": 2
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 7,
+  "when": "2026-09-22T11:36:11",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 11,
+  "pattern": "p2",
+  "row": 22,
+  "time": 75.62,
+  "tag": "note",
+  "text": "the sounds clash too much like the drones dont seem to match what's going on in the rest of the song at times",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 2
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 2
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 3,
+    "name": "Perc",
+    "sample": 10,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 10
+   },
+   {
+    "ch": 4,
+    "name": "Loop",
+    "sample": 11,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 6
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 11,
+    "loop": true,
+    "ago": 2
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "order": 11,
+    "loop": true,
+    "ago": 22
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 22
+   },
+   {
+    "ch": 8,
+    "name": "Bed B",
+    "sample": 19,
+    "note": "C-5",
+    "order": 10,
+    "loop": true,
+    "ago": 54
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 22
+   },
+   {
+    "ch": 11,
+    "name": "Seq",
+    "sample": 25,
+    "note": "F-3",
+    "order": 11,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 12,
+    "name": "Seq echo",
+    "sample": 25,
+    "note": "A-3",
+    "order": 11,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "D-5",
+    "order": 11,
+    "loop": true,
+    "ago": 6
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "D-5",
+    "order": 11,
+    "loop": true,
+    "ago": 6
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 8,
+  "when": "2026-09-22T11:36:38",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 11,
+  "pattern": "p2",
+  "row": 62,
+  "time": 79.79,
+  "tag": "note",
+  "text": "atonal chaos again",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 2
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 5,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 3,
+    "name": "Perc",
+    "sample": 9,
+    "note": "C-5",
+    "order": 11,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 4,
+    "name": "Loop",
+    "sample": 11,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 11,
+    "loop": true,
+    "ago": 2
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "G-1",
+    "order": 11,
+    "loop": true,
+    "ago": 62
+   },
+   {
+    "ch": 7,
+    "name": "Bed A",
+    "sample": 16,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 62
+   },
+   {
+    "ch": 8,
+    "name": "Bed B",
+    "sample": 19,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 30
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 20,
+    "note": "C-5",
+    "order": 11,
+    "loop": true,
+    "ago": 62
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "A-4",
+    "order": 11,
+    "loop": true,
+    "ago": 14
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "A-4",
+    "order": 11,
+    "loop": true,
+    "ago": 14
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 9,
+  "when": "2026-09-22T11:37:09",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 15,
+  "pattern": "b1",
+  "row": 34,
+  "time": 103.54,
+  "tag": "note",
+  "text": "i like this little break",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "G-2",
+    "order": 13,
+    "loop": true,
+    "ago": 102
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "A#1",
+    "order": 15,
+    "loop": true,
+    "ago": 34
+   },
+   {
+    "ch": 8,
+    "name": "Bed B",
+    "sample": 18,
+    "note": "C-5",
+    "order": 15,
+    "loop": true,
+    "ago": 2
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 21,
+    "note": "C-5",
+    "order": 15,
+    "loop": true,
+    "ago": 34
+   },
+   {
+    "ch": 13,
+    "name": "Riff",
+    "sample": 26,
+    "note": "D-4",
+    "order": 15,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 14,
+    "name": "Riff echo",
+    "sample": 26,
+    "note": "A#3",
+    "order": 15,
+    "loop": true,
+    "ago": 1
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 10,
+  "when": "2026-09-22T11:37:24",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 17,
+  "pattern": "b3",
+  "row": 44,
+  "time": 117.92,
+  "tag": "note",
+  "text": "ok but now it just sounds too different",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 17,
+    "loop": false,
+    "ago": 4
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 4,
+    "note": "C-5",
+    "order": 17,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 7,
+    "note": "C-5",
+    "order": 17,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "A#2",
+    "order": 17,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "A#1",
+    "order": 17,
+    "loop": true,
+    "ago": 44
+   },
+   {
+    "ch": 8,
+    "name": "Bed B",
+    "sample": 18,
+    "note": "C-5",
+    "order": 17,
+    "loop": true,
+    "ago": 12
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 21,
+    "note": "C-5",
+    "order": 17,
+    "loop": true,
+    "ago": 44
+   },
+   {
+    "ch": 13,
+    "name": "Riff",
+    "sample": 26,
+    "note": "C-4",
+    "order": 17,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 14,
+    "name": "Riff echo",
+    "sample": 26,
+    "note": "D-4",
+    "order": 17,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "C-5",
+    "order": 17,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "C-5",
+    "order": 17,
+    "loop": true,
+    "ago": 0
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 11,
+  "when": "2026-09-22T11:37:44",
+  "version": {
+   "hash": "e440c7c6",
+   "mtime": "2026-09-22T11:30:16"
+  },
+  "order": 19,
+  "pattern": "b5",
+  "row": 56,
+  "time": 132.5,
+  "tag": "note",
+  "text": "too ambient all of the sudden. tone shifted too much. we aren't making prog rock",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Kick",
+    "sample": 1,
+    "note": "C-5",
+    "order": 19,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 1,
+    "name": "Snare",
+    "sample": 2,
+    "note": "C-5",
+    "order": 19,
+    "loop": false,
+    "ago": 4
+   },
+   {
+    "ch": 2,
+    "name": "Hats",
+    "sample": 7,
+    "note": "C-5",
+    "order": 19,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 5,
+    "name": "Pulse",
+    "sample": 15,
+    "note": "A#2",
+    "order": 19,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 6,
+    "name": "Drone",
+    "sample": 14,
+    "note": "A#1",
+    "order": 19,
+    "loop": true,
+    "ago": 56
+   },
+   {
+    "ch": 8,
+    "name": "Bed B",
+    "sample": 18,
+    "note": "C-5",
+    "order": 19,
+    "loop": true,
+    "ago": 24
+   },
+   {
+    "ch": 9,
+    "name": "String bed",
+    "sample": 21,
+    "note": "C-5",
+    "order": 19,
+    "loop": true,
+    "ago": 56
+   },
+   {
+    "ch": 10,
+    "name": "Arp",
+    "sample": 24,
+    "note": "F-4",
+    "order": 19,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 13,
+    "name": "Riff",
+    "sample": 26,
+    "note": "C-4",
+    "order": 19,
+    "loop": true,
+    "ago": 0
+   },
+   {
+    "ch": 14,
+    "name": "Riff echo",
+    "sample": 26,
+    "note": "A#3",
+    "order": 19,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 16,
+    "name": "Lead",
+    "sample": 27,
+    "note": "C-5",
+    "order": 19,
+    "loop": true,
+    "ago": 8
+   },
+   {
+    "ch": 17,
+    "name": "Violins",
+    "sample": 32,
+    "note": "C-5",
+    "order": 19,
+    "loop": true,
+    "ago": 8
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "fin_arp_gentle",
+   "slot": 24,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ }
+]

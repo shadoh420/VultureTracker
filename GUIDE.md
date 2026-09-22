@@ -47,7 +47,8 @@ a section of the song, add candidate WAVs by path or glob, and each candidate is
 only that slot swapped. Keys `1`–`0` switch candidates without losing the playback position, `S`/`M` toggle
 SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes every channel that never plays the slot,
 stars/reject/notes are kept per candidate beside the song (`<song>.tryout.json`), and `U` shows the YAML change before
-writing it. With no candidate picked, SONG plays the song itself. Slots that have candidates are marked in the slot list
+writing it; once written, that slot's candidate list is cleared (the choice is made; a file's rating is remembered if it
+is added again). With no candidate picked, SONG plays the song itself. Slots that have candidates are marked in the slot list
 (`24 arp ▸ 5 candidates`); rejected candidates sink to the bottom of the list (their number keys stay). The candidate
 you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
 and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
@@ -59,12 +60,11 @@ move re-renders the tryout at once (the section is compiled once and the values 
 and the meter next to each channel is that channel soloed, its RMS in dB over the active part of the section (the way
 `scratch/ut99-clean/compare.py` measures a module). Nothing is written until WRITE MIX → SONG, which shows the YAML
 change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place). EXPORT STEMS
-writes one WAV per playing channel to `<song>_stems/`. The tab also has the arrangement grid, the slot table and a
-read-only pattern view that follows the selected order and the playhead. Render & Export builds the `.it` (and a WAV)
+writes one WAV per playing channel to `<song>_stems/`. The tab also has the arrangement grid and the slot table. The Pattern tab is the
+read-only pattern view, the whole window wide, following the selected order and the playhead. Render & Export builds the `.it` (and a WAV)
 and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (the newest 60).
 
-**Listening notes.** The bar under the player drops a note at the playhead: TOO LOUD, TOO QUIET, HATE THIS SOUND,
-TOO BUSY, KEEP or NOTE… (`N`). A note records the time, order and row, what was playing (the song or a candidate, the
+**Listening notes.** NOTE… (`N`) in the bar under the player drops a note at the playhead. A note records the time, order and row, what was playing (the song or a candidate, the
 mutes, the unwritten faders) and the channels sounding there (each channel's last note cell with its sample number;
 `~` marks a looped tone held from an earlier note); click the chip of the channel you mean and add words if you like.
 Notes live in `<song>.notes.json` and are rendered as `<song>.notes.md`, a report grouped by order (the tryout ratings
@@ -112,8 +112,19 @@ patterns:
       01: ...            | ===
 ```
 
-Four demos:
+Four demos, and a suite:
 
+- `suite/nadir/nadir.yaml`: "Nadir", 3:47 and loopable, the first piece of a suite where each piece is inspired by one
+  stylistic group of the Unreal Tournament (1999) soundtrack, this one by its dark, sub-heavy tracks: a driving grid at
+  144 BPM (tempo 120, speed 5, 16-row bars) under a dark mood, a sub drone under everything, one pedal throughout
+  (G Dorian over one pitch collection), open-fifth synth and recorded string beds, a soft synth lead doubled by a
+  violin section as the melody, one moving line at a time under it (a dark arp or a portamento riff with an echo), a
+  choir call, and drums with booms and a recorded drum bar chopped in surround. 20 channels, 34 patterns; v6 is the
+  last pass, built from the listener's notes (`suite/HANDOFF.md`). Its sounds are additive models (`gen_samples.py`),
+  CC0 drums (`gen_drums.py`), CC0 string sections (`gen_strings.py`) and Surge XT patches picked by measurement and
+  by ear in the tryout (`cand*.yaml`, `measure.py`, `kit.yaml`, then `gen_floor.py`); `gen_patterns.py` lays out the
+  patterns. `PROVENANCE.md` says what it takes from its reference group (descriptions only); `suite/NEXT-PROMPT.md`
+  is how the next pieces are meant to be made (one reference track each).
 - `demo4/vantage.yaml`: "Vantage", 3:03 and loopable, E minor at 168 BPM (tempo 140, speed 5), in the style of a
   late-90s arena-shooter module: a sub-bass drone holds the tonic under everything, a synth riff on three
   round-robin channels rides over it, chord samples sit low (a minor bed, a major bed that swells once per pattern,
