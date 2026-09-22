@@ -185,7 +185,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="bottom">
   <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
   <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
-    <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span></div>
+    <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="k">SPEED</span><select id="speed" onchange="setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option></select></div>
     <div class="prog" id="prog" onmousedown="seekDrag(event)" title="click or drag to seek"><i id="progfill"></i><b id="proghead"></b></div>
     <div style="display:flex;gap:8px;align-items:center;min-width:0"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><span class="k" style="white-space:nowrap" title="the channels sounding at the playhead, with the slot each plays (from the pattern: a looped tone until its note-off, a one-shot until its sample runs out) · click one to solo it">SOUNDING</span><div id="live" style="flex:1;min-width:0;display:flex;gap:3px;overflow:hidden"></div></div>
   </div>
@@ -220,7 +220,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="modal" id="keysmodal" onclick="toggle('keys',false)"><div class="box" style="width:520px">
   <div class="k" style="color:var(--acc);margin-bottom:10px">KEYBOARD</div>
   <div class="row"><span>1–9, 0</span><span>pick candidate 1–10</span></div><div class="row"><span>↑ ↓</span><span>previous / next candidate</span></div>
-  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead (the tag buttons do the same with a tag)</span></div>
+  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 %, the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead (the tag buttons do the same with a tag)</span></div>
   <div class="row"><span>SONG</span><span>play the song itself (no candidate swapped, the faders applied)</span></div><div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
   <div class="row"><span>Esc</span><span>close</span></div>
 </div></div>
@@ -228,6 +228,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <script>
 let S=null,sel=null,solo=false,filter='all',sort='added',diffId=null,focus=null,PAT={key:null,rows:null,order:-1,active:[],row:-2};
 let hexRows=false;try{hexRows=localStorage.hexrows==='1'}catch(e){}
+let speed=1,landAt=null;try{speed=+localStorage.speed||1}catch(e){}  // playback speed; where to resume when a solo/mute render lands
 // channel families guessed from names: colour the stems and arrangement, and pick the DRUMS set
 const FAMS=[[/kick|snare|hat|hh|perc|drum|break|clap|tom|cym|ride|crash|shak|tamb|rim|conga|bongo/i,'#6b7378'],[/bass|\bsub\b/i,'#7a7268'],[/pad|bed|choir|string|chord|motif|vox|voice|organ/i,'#657080'],[/riff|lead|melod|arp|synth|pluck|seq/i,'#6d7a72'],[/fx|noise|rise|sweep|swell|gong|hit|impact|sfx/i,'#746b7a']];
 const fam=name=>FAMS.findIndex(([re])=>re.test(name)),famCol=name=>{const i=fam(name);return i<0?'':FAMS[i][1]},rowNum=i=>hexRows?i.toString(16).toUpperCase().padStart(2,'0'):pad(i);
@@ -352,9 +353,9 @@ function renderStems(f){const n=f.channels.length,mx=S.mix||{},M=S.meters,nmix=n
   st.textContent=busy?'EXPORTING':S.queue?'RENDERING':M&&M.status==='failed'?'NO METERS':M&&M.status!=='ready'?'MEASURING':S.solo!=null?'SOLO':nm?`${nm} MUTED`:nmix?`${nmix} UNWRITTEN`:'ALL AUDIBLE';st.classList.toggle('on',dirty||busy||nmix>0);
   const wm=$('writemix');wm.textContent=nmix?`WRITE MIX → SONG · ${nmix}`:'WRITE MIX → SONG';wm.classList.toggle('dimb',!nmix);
   $('stemhint').textContent=busy?`exporting stems ${x.done} / ${x.total} → ${x.dir}`:x&&x.status==='done'?`wrote ${x.total} stems to ${x.dir}`:x&&x.status==='failed'?`stems export failed: ${x.error}`:dirty?`tryout renders skip ${S.solo!=null?'every channel but '+pad(S.solo+1):nm+' muted channel'+(nm>1?'s':'')} · the YAML is untouched`:nmix?`${nmix} fader value${nmix>1?'s':''} unwritten: the tryout plays them, the song file does not have them yet · WRITE MIX shows the change first`:'faders re-render the tryout section; nothing is written until WRITE MIX · meter: the channel soloed, RMS in dB over its active part'}
-function muteCh(c){const m=S.muted.includes(c)?S.muted.filter(x=>x!==c):[...S.muted,c];act('mute',{muted:m,solo:S.solo===c?null:S.solo})}
-function soloCh(c){act('mute',{muted:S.muted,solo:S.solo===c?null:c})}
-function resetStems(){act('mute',{muted:[],solo:null})}
+function muteCh(c){markLanding();const m=S.muted.includes(c)?S.muted.filter(x=>x!==c):[...S.muted,c];act('mute',{muted:m,solo:S.solo===c?null:S.solo})}
+function soloCh(c){markLanding();act('mute',{muted:S.muted,solo:S.solo===c?null:c})}
+function resetStems(){markLanding();act('mute',{muted:[],solo:null})}
 function renderSlots(f,ents){const sm=S.song.slot_meas||{},mx=S.mix||{},cc=S.cand_counts||{};$('slotn').textContent=f.samples.length;
   put('slots',`<tr><th style="width:28px">#</th><th style="width:104px">NAME</th><th>FILE</th><th class="r" style="width:56px">C5 RATE</th><th class="r" style="width:58px">LENGTH</th><th class="r" style="width:44px">PITCH</th><th class="r" style="width:60px">CENTROID</th><th class="r" style="width:56px">DECAY</th><th class="r" style="width:38px">LOOP</th><th style="width:66px" title="the sample's global_volume 0–64: scales every note it plays, whatever the cells say">GAIN</th><th style="width:74px"></th></tr>`+f.samples.map(s=>{const m=sm[s.num]||{},on=s.num===S.slot,file=(ents[s.num]||{}).file||'',g=mixVal('sample_volume',s.num,(ents[s.num]||{}).global_volume??64),gch=mx.sample_volume&&mx.sample_volume[s.num]!=null;
     return `<tr class="${on?'on':''}"><td>${pad(s.num)}</td><td class="sans" title="${esc(s.name)}">${esc(s.name)}</td><td class="file" title="${esc(file)}">${esc(file)}</td><td class="r">${s.c5_speed}</td><td class="r">${s.length.toFixed(3)} s</td><td class="r">${m.pitch||'—'}</td><td class="r">${m.centroid==null?'—':Math.round(m.centroid).toLocaleString()}</td><td class="r">${secs(m.decay)}</td><td class="r ${s.loop?'':'dimc'}">${s.loop?'loop':'—'}</td><td><input type="range" class="gain" min="0" max="64" value="${g}" oninput="liveGain(this,${s.num})" onchange="setMix('sample_volume',${s.num},+this.value)"> <span id="sg${s.num}" class="${gch?'chg':''}">${g}</span></td><td style="text-align:right"><span class="btn sm ${on?'on':''}" onclick="act('slot',{slot:${s.num}});tab('tryout')">${on?'IN TRYOUT':cc[s.num]?`TRY OUT · ${cc[s.num]}`:'TRY OUT'}</span></td></tr>`}).join(''))}
@@ -394,16 +395,19 @@ function updateAudio(){const c=S.candidates.find(x=>x.id===sel);const src=srcFor
   if(src!==lastSrc){const pending=c?(c.status==='queued'||c.status==='rendering'):(o.status==='queued'||o.status==='rendering');
     if(!src){if(pending&&audio.src){$('nowmode').textContent+=' · re-rendering, the old mix plays until it lands';return}lastSrc=src;audio.pause();audio.removeAttribute('src');return}  // a re-render after a fader or mute change: keep playing the old one until the new one lands
     lastSrc=src;const t=audio.currentTime,was=!audio.paused;
-    audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(t,Math.max(0,audio.duration-.05));if(was)audio.play()},{once:true});audio.load()}}
+    audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(landAt!=null?landAt:t,Math.max(0,audio.duration-.05));landAt=null;if(was)audio.play()},{once:true});audio.load()}}
 function togglePlay(){if(!audio.src){if(sel==null&&(!S.own||S.own.status!=='ready')){const c=visible()[0];if(c)pick(c.id)}if(!audio.src)return}audio.paused?audio.play():audio.pause()}
 function setSolo(v){solo=v;$('m-mix').classList.toggle('on',!v);$('m-solo').classList.toggle('on',v);updateAudio()}
+function setSpeed(v){speed=v;audio.defaultPlaybackRate=v;audio.playbackRate=v;audio.preservesPitch=true;try{localStorage.speed=v}catch(e){}$('speed').value=String(v)}
+// a solo or mute while playing: the old render keeps playing until the new one lands, which then starts a second before the click
+function markLanding(){if(!audio.paused&&!solo&&isFinite(audio.duration))landAt=Math.max(0,audio.currentTime-1)}
 function seekDrag(e){const el=$('prog'),to=ev=>{if(!isFinite(audio.duration))return;const r=el.getBoundingClientRect();audio.currentTime=audio.duration*Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))};
   const up=()=>{removeEventListener('mousemove',to);removeEventListener('mouseup',up)};addEventListener('mousemove',to);addEventListener('mouseup',up);if(e.preventDefault)e.preventDefault();to(e)}
 // ---- sounding now: the channels sounding at the playhead (one fetch per order per song version)
 const SND={};
 function soundingAt(p){if(!p)return null;const key=`${S.song.mtime}|${p.o}`;if(SND[key]===undefined){SND[key]=null;fetch('/api/sounding/'+p.o).then(r=>r.json()).then(j=>{SND[key]=j.rows||null})}const t=SND[key];return t?t[Math.min(p.row,t.length-1)]:null}
 function renderLive(){const f=S&&S.song&&S.song.facts;if(!f){put('live','');return}const p=(solo||!isFinite(audio.duration))?null:posAt(audio.currentTime),rows=soundingAt(p);
-  put('live',rows?rows.map(([c,s,h])=>`<span class="chipc ${S.solo===c?'on':''} ${audible(c)?'':'off'}" onclick="soloCh(${c})" title="channel ${pad(c+1)} ${esc(f.channels[c])} · slot ${s?pad(s)+' '+esc(sName(s)):'?'}${h?' · a looped tone':''} · click to solo this channel, again to unsolo">${esc(f.channels[c].toUpperCase())} ${s?pad(s):'??'}${h?'~':''}</span>`).join(''):'')}
+  put('live',rows?rows.map(([c,s,h])=>`<span class="chipc ${S.solo===c?'on':''} ${audible(c)?'':'off'}" onclick="soloCh(${c})" title="channel ${pad(c+1)} ${esc(f.channels[c])} · slot ${s?pad(s)+' '+esc(sName(s)):'?'}${h?' · a looped tone':''} · click to solo this channel (playback rewinds a second when the soloed render lands), again to unsolo">${esc(f.channels[c].toUpperCase())} ${s?pad(s):'??'}${h?'~':''}</span>`).join(''):'')}
 audio.addEventListener('play',render);audio.addEventListener('pause',render);
 setInterval(()=>{const d=audio.duration||0,t=audio.currentTime||0;$('progfill').style.width=$('proghead').style.left=d?(100*t/d)+'%':'0';$('pos').textContent=d?`${fmtT(t)} / ${fmtT(d)}`:'';$('playbtn').textContent=audio.paused?'▶':'❚❚';
   renderLive();if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-overview').classList.contains('on'))followPlayhead()},100);
@@ -421,14 +425,14 @@ async function addNote(tag){const f=S&&S.song&&S.song.facts;if(!f)return;const c
   if(j&&j.id){lastNote=j.id;render();if(tag==='note'){const inp=$('notelast').querySelector('input');if(inp)inp.focus()}}}
 function toggleCh(id,ch){const n=(S.notes||[]).find(x=>x.id===id);if(!n)return;const c=n.channels.includes(ch)?n.channels.filter(x=>x!==ch):[...n.channels,ch];act('noteedit',{id,channels:c})}
 function renderNotes(f){const ns=S.notes||[];$('notesn').textContent=ns.length?`· ${ns.length}`:'';$('notecount').textContent=ns.length;
-  $('notepaths').textContent=ns.length?`${S.notes_path} · report ${S.notes_path.replace(/\.json$/,'.md')}, rewritten on every change`:'nothing written yet';
+  $('notepaths').textContent=(ns.length?`${S.notes_path} · report ${S.notes_path.replace(/\.json$/,'.md')}, rewritten on every change`:'nothing written yet for this version of the song')+((S.archives||[]).length?` · earlier versions: ${S.archives.join(', ')}`:'');
   const last=ns.find(n=>n.id===lastNote)||ns[ns.length-1];
   put('notelast',last?noteRow(last,false):`<span style="font-size:10px;color:var(--dim)">click a tag while it plays: the note lands at the playhead with the channels sounding there · then click the channel you mean and add words if you like</span>`);
-  put('notelist',ns.length?[...ns].sort((a,b)=>a.order-b.order||a.row-b.row||a.id-b.id).map(n=>noteRow(n,true)).join(''):`<div class="empty"><div style="font-size:15px;font-weight:600;color:#c3cbcf">No notes yet</div><div style="margin-top:8px;max-width:480px;font-size:11.5px">Play the song or a candidate and click a tag in the bar below at the moment you hear something. The note records the position, what was playing and which channels were sounding there; click the channel you mean. Everything lands in <span class="mono">${esc(S.notes_path)}</span> and a report next to it; the song file is never touched.</div></div>`)}
+  put('notelist',ns.length?[...ns].sort((a,b)=>a.order-b.order||a.row-b.row||a.id-b.id).map(n=>noteRow(n,true)).join(''):`<div class="empty"><div style="font-size:15px;font-weight:600;color:#c3cbcf">No notes yet</div><div style="margin-top:8px;max-width:480px;font-size:11.5px">Play the song or a candidate and click a tag in the bar below at the moment you hear something. The note records the position, what was playing and which channels were sounding there; click the channel you mean. Everything lands in <span class="mono">${esc(S.notes_path)}</span> and a report next to it; the song file is never touched.</div>${(S.archives||[]).length?`<div style="margin-top:10px;max-width:480px;font-size:11px;color:var(--dim)">Notes on earlier versions of the song were moved beside it when it changed: <span class="mono">${esc(S.archives.join(', '))}</span></div>`:''}</div>`)}
 // solo in song: mute every channel that never plays the tryout slot (the mixer's mute list, so candidates render the same way)
 function slotChans(){const f=S.song.facts;return f.channels.map((_,c)=>c).filter(c=>f.use.some(u=>u[c].includes(S.slot)))}
 function soloActive(){const f=S.song.facts;if(!f||S.solo!=null)return false;const p=slotChans();return p.length>0&&f.channels.every((_,c)=>p.includes(c)!==S.muted.includes(c))}
-function soloSlot(){const f=S.song.facts;if(!f)return;if(soloActive())return act('mute',{muted:[],solo:null});const p=slotChans();if(!p.length)return alert(`slot ${pad(S.slot)} is not played anywhere`);act('mute',{muted:f.channels.map((_,c)=>c).filter(c=>!p.includes(c)),solo:null})}
+function soloSlot(){const f=S.song.facts;if(!f)return;markLanding();if(soloActive())return act('mute',{muted:[],solo:null});const p=slotChans();if(!p.length)return alert(`slot ${pad(S.slot)} is not played anywhere`);act('mute',{muted:f.channels.map((_,c)=>c).filter(c=>!p.includes(c)),solo:null})}
 // ---- apply
 let diffApply=null;
 async function showDiff(url,title,apply){diffApply=apply;const d=await (await fetch(url)).json();$('difftitle').textContent=`${title} · ${d.path}${d.redump?' · WARNING: a line could not be edited in place, the whole file will be re-dumped and comments lost':''}`;
@@ -448,5 +452,5 @@ document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagNam
   else if(e.key==='n'||e.key==='N')addNote('note');
   else if((e.key==='x'||e.key==='X')&&sel!=null){const c=S.candidates.find(x=>x.id===sel);act('rate',{id:sel,rejected:!c.rejected})}
   else if(e.key==='?')toggle('keys')});
-refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
+setSpeed(speed);refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
 </script></body></html>

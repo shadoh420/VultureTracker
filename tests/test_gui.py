@@ -266,6 +266,23 @@ class TestGui(unittest.TestCase):
         self.assertEqual(data.count(b"\r\n"), data.count(b"\n"))  # a CRLF file stays CRLF
         self.assertIn(b"  2: {file: cand.wav, name: cand, base_note: E-5}\r\n", data)
 
+    def test_notes_archive_when_the_song_changes_outside_the_app(self):
+        st = self.state()
+        st.add_note({"order": 0, "row": 2, "tag": "keep"})
+        old = st.version()["hash"]
+        st.apply(str(self.dir / "cand.wav"))          # the app's own write keeps the notes (the report marks their version)
+        self.assertEqual(len(st.notes), 1)
+        self.assertIn(f"(made against version {old})", (self.dir / "song.notes.md").read_text(encoding="utf-8"))
+        (self.dir / "song.yaml").write_bytes(SONG.replace("title: T", "title: T2").encode("utf-8"))
+        st.reload()                                   # a change from outside archives them
+        self.assertEqual(st.notes, [])
+        self.assertEqual(len(json.loads((self.dir / f"song.notes-{old}.json").read_text(encoding="utf-8"))), 1)
+        self.assertIn(f"version {old}", (self.dir / f"song.notes-{old}.md").read_text(encoding="utf-8"))
+        self.assertEqual(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8")), [])
+        self.assertEqual(st.snapshot()["archives"], [f"song.notes-{old}.md"])
+        st.add_note({"order": 0, "row": 0, "tag": "keep"})   # ids restart with the version
+        self.assertEqual(st.notes[0]["id"], 1)
+
     def test_want_and_priorities(self):
         st = self.state()
         st.meta["slot"] = 1

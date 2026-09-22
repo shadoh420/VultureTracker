@@ -52,7 +52,8 @@ writing it. With no candidate picked, SONG plays the song itself. Slots that hav
 you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
 and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
 playhead with the slot each plays (a looped tone until its note-off, a one-shot until its sample runs out); click one
-to solo it. The Song Overview tab has a stems rail that is also a mixer: mute or solo channels, a volume and pan fader per
+to solo it (playback rewinds a second when the soloed render lands, so the moment you clicked on is heard soloed).
+SPEED slows playback to 75, 50, 33, 25 or 20 % with the pitch kept. The Song Overview tab has a stems rail that is also a mixer: mute or solo channels, a volume and pan fader per
 channel, a MIX VOL master with the peak of what is playing, and a GAIN fader per sample slot in the slot table; every
 move re-renders the tryout at once (the section is compiled once and the values are patched into the module's header),
 and the meter next to each channel is that channel soloed, its RMS in dB over the active part of the section (the way
@@ -68,6 +69,9 @@ mutes, the unwritten faders) and the channels sounding there (each channel's las
 `~` marks a looped tone held from an earlier note); click the chip of the channel you mean and add words if you like.
 Notes live in `<song>.notes.json` and are rendered as `<song>.notes.md`, a report grouped by order (the tryout ratings
 at the end) for a collaborator who cannot listen; the NOTES tab lists and edits them. Nothing touches the song file.
+Notes belong to the version of the song they were made against: when the song changes outside the app (a rebuild), the
+notes on the old version move to `<song>.notes-<hash>.json` and `.md` beside it and the NOTES tab starts empty; the
+app's own writes keep them, and the report marks their version.
 
 **Standalone binary:** `pip install pyinstaller && python tools/build_exe.py` produces `dist/vulturetracker.exe`,
 the whole CLI with libopenmpt bundled: `vulturetracker.exe gui song.yaml`. Double-clicking it opens the app on its

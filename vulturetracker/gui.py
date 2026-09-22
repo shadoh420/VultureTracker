@@ -354,7 +354,10 @@ class State:
 
     # ---- song
 
-    def reload(self):
+    def reload(self, archive=True):
+        """Re-read the song. `archive`: notes made against another version of the song text move to their archive
+        (the song changed outside the app: a rebuild); the app's own writes pass False, so a slot write mid-session
+        keeps the notes."""
         with self.lock:
             raw = self.song_path.read_bytes()
             self.crlf = b"\r\n" in raw
@@ -374,6 +377,10 @@ class State:
             threading.Thread(target=lambda: [self.measured(f) for f in files if Path(f).exists()], daemon=True).start()
             if self.meta["slot"] not in self.song.get("samples", {}):
                 self.meta["slot"] = min(self.song.get("samples", {1: 0}))
+            if archive:
+                self._archive_old_notes()
+            if self.notes:
+                self.save_notes()  # the report's header and version labels follow the song text
             self.queue_all()
 
     def dirty(self):
@@ -662,18 +669,38 @@ class State:
         self.notes_path.write_text(json.dumps(self.notes, indent=1), encoding="utf-8")
         self.notes_path.with_suffix(".md").write_text(self.report(), encoding="utf-8")
 
-    def report(self):
-        """<song>.notes.md: the notes grouped by order, each with its tag, the channels the listener pointed at in bold, what
-        was sounding there, what was playing and their words; then the tryout ratings. For a collaborator who cannot listen."""
-        f, v = self.facts, self.version()
+    def _archive_old_notes(self):
+        """Notes made against another version of the song text move to `<song>.notes-<hash>.json` and `.md` beside it,
+        so the active file and the NOTES tab hold only notes on the song as it is now; an archive's report keeps that
+        version's stamp."""
+        v = self.version()["hash"]
+        old = [n for n in self.notes if (n.get("version") or {}).get("hash") != v]
+        if not old:
+            return
+        for h in sorted({(n.get("version") or {}).get("hash") or "unknown" for n in old}):
+            batch = [n for n in old if ((n.get("version") or {}).get("hash") or "unknown") == h]
+            p = self.song_path.with_name(f"{self.song_path.stem}.notes-{h}.json")
+            kept = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+            seen = {(n["id"], n.get("when")) for n in kept}
+            kept += [n for n in batch if (n["id"], n.get("when")) not in seen]
+            p.write_text(json.dumps(kept, indent=1), encoding="utf-8")
+            p.with_suffix(".md").write_text(self.report(kept, batch[0].get("version")), encoding="utf-8")
+        self.notes = [n for n in self.notes if n not in old]
+        self.save_notes()
+
+    def report(self, notes=None, version=None):
+        """<song>.notes.md (or an archive's): the notes grouped by order, each with its tag, the channels the listener
+        pointed at in bold, what was sounding there, what was playing and their words; then the tryout ratings. For a
+        collaborator who cannot listen."""
+        f, v, notes = self.facts, version or self.version(), self.notes if notes is None else notes
         fmt = lambda t: f"{int(t // 60)}:{t % 60:04.1f}"  # noqa: E731
         L = [f"# Listening notes: {f['title'] if f else self.song_path.stem}", "",
-             f"`{self.song_path.name}` version {v['hash']} ({v['mtime']}), {len(self.notes)} note{'s' if len(self.notes) != 1 else ''}.",
+             f"`{self.song_path.name}` version {v['hash']} ({v['mtime']}), {len(notes)} note{'s' if len(notes) != 1 else ''}.",
              "Time is the position in the whole song where the listener clicked (allow up to a second of reaction delay); ord is",
              "the order index, row the row in its pattern. **Bold** channels are the ones the listener pointed at; the others are",
              "what was sounding there (sample number after the name; `~` marks a looped tone still held from an earlier note).", ""]
         by = {}
-        for n in self.notes:
+        for n in notes:
             by.setdefault(n["order"], []).append(n)
         for order in sorted(by):
             o = f["orders"][order] if f and order < len(f["orders"]) else None
@@ -828,7 +855,7 @@ class State:
         with self.lock:
             new, _ = self.patched_text(cand)
             self.write_song(new)
-            self.reload()
+            self.reload(archive=False)
         self._put(0, ("build", False))
 
     def apply_mix(self):
@@ -837,7 +864,7 @@ class State:
             self.write_song(new)
             self.meta["mix"] = {}
             self.save_meta()
-            self.reload()
+            self.reload(archive=False)
         self._put(0, ("build", False))
 
     # ---- build / export
@@ -940,6 +967,7 @@ class State:
                 "candidates": cands, "build": self.build, "stems": self.stems,
                 "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
+                "archives": sorted(p.name for p in self.base_dir.glob(self.song_path.stem + ".notes-*.md")),
                 "queue": sum(1 for r in self.renders.values() if r["status"] in ("queued", "rendering")),
                 "cache": sum(1 for r in self.renders.values() if r["status"] == "ready"),
             }
