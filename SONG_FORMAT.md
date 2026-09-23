@@ -76,7 +76,7 @@ a letter.
 | `compatible_gxx` | bool | false | IT "compatible Gxx" mode (keep false) |
 | `channels` | 1–64, or list | required | channel count, or one entry per channel |
 | `message` | text | none | song message stored in the file |
-| `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points follow and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player; the file grows accordingly. Needs numpy. |
+| `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points follow and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
@@ -341,7 +341,8 @@ but not in the list produce a warning.
 
 At most 64 channels, 99 samples, 99 instruments, 200 rows per pattern, 255 orders and 25 envelope nodes.
 `check` reports all errors at once as `file:line: error: ...`, plus warnings (unused patterns,
-notes that map to no sample). Common mistakes it catches:
+notes that map to no sample, samples played so far below their stored rate that interpolation images reach
+the audible band). Common mistakes it catches:
 - lower-case notes, flats, or `C5` instead of `C-5`
 - effect letters that are digits (MOD/XM style `A08` is fine; `008` is not)
 - lower-case effect letters

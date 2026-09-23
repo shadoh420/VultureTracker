@@ -114,6 +114,34 @@ def resample(x, rate_in, rate_out, taps=64, loops=()):
     return y
 
 
+def _interpolator_response():
+    """|H|^2 of libopenmpt's 8-tap interpolator against frequency in units of the sample's stored rate. Measured by
+    playing a one-frame impulse five octaves down: an 8-tap Kaiser-windowed sinc (beta 9.75, cutoff 0.48 of the rate)
+    matches it within 0.7 dB down to -54 dB."""
+    t = (np.arange(8 * 64) - 8 * 64 / 2) / 64
+    p = np.abs(np.fft.rfft(np.sinc(0.96 * t) * np.kaiser(8 * 64, 9.75), 1 << 15)) ** 2
+    return np.fft.rfftfreq(1 << 15) * 64, p / p[0]
+
+
+def image_level(channels, rate, ceiling=19845.0):
+    """How loud the interpolation images of a sample played at `rate` frames per second are under `ceiling` Hz (the
+    oversampled render's cut at 0.45 of 44.1 kHz), in dB against the sample as played; None when every image lands
+    above it. A sample played slower than it is stored leaves copies of its spectrum at k * rate -/+ f; the interpolator
+    weakens those least for content near the sample's own Nyquist frequency, and the render removes only what lands
+    above `ceiling`. Within 1 dB of rendered white noise from 4 to 24 semitones below the root."""
+    if rate >= 2 * ceiling or not len(channels[0]):
+        return None
+    p = sum(np.abs(np.fft.rfft(np.asarray(ch, float))) ** 2 for ch in channels)
+    band = np.minimum((np.fft.rfftfreq(len(channels[0])) * 1024).astype(int), 511)
+    p = np.bincount(band, p, 512)                           # 512 bands keep very low notes (many images) cheap
+    nu = (np.arange(512) + 0.5) / 1024                      # band centres, cycles per stored frame
+    u, h2 = _interpolator_response()
+    direct = (p * np.interp(nu, u, h2)).sum()
+    images = sum((p * np.interp(f, u, h2) * (f * rate < ceiling)).sum()
+                 for k in range(1, int(ceiling / rate) + 2) for f in (k - nu, k + nu))
+    return 10 * math.log10(images / direct + 1e-30) if direct > 0 else None
+
+
 def resample_pcm(channels, rate_in, rate_out, bits=16, loops=()):
     """Integer PCM channels (lists) resampled and clipped back to `bits`; `loops` as for `resample`."""
     lim = 2 ** (bits - 1)

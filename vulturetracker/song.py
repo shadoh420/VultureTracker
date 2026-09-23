@@ -614,9 +614,10 @@ def _pattern(ctx, name, spec, line, num_channels):
     return Pattern(str(name), grid), lines
 
 
-def _check_pattern_refs(ctx, mod, pat, lines, where, declared):
+def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest):
     """Cross-reference checks that need the whole module. `declared`: instrument (or, in sample
-    mode, sample) numbers defined in the song."""
+    mode, sample) numbers defined in the song. `lowest` collects sample number -> (the lowest
+    note it plays, line, place) for `_check_images`."""
     insmode = mod.instruments is not None
     kind = "instrument" if insmode else "sample"
     last_ins = [0] * len(mod.channels)
@@ -629,11 +630,16 @@ def _check_pattern_refs(ctx, mod, pat, lines, where, declared):
                     ctx.error(line, f"{at}: {kind} {cell.instrument:02d} is not defined")
                     continue
                 last_ins[ch] = cell.instrument
-            if insmode and cell.note is not None and cell.note < 120 and last_ins[ch]:
-                ins = mod.instruments[last_ins[ch] - 1]
-                if ins and ins.keymap[cell.note][1] == 0:
-                    ctx.warn(line, f"{at}: {notation.format_note(cell.note)} has no sample in instrument "
-                                   f"{last_ins[ch]:02d} '{ins.name}' keymap (plays silence)")
+            if cell.note is not None and cell.note < 120 and last_ins[ch]:
+                play, smp = cell.note, last_ins[ch]
+                if insmode:
+                    ins = mod.instruments[last_ins[ch] - 1]
+                    play, smp = ins.keymap[cell.note] if ins else (play, 0)
+                    if ins and smp == 0:
+                        ctx.warn(line, f"{at}: {notation.format_note(cell.note)} has no sample in instrument "
+                                       f"{last_ins[ch]:02d} '{ins.name}' keymap (plays silence)")
+                if smp and (smp not in lowest or play < lowest[smp][0]):
+                    lowest[smp] = (play, line, at)
             letter = chr(ord("A") + cell.effect - 1) if cell.effect else ""
             if letter == "B" and cell.param >= len(mod.orders):
                 ctx.error(line, f"{at}: B{cell.param:02X} jumps to order {cell.param} but the order list has {len(mod.orders)} entries")
@@ -735,10 +741,33 @@ def compile_tree(tree, ctx, base_dir) -> Module:
             if idx not in used:
                 ctx.warn(_line(pats, name), f"pattern '{name}' is not used in the order list")
 
+    lowest = {}
     for pat, lines in zip(mod.patterns, pat_lines):
         _check_pattern_refs(ctx, mod, pat, lines, f"pattern '{pat.name}'",
-                            instrument_numbers if mod.instruments is not None else sample_numbers)
+                            instrument_numbers if mod.instruments is not None else sample_numbers, lowest)
+    _check_images(ctx, mod, lowest)
     return mod
+
+
+IMAGE_LIMIT = -60   # dB: the loudest interpolation images a sample's lowest note may leave under 20 kHz
+
+
+def _check_images(ctx, mod, lowest):
+    """Warn when a note plays a sample so far below its stored rate that the player's interpolation images reach the
+    audible band (resample.image_level): a bright sample stored at 44.1 kHz does from about four semitones down."""
+    try:
+        from .resample import image_level
+    except ImportError:     # no numpy, nothing to measure with
+        return
+    # ponytail: the lowest note only; slides, vibrato and pitch envelopes that go lower are not checked
+    for num, (note, line, at) in sorted(lowest.items()):
+        smp = mod.samples[num - 1] if num <= len(mod.samples) else None
+        db = image_level(smp.data, smp.c5_speed * 2 ** ((note - 60) / 12)) if smp and smp.data else None
+        if db is not None and db > IMAGE_LIMIT:
+            ctx.warn(line, f"{at}: {notation.format_note(note)} plays sample {num:02d} '{smp.name}' so far below its "
+                           f"stored rate that its interpolation images reach {db:.0f} dB under 20 kHz (limit "
+                           f"{IMAGE_LIMIT}); play it higher, add a lower multisample, or store it at a higher rate "
+                           f"(module sample_rate: 88200)")
 
 
 def load_song_text(text, base_dir=".", filename="<song>"):

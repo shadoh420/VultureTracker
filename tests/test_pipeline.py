@@ -308,6 +308,23 @@ class TestValidation(Base):
                          "bad.yaml:10: error: orders: unknown pattern 'nothere'"]:
             self.assertIn(expected, text)
 
+    def test_pitch_down_images_warn(self):
+        write_wav(self.dir / "bright.wav", RATE, [sine(18000)])
+
+        def warned(cell, module=""):
+            text = f"""
+                module: {{channels: 1{module}}}
+                samples: {{1: {{file: bright.wav}}, 2: {{file: high.wav}}}}
+                patterns: {{p: "{cell}\\n"}}
+                orders: [p]
+            """
+            return any("interpolation images" in w for w in load_song_text(textwrap.dedent(text), self.dir)[1])
+
+        self.assertFalse(warned("C-5 01"))                            # at its root every image is above 20 kHz
+        self.assertTrue(warned("C-4 01"))                             # an octave down 18 kHz images at 13 kHz
+        self.assertFalse(warned("C-4 01", ", sample_rate: 88200"))    # stored at twice the rate: above 20 kHz again
+        self.assertFalse(warned("C-3 02"))                            # a 2.2 kHz tone two octaves down: images too weak
+
 
 class TestWav(Base):
     def test_formats(self):
