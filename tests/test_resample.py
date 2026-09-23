@@ -1,4 +1,5 @@
 """The resampler must not image when raising a rate nor fold when lowering one, and must keep level."""
+import tempfile
 import unittest
 
 try:
@@ -43,6 +44,44 @@ class ResampleTest(unittest.TestCase):
         spec = np.abs(np.fft.rfft(y * np.hanning(len(y))))
         f = np.fft.rfftfreq(len(y), 1 / 22050)
         self.assertAlmostEqual(f[np.argmax(spec)], 440, delta=2)
+
+    def test_compiled_loop_wraps_smoothly(self):
+        """A loop running to the sample's end used to be interpolated against silence past it: a click on each pass."""
+        from vulturetracker import api
+        from vulturetracker.wavload import write_wav
+        x = np.rint(12000 * np.sin(2 * np.pi * np.arange(512) / 32)).astype(int).tolist()   # 16 whole cycles
+        with tempfile.TemporaryDirectory() as d:
+            write_wav(f"{d}/tone.wav", 22050, [x])
+            _, mod, _ = api.compile_song("module: {channels: 1, sample_rate: 44100}\n"
+                                         "samples:\n  1: {file: tone.wav, loop: {start: 0}}\n"
+                                         "patterns:\n  p: |\n    C-5 01 v64 ...\norders: [p]\n", d)
+        smp = mod.samples[0]
+        self.assertEqual((smp.loop.start, smp.loop.end, smp.length), (0, 1024, 1024))
+        y = np.array(smp.data[0], float)
+        wrap = np.abs(np.diff(np.concatenate([y[-3:], y[:3]]), 2)).max()   # second differences across the wrap
+        self.assertLess(wrap, 1.05 * np.abs(np.diff(y, 2)).max())
+
+    def test_loop_entry_and_exit_run_on(self):
+        """A loop whose start lands between output frames: playback runs into it and, after a sustain loop's release,
+        out of it without a jump (a pure tone's second-order prediction error stays at the interpolation's level)."""
+        from vulturetracker.resample import resample
+        x = 12000 * np.sin(2 * np.pi * np.arange(4000) / 32)            # 16 whole cycles in the loop below
+        y = resample(x, 16000, 44100, loops=[(3120, 3632, False)])      # 3120 frames land on output frame 8599.5
+        c = 2 * np.cos(2 * np.pi / 32 * 16000 / 44100)
+        err = np.abs(y[2:] - c * y[1:-1] + y[:-2]) / 12000
+        for edge in (8600, 8600 + 1411):                                   # the loop's first frame, the frame after its last
+            self.assertLess(err[edge - 6: edge + 4].max(), 1e-3)
+
+    def test_sustain_loop_inside_the_main_loop(self):
+        """Held, the sustain loop wraps; released, the main loop plays through the sustain loop's frames: no jump in
+        either (both loops hold whole cycles of the tone)."""
+        from vulturetracker.resample import resample, scale_loop
+        x = 12000 * np.sin(2 * np.pi * np.arange(2000) / 40)
+        y = resample(x, 16000, 44100, loops=[(0, 2000, False), (1000, 1520, False)])
+        (s1, e1, _), (s2, e2, _) = (scale_loop(a, b, False, 16000, 44100) for a, b in ((0, 2000), (1000, 1520)))
+        c = 2 * np.cos(2 * np.pi / 40 * 16000 / 44100)
+        for play in (np.concatenate([y[s1:e2], y[s2:e2], y[s2:e2]]), np.tile(y[s1:e1], 3)):
+            self.assertLess((np.abs(play[2:] - c * play[1:-1] + play[:-2]) / 12000).max(), 1e-3)
 
 
 if __name__ == "__main__":

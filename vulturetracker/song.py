@@ -271,8 +271,8 @@ LOOP_KEYS = ["start", "end", "type"]
 VIBRATO_KEYS = ["type", "speed", "depth", "rate"]
 
 
-def _loop(ctx, spec, line, wav, length, where, scale=1.0):
-    """`scale` maps loop points given in the WAV file's own frames onto a resampled sample."""
+def _loop(ctx, spec, line, wav, length, where):
+    """Loop points in the WAV file's own frames (`length` of them)."""
     if spec is None or spec is False or spec == "none":
         return None
     if spec == "from_wav":
@@ -280,12 +280,14 @@ def _loop(ctx, spec, line, wav, length, where, scale=1.0):
             ctx.error(line, f"{where}: 'from_wav' but the WAV file has no loop points (smpl chunk)")
             raise _Bad
         s, e, pp = wav.loops[0]
+        if min(e, length) <= s:
+            ctx.error(line, f"{where}: the WAV file's loop ({s}..{e}) is empty or past its {length} frames")
+            raise _Bad
         return Loop(s, min(e, length), pp)
     m = _map(ctx, spec, line, where)
     _check_keys(ctx, m, LOOP_KEYS, where)
-    src_len = round(length / scale)
-    start = round(_int(ctx, m, "start", 0, src_len, 0, where) * scale)
-    end = round(_int(ctx, m, "end", 0, src_len, src_len, where) * scale)
+    start = _int(ctx, m, "start", 0, length, 0, where)
+    end = _int(ctx, m, "end", 0, length, length, where)
     if end <= start:
         ctx.error(m.line, f"{where}: end ({end}) must be greater than start ({start}); sample length is {length}")
         raise _Bad
@@ -293,18 +295,19 @@ def _loop(ctx, spec, line, wav, length, where, scale=1.0):
     return Loop(start, end, pp)
 
 
-_RESAMPLED = {}  # (path, mtime, size, rate, bits) -> resampled channels: the GUI compiles the same song many times
+_RESAMPLED = {}  # (path, mtime, size, rate, bits, loops) -> resampled channels: the GUI compiles the same song many times
 
 
-def _resampled(path, wav, target, resample_pcm):
-    """`wav.channels` resampled to `target`, memoised on the file's stamp (kept as compact arrays: a song's samples add up)."""
+def _resampled(path, wav, target, loops, resample_pcm):
+    """`wav.channels` resampled to `target` with its `loops` kept seamless, memoised on the file's stamp (kept as
+    compact arrays: a song's samples add up)."""
     from array import array
     st = path.stat()
-    k = (str(path), st.st_mtime, st.st_size, target, wav.out_bits)
+    k = (str(path), st.st_mtime, st.st_size, target, wav.out_bits, tuple(loops))
     if k not in _RESAMPLED:
         while len(_RESAMPLED) >= 64:
             _RESAMPLED.pop(next(iter(_RESAMPLED)))
-        _RESAMPLED[k] = [array("i", c) for c in resample_pcm(wav.channels, wav.rate, target, wav.out_bits)]
+        _RESAMPLED[k] = [array("i", c) for c in resample_pcm(wav.channels, wav.rate, target, wav.out_bits, loops)]
     return [c.tolist() for c in _RESAMPLED[k]]
 
 
@@ -327,17 +330,23 @@ def _sample(ctx, num, spec, line, base_dir):
     except WavError as e:
         ctx.error(_line(m, "file"), f"{where}: {e}")
         raise _Bad
-    scale = 1.0
+    frames = len(wav.channels[0]) if wav.channels else 0
+    if frames == 0:
+        ctx.error(_line(m, "file"), f"{where}: WAV file contains no audio")
+        raise _Bad
+    loop = _loop(ctx, m.get("loop"), _line(m, "loop"), wav, frames, f"{where} loop")
+    sustain_loop = _loop(ctx, m.get("sustain_loop"), _line(m, "sustain_loop"), wav, frames, f"{where} sustain_loop")
     target = getattr(ctx, "sample_rate", None)
     if target and target != wav.rate:   # module sample_rate: band-limited resampling, so playback neither images nor aliases
         try:
-            from .resample import resample_pcm
+            from .resample import place_loops, resample_pcm
         except ImportError:
             ctx.error(_line(m, "file"), f"{where}: the module's sample_rate needs numpy (pip install numpy)")
             raise _Bad
-        scale = target / wav.rate
-        wav = WavData(target, wav.bits, _resampled(path, wav, target, resample_pcm), wav.out_bits,
-                      [(round(s * scale), round(e * scale), pp) for s, e, pp in wav.loops], wav.root)
+        loops = [(lp.start, lp.end, lp.pingpong) for lp in (loop, sustain_loop) if lp]
+        placed = iter(place_loops(loops, wav.rate, target))
+        loop, sustain_loop = (lp and Loop(*next(placed)) for lp in (loop, sustain_loop))
+        wav = WavData(target, wav.bits, _resampled(path, wav, target, loops, resample_pcm), wav.out_bits, [], wav.root)
     smp = Sample()
     smp.name = _text(ctx, m, "name", path.stem[:25], 25, where)
     smp.filename = path.name[:12]
@@ -352,9 +361,6 @@ def _sample(ctx, num, spec, line, base_dir):
         smp.data = [[v >> 8 for v in ch] for ch in smp.data]
     elif smp.bits == 16 and wav.out_bits == 8:
         smp.data = [[v << 8 for v in ch] for ch in smp.data]
-    if smp.length == 0:
-        ctx.error(_line(m, "file"), f"{where}: WAV file contains no audio")
-        raise _Bad
     smp.volume = _int(ctx, m, "volume", 0, 64, 64, where)
     smp.global_volume = _int(ctx, m, "global_volume", 0, 64, 64, where)
     smp.pan = _int(ctx, m, "pan", 0, 64, None, where) if m.get("pan") is not None else None
@@ -365,8 +371,7 @@ def _sample(ctx, num, spec, line, base_dir):
     else:
         base = _note(ctx, m, "base_note", "C-5", where)
         smp.c5_speed = round(wav.rate * 2 ** ((60 - base) / 12))
-    smp.loop = _loop(ctx, m.get("loop"), _line(m, "loop"), wav, smp.length, f"{where} loop", scale)
-    smp.sustain_loop = _loop(ctx, m.get("sustain_loop"), _line(m, "sustain_loop"), wav, smp.length, f"{where} sustain_loop", scale)
+    smp.loop, smp.sustain_loop = loop, sustain_loop
     if m.get("vibrato") is not None:
         v = _map(ctx, m["vibrato"], _line(m, "vibrato"), f"{where} vibrato")
         w = f"{where} vibrato"

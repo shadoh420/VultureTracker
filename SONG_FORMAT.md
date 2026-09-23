@@ -76,7 +76,7 @@ a letter.
 | `compatible_gxx` | bool | false | IT "compatible Gxx" mode (keep false) |
 | `channels` | 1–64, or list | required | channel count, or one entry per channel |
 | `message` | text | none | song message stored in the file |
-| `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited, loop points follow). Samples stored at the playback rate neither image nor alias in the player; the file grows accordingly. Needs numpy. |
+| `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points follow and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player; the file grows accordingly. Needs numpy. |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
