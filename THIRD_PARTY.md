@@ -13,6 +13,7 @@ the tools and libraries that are only ever installed and run separately.
 | libogg (`openmpt-ogg.dll`) by Xiph.Org | with libopenmpt | BSD-3-Clause | `vendor/Licenses/License.ogg.txt` |
 | libvorbis (`openmpt-vorbis.dll`) by Xiph.Org | with libopenmpt | BSD-3-Clause | `vendor/Licenses/License.Vorbis.txt` |
 | zlib (`openmpt-zlib.dll`) by Jean-loup Gailly and Mark Adler | with libopenmpt | zlib License | `vendor/Licenses/License.zlib.txt` |
+| libopenmpt compiled to WebAssembly (`vulturetracker/web/libopenmpt.js` + `.wasm`, the official 0.8.9+release dev.js build, for the live engine) | 0.8.9 | BSD-3-Clause and BSL-1.0, with minimp3 (CC0), miniz (MIT) and stb_vorbis (MIT / public domain) compiled in | `vulturetracker/web/licenses/` |
 
 ## Only inside the exe (Python packages packed by PyInstaller)
 
@@ -32,6 +33,14 @@ the tools and libraries that are only ever installed and run separately.
 | PyInstaller bootloader | 6.22.3 | GPL-2.0-or-later with the bootloader exception (the packed program keeps its own license) | https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt |
 
 The exe deliberately excludes pedalboard and mido (see below); `synth` and `audition` need a source checkout.
+
+## Beside the exe (`dist/ffmpeg.exe`, shipped as its own file)
+
+| Component | Version | License | License text and source |
+|---|---|---|---|
+| [FFmpeg](https://ffmpeg.org), the "essentials" Windows build by gyan.dev as shipped in imageio-ffmpeg 0.6.0 | 7.1 | GPL-3.0 (built with `--enable-gpl --enable-version3`) | `ffmpeg.exe -L` prints it; source for the build: https://www.gyan.dev/ffmpeg/builds/ and https://github.com/FFmpeg/FFmpeg (tag n7.1). A separate program the app runs for the MP3/OGG/FLAC export; not linked into the exe |
+
+In a source checkout the same binary comes from the `imageio-ffmpeg` package (BSD-2-Clause), or any ffmpeg on PATH.
 
 ## Installed and run separately, never redistributed here
 

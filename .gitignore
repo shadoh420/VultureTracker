@@ -16,6 +16,7 @@ demo3/*.it
 demo3/*.wav
 tools/synths/
 tools/royalty-free/
+tools/libopenmpt-js/
 samples/local/
 demo4/*.it
 demo4/*.wav

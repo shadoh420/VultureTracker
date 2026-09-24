@@ -47,6 +47,8 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .fail{margin-top:8px;display:flex;align-items:flex-start;gap:8px;padding:7px 8px;background:#1d1414;font:10.5px/1.5 var(--mono);color:#e0a09a}.fail b{font-family:inherit;color:var(--red);letter-spacing:.1em;font-size:10px;flex:none}
 .bottom{flex:none;height:60px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--bar);box-shadow:inset 0 1px 0 #2a3135}
 .play{width:36px;height:36px;display:grid;place-items:center;cursor:pointer;font-size:15px;color:#0c1a0f;background:var(--acc)}
+.loopbar{position:relative;height:6px;margin-bottom:2px;background:#0d1012;cursor:ew-resize}.loopbar i{position:absolute;top:0;bottom:0;background:var(--amber);opacity:.75}
+.lf{width:38px;padding:2px 3px;font:10px var(--mono)}
 .prog{position:relative;height:11px;background:#0b0e0f;cursor:pointer}.prog i{position:absolute;left:0;top:0;bottom:0;background:rgba(126,231,135,.25)}.prog b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--acc)}
 table{border-collapse:collapse;width:100%;font-size:11px}th{text-align:left;font-size:9px;letter-spacing:.1em;color:var(--dim);padding:4px 8px;box-shadow:inset 0 -1px 0 #0a0c0d;white-space:nowrap}td{padding:4px 8px;box-shadow:inset 0 -1px 0 #0a0c0d;font-family:var(--mono);font-size:10.5px;white-space:nowrap}
 #slots{table-layout:fixed}th.r,td.r{text-align:right}td.file{overflow:hidden;text-overflow:ellipsis;color:var(--dim)}td.sans{font-family:inherit;font-size:11.5px;overflow:hidden;text-overflow:ellipsis}td.dimc{color:#4a5255}
@@ -72,15 +74,24 @@ input[type=range]{-webkit-appearance:none;flex:1;min-width:30px;height:4px;margi
 .badge{flex:none;padding:3px 7px;white-space:nowrap;font:10px/1.3 var(--mono);color:var(--acc);background:#16201a}
 #patscroll{position:relative}
 .pathead{display:flex;position:sticky;top:0;z-index:2;background:var(--panel);padding:4px 0 3px;box-shadow:inset 0 -1px 0 #0a0c0d;font:8.5px/1 var(--mono);color:var(--dim);white-space:nowrap}.pathead span{width:86px;flex:none;overflow:hidden}.pathead span:first-child{width:26px;position:sticky;left:0;z-index:1;background:var(--panel)}.pathead span.off{color:#4a5255}
-.pt{display:flex;font:10px/15px var(--mono);white-space:pre}.pt.b4{background:rgba(255,255,255,.022)}.pt.b16{background:rgba(143,176,196,.055)}.pt.play{background:rgba(126,231,135,.13)}
-.rn{width:26px;flex:none;position:sticky;left:0;z-index:1;background:var(--panel);color:#4a5255;font-variant-numeric:tabular-nums}.pt.b4 .rn{background:#161a1c;color:#6d777c}.pt.b16 .rn{background:#171c20;color:#8fb0c4}.pt.play .rn{background:#1b2c20;color:var(--acc)}
-.pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pt.play .pc .n{color:#eaf6ec}
+.pt{display:flex;font:10px/15px var(--mono);white-space:pre}.pt.b4{background:rgba(255,255,255,.022)}.pt.b16{background:rgba(143,176,196,.055)}.pt.now{background:rgba(126,231,135,.13)}
+.rn{width:26px;flex:none;position:sticky;left:0;z-index:1;background:var(--panel);color:#4a5255;font-variant-numeric:tabular-nums}.pt.b4 .rn{background:#161a1c;color:#6d777c}.pt.b16 .rn{background:#171c20;color:#8fb0c4}.pt.now .rn{background:#1b2c20;color:var(--acc)}
+.pt.cur .rn{box-shadow:inset 3px 0 0 var(--amber);color:var(--amber)}.pt.cur{background:rgba(217,164,65,.07)}
+.sl{background:rgba(95,125,148,.38)}.cc{box-shadow:inset 0 0 0 1px var(--amber)}#pat.editing .cc{background:var(--amber);color:#1a1508!important}#pat.editing .pt.cur{background:rgba(217,164,65,.14)}
+.pathead span{position:relative}.lvu{position:absolute;left:0;bottom:-3px;height:2px;background:var(--acc);width:0}
+.pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pt.now .pc .n{color:#eaf6ec}.pt.now .pc .n.z{color:#3d4a42}
 /* listening notes: the tag bar under the player, channel chips, the notes tab */
 .notesbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 12px 6px;background:var(--panel2);box-shadow:inset 0 1px 0 #2a3135}
 .tagb{padding:5px 9px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:#c3cbcf;background:#1b2124;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d;user-select:none;white-space:nowrap}.tagb:hover{color:var(--hi);background:#232a2e}
 .chipc{padding:2px 6px;cursor:pointer;font:9.5px/1.3 var(--mono);color:var(--dim);background:#0f1416;box-shadow:inset 0 0 0 1px #1f262a;white-space:nowrap;user-select:none}.chipc:hover{color:var(--ink)}.chipc.on{color:#0c1a0f;background:var(--acc);box-shadow:none}.chipc.off{opacity:.35}
 .noterow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}.noterow.full{padding:6px 8px;background:var(--panel);box-shadow:inset 1px 1px 0 #21272a,inset -1px -1px 0 #080a0b}
 option.hascand{color:var(--acc);font-weight:700}
+/* instrument panel: the slot's instrument, per-note movement the tracker plays */
+.vrow{display:flex;align-items:center;gap:6px;padding:2px 0;font:8.5px/1 var(--mono);color:#5c6569;white-space:nowrap}.vrow .vl{width:72px;flex:none;letter-spacing:.06em}.vrow .vv{width:96px;flex:none;text-align:right;color:#c3cbcf;overflow:hidden;text-overflow:ellipsis}
+.tv{cursor:text}.tv:hover{color:var(--acc)!important;text-decoration:underline dotted}
+.typein{font:10px var(--mono);color:var(--hi);background:#0b0e0f;box-shadow:inset 0 0 0 1px var(--acc);padding:0 4px}
+.vkey{display:inline-block;width:10px;height:2px;vertical-align:middle;margin-right:3px}
+.drop{outline:1px dashed var(--acc);outline-offset:-2px}
 </style></head><body><div id="app">
 <div class="top">
   <div class="logo"><i></i><b>VULTURETRACKER</b></div>
@@ -94,20 +105,30 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab on" data-t="tryout" onclick="tab('tryout')">TRYOUT</div>
   <div class="tab" data-t="overview" onclick="tab('overview')">SONG OVERVIEW</div>
   <div class="tab" data-t="pattern" onclick="tab('pattern')">PATTERN</div>
+  <div class="tab" data-t="song" onclick="tab('song')">SONG</div>
+  <div class="tab" data-t="ins" onclick="tab('ins')">INSTRUMENTS</div>
+  <div class="tab" data-t="smp" onclick="tab('smp')">SAMPLES</div>
+  <div class="tab" data-t="spectrum" onclick="tab('spectrum')">SPECTRUM</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
 </div>
 
 <div class="main on" id="t-tryout">
-  <div class="col" style="width:320px;flex:none">
+  <div class="col" style="width:320px;flex:none;overflow-y:auto">
     <div class="panel" style="flex:none">
       <div class="ph"><span class="k" style="white-space:nowrap">SLOT</span><select id="slotsel" onchange="act('slot',{slot:+this.value})" style="font:11px var(--mono);padding:2px 4px"></select></div>
       <div class="pb" id="slotinfo"></div>
     </div>
-    <div class="panel" style="flex:1;min-height:0;overflow:auto">
+    <div class="panel" style="flex:none">
+      <div class="ph" style="gap:6px"><span class="k" id="voicetitle" style="cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" onclick="toggleVoice()" title="fold or unfold">INSTRUMENT</span><span id="voicebtns" style="display:flex;gap:2px;flex:none"><span class="btn sm" onclick="resetVoice()" title="drop this instrument's unwritten settings">RESET</span><span class="btn sm" style="color:#9df0a5;background:#1f3326" onclick="showDiff('/api/mixdiff','WRITE MIX TO SONG',()=>act('applymix'))" title="write the unwritten mix, these settings included, into the song; shows the change first">WRITE</span></span></div>
+      <div class="pb" id="voice" style="padding:4px 10px 8px"></div>
+    </div>
+    <div class="panel" style="flex:1 0 auto;min-height:150px">
       <div class="ph"><span class="k">SECTION TO LOOP</span><span class="mono" id="looplabel" style="font-size:10px;color:#c3cbcf"></span></div>
       <div class="pb">
         <div style="display:flex;gap:2px;margin-bottom:10px"><span class="btn" id="p1" style="flex:1;text-align:center;padding:5px 6px" onclick="preset(1)">1 ORDER</span><span class="btn" id="p4" style="flex:1;text-align:center;padding:5px 6px" onclick="preset(4)">4 ORDERS</span><span class="btn" id="pall" style="flex:1;text-align:center;padding:5px 6px" onclick="preset(0)">WHOLE SONG</span></div>
+        <div style="display:grid;grid-template-columns:auto auto 1fr;gap:3px 6px;align-items:center;margin-bottom:10px;font:9.5px var(--mono);color:var(--dim)" title="loop a span of what plays, the song or a candidate: playback only, the render stays the section above (or drag on the strip above the progress bar) · Enter or SET applies"><span class="k">LOOP FROM</span><span>ord <input class="lf" id="lf0" type="number" min="0" onkeydown="if(event.key==='Enter')loopFields()"> row <input class="lf" id="lf1" type="number" min="0" onkeydown="if(event.key==='Enter')loopFields()"></span><span style="display:flex;gap:2px;justify-content:flex-end"><span class="btn sm" onclick="loopFields()">SET</span><span class="btn sm" onclick="act('loop',{})">OFF</span></span><span class="k" style="text-align:right">TO</span><span>ord <input class="lf" id="lf2" type="number" min="0" onkeydown="if(event.key==='Enter')loopFields()"> row <input class="lf" id="lf3" type="number" min="0" onkeydown="if(event.key==='Enter')loopFields()"></span></div>
+        <div id="looptext" style="margin:-6px 0 10px;font:9.5px var(--mono);color:var(--dim)"></div>
         <div id="layers"></div>
         <div style="margin-top:8px;font-size:10px;color:var(--dim)">click an order to start the loop there · bright cells: where this slot plays</div>
       </div>
@@ -125,7 +146,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="btn" onclick="addCands()">ADD</span>
       </div>
     </div>
-    <div class="panel" style="flex:1;min-height:0;overflow:auto;background:var(--panel2)" id="cands"></div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto;background:var(--panel2)" id="cands" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>act('add',{globs:p.join('\n')}))"></div>
   </div>
   <div class="col" style="width:340px;flex:none">
     <div class="panel" style="flex:1;min-height:0;overflow:auto">
@@ -139,7 +160,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="panel col" style="width:var(--stemsw);flex:none">
     <div class="ph" style="position:static"><span class="k">STEMS · <span id="stemsn"></span></span><span class="state" id="stemstate"></span></div>
     <div id="stemlist" style="flex:1;min-height:0;overflow:auto;padding:4px 6px"></div>
-    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px;margin-bottom:3px"><span class="btn" id="writemix" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="showDiff('/api/mixdiff','WRITE MIX TO SONG',()=>act('applymix'))" title="write the faders into the song file (module.channels volume/pan, mix_volume, sample global_volume); shows the change first">WRITE MIX → SONG</span><span class="btn" onclick="resetMix()" title="drop the unwritten fader values">RESET MIX</span></div><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems')" title="one WAV per playing channel, next to the song (the song as written)">EXPORT STEMS</span><span class="btn" onclick="resetStems()" title="clear mutes and solo">UNMUTE</span></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
+    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px;margin-bottom:3px"><span class="btn" id="writemix" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="showDiff('/api/mixdiff','WRITE MIX TO SONG',()=>act('applymix'))" title="write the faders into the song file (module.channels volume/pan, mix_volume, sample global_volume); shows the change first">WRITE MIX → SONG</span><span class="btn" onclick="resetMix()" title="drop the unwritten fader values">RESET MIX</span></div><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems')" title="one WAV per playing channel, next to the song (the song as written)">EXPORT STEMS</span><span class="btn" onclick="resetStems()" title="clear mutes and solo">UNMUTE</span></div><div style="display:flex;gap:2px;margin-top:3px;align-items:center"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems',{fmt:$('expfmt').value,song:true,stems:$('mp3stems').checked})" title="the whole song next to the song file (the song as written), encoded by ffmpeg: MP3 192 kbit/s, Ogg Vorbis q6 (about 192 kbit/s, loops gaplessly), FLAC lossless">EXPORT SONG AS</span><select id="expfmt" style="font:9.5px var(--mono);padding:1px 2px"><option value="mp3">MP3</option><option value="ogg">OGG</option><option value="flac">FLAC</option></select><label style="display:flex;align-items:center;gap:4px;padding:0 6px;font-size:9.5px;letter-spacing:.08em;color:var(--dim);cursor:pointer" title="also one file per playing channel, in the chosen format, in the stems folder"><input type="checkbox" id="mp3stems" style="margin:0">+ STEMS</label></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
   </div>
   <div class="handle" onmousedown="drag(event,'--stemsw',1,200,420)"><i></i></div>
   <div class="col" style="flex:1;min-width:560px">
@@ -157,10 +178,101 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="main" id="t-pattern">
   <div class="panel col" style="flex:1;min-width:0">
     <div style="flex:none;padding:7px 10px;box-shadow:inset 0 -1px 0 #0a0c0d">
-      <div style="display:flex;align-items:baseline;gap:10px"><span class="k" id="pattitle" style="white-space:nowrap">PATTERN VIEW</span><span class="mono" id="patrow" style="font-size:10px;color:var(--acc);white-space:nowrap"></span><span style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">follows the playhead while the tryout plays · read only: edits happen in the YAML or your tracker</span></div>
+      <div style="display:flex;align-items:baseline;gap:10px"><span class="k" id="pattitle" style="white-space:nowrap">PATTERN VIEW</span><span class="mono" id="patrow" style="font-size:10px;color:var(--acc);white-space:nowrap"></span><span id="pathelp" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">click a cell for the cursor · Esc: edit mode (keys write into the song file, in place; Ctrl+Z undoes)</span></div>
+      <div id="livebar" style="display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap">
+        <span class="k" style="margin-right:2px" title="the live engine: libopenmpt compiled to WebAssembly, playing in the page's audio thread the whole song as it is now (the unwritten mix in)">LIVE</span>
+        <span class="btn sm" id="lv-cur" onclick="lvPlayCursor()" title="play from the cursor (Space, F7; Space again stops)">▶ FROM CURSOR</span><span class="btn sm" onclick="lvPlay(0,0)" title="play the song from its start">▶ SONG</span><span class="btn sm" id="lv-pat" onclick="lvLoopPattern()" title="loop the pattern at the cursor (F6)">↻ PATTERN</span><span class="btn sm" onclick="lvStop()" title="stop (F8)">■</span>
+        <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
+        <span class="k" style="margin-left:8px">INS</span><select id="lv-ins" style="font:10px var(--mono);padding:1px 3px;max-width:190px" title="the instrument the piano keys play (preview) and enter (edit mode): Z to M and Q to U, two octaves from OCT"></select><span class="k">OCT</span><input id="lv-oct" type="number" min="0" max="8" value="5" style="width:36px;font:10px var(--mono);padding:1px 3px">
+        <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
+        <span class="mono" id="lv-status" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right"></span>
+      </div>
+      <div id="selbar" style="display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap">
+        <span class="k" title="drag over cells, or Shift with the arrows; Ctrl+A the pattern, Ctrl+L the channel; without a selection the commands work on the cursor's cell">SELECTION</span><span class="mono" id="selinfo" style="font-size:10px;color:#c3cbcf;min-width:130px"></span>
+        <span class="btn sm" onclick="selCopy(false)" title="Ctrl+C (also to the system clipboard, as song rows)">COPY</span><span class="btn sm" onclick="selCopy(true)" title="Ctrl+X">CUT</span><span class="btn sm" id="sel-paste" onclick="selPaste(false)" title="paste at the cursor, overwriting (Ctrl+V)">PASTE</span><span class="btn sm" id="sel-mix" onclick="selPaste(true)" title="paste only into empty fields (Ctrl+Shift+V)">MIX</span><span class="btn sm" id="sel-flood" onclick="selPaste(false,true)" title="paste again and again from the cursor to the end of the pattern (Ctrl+Alt+V)">FLOOD</span><span class="btn sm" onclick="selClear()" title="clear the selected fields (Delete)">CLEAR</span>
+        <span class="k" style="margin-left:8px">TRANSPOSE</span><span class="btn sm" onclick="selTranspose(-12)" title="Ctrl+Shift+Down">−12</span><span class="btn sm" onclick="selTranspose(-1)" title="Ctrl+Down">−1</span><span class="btn sm" onclick="selTranspose(1)" title="Ctrl+Up">+1</span><span class="btn sm" onclick="selTranspose(12)" title="Ctrl+Shift+Up">+12</span><label style="display:flex;align-items:center;gap:3px;font-size:9.5px;color:var(--dim)" title="only notes whose cell names the INS instrument"><input type="checkbox" id="sel-ins" style="margin:0">INS ONLY</label>
+        <span class="btn sm" style="margin-left:8px" onclick="selInterpolate()" title="volume column and effect, between the first and last selected rows (Ctrl+I)">INTERPOLATE</span><span class="btn sm" onclick="selAmplify()" title="scale the volume column; a note without one gets one, from 64">AMPLIFY</span><input id="sel-amp" type="number" min="0" max="400" value="100" style="width:42px;font:10px var(--mono);padding:1px 3px"><span class="k">%</span>
+        <span class="btn sm" style="margin-left:8px" onclick="toggleFind()" title="find and replace (Ctrl+F; F3 finds the next)">FIND…</span><span class="mono" id="sel-msg" style="flex:1;min-width:0;font-size:10px;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+      </div>
+      <div id="findbar" style="display:none;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim)" onkeydown="if(event.key==='Enter'){event.preventDefault();findNext()}else if(event.key==='Escape')toggleFind(false)" title="* matches any characters, ? one; an empty field matches anything">
+        <span class="k">FIND</span>note<input id="f-n" style="width:40px;font:10px var(--mono);padding:1px 3px" placeholder="C-*">ins<input id="f-i" style="width:30px;font:10px var(--mono);padding:1px 3px">vol<input id="f-v" style="width:40px;font:10px var(--mono);padding:1px 3px">fx<input id="f-e" style="width:40px;font:10px var(--mono);padding:1px 3px">
+        <span class="k" style="margin-left:6px">REPLACE WITH</span>note<input id="r-n" style="width:40px;font:10px var(--mono);padding:1px 3px">ins<input id="r-i" style="width:30px;font:10px var(--mono);padding:1px 3px">vol<input id="r-v" style="width:40px;font:10px var(--mono);padding:1px 3px">fx<input id="r-e" style="width:40px;font:10px var(--mono);padding:1px 3px">
+        <select id="f-scope" style="font:10px var(--mono);padding:1px 3px"><option value="pattern">THIS PATTERN</option><option value="song">WHOLE SONG</option></select><span class="btn sm" onclick="findNext()">NEXT</span><span class="btn sm" onclick="replaceAll()" title="every match, as one undo step">REPLACE ALL</span><span class="btn sm" onclick="toggleFind(false)">✕</span>
+      </div>
       <div id="patctl" style="margin-top:6px"></div>
     </div>
     <div id="patscroll" style="flex:1;min-height:0;overflow:auto"><div id="pat"></div></div>
+  </div>
+</div>
+
+<div class="main" id="t-ins">
+  <div class="col" style="width:300px;flex:none">
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph" style="gap:4px"><span class="k">INSTRUMENTS · <span id="ins-n"></span></span><span style="display:flex;gap:2px;align-items:center"><select id="ins-newslot" style="font:10px var(--mono);padding:1px 3px;max-width:120px" title="the sample slot a new instrument plays"></select><span class="btn sm" onclick="insNew()" title="a new instrument playing the chosen slot">NEW</span></span></div><div id="ins-list" style="padding:4px 6px"></div></div>
+    <div class="panel" style="flex:none;max-height:45%;overflow:auto"><div class="ph"><span class="k">SAMPLE SLOTS · <span id="ins-sn"></span></span><span class="meta">swap WAVs in the Tryout tab</span></div><div id="ins-slots" style="padding:4px 10px" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>songEdit(p.map(file=>({op:'sample_new',file}))))" title="drop WAVs here for new slots"></div>
+      <div style="display:flex;gap:2px;padding:6px 10px 10px"><input id="ins-wav" placeholder="a WAV for a new slot" style="flex:1;min-width:0;padding:3px 6px;font:10px var(--mono)"><span class="btn sm" onclick="insBrowse()">BROWSE…</span><span class="btn sm" onclick="insSlot()">ADD SLOT</span></div></div>
+  </div>
+  <div class="col" style="flex:1;min-width:0">
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph" style="gap:8px"><span class="k" id="ins-title" style="white-space:nowrap">INSTRUMENT</span><span id="ins-msg" class="mono" style="flex:1;min-width:0;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><span class="btn sm" onclick="insClone()">CLONE</span><span class="btn sm" id="ins-del" onclick="twice(this,insDelete)" title="delete it (click twice); refused while a pattern plays it">DELETE</span></div>
+      <div class="pb" id="ins-edit"></div></div>
+  </div>
+</div>
+
+<div class="main" id="t-smp">
+  <div class="col" style="width:280px;flex:none">
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph"><span class="k">SAMPLE SLOTS · <span id="smp-n"></span></span><span class="meta">add slots in INSTRUMENTS</span></div><div id="smp-list" style="padding:4px 6px;min-height:80%" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>songEdit(p.map(file=>({op:'sample_new',file}))))" title="drop WAVs here for new slots, or on a slot to replace its WAV"></div></div>
+  </div>
+  <div class="col" style="flex:1;min-width:0">
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph" style="gap:8px"><span class="k" id="smp-title" style="white-space:nowrap">SAMPLE</span><span id="smp-msg" class="mono" style="flex:1;min-width:0;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span></div>
+      <div class="pb">
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:6px">
+          <span class="k">VIEW</span><span class="btn sm" onclick="smpZoom('all')" title="the whole sample">ALL</span><span class="btn sm" onclick="smpZoom('sel')">SELECTION</span><span class="btn sm" onclick="smpZoom('loop')" title="the loop (else the sustain loop) with a little either side">LOOP</span><span class="btn sm" onclick="smpZoom(.5)" title="zoom in (or the mouse wheel over the waveform)">+</span><span class="btn sm" onclick="smpZoom(2)" title="zoom out">−</span>
+          <span class="k" style="margin-left:12px">PREVIEW</span><span class="btn sm" id="smp-hear" onmousedown="smpHear(true)" onmouseup="smpHear(false)" onmouseleave="smpHear(false)" title="hold to play the sample through the live engine (its instrument, the song as written: the loop you just set); release lets go of the note, so a sustain loop ends. The piano keys play it too">▶ HOLD</span>
+          <span id="smp-hint" style="font-size:9.5px;color:var(--dim);margin-left:8px">drag to select · drag a loop line to move it · wheel zooms, Shift+wheel scrolls · Ctrl+Z undoes</span>
+        </div>
+        <canvas id="smp-wave" style="width:100%;height:260px;display:block;cursor:crosshair;background:#0b0e0f" onmousedown="smpDown(event)" onwheel="smpWheel(event)" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="SMP_SEL!=null&&dropWav(event,p=>songEdit([{op:'sample_file',num:+SMP_SEL,file:p[0]}]))" onmousemove="smpHover(event)" onmouseleave="W.hover=null;renderSmpInfo()"></canvas>
+        <input type="range" id="smp-scroll" min="0" max="0" value="0" style="width:100%;margin:2px 0;display:block" oninput="smpView(+this.value,+this.value+(W.b-W.a))">
+        <div id="smp-info" class="mono" style="font-size:10px;color:var(--dim);min-height:14px"></div>
+        <div id="smp-loops" style="margin-top:8px"></div>
+        <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:12px">
+          <span class="k" title="each writes a new WAV beside the song (the source file is never touched) and points the slot at it; one undo step">EDIT → NEW WAV</span>
+          <span class="btn sm" onclick="smpProcess('trim')" title="keep the selection only (loops move with it)">TRIM TO SELECTION</span><span class="btn sm" onclick="smpProcess('fade_in')" title="over the selection, else the whole sample">FADE IN</span><span class="btn sm" onclick="smpProcess('fade_out')" title="over the selection, else the whole sample">FADE OUT</span><span class="btn sm" onclick="smpProcess('normalize')" title="the peak of the selection (else the whole sample) to full scale">NORMALIZE</span><span class="btn sm" onclick="smpProcess('reverse')" title="the selection, else the whole sample (its loops mirrored)">REVERSE</span><span class="btn sm" onclick="smpProcess('dc')" title="subtract the mean of the selection, else of the whole sample">REMOVE DC</span>
+          <span class="btn sm" style="margin-left:8px" onclick="smpProcess('crossfade',{frames:Math.round((+$('smp-xf').value||0)*W.data.rate/1000)})" title="the end of the loop fades (equal power) into the audio just before its start, so the wrap is seamless; needs that much audio before the loop start">CROSSFADE LOOP</span><input id="smp-xf" type="number" min="1" value="20" style="width:48px;font:10px var(--mono);padding:1px 3px"><span class="k">MS</span>
+        </div>
+        <div id="smp-props" style="margin-top:14px"></div>
+      </div></div>
+  </div>
+</div>
+
+<div class="main" id="t-song">
+  <div class="col" style="width:330px;flex:none">
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">SONG SETTINGS</span><span class="meta">click a value to type it</span></div><div class="pb" id="song-mod"></div></div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph"><span class="k">CHANNELS · <span id="song-chn"></span></span><span class="btn sm" onclick="songEdit([{op:'channel_add'}])" title="a new channel at the end (its cells are empty in every pattern)">+ CHANNEL</span></div><div class="pb" id="song-ch" style="padding:4px 10px"></div></div>
+  </div>
+  <div class="col" style="flex:1;min-width:0">
+    <div class="panel" style="flex:none"><div class="ph" style="gap:8px"><span class="k" style="white-space:nowrap">ORDER LIST · <span id="song-on"></span></span><span id="song-msg" class="mono" style="flex:1;min-width:0;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span></div>
+      <div class="pb"><div id="song-orders" style="display:flex;flex-wrap:wrap;gap:2px"></div>
+        <div style="display:flex;align-items:center;gap:4px;margin-top:10px;flex-wrap:wrap">
+          <span class="k">SELECTED</span><span class="btn sm" onclick="ordMove(-1)" title="move it left">◀</span><span class="btn sm" onclick="ordMove(1)" title="move it right">▶</span><span class="btn sm" onclick="ordRemove()">REMOVE</span><span class="btn sm" onclick="ordInsert(ORD_SEL<0?null:S.structure.orders[ORD_SEL])" title="the same pattern again, after it">DUPLICATE</span><span class="btn sm" onclick="ordClone()" title="a copy of its pattern under a new name, in its place (edit the copy without touching the other orders that use the pattern)">CLONE PATTERN</span><span class="btn sm" onclick="ordEdit()" title="open it in the Pattern tab">EDIT ▸</span>
+          <span class="k" style="margin-left:10px">PATTERN</span><select id="song-pat" style="font:10px var(--mono);padding:1px 3px;max-width:160px"></select><span class="btn sm" onclick="ordInsert($('song-pat').value)" title="insert it after the selected order">INSERT</span><span class="btn sm" onclick="ordSet($('song-pat').value)" title="the selected order plays this pattern instead">SET</span>
+          <span class="btn sm" style="margin-left:10px" onclick="ordNew()" title="a new empty pattern, inserted after the selected order">NEW PATTERN</span><input id="song-rows" type="number" min="1" max="200" value="64" style="width:44px;font:10px var(--mono);padding:1px 3px" title="its rows"><span class="k">ROWS</span>
+        </div></div></div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph"><span class="k">PATTERNS · <span id="song-pn"></span></span><span class="meta">click a name or a row count to change it</span></div><table id="song-pats"></table></div>
+    <div class="panel" style="flex:none;max-height:30%;overflow:auto"><div class="ph"><span class="k" title="what the order list never plays: patterns outside it, instruments no played pattern names, samples no used instrument maps">CLEAN-UP</span><span class="btn sm" id="clean-all" onclick="twice(this,cleanAll)" title="remove everything listed, as one undo step (click twice)">REMOVE ALL UNUSED</span></div><div class="pb" id="song-clean" style="font-size:10.5px"></div></div>
+  </div>
+</div>
+
+<div class="main" id="t-spectrum">
+  <div class="panel col" style="flex:1;min-width:0">
+    <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SPECTROGRAM</span><span id="specsrc" style="flex:1;min-width:0;font-size:10.5px;color:#8d979c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><span id="speclegend" style="display:flex;align-items:center;gap:5px;font:9px var(--mono);color:var(--dim)"></span><span style="display:flex;gap:2px"><span class="btn sm" id="sc-log" onclick="setSpecScale('log')" title="frequency on a log axis, 20 Hz to the Nyquist frequency">LOG</span><span class="btn sm" id="sc-lin" onclick="setSpecScale('lin')" title="frequency on a linear axis (the top octave is half the height: where imaging and aliasing show)">LIN</span></span></div>
+    <div style="flex:1;min-height:0;display:flex;padding:10px 14px 26px 0">
+      <div id="specaxis" style="width:54px;flex:none;position:relative"></div>
+      <div id="specbox" style="flex:1;min-width:0;position:relative;background:#000;cursor:pointer" onmousedown="seekDrag(event,this)" title="click or drag to seek">
+        <img id="specimg" alt="" draggable="false" style="position:absolute;inset:0;width:100%;height:100%;display:block">
+        <div id="specgrid" style="position:absolute;inset:0;pointer-events:none"></div>
+        <b id="spechead" style="position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--acc);pointer-events:none"></b>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -186,7 +298,8 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="bottom">
   <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
   <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
-    <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="k">SPEED</span><select id="speed" onchange="setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option></select></div>
+    <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
+    <div class="loopbar" id="loopbar" onmousedown="loopDrag(event)" title="playback loop: drag here to loop a span of what plays (snapped to rows) · click to clear it"><i id="loopfill"></i></div>
     <div class="prog" id="prog" onmousedown="seekDrag(event)" title="click or drag to seek"><i id="progfill"></i><b id="proghead"></b></div>
     <div style="display:flex;gap:8px;align-items:center;min-width:0"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><span class="k" style="white-space:nowrap" title="the channels sounding at the playhead, with the slot each plays (from the pattern: a looped tone until its note-off, a one-shot until its sample runs out) · click one to solo it">SOUNDING</span><div id="live" style="flex:1;min-width:0;display:flex;gap:3px;overflow:hidden"></div></div>
   </div>
@@ -215,13 +328,17 @@ option.hascand{color:var(--acc);font-weight:700}
   <div style="font-size:15px;font-weight:600;color:var(--hi)">Open a song</div>
   <div style="margin-top:4px;font-size:11.5px;color:var(--mid)">A song is a YAML file; the tryout screen renders candidate samples inside it.</div>
   <div style="margin-top:16px;display:flex;gap:6px"><input id="openpath" placeholder="path to song.yaml" style="flex:1;padding:7px 9px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')openSong(this.value)"><span class="btn" onclick="openSong($('openpath').value)">OPEN</span><span class="btn big" onclick="browse()">BROWSE…</span></div>
+  <div style="margin-top:18px"><div class="k" style="margin-bottom:6px">NEW SONG</div><div style="display:flex;gap:6px;align-items:center"><input id="newpath" placeholder="where: e.g. C:/music/first.yaml" style="flex:1;padding:7px 9px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')newSong()"><input id="newch" type="number" min="1" max="64" value="8" style="width:48px;padding:7px 6px;font:11px var(--mono)" title="channels"><span class="k">CH</span><span class="btn big" onclick="newSong()">CREATE</span></div>
+    <div style="margin-top:5px;font-size:10.5px;color:var(--dim)">an empty 64-row pattern, one instrument playing a one-second tone written beside the song (swap the WAV in the Tryout tab, add slots and instruments in the Instruments tab)</div></div>
+  <div style="margin-top:18px"><div class="k" style="margin-bottom:6px">IMPORT A MODULE</div><div style="display:flex;gap:6px;align-items:center"><input id="imppath" placeholder="an .it, .xm, .s3m or .mod file" style="flex:1;padding:7px 9px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')importModule(false)"><span class="btn" onclick="importModule(false)">IMPORT</span><span class="btn big" onclick="importModule(true)">BROWSE…</span></div>
+    <div style="margin-top:5px;font-size:10.5px;color:var(--dim)">written beside it as name.yaml, its samples as WAVs in name_samples/ (nothing is replaced); what IT cannot say is listed at the top of the song file</div></div>
   <div id="recentlist" style="margin-top:18px"></div>
   <div id="demolist" style="margin-top:14px"></div>
 </div></div>
 <div class="modal" id="keysmodal" onclick="toggle('keys',false)"><div class="box" style="width:520px">
   <div class="k" style="color:var(--acc);margin-bottom:10px">KEYBOARD</div>
   <div class="row"><span>1–9, 0</span><span>pick candidate 1–10</span></div><div class="row"><span>↑ ↓</span><span>previous / next candidate</span></div>
-  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 %, the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead</span></div>
+  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 %, the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead</span></div><div class="row"><span>a fader's number</span><span>click to type it · Enter applies · Esc cancels</span></div><div class="row"><span>loop strip</span><span>drag above the progress bar to loop a span; click to clear</span></div><div class="row"><span>Pattern tab: Space / F7, F6, F8</span><span>live: play from the cursor (or stop), loop the pattern, stop</span></div><div class="row"><span>Pattern tab: arrows, Page Up/Down</span><span>move the cursor (a click sets it, a double-click plays from there)</span></div><div class="row"><span>Pattern tab: Z–M, Q–U</span><span>preview the instrument, two octaves from OCT</span></div><div class="row"><span>Pattern tab: Esc</span><span>edit mode: notes (1 off, ` fade, \ cut), digits, letters; Del or . clears, Insert / Backspace shift the channel</span></div><div class="row"><span>Pattern tab: Ctrl+Z, Ctrl+Y</span><span>undo, redo a pattern edit</span></div><div class="row"><span>Pattern tab: drag, Shift+arrows, Ctrl+A / L</span><span>select (the pattern, the channel)</span></div><div class="row"><span>Pattern tab: Ctrl+C X V, Ctrl+Shift+V</span><span>copy, cut, paste, mix-paste · Delete clears the selection</span></div><div class="row"><span>Pattern tab: Ctrl+Up/Down (+Shift)</span><span>transpose a semitone (an octave) · Ctrl+I interpolate</span></div><div class="row"><span>Pattern tab: Ctrl+F, F3</span><span>find and replace, find the next</span></div><div class="row"><span>SPECTRUM tab</span><span>the spectrogram of what plays; click or drag to seek</span></div>
   <div class="row"><span>SONG</span><span>play the song itself (no candidate swapped, the faders applied)</span></div><div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
   <div class="row"><span>Esc</span><span>close</span></div>
 </div></div>
@@ -250,8 +367,12 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
   $('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
 function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src')}
 async function openSong(p){if(!p)return;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
+async function newSong(){const p=$('newpath').value.trim();if(!p)return;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
+async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;
+  const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
+  if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat()}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -286,7 +407,7 @@ function render(){
   if(f){const inSel=i=>S.orders?i>=S.orders[0]&&i<S.orders[1]:true;
     put('layers',grid(f,inSel,9));
     put('arr',grid(f,inSel,11));$('ovlabel').textContent=loopLabel();$('arrlabel').textContent=`${f.orders.length} ORD × ${f.channels.length} CH`;
-    renderStems(f);renderSlots(f,ents);renderNotes(f);showPattern(viewOrder());$('m-soloin').classList.toggle('on',soloActive())}
+    renderStems(f);renderSlots(f,ents);renderNotes(f);renderVoice();showPattern(viewOrder());$('m-soloin').classList.toggle('on',soloActive())}
   // candidates
   const cs=visible(),best=S.candidates.filter(c=>!c.current&&c.dist!=null).sort((a,b)=>a.dist-b.dist)[0];
   if(sel!=null&&!S.candidates.some(c=>c.id===sel))sel=null;
@@ -303,7 +424,7 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
 function measRows(m){if(!m||m.error)return '';return [['duration',secs(m.duration)],['detected pitch',m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'],['spectral centroid',hz(m.centroid)],['decay to −40 dB',secs(m.decay)],['attack to peak',m.attack==null?'—':Math.round(m.attack*1000)+' ms'],['flatness (noise)',m.flatness==null?'—':m.flatness.toFixed(2)]].map(([k,v])=>`<div class="row"><span>${k}</span><span>${v}</span></div>`).join('')}
@@ -343,50 +464,535 @@ function setMix(kind,i,v){const f=S.song.facts,ents=S.song.sample_entries,m=JSON
   if(kind==='mix_volume'){if(v===song)delete m.mix_volume;else m.mix_volume=v}else{m[kind]=m[kind]||{};if(v===song)delete m[kind][i];else m[kind][i]=v;if(!Object.keys(m[kind]).length)delete m[kind]}
   act('mix',m)}
 function resetMix(){act('mix',{})}
-const nMix=()=>Object.values(S.mix||{}).reduce((k,v)=>k+(typeof v==='object'?Object.keys(v).length:1),0);
+const nMix=()=>Object.entries(S.mix||{}).reduce((k,[kind,v])=>k+(kind==='instrument'?Object.values(v).reduce((a,e)=>a+Object.keys(e).length,0):typeof v==='object'?Object.keys(v).length:1),0);
 function renderStems(f){const n=f.channels.length,mx=S.mix||{},M=S.meters,nmix=nMix();$('stemsn').textContent=`${n} CHANNELS`;
   const mv=mixVal('mix_volume',null,f.mix_volume),pc=S.candidates.find(x=>x.id===sel),pk=pc?pc.peak:S.own&&S.own.peak;
-  put('stemlist',`<div class="mix" style="padding:7px 4px 8px;margin-bottom:3px;box-shadow:inset 0 -1px 0 #0a0c0d"><span class="k" style="color:var(--mid)">MIX VOL</span><input type="range" min="0" max="128" value="${mv}" oninput="liveMix(this)" onchange="setMix('mix_volume',null,+this.value)" title="module mix_volume 0–128 (song: ${f.mix_volume})"><span class="v ${mx.mix_volume!=null?'chg':''}" id="mmv" style="width:26px">${mv}</span><span class="db" style="width:auto;padding-left:4px;color:${pk>=.999?'var(--red)':'#8d979c'}" title="peak of the render that is playing (1.00: the mixer clipped)">${pk==null?'':pk>=.999?'CLIP':'PK '+pk.toFixed(2)}</span></div>`+
+  put('stemlist',`<div class="mix" style="padding:7px 4px 8px;margin-bottom:3px;box-shadow:inset 0 -1px 0 #0a0c0d"><span class="k" style="color:var(--mid)">MIX VOL</span><input type="range" min="0" max="128" value="${mv}" oninput="liveMix(this)" onchange="setMix('mix_volume',null,+this.value)" title="module mix_volume 0–128 (song: ${f.mix_volume})"><span class="v tv ${mx.mix_volume!=null?'chg':''}" id="mmv" style="width:26px" onclick="typeIn(this,0,128,v=>setMix('mix_volume',null,v),${mv})" title="click to type 0–128">${mv}</span><span class="db" style="width:auto;padding-left:4px;color:${pk>=.999?'var(--red)':'#8d979c'}" title="peak of the render that is playing (1.00: the mixer clipped)">${pk==null?'':pk>=.999?'CLIP':'PK '+pk.toFixed(2)}</span></div>`+
    f.channels.map((ch,c)=>{const on=audible(c),m=S.muted.includes(c),so=S.solo===c,used=[...new Set(f.use.flatMap(o=>o[c]))].sort((a,b)=>a-b),v=mixVal('volume',c,f.volume[c]),p=mixVal('pan',c,f.pan[c]),db=meterDb(c),l=M&&M.levels&&M.levels[c];
     return `<div class="stem ${on?'':'off'} ${so?'solo':''}"><span class="n">${pad(c+1)}</span><span class="ms ${m?'m':''}" onclick="muteCh(${c})" title="mute">M</span><span class="ms ${so?'s':''}" onclick="soloCh(${c})" title="solo">S</span><i class="fb" style="background:${famCol(ch)||'#333a3d'}"></i><span class="nm" title="${esc(ch)}">${esc(ch.toUpperCase())}</span><span class="smp" title="${esc(used.map(n=>pad(n)+' '+sName(n)).join(', ')||'plays no sample')}">${used.length===1?pad(used[0])+' '+esc(sName(used[0])):smpList(used)}</span></div>
-    <div class="mix"><span>VOL</span><input type="range" min="0" max="64" value="${v}" oninput="liveVol(this,${c})" onchange="setMix('volume',${c},+this.value)" title="channel volume 0–64 (song: ${f.volume[c]})"><span class="v ${mx.volume&&mx.volume[c]!=null?'chg':''}" id="mv${c}">${v}</span><span>PAN</span><input type="range" min="0" max="64" value="${p===100?32:p}" oninput="livePan(this,${c})" onchange="setMix('pan',${c},+this.value)" style="flex:.7" title="channel pan: 0 left · 32 centre · 64 right (song: ${panLabel(f.pan[c])})"><span class="v ${mx.pan&&mx.pan[c]!=null?'chg':''}" id="mp${c}">${panLabel(p)}</span><span class="meter" title="${l?`this channel soloed, over the tryout section: ${l.db} dB RMS whole, ${l.active_db==null?'silent':l.active_db+' dB'} over its active ${l.active_s} s`:M&&M.status==='failed'?'meters failed: '+M.error:'measuring…'}"><i id="mb${c}" style="width:${meterW(db)}%"></i></span><span class="db" id="md${c}">${dbText(db)}</span></div>`}).join(''));
+    <div class="mix"><span>VOL</span><input type="range" min="0" max="64" value="${v}" oninput="liveVol(this,${c})" onchange="setMix('volume',${c},+this.value)" title="channel volume 0–64 (song: ${f.volume[c]})"><span class="v tv ${mx.volume&&mx.volume[c]!=null?'chg':''}" id="mv${c}" onclick="typeIn(this,0,64,v=>setMix('volume',${c},v),${v})" title="click to type 0–64">${v}</span><span>PAN</span><input type="range" min="0" max="64" value="${p===100?32:p}" oninput="livePan(this,${c})" onchange="setMix('pan',${c},+this.value)" style="flex:.7" title="channel pan: 0 left · 32 centre · 64 right (song: ${panLabel(f.pan[c])})"><span class="v tv ${mx.pan&&mx.pan[c]!=null?'chg':''}" id="mp${c}" onclick="typeIn(this,0,64,v=>setMix('pan',${c},v),'${panLabel(p)}',panParse)" title="click to type: 0–64 (32 centre), L50 / R20 / C, or S for surround">${panLabel(p)}</span><span class="meter" title="${l?`this channel soloed, over the tryout section: ${l.db} dB RMS whole, ${l.active_db==null?'silent':l.active_db+' dB'} over its active ${l.active_s} s`:M&&M.status==='failed'?'meters failed: '+M.error:'measuring…'}"><i id="mb${c}" style="width:${meterW(db)}%"></i></span><span class="db" id="md${c}">${dbText(db)}</span></div>`}).join(''));
   const nm=S.muted.length,dirty=S.solo!=null||nm>0,st=$('stemstate'),x=S.stems,busy=x&&(x.status==='queued'||x.status==='rendering');
   st.textContent=busy?'EXPORTING':S.queue?'RENDERING':M&&M.status==='failed'?'NO METERS':M&&M.status!=='ready'?'MEASURING':S.solo!=null?'SOLO':nm?`${nm} MUTED`:nmix?`${nmix} UNWRITTEN`:'ALL AUDIBLE';st.classList.toggle('on',dirty||busy||nmix>0);
   const wm=$('writemix');wm.textContent=nmix?`WRITE MIX → SONG · ${nmix}`:'WRITE MIX → SONG';wm.classList.toggle('dimb',!nmix);
-  $('stemhint').textContent=busy?`exporting stems ${x.done} / ${x.total} → ${x.dir}`:x&&x.status==='done'?`wrote ${x.total} stems to ${x.dir}`:x&&x.status==='failed'?`stems export failed: ${x.error}`:dirty?`tryout renders skip ${S.solo!=null?'every channel but '+pad(S.solo+1):nm+' muted channel'+(nm>1?'s':'')} · the YAML is untouched`:nmix?`${nmix} fader value${nmix>1?'s':''} unwritten: the tryout plays them, the song file does not have them yet · WRITE MIX shows the change first`:'faders re-render the tryout section; nothing is written until WRITE MIX · meter: the channel soloed, RMS in dB over its active part'}
+  const xs=x&&x.song?1:0,what=x?[x.song,x.dir&&`${x.total-xs} ${(x.fmt||'wav').toUpperCase()} stems in ${x.dir}`].filter(Boolean).join(' and '):'';
+  $('stemhint').textContent=busy?`exporting ${x.done} / ${x.total} → ${what||'…'}`:x&&x.status==='done'?`wrote ${what}`:x&&x.status==='failed'?`export failed: ${x.error}`:dirty?`tryout renders skip ${S.solo!=null?'every channel but '+pad(S.solo+1):nm+' muted channel'+(nm>1?'s':'')} · the YAML is untouched`:nmix?`${nmix} value${nmix>1?'s':''} unwritten (faders, instrument panel): the tryout plays them, the song file does not have them yet · WRITE MIX shows the change first`:'faders re-render the tryout section; nothing is written until WRITE MIX · meter: the channel soloed, RMS in dB over its active part'}
 function muteCh(c){markLanding();const m=S.muted.includes(c)?S.muted.filter(x=>x!==c):[...S.muted,c];act('mute',{muted:m,solo:S.solo===c?null:S.solo})}
 function soloCh(c){markLanding();act('mute',{muted:S.muted,solo:S.solo===c?null:c})}
 function resetStems(){markLanding();act('mute',{muted:[],solo:null})}
 function renderSlots(f,ents){const sm=S.song.slot_meas||{},mx=S.mix||{},cc=S.cand_counts||{};$('slotn').textContent=f.samples.length;
   put('slots',`<tr><th style="width:28px">#</th><th style="width:104px">NAME</th><th>FILE</th><th class="r" style="width:56px">C5 RATE</th><th class="r" style="width:58px">LENGTH</th><th class="r" style="width:44px">PITCH</th><th class="r" style="width:60px">CENTROID</th><th class="r" style="width:56px">DECAY</th><th class="r" style="width:38px">LOOP</th><th style="width:66px" title="the sample's global_volume 0–64: scales every note it plays, whatever the cells say">GAIN</th><th style="width:74px"></th></tr>`+f.samples.map(s=>{const m=sm[s.num]||{},on=s.num===S.slot,file=(ents[s.num]||{}).file||'',g=mixVal('sample_volume',s.num,(ents[s.num]||{}).global_volume??64),gch=mx.sample_volume&&mx.sample_volume[s.num]!=null;
-    return `<tr class="${on?'on':''}"><td>${pad(s.num)}</td><td class="sans" title="${esc(s.name)}">${esc(s.name)}</td><td class="file" title="${esc(file)}">${esc(file)}</td><td class="r">${s.c5_speed}</td><td class="r">${s.length.toFixed(3)} s</td><td class="r">${m.pitch||'—'}</td><td class="r">${m.centroid==null?'—':Math.round(m.centroid).toLocaleString()}</td><td class="r">${secs(m.decay)}</td><td class="r ${s.loop?'':'dimc'}">${s.loop?'loop':'—'}</td><td><input type="range" class="gain" min="0" max="64" value="${g}" oninput="liveGain(this,${s.num})" onchange="setMix('sample_volume',${s.num},+this.value)"> <span id="sg${s.num}" class="${gch?'chg':''}">${g}</span></td><td style="text-align:right"><span class="btn sm ${on?'on':''}" onclick="act('slot',{slot:${s.num}});tab('tryout')">${on?'IN TRYOUT':cc[s.num]?`TRY OUT · ${cc[s.num]}`:'TRY OUT'}</span></td></tr>`}).join(''))}
+    return `<tr class="${on?'on':''}"><td>${pad(s.num)}</td><td class="sans" title="${esc(s.name)}">${esc(s.name)}</td><td class="file" title="${esc(file)}">${esc(file)}</td><td class="r">${s.c5_speed}</td><td class="r">${s.length.toFixed(3)} s</td><td class="r">${m.pitch||'—'}</td><td class="r">${m.centroid==null?'—':Math.round(m.centroid).toLocaleString()}</td><td class="r">${secs(m.decay)}</td><td class="r ${s.loop?'':'dimc'}">${s.loop?'loop':'—'}</td><td><input type="range" class="gain" min="0" max="64" value="${g}" oninput="liveGain(this,${s.num})" onchange="setMix('sample_volume',${s.num},+this.value)"> <span id="sg${s.num}" class="tv ${gch?'chg':''}" onclick="typeIn(this,0,64,v=>setMix('sample_volume',${s.num},v),${g})" title="click to type 0–64">${g}</span></td><td style="text-align:right"><span class="btn sm ${on?'on':''}" onclick="act('slot',{slot:${s.num}});tab('tryout')">${on?'IN TRYOUT':cc[s.num]?`TRY OUT · ${cc[s.num]}`:'TRY OUT'}</span></td></tr>`}).join(''))}
+// ---- typed values: click a number to type it; Enter applies it through the slider's own path (clamped to the field's
+// range, the song format's), Escape or a click elsewhere cancels
+const panParse=s=>/^s/i.test(s)?'surround':/^c$/i.test(s)?32:/^[lr]\d+$/i.test(s)?Math.round(32+(s[0].toLowerCase()==='l'?-1:1)*Math.min(99,+s.slice(1))*32/99):+s;
+function typeIn(el,lo,hi,apply,cur,parse){const r=el.getBoundingClientRect(),inp=document.createElement('input');let done=false;
+  inp.className='typein';inp.value=cur;inp.title=`${lo}–${hi} · Enter applies · Esc cancels`;
+  Object.assign(inp.style,{position:'fixed',left:r.left+'px',top:(r.top+r.height/2-9)+'px',width:Math.max(r.width,54)+'px',height:'18px',zIndex:20});
+  const close=()=>{if(!done){done=true;inp.remove()}};
+  inp.onkeydown=e=>{e.stopPropagation();if(e.key==='Escape')return close();if(e.key!=='Enter')return;const s=inp.value.trim(),v=parse?parse(s):+s;close();
+    if(typeof v==='string')apply(v);else if(s!==''&&isFinite(v))apply(Math.max(lo,Math.min(hi,Math.round(v))))};
+  inp.onblur=close;document.body.appendChild(inp);inp.focus();inp.select()}
+// ---- instrument panel: the slot's instrument as the tracker plays every note (volume envelope, release, filter and its
+// sweep, random volume); unwritten like the faders: kept in the mix, applied when the tryout compiles, written by WRITE MIX
+const VGROUP={volume:['attack','decay','sustain'],release:['release'],filter:['cutoff','resonance'],sweep:['sweep_from','sweep_to','sweep_ticks'],random:['random']};
+const VROWS=[['VOLUME','volume'],['attack','ATTACK',64],['decay','DECAY',192],['sustain','SUSTAIN',64],['release','RELEASE',49],['FILTER','filter'],['cutoff','CUTOFF',127],['resonance','RESONANCE',127],['SWEEP','sweep'],['sweep_from','FROM',64],['sweep_to','TO',64],['sweep_ticks','TIME',192],['PER NOTE','random'],['random','RANDOM VOL',100]];
+let voiceOpen=true;try{voiceOpen=localStorage.voice!=='0'}catch(e){}
+// RELEASE is the instrument's fadeout (a fading note loses fadeout/1024 a tick): the slider steps it by halves, the end is "never"
+const relFade=p=>p>=49?0:Math.round(256/2**(p/6)),relPos=f=>f?Math.max(0,Math.min(48,Math.round(6*Math.log2(256/f)))):49;
+function vlabel(k,v){const tm=2500/S.song.facts.tempo,ms=t=>t*tm<1000?Math.round(t*tm)+' ms':(t*tm/1000).toFixed(2)+' s';
+  if(k==='attack'||k==='decay'||k==='sweep_ticks')return v?`${v} ticks · ${ms(v)}`:k==='sweep_ticks'?'at once':'0';
+  if(k==='sustain')return v?(20*Math.log10(v/64)).toFixed(1)+' dB':'dies away';
+  if(k==='release')return v?`${ms(1024/v)} to silence`:'never';
+  if(k==='cutoff')return v>=127?'off':`${v} · ≈${(290*2**(v/27.9)/1000).toFixed(1)} kHz`;
+  if(k==='sweep_from'||k==='sweep_to')return Math.round(v*100/64)+' % of cutoff';
+  return k==='random'?v+' %':String(v)}
+function voiceSvg(v,val){const a=val('attack'),d=val('decay'),s=val('sustain'),f0=val('sweep_from'),f1=val('sweep_to'),st=val('sweep_ticks'),T=Math.max(32,a+Math.max(1,d)+16,st+16);
+  const pl=(pts,col,dash)=>`<polyline points="${pts.map(([t,y])=>`${(100*t/T).toFixed(1)},${(28-26*y).toFixed(1)}`).join(' ')}" fill="none" stroke="${col}" stroke-width="1.2" vector-effect="non-scaling-stroke"${dash?' stroke-dasharray="3 2"':''}/>`;
+  const vol=v.custom.includes('volume')&&!VGROUP.volume.some(k=>v.edit[k]!=null)?'':pl([[0,a?0:1],[a,1],...(s<64?[[a+Math.max(1,d),s/64]]:[]),[T,s/64]],'#7ee787');
+  const flt=val('cutoff')<127||val('resonance')>0||f0!==64||f1!==64?pl(st?[[0,f0/64],[st,f1/64],[T,f1/64]]:[[0,f1/64],[T,f1/64]],'#8fb0c4',1):'';
+  return `<div class="wave" style="height:34px;margin-top:4px"><svg viewBox="0 0 100 30" preserveAspectRatio="none">${vol}${flt}</svg></div><div style="display:flex;gap:10px;margin:3px 0 2px;font-size:9px;color:var(--dim)"><span><i class="vkey" style="background:#7ee787"></i>volume</span><span><i class="vkey" style="background:#8fb0c4"></i>filter, share of the cutoff</span><span style="flex:1;text-align:right">${T} ticks</span></div>`}
+function renderVoice(){const vs=S.voice||[],v=vs[0],fold=voiceOpen?'▾':'▸';
+  if(!v){$('voicetitle').innerHTML=`${fold} INSTRUMENT`;$('voicebtns').style.display='none';put('voice',voiceOpen?`<div style="font-size:10.5px;color:var(--dim)">no instrument plays slot ${pad(S.slot)} through <span class="mono">sample:</span> (a keymap or no instrument): edit it in the song</div>`:'');return}
+  const val=k=>v.edit[k]!=null?v.edit[k]:v.song[k],n=Object.keys(v.edit).length;$('voicebtns').style.display='';
+  $('voicetitle').innerHTML=`${fold} INSTRUMENT <span class="mono" style="color:#c3cbcf;letter-spacing:0;font-weight:400">${pad(v.num)} ${esc(v.name)}</span>${vs.length>1?`<span style="font-weight:400;letter-spacing:0"> · also ${vs.slice(1).map(x=>pad(x.num)).join(', ')}</span>`:''}${n?`<span class="chg" style="font-weight:400;letter-spacing:0"> · ${n} unwritten</span>`:''}`;
+  if(!voiceOpen){put('voice','');return}
+  put('voice',voiceSvg(v,val)+VROWS.map(r=>{if(r.length===2)return `<div class="k" style="margin:6px 0 1px;font-size:8.5px">${r[0]}${v.custom.includes(r[1])?` <span style="color:var(--amber);letter-spacing:0;font-weight:400">custom envelope in the song: moving one replaces it</span>`:''}</div>`;
+    const [k,label,max]=r,x=val(k);
+    return `<div class="vrow"><span class="vl">${label}</span><input type="range" min="0" max="${max}" value="${k==='release'?relPos(x):x}" oninput="liveVoice(this,'${k}')" onchange="setVoice(${v.num},'${k}',${k==='release'?'relFade(+this.value)':'+this.value'})"><span class="vv tv ${v.edit[k]!=null?'chg':''}" id="vv_${k}" onclick="typeIn(this,${S.voice_range[k][0]},${S.voice_range[k][1]},x=>setVoice(${v.num},'${k}',x),${x})" title="click to type ${k==='release'?'the fadeout, ':''}${S.voice_range[k][0]}–${S.voice_range[k][1]}">${vlabel(k,x)}</span></div>`}).join('')+
+   `<div style="margin-top:6px;font-size:9.5px;line-height:1.5;color:var(--dim)">every note on this instrument plays these, in the song and in each candidate; a move re-renders the tryout · unwritten until WRITE (or WRITE MIX in the overview)</div>`)}
+function toggleVoice(){voiceOpen=!voiceOpen;try{localStorage.voice=voiceOpen?'1':'0'}catch(e){}renderVoice()}
+function liveVoice(el,k){lastInput=Date.now();$('vv_'+k).textContent=vlabel(k,k==='release'?relFade(+el.value):+el.value)}
+// a value back at the song's own is no change (unless it replaces a custom envelope); the server applies the same rule
+function setVoice(n,k,x){const v=(S.voice||[]).find(y=>y.num===n);if(!v)return;const m=JSON.parse(JSON.stringify(S.mix||{})),ins=m.instrument=m.instrument||{},e=ins[n]=ins[n]||{};
+  if(x===v.song[k]&&!v.custom.some(g=>VGROUP[g].includes(k)))delete e[k];else e[k]=x;
+  if(!Object.keys(e).length)delete ins[n];if(!Object.keys(ins).length)delete m.instrument;act('mix',m)}
+function resetVoice(){const v=(S.voice||[])[0],m=JSON.parse(JSON.stringify(S.mix||{}));if(!v||!m.instrument)return;delete m.instrument[v.num];if(!Object.keys(m.instrument).length)delete m.instrument;act('mix',m)}
 // ---- song overview: pattern view (read only; follows the playhead while the tryout plays)
 function posAt(t){const f=S.song.facts,[a,b]=S.orders||[0,f.orders.length];
   for(let i=a;i<b;i++){const o=f.orders[i];if(t<o.seconds||i===b-1)return {o:i,row:Math.max(0,Math.min(o.rows-1,o.seconds?Math.floor(t/o.seconds*o.rows):0))};t-=o.seconds}return {o:a,row:0}}
-function playPos(){if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;return posAt(audio.currentTime)}
-function viewOrder(){const p=playPos();return p?p.o:S.orders?S.orders[0]:0}
+function playPos(){if(LV.playing&&LV.pos&&LV.oi>=0)return {o:LV.oi,row:LV.pos.row};if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;return posAt(audio.currentTime)}
+let curSection=null;  // the cursor starts at the tryout section's first order, and moves there when the section changes
+function viewOrder(){const p=playPos();if(p&&!EDIT)return p.o;const s=JSON.stringify(S.orders);if(s!==curSection){curSection=s;CUR.o=S.orders?S.orders[0]:0;CUR.row=0}return CUR.o}
 function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const key=`${S.song.mtime}|${o.index}`;
-  if(PAT.key!==key){PAT={key,rows:null,order:oi,active:[],row:-2};fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key){PAT.rows=j.rows;renderPat()}})}
+  if(PAT.key!==key){const keep=PAT.rows&&PAT.idx===o.index?PAT.rows:null;PAT={key,rows:keep,order:oi,active:[],row:-2,idx:o.index,fo:PAT.fo};
+    fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key&&!EDQ.n){PAT.rows=j.rows;renderPat()}})}
   PAT.order=oi;renderPat()}
 function drumChannels(){return S.song.facts.channels.map((c,i)=>fam(c)===0?i:-1).filter(i=>i>=0)}
 function setHex(v){hexRows=v;try{localStorage.hexrows=v?'1':'0'}catch(e){}renderPat()}
 function setFocus(x){const n=S.song.facts.channels.length;if(x===null)focus=null;else if(x==='all')focus=[...Array(n).keys()];else if(x==='drums')focus=drumChannels();else{const f=(focus||PAT.active).slice(),k=f.indexOf(x);if(k>=0){if(f.length>1)f.splice(k,1)}else f.push(x);focus=f.sort((a,b)=>a-b)}renderPat()}
-function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows;if(!o)return;
-  $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · READ ONLY`;
+function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL=f.highlight||[4,16];if(!o)return;
+  $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · ${EDIT?'EDITING':'VIEW'}`;$('pat').classList.toggle('editing',EDIT);
   if(!rows){put('pat','<div style="padding:30px;text-align:center;color:var(--dim)">loading…</div>');put('patctl','');$('patrow').textContent='';return}
   const n=f.channels.length,empty='... .. ... ...';PAT.active=f.channels.map((_,c)=>rows.some(r=>r[c]!==empty)?c:-1).filter(c=>c>=0);
-  const drums=drumChannels(),fo=focus||PAT.active,fits=Math.max(1,Math.floor(($('patscroll').clientWidth-26-18)/86));
+  const drums=drumChannels(),fo=focus||(EDIT||!PAT.active.length?f.channels.map((_,c)=>c):PAT.active),fits=Math.max(1,Math.floor(($('patscroll').clientWidth-26-18)/86));
   put('patctl',`<div style="display:flex;align-items:center;gap:6px"><span class="btn sm ${focus?'':'on'}" onclick="setFocus(null)">ACTIVE ${PAT.active.length}</span>${drums.length?`<span class="btn sm ${focus&&focus.join()===drums.join()?'on':''}" onclick="setFocus('drums')">DRUMS</span>`:''}<span class="btn sm ${focus&&focus.length===n?'on':''}" onclick="setFocus('all')">ALL ${n}</span><span class="btn sm ${hexRows?'on':''}" onclick="setHex(!hexRows)" title="hex row numbers">HEX</span><span style="flex:1;min-width:0;text-align:right;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${fo.length<=fits?'#6d777c':'var(--amber)'}">${fo.length<=fits?`all ${fo.length} fit`:`${fo.length} picked · ${fits} fit, scroll for ${fo.length-fits}`}</span></div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:6px">${f.channels.map((_,c)=>`<span class="btn sm ${fo.includes(c)?'on':PAT.active.includes(c)?'':'dimb'}" onclick="setFocus(${c})">${pad(c+1)}</span>`).join('')}</div>`);
-  const cell=s=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'';return `<span class="pc"><span class="n${z(a)}">${a}</span> <span class="i${z(b)}">${b}</span> <span class="v${z(c)}">${c}</span> <span class="e${z(d)}">${d}</span></span>`};
-  const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}">${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}</span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%16?i%4?'':'b4':'b16'}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map(c=>cell(r[c])).join('')}</div>`).join('')}</div>`);
-  if(shown.pat!==was)PAT.row=-2;followPlayhead()}
-function followPlayhead(){const p=playPos();if(p&&p.o!==PAT.order){showPattern(p.o);return}const r=p?p.row:-1;
+  PAT.fo=fo;if(!fo.includes(CUR.ch))CUR.ch=fo[0];
+  const N=selNorm();renderSelBar();
+  const cell=(s,cur,row,vi)=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'',q=n=>(cur===n?' cc':'')+(N&&inSel(N,row,vi,n)?' sl':'');return `<span class="pc"><span class="n${z(a)}${q(0)}">${a}</span> <span class="i${z(b)}${q(1)}">${b}</span> <span class="v${z(c)}${q(2)}">${c}</span> <span class="e${z(d)}${q(3)}">${d[0]}</span><span class="e${z(d)}${q(4)}">${d.slice(1)}</span></span>`};
+  const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}">${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}<i class="lvu" id="lvu${c}"></i></span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%HL[1]?i%HL[0]?'':'b4':'b16'}${PAT.order===CUR.o&&i===CUR.row?' cur':''}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map((c,vi)=>cell(r[c],PAT.order===CUR.o&&i===CUR.row&&c===CUR.ch?CUR.col:-1,i,vi)).join('')}</div>`).join('')}</div>`);
+  if(shown.pat!==was)PAT.row=-2;followPlayhead();patHelp()}
+function followPlayhead(){let p=playPos();if(p&&p.o!==PAT.order){if(!EDIT){showPattern(p.o);return}p=null}const r=p?p.row:-1;
   $('patrow').textContent=PAT.rows?(r>=0?`row ${rowNum(r)} / ${PAT.rows.length}`:`${PAT.rows.length} rows`):'';
-  if(PAT.row===r)return;PAT.row=r;const el=$('pat');el.querySelectorAll('.pt.play').forEach(e=>e.classList.remove('play'));
-  if(r>=0){const e=el.querySelector(`.pt[data-r="${r}"]`),sc=$('patscroll');if(!e)return;e.classList.add('play');if(e.offsetTop<sc.scrollTop+20||e.offsetTop+15>sc.scrollTop+sc.clientHeight)sc.scrollTop=e.offsetTop-sc.clientHeight/3}}
+  if(PAT.row===r)return;PAT.row=r;const el=$('pat');el.querySelectorAll('.pt.now').forEach(e=>e.classList.remove('now'));
+  if(r>=0){const e=el.querySelector(`.pt[data-r="${r}"]`),sc=$('patscroll');if(!e)return;e.classList.add('now');if(e.offsetTop<sc.scrollTop+20||e.offsetTop+15>sc.scrollTop+sc.clientHeight)sc.scrollTop=e.offsetTop-sc.clientHeight/3}}
 function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseInt(getComputedStyle(document.documentElement).getPropertyValue(v));
   const mv=ev=>document.documentElement.style.setProperty(v,Math.max(min,Math.min(max,w0+sign*(ev.clientX-x0)))+'px'),up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);document.body.style.cursor='';if(PAT.order>=0)renderPat()};
   addEventListener('mousemove',mv);addEventListener('mouseup',up);document.body.style.cursor='col-resize'}
+// ---- live engine: libopenmpt (WebAssembly) in an AudioWorklet (/engine-worklet.js: web/engine-core.js and
+// engine-worklet.js) plays the whole song as it is now (/api/it: the unwritten mix in), from any order and row. Mutes, solo,
+// the loop, SPEED and note previews act at once; when the song or the mix changes, the recompiled song is swapped in where
+// it plays. The worklet reports module order indices; facts.orders[i].order maps them to the order list here.
+const LV={ctx:null,node:null,ready:null,key:'',playing:false,pos:null,oi:-1,sent:{},held:{},err:null,version:''},CUR={o:0,row:0,ch:0,col:0};
+let lvLatency='0',lvPatLoop=false;try{lvLatency=localStorage.lvlatency==='interactive'?'interactive':'0'}catch(e){}
+const lvKey=()=>`${S.song.mtime}|${JSON.stringify(S.mix||{})}`;
+function lvStart(){if(LV.ready)return LV.ready;
+  LV.ready=(async()=>{const ctx=LV.ctx=new AudioContext({latencyHint:lvLatency==='0'?0:lvLatency});
+    await ctx.audioWorklet.addModule('/engine-worklet.js');const wasm=await (await fetch('/web/libopenmpt.wasm')).arrayBuffer();
+    const node=LV.node=new AudioWorkletNode(ctx,'vt-engine',{numberOfInputs:0,outputChannelCount:[2],processorOptions:{wasm}});node.connect(ctx.destination);LV.an=ctx.createAnalyser();LV.an.fftSize=2048;node.connect(LV.an);
+    await new Promise((ok,fail)=>{node.port.onmessage=e=>{if(e.data.type==='ready'){LV.version=e.data.version;ok()}else if(e.data.type==='error')fail(new Error(e.data.text))}});
+    node.port.onmessage=e=>lvMsg(e.data);await lvLoad(false)})();
+  LV.ready.catch(e=>{LV.err=String(e.message||e);LV.ready=null;renderLiveBar()});return LV.ready}
+async function lvLoad(keep){const key=lvKey(),r=await fetch('/api/it');if(!r.ok){LV.err='compile failed: '+((await r.json()).error||r.status);renderLiveBar();return}
+  const bytes=await r.arrayBuffer();LV.sent={};LV.key=key;
+  await new Promise(ok=>{LV.onLoaded=ok;LV.node.port.postMessage({type:'load',bytes,keep},[bytes])});LV.err=null;lvSync()}
+function lvMsg(m){if(m.type==='pos'){LV.pos=m;LV.playing=m.playing;LV.oi=S&&S.song.facts?S.song.facts.orders.findIndex(o=>o.order===m.order):-1;
+    if($('t-pattern').classList.contains('on'))document.querySelectorAll('.lvu').forEach(e=>{const v=m.playing?m.vu[+e.id.slice(3)]||0:0;e.style.width=Math.min(100,v*100)+'%'})}
+  else if(m.type==='loaded'){if(LV.onLoaded)LV.onLoaded()}
+  else if(m.type==='note'){const h=LV.held[m.id];if(h&&h.release){LV.node.port.postMessage({type:'noteoff',ch:m.ch,on:m.on});delete LV.held[m.id]}else if(h)LV.held[m.id]=m}
+  else if(m.type==='error'){LV.err=m.text;renderLiveBar()}}
+// what the engine should be doing, sent only when it changes: mutes (solo = every other channel), the loop, the speed; a changed song or mix swaps the song in
+function lvSync(){if(!LV.node||!S||!S.song.facts){renderLiveBar();return}const f=S.song.facts,P=LV.node.port;
+  if(LV.key&&LV.key!==lvKey()&&!LV.loading){LV.loading=true;lvLoad(true).finally(()=>{LV.loading=false})}
+  f.channels.forEach((_,c)=>{const on=!audible(c);if(LV.sent['m'+c]!==on){LV.sent['m'+c]=on;P.postMessage({type:'mute',ch:c,on})}});
+  const o=f.orders[CUR.o],L=lvPatLoop&&o?{from:[o.order,0],to:[o.order,o.rows-1]}:S.loop&&f.orders[S.loop.from[0]]&&f.orders[S.loop.to[0]]?{from:[f.orders[S.loop.from[0]].order,S.loop.from[1]],to:[f.orders[S.loop.to[0]].order,S.loop.to[1]]}:null,ls=JSON.stringify(L);
+  if(LV.sent.loop!==ls){LV.sent.loop=ls;P.postMessage({type:'loop',span:L})}
+  if(LV.sent.tempo!==speed){LV.sent.tempo=speed;P.postMessage({type:'tempo',factor:speed})}
+  const hl=f.highlight||[4,16],ms=JSON.stringify([METRO,hl]);if(LV.sent.metro!==ms){LV.sent.metro=ms;P.postMessage({type:'metro',on:METRO,beat:hl[0],bar:hl[1]})}
+  renderLiveBar()}
+async function lvPlay(oi,row){try{await lvStart()}catch(e){return}const o=S.song.facts.orders[oi];if(!o)return;audio.pause();LV.ctx.resume();lvSync();
+  LV.node.port.postMessage({type:'play',order:o.order,row:Math.min(row,o.rows-1)});LV.playing=true;renderLiveBar()}
+function lvPlayCursor(){if(LV.playing)return lvStop();lvPatLoop=false;lvPlay(CUR.o,CUR.row)}
+function lvLoopPattern(){lvPatLoop=!(lvPatLoop&&LV.playing);if(lvPatLoop)lvPlay(CUR.o,CUR.row);else lvStop()}
+function lvStop(){if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=LV.pos.row}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar()}
+function lvSetLatency(v){lvLatency=v;try{localStorage.lvlatency=v}catch(e){}if(LV.ctx){lvStop();LV.ctx.close();Object.assign(LV,{ctx:null,node:null,ready:null,key:'',pos:null,oi:-1,sent:{}})}renderLiveBar()}
+function renderLiveBar(){if(!S||!S.song||!S.song.facts)return;const f=S.song.facts,ins=f.instruments&&f.instruments.length?f.instruments.map((n,i)=>[i,`${pad(i+1)} ${n}`]):f.samples.map((s,i)=>[i,`${pad(s.num)} ${s.name}`]);
+  put('lv-ins',ins.map(([i,n])=>`<option value="${i}">${esc(n)}</option>`).join(''));$('lv-lat').value=lvLatency;
+  $('lv-edit').classList.toggle('warn',EDIT);$('lv-undo').textContent=`↶ ${S.undo||0}`;$('lv-redo').textContent=`↷ ${S.redo||0}`;
+  $('lv-undo').classList.toggle('dimb',!S.undo);$('lv-redo').classList.toggle('dimb',!S.redo);
+  $('lv-cur').classList.toggle('on',LV.playing&&!lvPatLoop);$('lv-metro').classList.toggle('on',METRO);$('lv-pat').classList.toggle('on',LV.playing&&lvPatLoop);
+  $('lv-status').style.color=EDQ.err?'var(--red)':'';
+  $('lv-status').textContent=EDQ.err?'edit refused (the song is unchanged): '+EDQ.err:LV.err?'engine: '+LV.err:!LV.ctx?'engine off · starts on the first ▶ or piano key':`libopenmpt ${LV.version.split('+')[0]} (wasm) · ${Math.round(((LV.ctx.outputLatency||0)+LV.ctx.baseLatency)*1000)} ms`+(LV.loading?' · swapping the song in…':'')+(LV.playing&&LV.pos?` · ord ${pad(LV.oi)} row ${pad(LV.pos.row)}`:'')}
+function setCursor(oi,row,ch,col){CUR.o=oi;CUR.row=Math.max(0,row);if(ch!=null)CUR.ch=ch;if(col!=null)CUR.col=col;if(PAT.rows)renderPat();
+  const e=PAT.order===oi&&$('pat').querySelector(`.pt[data-r="${CUR.row}"]`),sc=$('patscroll');
+  if(e&&(!LV.playing||EDIT)&&(e.offsetTop<sc.scrollTop+20||e.offsetTop+15>sc.scrollTop+sc.clientHeight))sc.scrollTop=e.offsetTop-sc.clientHeight/3}
+function cellAt(t){const r=t.closest&&t.closest('#pat .pt');if(!r)return null;const pc=t.closest('.pc');if(!pc)return {row:+r.dataset.r,ch:CUR.ch,col:CUR.col};
+  const sp=t.closest('.pc>span');return {row:+r.dataset.r,ch:PAT.fo[[...r.querySelectorAll('.pc')].indexOf(pc)],col:sp?Math.max(0,[...pc.children].indexOf(sp)):0}}
+$('pat').addEventListener('mousedown',e=>{const c=cellAt(e.target);if(!c||e.button!==0)return;e.preventDefault();
+  if(e.shiftKey){if(!SEL||SEL.o!==PAT.order)SEL={o:PAT.order,a:{row:CUR.row,ch:CUR.ch,col:CUR.col}};SEL.b=c}else SEL={o:PAT.order,a:c};
+  setCursor(PAT.order,c.row,c.ch,c.col);
+  const mv=ev=>{const d=cellAt(ev.target);if(!d)return;if(d.row!==CUR.row||d.ch!==CUR.ch||d.col!==CUR.col){SEL.b=d;setCursor(PAT.order,d.row,d.ch,d.col)}},
+    up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);if(SEL&&!SEL.b){SEL=null;renderPat()}};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up)});
+$('pat').addEventListener('dblclick',e=>{const r=e.target.closest('.pt');if(r){setCursor(PAT.order,+r.dataset.r);lvPlay(CUR.o,CUR.row)}});
+// piano keys preview the instrument: on the song while it plays live, alone (a muted copy) while stopped
+const PIANO='zsxdcvgbhnjmq2w3er5t6y7u';
+async function lvNoteOn(k,insIdx,nt,vol){const id='k'+k;if(LV.held[id])return;const note=nt!=null?nt:12*(+$('lv-oct').value||0)+PIANO.indexOf(k);if(note>119)return;LV.held[id]={pending:true};
+  try{await lvStart()}catch(e){delete LV.held[id];return}LV.ctx.resume();LV.node.port.postMessage({type:'note',id,ins:insIdx!=null?insIdx:+$('lv-ins').value||0,note,vol:vol!=null?vol:1})}
+function lvNoteOff(k){const id='k'+k,h=LV.held[id];if(!h)return;if(h.pending){h.release=true;return}delete LV.held[id];LV.node.port.postMessage({type:'noteoff',ch:h.ch,on:h.on})}
+// ---- pattern editing: the cursor is a row, a channel and a column (0 note, 1 instrument, 2 volume, 3 effect letter, 4
+// effect parameter). In edit mode the keys write the cell at the cursor; each change is shown at once and sent to the
+// server in order (POST edit: written into the song file in place, checked by compiling it first; the live engine swaps
+// the new song in). Undo and redo step through the server's history of song texts.
+let EDIT=false;const EDQ={chain:Promise.resolve(),n:0},EMPTY='... .. ... ...',NOTES=['C-','C#','D-','D#','E-','F-','F#','G-','G#','A-','A#','B-'];
+const VOLMAX={v:64,p:64,a:9,b:9,c:9,d:9,e:9,f:9,g:9,h:9};
+const cellOf=s=>{const [n,i,v,e]=s.split(' ');return {n,i,v,e}},cellText=p=>`${p.n} ${p.i} ${p.v} ${p.e}`;
+function setEdit(on){EDIT=on;if(on&&CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}renderPat();renderLiveBar()}
+function patEdit(changes){const idx=PAT.idx;if(idx==null||!PAT.rows||!changes.length)return;  // the pattern on show
+  changes.forEach(c=>{PAT.rows[c.row][c.ch]=c.cell});renderPat();EDQ.n++;
+  EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pattern:idx,cells:changes})})).json();
+      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null})
+    .catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
+function patUndo(redo){EDQ.n++;EDQ.err=null;EDQ.chain=EDQ.chain.then(()=>act(redo?'redo':'undo')).catch(()=>{}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
+function patMove(d){const rows=PAT.rows?PAT.rows.length:64;if(CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}setCursor(CUR.o,Math.max(0,Math.min(rows-1,CUR.row+d)))}
+function patCol(d){const fo=PAT.fo||[],i=Math.max(0,fo.indexOf(CUR.ch));let col=CUR.col+d,j=i;if(col>4){if(i+1<fo.length){j=i+1;col=0}else col=4}else if(col<0){if(i>0){j=i-1;col=4}else col=0}setCursor(CUR.o,CUR.row,fo[j],col)}
+function patChan(d){const fo=PAT.fo||[],i=Math.max(0,fo.indexOf(CUR.ch)),j=Math.max(0,Math.min(fo.length-1,i+d));setCursor(CUR.o,CUR.row,fo[j],0)}
+let DIG=null;
+function digit(k){const at=`${CUR.o}|${CUR.row}|${CUR.ch}|${CUR.col}`;if(DIG&&DIG.at===at){const v=DIG.d+k;DIG=null;return v}DIG={at,d:k};return '0'+k}
+function insNum(){const f=S.song.facts,i=+$('lv-ins').value||0;return f.instruments&&f.instruments.length?i+1:f.samples[i].num}
+function putCell(p,advance){patEdit([{row:CUR.row,ch:CUR.ch,cell:cellText(p)}]);if(advance)patMove(Math.max(0,+$('lv-step').value||0))}
+// Insert pushes the channel down from the cursor (the last row drops off); Backspace removes the cell at the cursor and pulls the rest up
+function patShift(down){const rows=PAT.rows,ch=CUR.ch,col=rows.map(r=>r[ch]),out=col.slice(),r0=CUR.row,n=rows.length;
+  if(down){for(let r=n-1;r>r0;r--)out[r]=col[r-1];out[r0]=EMPTY}else{for(let r=r0;r<n-1;r++)out[r]=col[r+1];out[n-1]=EMPTY}
+  patEdit(out.map((c,r)=>({row:r,ch,cell:c})).filter(c=>c.cell!==col[c.row]))}
+// one key in edit mode at the cursor's column; true when it was used
+// a note with the INS instrument (and a volume, from MIDI velocity) into the cell at the cursor, then STEP rows down
+function enterNote(note,vol){const p=cellOf(PAT.rows[CUR.row][CUR.ch]);p.n=noteTxt(note);p.i=pad(insNum());if(vol!=null)p.v='v'+pad(vol);putCell(p,true)}
+// ---- MIDI input: Web MIDI in the page (no Python side). Note-on previews through the live engine like the piano keys (the
+// instrument on show in INSTRUMENTS, the slot's player in SAMPLES, else INS), at the key's loudness with VEL→VOL; in edit
+// mode on the Pattern tab it also enters the note at the cursor (INS instrument, the velocity as v01-v64). MIDI note 60 =
+// C-5. Note-off releases the preview. Access is asked for (the window's permission prompt, kept in its profile) only once
+// MIDI is switched on; switched on, it connects at every launch.
+const MIDI={access:null,err:null,on:false,vel:true};try{MIDI.on=localStorage.midi==='1';MIDI.vel=localStorage.midivel!=='0'}catch(e){}
+async function midiStart(){if(MIDI.access)return;if(!navigator.requestMIDIAccess){MIDI.err='no Web MIDI here';return renderMidi()}
+  try{MIDI.access=await navigator.requestMIDIAccess();MIDI.access.onstatechange=midiBind;midiBind()}catch(e){MIDI.err=String(e.message||e);renderMidi()}}
+function midiBind(){MIDI.access.inputs.forEach(i=>{i.onmidimessage=e=>midiMsg(e.data)});renderMidi()}
+function midiMsg(d){if(!MIDI.on||!S||!S.song||!S.song.facts)return;const t=d[0]&0xf0;
+  if(t===0x90&&d[2]>0)midiNoteOn(d[1],d[2]);else if(t===0x80||t===0x90)lvNoteOff('m'+d[1])}
+function midiNoteOn(n,vel){if(n>119)return;
+  if($('t-pattern').classList.contains('on')&&EDIT&&PAT.rows&&!document.querySelector('.modal.on')){if(CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}enterNote(n,MIDI.vel?Math.max(1,Math.round(vel*64/127)):null)}
+  const ins=$('t-ins').classList.contains('on')&&INS_SEL!=null?+INS_SEL-1:$('t-smp').classList.contains('on')&&W.data&&W.data.player?W.data.player[0]:null;
+  lvNoteOn('m'+n,ins,n,MIDI.vel?vel/127:1)}
+function midiToggle(){MIDI.on=!MIDI.on;try{localStorage.midi=MIDI.on?'1':'0'}catch(e){}if(MIDI.on)midiStart();renderMidi()}
+function midiVel(v){MIDI.vel=v;try{localStorage.midivel=v?'1':'0'}catch(e){}}
+function renderMidi(){const ins=MIDI.access?[...MIDI.access.inputs.values()].filter(i=>i.state!=='disconnected'):[];$('midi-on').classList.toggle('on',MIDI.on&&ins.length>0);$('midi-vel').checked=MIDI.vel;
+  $('midi-status').textContent=MIDI.err?'MIDI: '+MIDI.err:!MIDI.on?'off · click MIDI to play a keyboard':!MIDI.access?'asking for access…':ins.length?ins.map(i=>i.name).join(', '):'no MIDI input connected';$('midi-status').title=$('midi-status').textContent}
+if(MIDI.on)midiStart();else renderMidi();
+function editKey(e,k){const p=cellOf(PAT.rows[CUR.row][CUR.ch]),col=CUR.col;
+  if(e.key==='Delete'||k==='.'){if(col===0){p.n='...';p.i='..'}else if(col===1)p.i='..';else if(col===2)p.v='...';else p.e='...';putCell(p,true);return true}
+  if(e.key==='Insert'){patShift(true);return true}
+  if(e.key==='Backspace'){patShift(false);return true}
+  if(col===0){if(PIANO.includes(k)&&k.length===1){const note=12*(+$('lv-oct').value||0)+PIANO.indexOf(k);if(note>119)return true;enterNote(note);if(!e.repeat)lvNoteOn(k);return true}
+    const sp={'1':'===','`':'~~~','\\':'^^^'}[k];if(sp){p.n=sp;putCell(p,true);return true}return false}
+  if(col===1&&/^[0-9]$/.test(k)){const d=digit(k);p.i=d==='00'?'..':d;putCell(p,false);return true}
+  if(col===2){if(VOLMAX[k]!=null&&k.length===1){p.v=k+pad(Math.min(VOLMAX[k],p.v==='...'?0:+p.v.slice(1)));putCell(p,false);return true}
+    if(/^[0-9]$/.test(k)){const L=p.v==='...'?'v':p.v[0];p.v=L+pad(Math.min(VOLMAX[L],+digit(k)));putCell(p,false);return true}return false}
+  if(col===3&&/^[a-z]$/.test(k)){p.e=k.toUpperCase()+(p.e==='...'?'00':p.e.slice(1));putCell(p,false);return true}
+  if(col===4&&/^[0-9a-f]$/.test(k)){if(p.e==='...')return true;p.e=p.e[0]+digit(k.toUpperCase());putCell(p,false);return true}
+  return false}
+// ---- the INSTRUMENTS tab: the song's instruments and sample slots. Every change writes the instrument's entry into the song
+// file in place (POST songedit: instrument_set, one undo step), so the live engine swaps it in and the piano keys preview it
+let INS_SEL=null,ENVD=null;
+const ENVS=[['volume_envelope','VOLUME',0,64],['panning_envelope','PANNING',-32,32],['pitch_envelope','PITCH / FILTER',-32,32]];
+const noteNum=s=>{const m=/^([A-G][-#])(\d)$/.exec(String(s||'').trim());return m&&NOTES.includes(m[1])?NOTES.indexOf(m[1])+12*(+m[2]):null};
+const noteTxt=n=>NOTES[n%12]+Math.floor(n/12);
+function insEntry(){return S.instruments&&INS_SEL!=null?S.instruments[INS_SEL]:null}
+function insSet(fn){const e=JSON.parse(JSON.stringify(insEntry()||{}));fn(e);S.instruments[INS_SEL]=e;renderIns();songEdit([{op:'instrument_set',num:+INS_SEL,entry:e}])}
+function slotNum(ref){const f=S.song.facts;if(typeof ref==='number')return ref;const s=f.samples.find(x=>x.name===ref);return s?s.num:null}
+function slotOpts(cur){return S.song.facts.samples.map(s=>`<option value="${s.num}" ${s.num===cur?'selected':''}>${pad(s.num)} ${esc(s.name)}</option>`).join('')}
+function insNew(){const nums=Object.keys(S.instruments||{}).map(Number),num=Math.max(0,...nums)+1,slot=+$('ins-newslot').value||1,s=S.song.facts.samples.find(x=>x.num===slot);
+  INS_SEL=String(num);songEdit([{op:'instrument_new',num,entry:{name:(s?s.name:'new').slice(0,25),sample:slot}}])}
+function insClone(){const e=insEntry();if(!e||EDQ.n)return;const num=Math.max(0,...Object.keys(S.instruments).map(Number))+1,c=JSON.parse(JSON.stringify(e));c.name=((c.name||'')+' copy').slice(0,25);INS_SEL=String(num);songEdit([{op:'instrument_new',num,entry:c}])}
+function insDelete(){if(INS_SEL==null||!insEntry()||EDQ.n)return;const n=+INS_SEL;INS_SEL=null;songEdit([{op:'instrument_delete',num:n}])}
+async function insBrowse(){const j=await (await fetch('/api/browsewav',{method:'POST',body:'{}'})).json();if(j.path)$('ins-wav').value=j.path}
+function insSlot(){const f=$('ins-wav').value.trim();if(!f)return;$('ins-wav').value='';songEdit([{op:'sample_new',file:f}])}
+// the envelope graph: x = ticks, y = value; drag a node, click empty space to add one, right-click a node to remove it
+function envGeom(env,lo,hi){const last=env.nodes[env.nodes.length-1][0],T=Math.max(32,Math.ceil(last*1.25/8)*8),W=640,H=120;
+  return {T,W,H,x:t=>34+(W-44)*t/T,y:v=>8+(H-24)*(hi-v)/(hi-lo),t:px=>Math.round((px-34)*T/(W-44)),v:py=>Math.round(hi-(py-8)*(hi-lo)/(H-24))}}
+function envSvg(kind,env,lo,hi){const g=envGeom(env,lo,hi),n=env.nodes,sus=env.sustain==null?[]:Array.isArray(env.sustain)?env.sustain:[env.sustain,env.sustain],lp=env.loop||[],ms=2500/S.song.facts.tempo,off=env.enabled===false;
+  const ln=(i,col)=>n[i]?`<line x1="${g.x(n[i][0])}" x2="${g.x(n[i][0])}" y1="4" y2="${g.H-14}" stroke="${col}" stroke-dasharray="3 2"/>`:'';
+  const ticks=[0,.25,.5,.75,1].map(f=>Math.round(g.T*f)).map(t=>`<text x="${g.x(t)}" y="${g.H-2}" fill="#79848a" font-size="9" text-anchor="middle">${t} · ${t*ms<1000?Math.round(t*ms)+'ms':(t*ms/1000).toFixed(1)+'s'}</text>`).join('');
+  return `<svg width="${g.W}" height="${g.H}" style="display:block;background:#0b0e0f;cursor:crosshair;opacity:${off?.45:1}"><text x="4" y="12" fill="#79848a" font-size="9">${hi}</text><text x="4" y="${g.H-16}" fill="#79848a" font-size="9">${lo}</text>
+    ${lo<0?`<line x1="34" x2="${g.W-10}" y1="${g.y(0)}" y2="${g.y(0)}" stroke="#242a2e"/>`:''}${sus.map(i=>ln(i,'#d9a441')).join('')}${lp.map(i=>ln(i,'#5f7d94')).join('')}
+    <polyline points="${n.map(([t,v])=>`${g.x(t)},${g.y(v)}`).join(' ')}" fill="none" stroke="#7ee787" stroke-width="1.5"/>
+    ${n.map(([t,v],i)=>`<circle data-i="${i}" cx="${g.x(t)}" cy="${g.y(v)}" r="5" fill="${sus.includes(i)?'#d9a441':'#7ee787'}" stroke="#0b0e0f" style="cursor:grab"><title>node ${i}: tick ${t}, ${v}</title></circle>`).join('')}${ticks}</svg>`}
+function envAt(e,box,env,lo,hi){const g=envGeom(env,lo,hi),r=box.getBoundingClientRect();return [g.t(e.clientX-r.left),Math.max(lo,Math.min(hi,g.v(e.clientY-r.top)))]}
+function envDown(e,kind,lo,hi){if(e.button!==0)return;e.preventDefault();const box=e.currentTarget,env=JSON.parse(JSON.stringify(insEntry()[kind])),i=e.target.dataset&&e.target.dataset.i;
+  if(i==null){const [t,v]=envAt(e,box,env,lo,hi);if(t<=0||env.nodes.some(nd=>nd[0]===t)||env.nodes.length>=25)return;const k=env.nodes.findIndex(nd=>nd[0]>t),at=k<0?env.nodes.length:k;
+    env.nodes.splice(at,0,[t,v]);shiftIdx(env,at,1);insSet(x=>x[kind]=env);return}
+  ENVD={kind,i:+i,env};const mv=ev=>{const [t,v]=envAt(ev,box,ENVD.env,lo,hi),n=ENVD.env.nodes,k=ENVD.i;n[k]=[k===0?0:Math.max(n[k-1][0]+1,Math.min(k+1<n.length?n[k+1][0]-1:9999,t)),v];renderIns()},
+    up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);const d=ENVD;ENVD=null;insSet(x=>x[d.kind]=d.env)};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up)}
+// node indices in sustain and loop follow an inserted (d = 1) or removed (d = -1) node; a span that loses its node goes
+function shiftIdx(env,at,d){const f=i=>d>0?(i>=at?i+1:i):(i===at?null:i>at?i-1:i);
+  if(env.sustain!=null){const s=(Array.isArray(env.sustain)?env.sustain:[env.sustain]).map(f);if(s.includes(null))delete env.sustain;else env.sustain=s.length>1?s:s[0]}
+  if(env.loop){const l=env.loop.map(f);if(l.includes(null))delete env.loop;else env.loop=l}}
+function envCtx(e,kind){const i=e.target.dataset&&e.target.dataset.i;if(i==null)return;e.preventDefault();insSet(x=>{const env=x[kind];if(env.nodes.length<2||+i===0)return;env.nodes.splice(+i,1);shiftIdx(env,+i,-1)})}
+const spanTxt=s=>s==null?'off':Array.isArray(s)?(s[0]===s[1]?String(s[0]):`${s[0]}-${s[1]}`):String(s);
+const spanParse=(s,pair)=>{s=s.trim();if(!s||s==='off')return null;const m=/^(\d+)\s*[-–.]+\s*(\d+)$/.exec(s);if(m)return [+m[1],+m[2]];return /^\d+$/.test(s)?(pair?[+s,+s]:+s):undefined};
+function renderIns(){if(!$('ins-edit')||!S.song.facts)return;const f=S.song.facts,ins=S.instruments||{},nums=Object.keys(ins).sort((a,b)=>a-b);
+  if(!EDQ.n&&(INS_SEL==null||!ins[INS_SEL]))INS_SEL=nums[0]||null;  // a selection made by NEW or CLONE waits for its write
+  $('ins-n').textContent=nums.length;$('ins-sn').textContent=f.samples.length;put('ins-newslot',slotOpts(null));
+  put('ins-list',nums.map(n=>{const e=ins[n]||{},what=e.keymap?`keymap · ${e.keymap.length}`:e.sample!=null?`slot ${pad(slotNum(e.sample)||0)}`:'no notes';
+    return `<div class="stem ${n===INS_SEL?'solo':''}" style="cursor:pointer" onclick="INS_SEL='${n}';renderIns()"><span class="n">${pad(+n)}</span><span class="nm">${esc(e.name||'')}</span><span class="smp">${esc(what)}</span></div>`}).join('')||'<div style="padding:8px;color:var(--dim)">no instruments: the song plays samples directly</div>');
+  put('ins-slots',f.samples.map(s=>`<div class="row"><span class="mono">${pad(s.num)} ${esc(s.name)}</span><span style="font-size:9.5px">${s.length.toFixed(2)} s${s.loop?' · loop':''}</span></div>`).join(''));
+  $('ins-msg').style.color=EDQ.err?'var(--red)':'var(--dim)';$('ins-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:EDQ.n?'writing…':'written into the song file in place · the piano keys (Z–M, Q–U, OCT in the Pattern tab) play it · Ctrl+Z in the Pattern tab undoes';
+  const e=insEntry();$('ins-title').textContent=e?`INSTRUMENT ${pad(+INS_SEL)} · ${e.name||''}`:INS_SEL!=null&&EDQ.n?`INSTRUMENT ${pad(+INS_SEL)} · writing…`:'INSTRUMENT';$('ins-del').classList.toggle('dimb',!e);if(!e){put('ins-edit','');return}
+  const val=(k,lab,lo,hi,txt,opt)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,${lo},${hi},v=>insSet(x=>{if(v===''||v==null)delete x['${k}'];else x['${k}']=v}),${JSON.stringify(e[k]==null?'':String(e[k])).replace(/"/g,'&quot;')},${txt?'s=>s':`s=>s.trim()===''?'':+s`})" title="click to type${txt?'':` ${lo}–${hi}`}${opt?' (empty: off)':''}">${e[k]==null?(opt?'off':'—'):esc(e[k])}</span></div>`;
+  const sel=(k,opts,def)=>`<div class="row"><span>${k.toUpperCase()}</span><select onchange="insSet(x=>{x['${k}']=this.value})" style="font:10.5px var(--mono);padding:0 3px">${opts.map(o=>`<option ${(e[k]||def)===o?'selected':''}>${o}</option>`).join('')}</select></div>`;
+  const general=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;max-width:640px">${val('name','name',0,0,1)}${val('fadeout','fadeout (release)',0,256)}${val('global_volume','global volume',0,128)}${val('pan','pan',0,64,0,1)}${val('random_volume','random volume %',0,100)}${val('random_pan','random pan',0,64)}${val('filter_cutoff','filter cutoff',0,127,0,1)}${val('filter_resonance','filter resonance',0,127,0,1)}${val('pitch_pan_separation','pitch-pan separation',-32,32)}${val('pitch_pan_center','pitch-pan center',0,0,1)}${sel('nna',['cut','continue','off','fade'],'cut')}${sel('dct',['off','note','sample','instrument'],'off')}${sel('dca',['cut','off','fade'],'cut')}</div>`;
+  // notes to samples: the one-slot shorthand or a keymap; the strip shows the slot each of the 120 notes plays
+  const map=Array(120).fill(null);if(e.sample!=null)map.fill(slotNum(e.sample));
+  (e.keymap||[]).forEach(k=>{const [a,b]=String(k.notes).split('..'),lo=noteNum(a),hi=b?noteNum(b):lo;if(lo==null||hi==null)return;for(let n=lo;n<=hi;n++)map[n]=slotNum(k.sample)});
+  const hue=s=>s==null?'#161a1c':`hsl(${(s*67)%360},45%,42%)`;
+  const strip=`<div style="display:flex;margin-top:6px;max-width:720px">${map.map((s,n)=>`<i title="${noteTxt(n)}: ${s==null?'silent':'slot '+pad(s)}" style="flex:1;height:14px;background:${hue(s)};${n%12===0?'box-shadow:inset 1px 0 0 #0a0c0d;':''}"></i>`).join('')}</div><div style="display:flex;max-width:720px;font:8.5px var(--mono);color:var(--dim)">${[...Array(10).keys()].map(o=>`<span style="flex:1">C-${o}</span>`).join('')}</div>`;
+  const km=e.keymap?`<table style="max-width:720px"><tr><th>NOTES</th><th>SLOT</th><th>PLAYS AT</th><th></th></tr>${e.keymap.map((k,i)=>`<tr><td class="tv" onclick="typeIn(this,0,0,v=>insSet(x=>{x.keymap[${i}].notes=v}),${JSON.stringify(String(k.notes)).replace(/"/g,'&quot;')},s=>s)" title="a note (C-5) or a range (C-0..B-4)">${esc(k.notes)}</td><td><select onchange="insSet(x=>{x.keymap[${i}].sample=+this.value})" style="font:10.5px var(--mono)">${slotOpts(slotNum(k.sample))}</select></td><td class="tv" onclick="typeIn(this,0,0,v=>insSet(x=>{const q=x.keymap[${i}];delete q.transpose;delete q.play_note;if(/^[+-]?\\d+$/.test(v.trim()))q.transpose=+v;else if(v.trim())q.play_note=v.trim()}),${JSON.stringify(k.play_note||(k.transpose!=null?String(k.transpose):'')).replace(/"/g,'&quot;')},s=>s)" title="empty: each note at its own pitch · +12 / -5: transposed · C-5: every note at that pitch (drums)">${k.play_note?esc(k.play_note):k.transpose!=null?(k.transpose>0?'+':'')+k.transpose+' st':'own pitch'}</td><td style="text-align:right"><span class="btn sm" onclick="insSet(x=>{x.keymap.splice(${i},1);if(!x.keymap.length)delete x.keymap})">✕</span></td></tr>`).join('')}</table><span class="btn sm" style="margin-top:4px" onclick="insSet(x=>x.keymap.push({notes:'C-5',sample:${f.samples[0]?f.samples[0].num:1}}))">+ ENTRY</span> <span style="font-size:9.5px;color:var(--dim)">later entries override earlier ones</span>`
+    :e.sample!=null?`<div class="row" style="max-width:420px"><span>every note plays slot</span><select onchange="insSet(x=>{x.sample=+this.value})" style="font:10.5px var(--mono)">${slotOpts(slotNum(e.sample))}</select></div><span class="btn sm" onclick="insSet(x=>{x.keymap=[{notes:'C-0..B-9',sample:slotNum(x.sample)}];delete x.sample})" title="map note ranges to different slots (multisamples, drum kits)">USE A KEYMAP</span>`
+    :`<div style="color:var(--amber)">no notes mapped: the instrument is silent</div><span class="btn sm" onclick="insSet(x=>{x.sample=${f.samples[0]?f.samples[0].num:1}})">PLAY ONE SLOT</span>`;
+  const envs=ENVS.map(([k,label,lo,hi])=>{const env=ENVD&&ENVD.kind===k?ENVD.env:e[k],on=env&&env.enabled!==false;
+    const head=`<div style="display:flex;align-items:center;gap:8px;margin:14px 0 4px;font:9.5px var(--mono);color:var(--dim)"><span class="k">${label}</span><label><input type="checkbox" ${on?'checked':''} onchange="insSet(x=>{if(!x['${k}'])x['${k}']={nodes:[[0,${k==='volume_envelope'?64:0}],[16,${k==='volume_envelope'?64:0}]]};else if(this.checked)delete x['${k}'].enabled;else x['${k}'].enabled=false})"> on</label>`+
+      (env?`<span>SUSTAIN <span class="tv" style="color:#d9a441" onclick="typeIn(this,0,0,v=>{const s=spanParse(v,false);if(s===undefined)return;insSet(x=>{if(s==null)delete x['${k}'].sustain;else x['${k}'].sustain=s})},'${spanTxt(env.sustain)}',s=>s)" title="a node (2) held until note-off, or a span (1-3) looped until then; empty: none">${spanTxt(env.sustain)}</span></span><span>LOOP <span class="tv" style="color:#8fb0c4" onclick="typeIn(this,0,0,v=>{const s=spanParse(v,true);if(s===undefined)return;insSet(x=>{if(s==null)delete x['${k}'].loop;else x['${k}'].loop=s})},'${spanTxt(env.loop)}',s=>s)" title="a span of nodes (0-3) looped for good; empty: none">${spanTxt(env.loop)}</span></span>`+
+      `<label><input type="checkbox" ${env.carry?'checked':''} onchange="insSet(x=>{if(this.checked)x['${k}'].carry=true;else delete x['${k}'].carry})"> carry</label>`+(k==='pitch_envelope'?`<label title="the envelope moves the filter cutoff instead of the pitch"><input type="checkbox" ${env.filter?'checked':''} onchange="insSet(x=>{if(this.checked)x['${k}'].filter=true;else delete x['${k}'].filter})"> filter</label>`:'')+
+      `<span class="btn sm" onclick="insSet(x=>{delete x['${k}']})" title="remove the envelope">✕</span><span>${env.nodes.length} nodes · drag · click to add · right-click to remove</span>`:'')+`</div>`;
+    return head+(env?`<div onmousedown="envDown(event,'${k}',${lo},${hi})" oncontextmenu="envCtx(event,'${k}')">${envSvg(k,env,lo,hi)}</div>`:'')}).join('');
+  put('ins-edit',general+`<div class="k" style="margin:14px 0 4px">NOTES → SAMPLE SLOTS</div>${km}${strip}`+envs)}
+// ---- the SAMPLES tab: a zoomable waveform of a slot's WAV (min/max per pixel column from /api/wave, computed by the server
+// for the span on show), loop and sustain-loop points dragged on it, edits of the audio written as new WAVs beside the song
+// (the slot pointed at them) and the sample's properties. Every change is one undo step (POST songedit: sample_set with the
+// whole entry, sample_process), queued with the other edits; loop points are in the WAV's own frames, as in the song file.
+let SMP_SEL=null;const W={data:null,a:0,b:0,sel:null,drag:null,id:'',key:'',busy:false,pend:false,hover:null};
+const smpEntry=()=>S.song.sample_entries&&SMP_SEL!=null?S.song.sample_entries[SMP_SEL]:null;
+function smpSet(fn){const e=JSON.parse(JSON.stringify(smpEntry()||{}));fn(e);S.song.sample_entries[SMP_SEL]=e;renderSmp();songEdit([{op:'sample_set',num:+SMP_SEL,entry:e}])}
+function smpInfo(t){$('smp-msg').style.color='var(--amber)';$('smp-msg').textContent=t}
+function smpLoop(e,k){if(W.drag&&W.drag.k===k)return W.drag.L;const v=e&&e[k],d=W.data;if(v==='from_wav')return d&&d.wav_loop;
+  if(v&&typeof v==='object'&&d)return [v.start||0,v.end!=null?v.end:d.frames,v.type==='pingpong'];return null}
+const loopEntry=(L,pp)=>({start:L[0],end:L[1],...(pp?{type:'pingpong'}:{})});
+function smpProcess(action,extra){if(SMP_SEL==null||!W.data||EDQ.n)return;const s=W.sel&&W.sel[1]>W.sel[0]?W.sel:null;
+  if(action==='trim'&&!s)return smpInfo('select the part to keep first (drag on the waveform)');
+  songEdit([{op:'sample_process',num:+SMP_SEL,action,...(s?{a:s[0],b:s[1]}:{}),...(extra||{})}]);if(action==='trim'){W.sel=null;W.a=0;W.b=0}}
+function smpHear(on){const p=W.data&&W.data.player;if(!p){if(on&&W.data)smpInfo('no instrument plays this slot: nothing to preview it with');return}if(on)lvNoteOn('aud',p[0],p[1]);else lvNoteOff('aud')}
+function smpKey(){const cv=$('smp-wave'),e=smpEntry();return `${S.song.mtime}|${SMP_SEL}|${e&&e.file}|${W.a}|${W.b}|${Math.max(16,Math.round(cv.clientWidth*(devicePixelRatio||1)))}`}
+// one request in flight; a view that changes meanwhile is fetched when it lands (the old peaks are drawn stretched until then)
+function smpFetch(){const cv=$('smp-wave'),e=smpEntry();if(!cv||!cv.clientWidth||!e||!e.file)return;const key=smpKey();if(W.key===key)return;W.key=key;if(W.busy){W.pend=true;return}W.busy=true;
+  fetch(`/api/wave/${SMP_SEL}?a=${W.a}&b=${W.b||''}&n=${key.split('|').pop()}`).then(r=>r.json()).then(j=>{
+    if(j.error){W.data=null;W.err=j.error}else{W.err=null;if(String(j.num)!==String(SMP_SEL))return;W.data=j;
+      if(!W.b||W.b>j.frames){W.a=j.a;W.b=j.b;W.key=smpKey()}if(W.sel)W.sel=[Math.min(W.sel[0],j.frames),Math.min(W.sel[1],j.frames)]}
+    drawWave();renderSmpLoops();renderSmpInfo()}).catch(e=>{W.err=String(e)}).finally(()=>{W.busy=false;if(W.pend){W.pend=false;W.key='';smpFetch()}})}
+function smpView(a,b){const N=W.data?W.data.frames:0;if(!N)return;const s=Math.min(N,Math.max(32,Math.round(b-a)));a=Math.max(0,Math.min(N-s,Math.round(a)));W.a=a;W.b=a+s;drawWave();renderSmpInfo();smpFetch()}
+function smpZoom(z){const d=W.data;if(!d)return;const a=W.a,b=W.b||d.frames;
+  if(z==='all')return smpView(0,d.frames);if(z==='sel')return W.sel&&smpView(W.sel[0],W.sel[1]);
+  if(z==='loop'){const e=smpEntry(),L=smpLoop(e,'loop')||smpLoop(e,'sustain_loop');if(L){const m=Math.round((L[1]-L[0])*.1)+16;smpView(L[0]-m,L[1]+m)}return}
+  const c=(a+b)/2,s=(b-a)*z;smpView(c-s/2,c+s/2)}
+const smpX=(f,w)=>(f-W.a)*w/((W.b||1)-W.a),smpF=(px,w)=>Math.max(0,Math.min(W.data.frames,Math.round(W.a+px*((W.b||1)-W.a)/w)));
+function drawWave(){const cv=$('smp-wave');if(!cv||!$('t-smp').classList.contains('on'))return;const dpr=devicePixelRatio||1,w=cv.width=Math.round(cv.clientWidth*dpr),h=cv.height=Math.round(cv.clientHeight*dpr),g=cv.getContext('2d');
+  g.fillStyle='#0b0e0f';g.fillRect(0,0,w,h);const d=W.data;if(!d||!W.b){g.fillStyle='#79848a';g.font=`${11*dpr}px monospace`;g.fillText(W.err||(smpEntry()&&smpEntry().file?'loading…':'an empty slot: no WAV'),10*dpr,20*dpr);return}
+  const X=f=>smpX(f,w),e=smpEntry(),nc=d.channels,ch=h/nc;
+  [['loop','rgba(95,125,148,.25)','#8fb0c4','L'],['sustain_loop','rgba(217,164,65,.18)','#d9a441','S']].forEach(([k,fill,line,lab])=>{const L=smpLoop(e,k);if(!L)return;
+    g.fillStyle=fill;g.fillRect(X(L[0]),0,X(L[1])-X(L[0]),h);g.fillStyle=line;g.font=`${9*dpr}px monospace`;
+    [L[0],L[1]].forEach((f,i)=>{const x=Math.round(X(f));g.fillRect(x-Math.round(dpr/2),0,Math.max(1,Math.round(dpr)),h);g.fillRect(i?x-7*dpr:x,0,7*dpr,11*dpr);g.fillStyle='#0b0e0f';g.fillText(lab,(i?x-6*dpr:x+1*dpr),9*dpr);g.fillStyle=line})});
+  if(W.sel){g.fillStyle='rgba(255,255,255,.13)';g.fillRect(X(W.sel[0]),0,Math.max(dpr,X(W.sel[1])-X(W.sel[0])),h)}
+  for(let c=0;c<nc;c++){const mid=ch*(c+.5),amp=ch*.46,mn=d.min[c],mx=d.max[c],n=mn.length,span=d.b-d.a;
+    g.fillStyle='#242a2e';g.fillRect(0,Math.round(mid),w,1);if(c)g.fillRect(0,Math.round(ch*c),w,1);
+    if(n===span){g.strokeStyle='#7ee787';g.lineWidth=Math.max(1,dpr);g.beginPath();for(let i=0;i<n;i++){const x=X(d.a+i),y=mid-mx[i]*amp;i?g.lineTo(x,y):g.moveTo(x,y)}g.stroke();
+      if(w/(W.b-W.a)>5*dpr){g.fillStyle='#7ee787';for(let i=0;i<n;i++)g.fillRect(X(d.a+i)-1.5*dpr,mid-mx[i]*amp-1.5*dpr,3*dpr,3*dpr)}}
+    else{g.fillStyle='#7ee787';for(let i=0;i<n;i++){const x0=X(d.a+i*span/n),x1=X(d.a+(i+1)*span/n);g.fillRect(x0,mid-mx[i]*amp,Math.max(1,x1-x0),Math.max(1,(mx[i]-mn[i])*amp))}}}}
+function smpMarkerAt(px,w){const e=smpEntry();let best=null;for(const k of ['loop','sustain_loop']){const L=smpLoop(e,k);if(!L)continue;[0,1].forEach(i=>{const dx=Math.abs(smpX(L[i],w)-px);if(dx<=6&&(!best||dx<best.dx))best={k,i,dx}})}return best}
+function smpDown(ev){if(ev.button!==0||!W.data||!W.b)return;ev.preventDefault();const cv=ev.currentTarget,r=cv.getBoundingClientRect(),w=r.width,m=smpMarkerAt(ev.clientX-r.left,w);
+  if(m){const e=smpEntry(),L=smpLoop(e,m.k).slice(),pp=L[2];W.drag={k:m.k,L};
+    const mv=e2=>{const f=smpF(e2.clientX-r.left,w);if(m.i===0)L[0]=Math.min(f,L[1]-1);else L[1]=Math.max(f,L[0]+1);drawWave();renderSmpInfo()},
+      up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);const k=W.drag.k;W.drag=null;smpSet(x=>{x[k]=loopEntry(L,pp)})};
+    addEventListener('mousemove',mv);addEventListener('mouseup',up);return}
+  const f0=smpF(ev.clientX-r.left,w);W.sel=null;
+  const mv=e2=>{const f=smpF(e2.clientX-r.left,w);W.sel=[Math.min(f0,f),Math.max(f0,f)];drawWave();renderSmpInfo()},
+    up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);if(W.sel&&W.sel[1]-W.sel[0]<1)W.sel=null;drawWave();renderSmpInfo();renderSmpLoops()};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up);drawWave()}
+function smpWheel(ev){const d=W.data;if(!d||!W.b)return;ev.preventDefault();const r=ev.currentTarget.getBoundingClientRect(),a=W.a,b=W.b,span=b-a;
+  if(ev.shiftKey||Math.abs(ev.deltaX)>Math.abs(ev.deltaY)){const s=Math.round(span*.15*Math.sign(ev.deltaY||ev.deltaX));return smpView(a+s,b+s)}
+  const f=a+(ev.clientX-r.left)/r.width*span,k=ev.deltaY<0?.8:1.25,ns=span*k;smpView(f-(f-a)*k,f-(f-a)*k+ns)}
+function smpHover(ev){if(!W.data||!W.b)return;const r=ev.currentTarget.getBoundingClientRect();W.hover=smpF(ev.clientX-r.left,r.width);ev.currentTarget.style.cursor=smpMarkerAt(ev.clientX-r.left,r.width)?'ew-resize':'crosshair';renderSmpInfo()}
+const fms=(f,rate)=>{const s=f/rate;return s<1?(s*1000).toFixed(1)+' ms':s.toFixed(3)+' s'};
+function renderSmpInfo(){const d=W.data,el=$('smp-info');if(!el)return;if(!d||!W.b){el.textContent=W.err||'';return}const sc=$('smp-scroll'),span=W.b-W.a;
+  sc.max=Math.max(0,d.frames-span);sc.value=W.a;sc.style.visibility=span<d.frames?'visible':'hidden';
+  el.textContent=`${d.frames} frames · ${fms(d.frames,d.rate)} · ${d.rate} Hz · ${d.channels>1?'stereo':'mono'} · ${d.bits}-bit${d.root?' · smpl root '+d.root:''} · view ${W.a}–${W.b}`+
+    (W.sel?` · selection ${W.sel[0]}–${W.sel[1]} (${W.sel[1]-W.sel[0]} frames, ${fms(W.sel[1]-W.sel[0],d.rate)})`:'')+(W.hover!=null?` · at ${W.hover}`:'')}
+function renderSmpLoops(){const d=W.data,e=smpEntry();if(!$('smp-loops'))return;if(!d||!e){put('smp-loops','');return}
+  put('smp-loops',[['loop','LOOP','#8fb0c4','played for as long as the note sounds'],['sustain_loop','SUSTAIN LOOP','#d9a441','played until note-off, then the sample goes on (to its loop, if any)']].map(([k,lab,col,tip])=>{
+    const v=e[k],L=smpLoop(e,k),mode=v==null?'off':v==='from_wav'?'from_wav':L&&L[2]?'pingpong':'forward',ms=L?fms(L[1]-L[0],d.rate):'';
+    const tv=(i,lo,hi)=>`<span class="tv" onclick="typeIn(this,${lo},${hi},x=>smpSet(y=>{const L=smpLoop(y,'${k}').slice();L[${i}]=x;y['${k}']=loopEntry(L,L[2])}),'${L[i]}')" title="click to type (frames of the WAV)">${L[i]}</span>`;
+    return `<div style="display:flex;align-items:center;gap:8px;font:10.5px var(--mono);margin:3px 0"><span class="k" style="color:${col};width:92px" title="${tip}">${lab}</span>
+      <select onchange="smpLoopMode('${k}',this.value)" style="font:10.5px var(--mono);padding:0 3px">${[['off','off'],['forward','forward'],['pingpong','ping-pong'],...(d.wav_loop||v==='from_wav'?[['from_wav','from the WAV']]:[])].map(([o,t])=>`<option value="${o}" ${o===mode?'selected':''}>${t}</option>`).join('')}</select>
+      ${L?`<span>START ${mode==='from_wav'?L[0]:tv(0,0,L[1]-1)}</span><span>END ${mode==='from_wav'?L[1]:tv(1,L[0]+1,d.frames)}</span><span style="color:var(--dim)">${L[1]-L[0]} frames · ${ms}</span>`:''}
+      <span class="btn sm ${W.sel?'':'dimb'}" onclick="smpLoopFromSel('${k}')" title="the selection becomes the ${lab.toLowerCase()}">SELECTION → ${lab}</span></div>`}).join(''))}
+function smpLoopMode(k,m){const d=W.data;smpSet(x=>{const L=smpLoop(x,k);if(m==='off')delete x[k];else if(m==='from_wav')x[k]='from_wav';else x[k]=loopEntry(L||(W.sel&&W.sel[1]>W.sel[0]?W.sel:[0,d.frames]),m==='pingpong')})}
+function smpLoopFromSel(k){if(!W.sel||W.sel[1]<=W.sel[0])return smpInfo('select the loop on the waveform first');const L=smpLoop(smpEntry(),k);smpSet(x=>{x[k]=loopEntry(W.sel,L&&L[2])})}
+function renderSmp(){if(!$('smp-list')||!S||!S.song||!S.song.facts||!$('t-smp').classList.contains('on'))return;const f=S.song.facts,ents=S.song.sample_entries||{},nums=Object.keys(ents).sort((a,b)=>a-b);
+  if(!EDQ.n&&(SMP_SEL==null||!ents[SMP_SEL]))SMP_SEL=ents[S.slot]?String(S.slot):nums[0]||null;
+  $('smp-n').textContent=nums.length;
+  put('smp-list',nums.map(n=>{const e=ents[n]||{},s=f.samples.find(x=>x.num===+n);return `<div class="stem ${n===SMP_SEL?'solo':''}" style="cursor:pointer" onclick="SMP_SEL='${n}';renderSmp()" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>{SMP_SEL='${n}';songEdit([{op:'sample_file',num:${+n},file:p[0]}])})"><span class="n">${pad(+n)}</span><span class="nm">${esc(e.name||(e.file?String(e.file).split('/').pop():'empty'))}</span><span class="smp">${s?s.length.toFixed(2)+' s':''}${e.loop?' ⟲':''}${e.sustain_loop?' S':''}</span></div>`}).join(''));
+  $('smp-msg').style.color=EDQ.err?'var(--red)':'var(--dim)';$('smp-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:EDQ.n?'writing…':LV.loading?'the live engine is swapping the new song in…':'written into the song file in place · edits of the audio go to new WAVs beside the song';
+  const e=smpEntry();$('smp-title').textContent=e?`SAMPLE ${pad(+SMP_SEL)} · ${e.name||''}`:'SAMPLE';
+  const id=`${SMP_SEL}|${e&&e.file}`;if(W.id!==id){if(W.id.split('|')[0]!==String(SMP_SEL)){W.a=0;W.b=0;W.sel=null;W.data=null}W.id=id}
+  if(!e){put('smp-props','');put('smp-loops','');drawWave();return}
+  const q=s=>JSON.stringify(s==null?'':String(s)).replace(/"/g,'&quot;');
+  const val=(k,lab,lo,hi,txt,other,tip)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,${lo},${hi},v=>smpSet(x=>{if(v===''||v==null)delete x['${k}'];else{x['${k}']=v;${other?`delete x['${other}']`:''}}}),${q(e[k])},${txt?'s=>s':`s=>s.trim()===''?'':+s`})" title="${tip||'click to type'+(txt?'':` ${lo}–${hi}`)} (empty: the default)">${e[k]==null?'—':esc(e[k])}</span></div>`;
+  const vib=e.vibrato||null,vv=(k,lab,hi)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,0,${hi},v=>smpSet(x=>{x.vibrato=Object.assign(x.vibrato||{},{'${k}':v})}),${q(vib&&vib[k])})" title="click to type 0–${hi}">${vib&&vib[k]!=null?vib[k]:'—'}</span></div>`;
+  const m=(S.song.slot_meas||{})[SMP_SEL]||{};
+  put('smp-props',`<div class="k" style="margin-bottom:4px">PROPERTIES</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px;max-width:640px">
+    ${val('name','name',0,0,1)}<div class="row"><span>file</span><span class="mono" style="font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px" title="${esc(e.file)}">${esc(e.file||'—')}</span></div>
+    ${val('base_note','base note (plays at C-5)',0,0,1,'c5_speed','the note the WAV sounds at when played at C-5, e.g. A-5; replaces c5_speed')}${val('c5_speed','c5 speed (Hz)',256,9999999,0,'base_note','the rate that plays at C-5; replaces base note')}
+    ${val('volume','default volume',0,64)}${val('global_volume','global volume',0,64)}
+    ${val('pan','default pan',0,64,0,null,'0–64 (empty: the channel pan)')}<div class="row"><span>detected pitch</span><span class="mono">${m.pitch||'—'}</span></div>
+    <div class="row"><span>bits</span><select onchange="smpSet(x=>{if(this.value)x.bits=+this.value;else delete x.bits})" style="font:10.5px var(--mono);padding:0 3px">${[['','as the WAV'],['16','16'],['8','8']].map(([o,t])=>`<option value="${o}" ${String(e.bits??'')===o?'selected':''}>${t}</option>`).join('')}</select></div>
+    <div class="row"><span>stereo</span><label style="font-size:10px"><input type="checkbox" ${e.stereo?'checked':''} ${W.data&&W.data.channels<2?'disabled':''} onchange="smpSet(x=>{if(this.checked)x.stereo=true;else delete x.stereo})"> ${W.data&&W.data.channels<2?'mono WAV':'keep both channels'}</label></div>
+    </div><div style="display:flex;align-items:center;gap:8px;margin:12px 0 4px"><span class="k">AUTO-VIBRATO</span><select onchange="smpSet(x=>{x.vibrato=Object.assign(x.vibrato||{},{type:this.value})})" style="font:10.5px var(--mono);padding:0 3px">${['sine','ramp_down','square','random'].map(o=>`<option ${(vib&&vib.type||'sine')===o?'selected':''}>${o}</option>`).join('')}</select>${vib?`<span class="btn sm" onclick="smpSet(x=>{delete x.vibrato})" title="no auto-vibrato">✕</span>`:''}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 24px;max-width:640px">${vv('speed','speed',64)}${vv('depth','depth',64)}${vv('rate','rate (sweep)',255)}</div>`);
+  renderSmpLoops();renderSmpInfo();smpFetch();drawWave()}
+addEventListener('resize',()=>{if($('t-smp').classList.contains('on')){drawWave();smpFetch()}});
+// ---- conveniences: WAVs dropped from the file manager are uploaded (the page cannot see a file's path) and saved beside
+// the song (an identical copy there is reused), then handed to `fn` as paths; a drop anywhere else does nothing (WebView2
+// would open the file in place of the app)
+function dragOver(ev){if([...ev.dataTransfer.types].includes('Files')){ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.add('drop')}}
+async function dropWav(ev,fn){ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.remove('drop');const fs=[...(ev.dataTransfer.files||[])].filter(f=>/\.wav$/i.test(f.name));
+  if(!fs.length){alert('drop WAV files');return}const paths=[];
+  for(const f of fs){const j=await (await fetch('/api/upload?name='+encodeURIComponent(f.name),{method:'POST',body:await f.arrayBuffer()})).json();if(j.error){alert(j.error);return}paths.push(j.path)}
+  fn(paths)}
+addEventListener('dragover',e=>e.preventDefault());addEventListener('drop',e=>e.preventDefault());
+// effect help: what the volume command and the effect under the cursor do (SONG_FORMAT.md's tables, from /api/effects)
+let EFH=null;fetch('/api/effects').then(r=>r.json()).then(j=>{EFH=j;if(PAT.rows)patHelp()});
+function effText(e){if(!EFH||!e||e[0]==='.')return '';const L=e[0],s=EFH.s,p=e.slice(1);let t=EFH.e[L]||'unknown effect';
+  if(L==='S'){const k=Object.keys(s).find(x=>x==='S'+p)||Object.keys(s).find(x=>x==='S'+p[0])||Object.keys(s).find(x=>x.startsWith('S'+p[0]));t=k?s[k]:'unknown S command'}return `${e}: ${t}`.replace(/`/g,'')}
+function patHelp(){const el=$('pathelp');if(!el||!PAT.rows||!PAT.rows[CUR.row]||CUR.o!==PAT.order)return;const p=cellOf(PAT.rows[CUR.row][CUR.ch]||EMPTY);
+  const t=[p.v&&p.v[0]!=='.'&&EFH?`${p.v}: ${(EFH.v[p.v[0]]||'unknown volume command').replace(/`/g,'')}`:'',effText(p.e)].filter(Boolean).join(' · ');
+  el.textContent=t||'click a cell for the cursor · Esc: edit mode (keys write into the song file, in place; Ctrl+Z undoes)';el.title=el.textContent;el.style.color=t?'#c3cbcf':''}
+// metronome (in the worklet, so the click lands within 0.7 ms of the beat row) and the scope of the engine's output
+let METRO=false;try{METRO=localStorage.metro==='1'}catch(e){}
+function setMetro(v){METRO=v;try{localStorage.metro=v?'1':'0'}catch(e){}lvSync()}
+function drawScope(){const cv=$('lv-scope');if(!cv||!LV.an||!$('t-pattern').classList.contains('on'))return;const g=cv.getContext('2d'),w=cv.width,h=cv.height,d=LV.scope||(LV.scope=new Float32Array(LV.an.fftSize));
+  LV.an.getFloatTimeDomainData(d);g.fillStyle='#0b0e0f';g.fillRect(0,0,w,h);g.strokeStyle='#7ee787';g.lineWidth=1;g.beginPath();
+  let z=0;for(let i=1;i<d.length/2;i++)if(d[i-1]<=0&&d[i]>0){z=i;break}  // start on a rising zero crossing: a steady tone stands still
+  for(let x=0;x<w;x++){const v=d[z+Math.floor(x*(d.length/2)/w)]||0,y=h/2-Math.max(-1,Math.min(1,v))*h/2;x?g.lineTo(x,y):g.moveTo(x,y)}g.stroke()}
+// ---- the SONG tab: settings, the order list, patterns and channels; each change is one undoable step written into the
+// song text in place (POST songedit), in order with the pattern edits
+let ORD_SEL=-1;
+function songEdit(ops){EDQ.n++;renderSongTab();renderIns();renderSmp();
+  EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/songedit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ops})})).json();
+      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null}).catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
+const isMark=o=>o==='+++'||o==='---';
+function uniqueName(base){const have=new Set(S.structure.patterns.map(p=>p.name));if(!have.has(base))return base;const m=/^(.*?)(\d*)$/.exec(base);for(let n=+(m[2]||1)+1;;n++){const s=m[1]+String(n).padStart(m[2].length||0,'0');if(!have.has(s))return s}}
+function ordList(){return S.structure.orders.slice()}
+function ordMove(d){const o=ordList(),i=ORD_SEL,j=i+d;if(i<0||j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];ORD_SEL=j;songEdit([{op:'orders',orders:o}])}
+function ordRemove(){const o=ordList();if(ORD_SEL<0||o.length<2)return;o.splice(ORD_SEL,1);ORD_SEL=Math.min(ORD_SEL,o.length-1);songEdit([{op:'orders',orders:o}])}
+function ordInsert(name){if(!name)return;const o=ordList(),at=ORD_SEL<0?o.length:ORD_SEL+1;o.splice(at,0,name);ORD_SEL=at;songEdit([{op:'orders',orders:o}])}
+function ordSet(name){const o=ordList();if(ORD_SEL<0||!name)return;o[ORD_SEL]=name;songEdit([{op:'orders',orders:o}])}
+function ordNew(){const o=ordList(),at=ORD_SEL<0?o.length:ORD_SEL+1,name=uniqueName('p'+String(S.structure.patterns.length).padStart(2,'0'));o.splice(at,0,name);ORD_SEL=at;
+  songEdit([{op:'pattern_new',name,rows:Math.max(1,Math.min(200,+$('song-rows').value||64))},{op:'orders',orders:o}])}
+function ordClone(){const o=ordList(),src=o[ORD_SEL];if(ORD_SEL<0||isMark(src))return;const name=uniqueName(src+'b');o[ORD_SEL]=name;
+  songEdit([{op:'pattern_clone',src,name},{op:'orders',orders:o}])}
+function ordEdit(){const o=ordList();if(ORD_SEL<0||isMark(o[ORD_SEL]))return;const fi=o.slice(0,ORD_SEL).filter(x=>!isMark(x)).length;SEL=null;CUR.o=fi;CUR.row=0;tab('pattern');showPattern(fi)}
+// a destructive button asks once: the first click arms it for three seconds
+function twice(el,fn){if(el.dataset.armed){delete el.dataset.armed;el.textContent=el.dataset.label;fn();return}el.dataset.armed=1;el.dataset.label=el.textContent;el.textContent='SURE?';
+  setTimeout(()=>{if(el.dataset.armed){delete el.dataset.armed;el.textContent=el.dataset.label}},3000)}
+function renderClean(){const u=S.unused||{},ins=S.instruments||{},ents=S.song.sample_entries||{},n=(u.patterns||[]).length+(u.instruments||[]).length+(u.samples||[]).length;$('clean-all').classList.toggle('dimb',!n);
+  const item=(op,key,label)=>`<span class="chip" style="display:inline-flex;gap:4px;align-items:center;margin:0 4px 4px 0;padding:1px 6px">${esc(label)}<span class="btn sm" style="padding:0 4px" onclick='songEdit([{op:"${op}",${key}}])' title="remove it">✕</span></span>`;
+  put('song-clean',!n?'<span style="color:var(--dim)">nothing unused</span>':[['PATTERNS',(u.patterns||[]).map(p=>item('pattern_delete',`"name":${JSON.stringify(p).replace(/'/g,'&#39;')}`,p))],
+    ['INSTRUMENTS',(u.instruments||[]).map(k=>item('instrument_delete',`"num":${+k}`,`${pad(+k)} ${(ins[k]||{}).name||''}`))],
+    ['SAMPLES',(u.samples||[]).map(k=>item('sample_delete',`"num":${+k}`,`${pad(+k)} ${(ents[k]||{}).name||''}`))]].filter(x=>x[1].length).map(([h,xs])=>`<div><span class="k" style="margin-right:6px">${h}</span>${xs.join('')}</div>`).join(''))}
+function cleanAll(){const u=S.unused||{};const ops=[...(u.patterns||[]).map(name=>({op:'pattern_delete',name})),...(u.instruments||[]).map(n=>({op:'instrument_delete',num:+n})),...(u.samples||[]).map(n=>({op:'sample_delete',num:+n}))];if(ops.length)songEdit(ops)}
+function renderSongTab(){const st=S.structure;if(!st||!S.song.facts)return;renderClean();const f=S.song.facts,m=st.module,busy=EDQ.n>0;
+  $('song-msg').style.color=EDQ.err?'var(--red)':'var(--dim)';$('song-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:busy?'writing…':'each change is written into the song file in place · Ctrl+Z in the Pattern tab (or ↶ there) undoes it';
+  const val=(k,lab,lo,hi,txt)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,${lo},${hi},v=>songEdit([{op:'module',key:'${k}',value:v}]),${JSON.stringify(String(m[k])).replace(/"/g,'&quot;')}${txt?',s=>s':''})" title="click to type${txt?'':` ${lo}–${hi}`}">${esc(m[k])}</span></div>`;
+  put('song-mod',val('title','title',0,0,1)+val('tempo','tempo',32,255)+val('speed','speed (ticks per row)',1,255)+val('global_volume','global volume',0,128)+val('mix_volume','mix volume',0,128)+val('separation','stereo separation',0,128)+`<div class="row"><span>BPM (4 rows per beat)</span><span>${f.bpm}</span></div>`);
+  $('song-on').textContent=`${st.orders.length} ENTRIES`;if(ORD_SEL>=st.orders.length)ORD_SEL=st.orders.length-1;
+  put('song-orders',st.orders.map((o,i)=>`<span class="chipc ${i===ORD_SEL?'on':''}" style="${isMark(o)?'color:var(--amber)':''}" onclick="ORD_SEL=${i};renderSongTab()" ondblclick="ORD_SEL=${i};ordEdit()" title="${isMark(o)?(o==='+++'?'skip marker':'end of song'):'double-click to edit it'}">${pad(i)} ${esc(o)}</span>`).join(''));
+  put('song-pat',[...st.patterns.map(p=>p.name),'+++','---'].map(n=>`<option value="${esc(n)}">${esc(n)}${n==='+++'?' (skip)':n==='---'?' (end)':''}</option>`).join(''));
+  $('song-pn').textContent=st.patterns.length;
+  put('song-pats',`<tr><th>NAME</th><th class="r">ROWS</th><th class="r">IN ORDERS</th><th></th></tr>`+st.patterns.map(p=>`<tr><td class="sans tv" onclick="typeIn(this,0,0,v=>songEdit([{op:'pattern_rename',old:${JSON.stringify(p.name).replace(/"/g,'&quot;')},new:v}]),${JSON.stringify(p.name).replace(/"/g,'&quot;')},s=>s)" title="click to rename (the order list follows)">${esc(p.name)}</td><td class="r tv" onclick="typeIn(this,1,200,v=>songEdit([{op:'pattern_rows',name:${JSON.stringify(p.name).replace(/"/g,'&quot;')},rows:v}]),${p.rows})" title="click to type 1–200 (rows past a new end are removed)">${p.rows}</td><td class="r ${p.used?'':'dimc'}">${p.used||'unused'}</td><td style="text-align:right"><span class="btn sm" onclick="songEdit([{op:'pattern_clone',src:${JSON.stringify(p.name).replace(/"/g,'&quot;')},name:uniqueName(${JSON.stringify(p.name).replace(/"/g,'&quot;')}+'b')}])">CLONE</span> <span class="btn sm ${p.used?'dimb':''}" onclick="${p.used?`EDQ.err='take it out of the order list first';renderSongTab()`:`twice(this,()=>songEdit([{op:'pattern_delete',name:${JSON.stringify(p.name).replace(/"/g,'&quot;')}}]))`}" title="${p.used?'in the order list: remove it there first':'delete it (click twice)'}">DELETE</span></td></tr>`).join(''));
+  $('song-chn').textContent=`${f.channels.length} CHANNELS`;
+  put('song-ch',f.channels.map((c,i)=>`<div class="stem"><span class="n">${pad(i+1)}</span><i class="fb" style="background:${famCol(c)||'#333a3d'}"></i><span class="nm tv" onclick="typeIn(this,0,0,v=>songEdit([{op:'channel_rename',ch:${i},name:v}]),${JSON.stringify(c).replace(/"/g,'&quot;')},s=>s)" title="click to rename (20 characters)">${esc(c)}</span><span class="ms" onclick="songEdit([{op:'channel_move',ch:${i},to:${i-1}}])" title="move up: its cells move in every pattern">▲</span><span class="ms" onclick="songEdit([{op:'channel_move',ch:${i},to:${i+1}}])" title="move down">▼</span><span class="btn sm" style="padding:2px 5px" onclick="twice(this,()=>songEdit([{op:'channel_remove',ch:${i}}]))" title="remove it and its cells in every pattern (click twice; Ctrl+Z in the Pattern tab brings it back)">✕</span></div>`).join(''))}
+// ---- selections: a block from an anchor to the cursor over rows, channels (in view order) and columns, the way
+// trackers select: the first channel from the anchor's column, the last up to the cursor's, the ones between whole.
+// Commands work on it (or on the cursor's cell): copy, cut, paste, mix-paste, clear, transpose, interpolate, amplify.
+let SEL=null,CLIP=null;const COLF=[0,1,2,3,3],FK=['n','i','v','e'],EMP={n:'...',i:'..',v:'...',e:'...'};
+function selNorm(){if(!SEL||!SEL.b||SEL.o!==PAT.order||!PAT.fo)return null;const fo=PAT.fo,a=SEL.a,b=SEL.b,ia=fo.indexOf(a.ch),ib=fo.indexOf(b.ch);if(ia<0||ib<0)return null;
+  const [p,q]=ia<ib||(ia===ib&&a.col<=b.col)?[[ia,a.col],[ib,b.col]]:[[ib,b.col],[ia,a.col]];
+  return {r0:Math.min(a.row,b.row),r1:Math.max(a.row,b.row),i0:p[0],i1:q[0],c0:p[1],c1:q[1]}}
+function selFields(n,i){const f=new Set();for(let c=i===n.i0?n.c0:0;c<=(i===n.i1?n.c1:4);c++)f.add(COLF[c]);return f}
+function inSel(n,row,i,col){return !!n&&row>=n.r0&&row<=n.r1&&i>=n.i0&&i<=n.i1&&selFields(n,i).has(COLF[col])}
+// the cells a command works on: [{row, ch, i (view index), f (a Set of fields)}]; without a selection the cursor's cell, `whole` or its column's field
+function targets(whole){const n=selNorm(),fo=PAT.fo||[];if(!n)return [{row:CUR.row,ch:CUR.ch,i:fo.indexOf(CUR.ch),f:new Set(whole?[0,1,2,3]:[COLF[CUR.col]])}];
+  const out=[];for(let r=n.r0;r<=n.r1;r++)for(let i=n.i0;i<=n.i1;i++)out.push({row:r,ch:fo[i],i,f:selFields(n,i)});return out}
+function applyCells(fn,list){const ch=[];for(const t of list){const old=PAT.rows[t.row][t.ch],p=cellOf(old);fn(p,t);const s=cellText(p);if(s!==old)ch.push({row:t.row,ch:t.ch,cell:s})}patEdit(ch);return ch.length}
+function withSel(shift,fn){const at={row:CUR.row,ch:CUR.ch,col:CUR.col};fn();if(shift){if(!SEL||SEL.o!==CUR.o)SEL={o:CUR.o,a:at};SEL.b={row:CUR.row,ch:CUR.ch,col:CUR.col};renderPat()}else if(SEL){SEL=null;renderPat()}}
+function selectAll(channelOnly){const fo=PAT.fo||[],n=PAT.rows?PAT.rows.length:1;SEL=channelOnly?{o:CUR.o,a:{row:0,ch:CUR.ch,col:0},b:{row:n-1,ch:CUR.ch,col:4}}:{o:CUR.o,a:{row:0,ch:fo[0],col:0},b:{row:n-1,ch:fo[fo.length-1],col:4}};renderPat()}
+function selCopy(cut){const n=selNorm(),fo=PAT.fo||[],T=targets(true),r0=n?n.r0:CUR.row,i0=n?n.i0:fo.indexOf(CUR.ch);
+  CLIP={rows:[]};for(const t of T){const r=t.row-r0,k=t.i-i0,p=cellOf(PAT.rows[t.row][t.ch]);(CLIP.rows[r]=CLIP.rows[r]||[])[k]=Object.fromEntries([...t.f].map(x=>[FK[x],p[FK[x]]]))}
+  const text=CLIP.rows.map(row=>row.map(c=>cellText(Object.assign({},EMP,c))).join(' | ')).join('\n');try{navigator.clipboard.writeText(text).catch(()=>{})}catch(e){}
+  if(cut)applyCells((p,t)=>t.f.forEach(x=>p[FK[x]]=EMP[FK[x]]),T);renderSelBar()}
+// paste at the cursor: the copied fields overwrite (mix: fill only fields that are empty); rows and channels past the pattern are dropped
+// flood: the clipboard again and again from the cursor down to the end of the pattern (a bar of hats over eight bars)
+function selPaste(mix,flood){if(!CLIP)return;const fo=PAT.fo||[],i0=fo.indexOf(CUR.ch),L=[],h=CLIP.rows.length||1;
+  for(let off=0;off===0||(flood&&CUR.row+off<PAT.rows.length);off+=h)
+    CLIP.rows.forEach((row,r)=>(row||[]).forEach((c,k)=>{if(c&&CUR.row+off+r<PAT.rows.length&&fo[i0+k]!=null)L.push({row:CUR.row+off+r,ch:fo[i0+k],c})}));
+  applyCells((p,t)=>{for(const [x,v] of Object.entries(t.c))if(!mix||p[x]===EMP[x])p[x]=v},L)}
+function selClear(){applyCells((p,t)=>t.f.forEach(x=>p[FK[x]]=EMP[FK[x]]),targets(false))}
+// transpose the notes in the selection (or at the cursor) by d semitones, within C-0..B-9; INS ONLY: notes whose cell names the INS instrument
+function selTranspose(d){const only=$('sel-ins').checked?pad(insNum()):null,T=targets(true).filter(t=>!selNorm()||t.f.has(0));
+  applyCells(p=>{const m=/^([A-G][-#])(\d)$/.exec(p.n);if(!m||(only&&p.i!==only))return;const n=Math.max(0,Math.min(119,NOTES.indexOf(m[1])+12*(+m[2])+d));p.n=NOTES[n%12]+Math.floor(n/12)},T)}
+// interpolate the volume column and the effect between the selection's first and last rows, per channel, where both ends
+// carry the same command (volume letter, effect letter); the rows between get that command at evenly spaced values
+function selInterpolate(){const n=selNorm();if(!n||n.r1-n.r0<2)return selInfo('select at least three rows to interpolate');const fo=PAT.fo,L=[];let skipped=0;
+  for(let i=n.i0;i<=n.i1;i++){const ch=fo[i],F=selFields(n,i),a=cellOf(PAT.rows[n.r0][ch]),b=cellOf(PAT.rows[n.r1][ch]),span=n.r1-n.r0;
+    const ok=[];if(F.has(2)){if(a.v!=='...'&&a.v[0]===b.v[0])ok.push(['v',+a.v.slice(1),+b.v.slice(1),a.v[0],10]);else skipped++}
+    if(F.has(3)){if(a.e!=='...'&&a.e[0]===b.e[0])ok.push(['e',parseInt(a.e.slice(1),16),parseInt(b.e.slice(1),16),a.e[0],16]);else skipped++}
+    for(let r=n.r0+1;r<n.r1;r++)L.push({row:r,ch,ok,frac:(r-n.r0)/span})}
+  const c=applyCells((p,t)=>t.ok.forEach(([x,v0,v1,letter,base])=>{const v=Math.round(v0+(v1-v0)*t.frac);p[x]=letter+(base===16?v.toString(16).toUpperCase().padStart(2,'0'):pad(v))}),L);
+  selInfo(`interpolated ${c} cells`+(skipped?` · ${skipped} column${skipped>1?'s':''} skipped (both ends need the same command)`:''))}
+// amplify the volume column by a percentage: v commands scale; a note without a volume gets one (from 64, the usual default volume)
+function selAmplify(){const pct=Math.max(0,+$('sel-amp').value||100),T=targets(true).filter(t=>t.f.has(2));
+  applyCells(p=>{if(p.v[0]==='v')p.v='v'+pad(Math.min(64,Math.round(+p.v.slice(1)*pct/100)));else if(p.v==='...'&&/^[A-G][-#]\d$/.test(p.n))p.v='v'+pad(Math.min(64,Math.round(64*pct/100)))},T)}
+function selInfo(t){$('sel-msg').textContent=t||''}
+function renderSelBar(){const n=selNorm();if(!$('selinfo'))return;$('selinfo').textContent=n?`rows ${n.r0}–${n.r1} · ${n.i1-n.i0+1} channel${n.i1>n.i0?'s':''}`:'the cursor cell';
+  $('sel-paste').classList.toggle('dimb',!CLIP);$('sel-flood').classList.toggle('dimb',!CLIP);$('sel-mix').classList.toggle('dimb',!CLIP)}
+// ---- find and replace: each field a pattern (* any characters, ? one; empty: any), in this pattern or the whole song
+const PR={};  // pattern index -> rows, for the song scope (per song version)
+async function patRows(idx){const key=`${S.song.mtime}|${idx}`;if(idx===PAT.idx&&PAT.rows)return PAT.rows;if(!PR[key])PR[key]=(await (await fetch('/api/pattern/'+idx)).json()).rows;return PR[key]}
+function findSpec(){const g=id=>$(id).value.trim(),rx=s=>s?new RegExp('^'+s.replace(/[.+^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*').replace(/\?/g,'.')+'$'):null;
+  return {m:[rx(g('f-n')),rx(g('f-i')),rx(g('f-v')),rx(g('f-e'))],r:[g('r-n'),g('r-i'),g('r-v'),g('r-e')]}}
+const cellMatch=(s,sp)=>{const p=cellOf(s);return sp.m.some(x=>x)&&sp.m.every((x,k)=>!x||x.test(p[FK[k]]))};
+function toggleFind(on){const b=$('findbar');b.style.display=(on??b.style.display==='none')?'flex':'none';if(b.style.display==='flex')$('f-n').focus()}
+async function findNext(){const sp=findSpec(),f=S.song.facts,fo=PAT.fo||[],song=$('f-scope').value==='song',os=song?f.orders.map((_,i)=>i):[CUR.o];
+  const start=os.indexOf(CUR.o),n=os.length;
+  for(let s=0;s<=n;s++){const oi=os[(Math.max(0,start)+s)%n],rows=await patRows(f.orders[oi].index);
+    for(let r=s===0?CUR.row:0;r<rows.length;r++)for(let i=(s===0&&r===CUR.row?fo.indexOf(CUR.ch)+1:0);i<fo.length;i++)
+      if(cellMatch(rows[r][fo[i]],sp)){if(oi!==PAT.order){CUR.o=oi;showPattern(oi);if(!PAT.rows)PAT.rows=rows}SEL=null;setCursor(oi,r,fo[i],0);selInfo(`found at ord ${pad(oi)} row ${pad(r)}`);return}}
+  selInfo('no match'+(song?' in the song':' in this pattern')+' (shown channels)')}
+async function replaceAll(){const sp=findSpec(),f=S.song.facts,song=$('f-scope').value==='song',idxs=[...new Set(song?f.orders.map(o=>o.index):[f.orders[CUR.o].index])],groups=[];let total=0;
+  if(!sp.r.some(x=>x))return selInfo('type what to replace with');
+  for(const idx of idxs){const rows=await patRows(idx),cells=[];rows.forEach((row,r)=>row.forEach((s,ch)=>{if(!cellMatch(s,sp))return;const p=cellOf(s);sp.r.forEach((v,k)=>{if(v)p[FK[k]]=v});const t=cellText(p);if(t!==s)cells.push({row:r,ch,cell:t})}));
+    if(cells.length){groups.push({pattern:idx,cells});total+=cells.length;if(idx===PAT.idx)cells.forEach(c=>{PAT.rows[c.row][c.ch]=c.cell})}}
+  if(!groups.length)return selInfo('nothing to replace');renderPat();selInfo(`replaced ${total} cell${total>1?'s':''} in ${groups.length} pattern${groups.length>1?'s':''} (one undo step)`);EDQ.n++;
+  EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({patterns:groups})})).json();
+      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null}).catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
+// Pattern tab keys (a capture listener, before the app's own): Esc edit mode, Space / F7 play from the cursor or stop, F6
+// loop the pattern, F8 stop, arrows / Tab / Page Up/Down / Home / End move the cursor, Ctrl+Z / Ctrl+Y undo and redo; the
+// piano keys preview (or, in edit mode, enter notes)
+document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.song.facts&&!document.querySelector('.modal.on')){e.preventDefault();e.stopImmediatePropagation();
+    if(e.key==='F5'){lvPatLoop=false;lvPlay(0,0)}else if(e.key==='F6')lvLoopPattern();else if(e.key==='F7'){lvPatLoop=false;lvPlay(CUR.o,CUR.row)}else lvStop();return}
+  if($('t-smp').classList.contains('on')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){const k=e.key.toLowerCase();
+    if((e.ctrlKey||e.metaKey)&&(k==='z'||k==='y')){e.preventDefault();e.stopImmediatePropagation();patUndo(k==='y'||e.shiftKey);return}
+    if(e.key==='Escape'&&W.sel){W.sel=null;drawWave();renderSmpInfo();return}
+    if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&k.length===1&&PIANO.includes(k)&&W.data&&W.data.player){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,W.data.player[0])}return}
+  if($('t-ins').classList.contains('on')&&INS_SEL!=null&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){
+    const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,+INS_SEL-1)}return}
+  if(!$('t-pattern').classList.contains('on')||!S||!S.song||!S.song.facts)return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||document.querySelector('.modal.on'))return;
+  const k=e.key.toLowerCase(),rows=PAT.rows?PAT.rows.length:64;let done=true;
+  if(e.ctrlKey||e.metaKey){if(k==='z'&&!e.shiftKey)patUndo(false);else if(k==='y'||(k==='z'&&e.shiftKey))patUndo(true);
+    else if(k==='c')selCopy(false);else if(k==='x')selCopy(true);else if(k==='v')selPaste(e.shiftKey,e.altKey);else if(k==='a')selectAll(false);else if(k==='l')selectAll(true);
+    else if(e.key==='ArrowUp')selTranspose(e.shiftKey?12:1);else if(e.key==='ArrowDown')selTranspose(e.shiftKey?-12:-1);else if(k==='i')selInterpolate();else if(k==='f')toggleFind(true);else done=false}
+  else if(e.key==='F3')findNext();
+  else if(e.key==='Delete'&&selNorm())selClear();
+  else if(e.altKey)done=false;
+  else if(e.key==='Escape')setEdit(!EDIT);
+  else if(e.key===' ')lvPlayCursor();else if(e.key==='F7'){lvPatLoop=false;lvPlay(CUR.o,CUR.row)}else if(e.key==='F6')lvLoopPattern();else if(e.key==='F8')lvStop();
+  else if(e.key==='ArrowDown')withSel(e.shiftKey,()=>patMove(1));else if(e.key==='ArrowUp')withSel(e.shiftKey,()=>patMove(-1));
+  else if(e.key==='PageDown')withSel(e.shiftKey,()=>patMove(16));else if(e.key==='PageUp')withSel(e.shiftKey,()=>patMove(-16));
+  else if(e.key==='Home')withSel(e.shiftKey,()=>patMove(-rows));else if(e.key==='End')withSel(e.shiftKey,()=>patMove(rows));
+  else if(e.key==='ArrowRight')withSel(e.shiftKey,()=>patCol(1));else if(e.key==='ArrowLeft')withSel(e.shiftKey,()=>patCol(-1));else if(e.key==='Tab')patChan(e.shiftKey?-1:1);
+  else if(EDIT&&PAT.rows&&CUR.o===PAT.order&&editKey(e,k)){}
+  else if(!EDIT&&PIANO.includes(k)&&k.length===1){if(!e.repeat)lvNoteOn(k)}
+  else done=false;
+  if(done){e.preventDefault();e.stopImmediatePropagation()}},true);
+document.addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k))lvNoteOff(k)});
 // ---- audio
 let lastSrc='',lastInput=0;
 function pick(id){sel=id;render();act('want',{id})}
@@ -395,23 +1001,66 @@ function updateAudio(){const c=S.candidates.find(x=>x.id===sel);const src=srcFor
   $('nowname').textContent=c?c.name:'the song as it is';$('nowmode').textContent=(c?(solo?'· sample alone':c.status==='ready'?'· in the song, this slot swapped':'· '+c.status):solo?'· pick a candidate to hear it alone':o.status==='ready'?(nMix()?'· with the unwritten faders':'· nothing swapped'):'· '+(o.error||o.status||''))+(S.solo!=null?' · channel '+pad(S.solo+1)+' soloed':S.muted.length?` · ${S.muted.length} channels muted`:'');
   if(src!==lastSrc){const pending=c?(c.status==='queued'||c.status==='rendering'):(o.status==='queued'||o.status==='rendering');
     if(!src){if(pending&&audio.src){$('nowmode').textContent+=' · re-rendering, the old mix plays until it lands';return}lastSrc=src;audio.pause();audio.removeAttribute('src');return}  // a re-render after a fader or mute change: keep playing the old one until the new one lands
-    lastSrc=src;const t=audio.currentTime,was=!audio.paused;
+    lastSrc=src;renderSpec();const t=audio.currentTime,was=!audio.paused;
     audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(landAt!=null?landAt:t,Math.max(0,audio.duration-.05));landAt=null;if(was)audio.play()},{once:true});audio.load()}}
-function togglePlay(){if(!audio.src){if(sel==null&&(!S.own||S.own.status!=='ready')){const c=visible()[0];if(c)pick(c.id)}if(!audio.src)return}audio.paused?audio.play():audio.pause()}
+function togglePlay(){if(LV.playing){lvStop();return}if(!audio.src){if(sel==null&&(!S.own||S.own.status!=='ready')){const c=visible()[0];if(c)pick(c.id)}if(!audio.src)return}audio.paused?audio.play():audio.pause()}
 function setSolo(v){solo=v;$('m-mix').classList.toggle('on',!v);$('m-solo').classList.toggle('on',v);updateAudio()}
-function setSpeed(v){speed=v;audio.defaultPlaybackRate=v;audio.playbackRate=v;audio.preservesPitch=true;try{localStorage.speed=v}catch(e){}$('speed').value=String(v)}
+function setSpeed(v){v=Math.max(.1,Math.min(2,+v||1));speed=v;if(LV.node)lvSync();const s=$('speed');if(![...s.options].some(o=>o.value===String(v))){s.querySelectorAll('option[data-c]').forEach(o=>o.remove());const o=new Option(Math.round(v*100)+' %',String(v));o.dataset.c=1;s.insertBefore(o,s.lastElementChild)}audio.defaultPlaybackRate=v;audio.playbackRate=v;audio.preservesPitch=true;try{localStorage.speed=v}catch(e){}$('speed').value=String(v)}
 // a solo or mute while playing: the old render keeps playing until the new one lands, which then starts a second before the click
 function markLanding(){if(!audio.paused&&!solo&&isFinite(audio.duration))landAt=Math.max(0,audio.currentTime-1)}
-function seekDrag(e){const el=$('prog'),to=ev=>{if(!isFinite(audio.duration))return;const r=el.getBoundingClientRect();audio.currentTime=audio.duration*Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))};
+function seekDrag(e,box){const el=box||$('prog'),to=ev=>{if(!isFinite(audio.duration))return;const r=el.getBoundingClientRect();audio.currentTime=audio.duration*Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width))};
   const up=()=>{removeEventListener('mousemove',to);removeEventListener('mouseup',up)};addEventListener('mousemove',to);addEventListener('mouseup',up);if(e.preventDefault)e.preventDefault();to(e)}
+// ---- spectrum: the spectrogram of the render that is playing, computed by the server from its WAV (/spec/<key>): time
+// across as on the progress bar, frequency up in Hz, colour = level in dBFS (a full-scale sine is 0 dB)
+let specScale='log';try{specScale=localStorage.specscale==='lin'?'lin':'log'}catch(e){}
+function setSpecScale(s){specScale=s;try{localStorage.specscale=s}catch(e){}renderSpec()}
+function specY(v){const ny=S.spec.nyquist;return specScale==='lin'?100*(1-v/ny):100*(1-Math.log(Math.max(v,20)/20)/Math.log(ny/20))}
+function renderSpec(){if(!S||!S.song||!S.spec)return;const f=S.song.facts,sp=S.spec,img=$('specimg'),url=lastSrc.startsWith('/wav/')?`/spec/${lastSrc.slice(5)}?scale=${specScale}`:'';
+  $('sc-log').classList.toggle('on',specScale==='log');$('sc-lin').classList.toggle('on',specScale==='lin');
+  if(url&&img.getAttribute('src')!==url)img.src=url;img.style.visibility=url?'':'hidden';
+  $('specsrc').textContent=url?`${$('nowname').textContent} · ${loopLabel()}${S.solo!=null?' · channel '+pad(S.solo+1)+' soloed':S.muted.length?` · ${S.muted.length} muted`:''}`
+    :solo?'the sample alone: the spectrogram is of renders (the song, or a candidate in it)':'nothing rendered is playing yet';
+  const col=c=>`rgb(${c.join(',')})`;put('speclegend',`${sp.db[0]}<i style="display:block;width:130px;height:8px;background:linear-gradient(to right,${sp.stops.map(col).join(',')})"></i>${sp.db[1]} dBFS`);
+  const ticks=specScale==='lin'?[...Array(12).keys()].map(i=>i*2000):[20,50,100,200,500,1000,2000,5000,10000,20000],hzl=v=>v>=1000?v/1000+'k':String(v);
+  put('specaxis',`<span style="position:absolute;right:6px;top:-11px;font:8.5px var(--mono);color:var(--dim)">Hz</span>`+ticks.map(v=>`<span style="position:absolute;right:6px;top:${specY(v)}%;transform:translateY(-50%);font:9.5px var(--mono);color:#8d979c">${hzl(v)}</span>`).join(''));
+  let lines=ticks.map(v=>`<i style="position:absolute;left:0;right:0;top:${specY(v)}%;height:1px;background:rgba(255,255,255,.09)"></i>`).join('');
+  if(f&&url){const [a,b]=S.orders||[0,f.orders.length],os=f.orders.slice(a,b),tot=(isFinite(audio.duration)&&audio.duration)||os.reduce((s,o)=>s+o.seconds,0)||1,w=$('specbox').clientWidth||800;let cum=0,lastX=-99;
+    os.forEach((o,k)=>{const x=100*cum/tot,px=x*w/100;lines+=`<i style="position:absolute;top:0;bottom:0;left:${x}%;width:1px;background:rgba(255,255,255,${k?.13:0})"></i>`;
+      if(px-lastX>=34){lines+=`<span style="position:absolute;top:calc(100% + 5px);left:${x}%;font:9px var(--mono);color:#8d979c;white-space:nowrap" title="${esc(o.pattern)} at ${fmtT(o.start)}">ord ${a+k}</span>`;lastX=px}cum+=o.seconds})}
+  const L=loopSpan();if(L&&url&&isFinite(audio.duration))lines+=`<i style="position:absolute;top:0;bottom:0;left:${100*L[0]/audio.duration}%;width:${100*(L[1]-L[0])/audio.duration}%;background:rgba(217,164,65,.12);box-shadow:inset 1px 0 0 var(--amber),inset -1px 0 0 var(--amber)"></i>`;
+  put('specgrid',lines)}
+// ---- playback loop: a span [order, row] .. [order, row] (inclusive) of the song, kept by the server (POST loop); playback
+// only: whatever render plays (the song or a candidate) jumps back to its start when the playhead crosses its end, if the
+// span lies inside the rendered section; the render itself stays the section
+function timeAt(o,r){const f=S.song.facts,[a,b]=S.orders||[0,f.orders.length];if(o<a||o>=b)return null;let t=0;for(let i=a;i<o;i++)t+=f.orders[i].seconds;const x=f.orders[o];return t+x.seconds*Math.min(r,x.rows)/x.rows}
+function loopSpan(){const L=S&&S.loop,f=S&&S.song&&S.song.facts;if(!L||!f||solo)return null;const a=timeAt(L.from[0],L.from[1]),b=timeAt(L.to[0],L.to[1]+1);return a!=null&&b!=null&&b>a?[a,b]:null}
+let prevT=0;
+function loopTick(){const L=loopSpan(),t=audio.currentTime;
+  // crossing the end, or the audio element's own wrap at the end of the file when the loop runs to the last row
+  if(L&&!audio.paused&&((prevT<L[1]&&t>=L[1])||(prevT>audio.duration-.3&&t<.3&&t<L[0])))audio.currentTime=L[0];prevT=audio.currentTime}
+(function raf(){loopTick();drawScope();requestAnimationFrame(raf)})();
+function setLoop(a,b){act('loop',{from:a,to:b}).then(()=>{const L=loopSpan();if(L&&!audio.paused)audio.currentTime=L[0]})}
+function loopFields(){const v=[0,1,2,3].map(i=>$('lf'+i).value);if(v.some(x=>x===''))return;setLoop([+v[0],+v[1]],[+v[2],+v[3]])}
+function loopDrag(e){e.preventDefault();const el=$('loopbar'),r=el.getBoundingClientRect(),d=audio.duration;if(!isFinite(d)||solo)return;
+  const tx=x=>d*Math.max(0,Math.min(.9999,(x-r.left)/r.width)),x0=e.clientX,fill=$('loopfill');let x1=x0;
+  const mv=ev=>{x1=ev.clientX;const a=Math.min(x0,x1)-r.left,b=Math.max(x0,x1)-r.left;fill.style.left=a+'px';fill.style.width=(b-a)+'px'};
+  const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);if(Math.abs(x1-x0)<3)return act('loop',{});
+    const p=posAt(tx(Math.min(x0,x1))),q=posAt(tx(Math.max(x0,x1)));setLoop([p.o,p.row],[q.o,q.row])};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up)}
+function renderLoop(){const L=S.loop,sp=loopSpan(),d=audio.duration,fill=$('loopfill');
+  if(sp&&isFinite(d)){fill.style.left=100*sp[0]/d+'%';fill.style.width=100*(sp[1]-sp[0])/d+'%'}else fill.style.width='0';
+  if(!['lf0','lf1','lf2','lf3'].includes(document.activeElement.id)){const v=L?[...L.from,...L.to]:['','','',''];v.forEach((x,i)=>{$('lf'+i).value=x})}
+  $('looptext').textContent=!L?'playback loop off · drag on the strip above the progress bar, or type the span':solo?'the sample alone plays whole':sp?`looping ${fmtT(sp[1]-sp[0])} of what plays · playback only, the render stays the section`:'the loop lies outside the rendered section: not looping';
+  $('looplabel2').textContent=loopLabel()+(sp?` · loop ord ${L.from[0]} row ${L.from[1]} → ord ${L.to[0]} row ${L.to[1]}`:'')}
 // ---- sounding now: the channels sounding at the playhead (one fetch per order per song version)
 const SND={};
 function soundingAt(p){if(!p)return null;const key=`${S.song.mtime}|${p.o}`;if(SND[key]===undefined){SND[key]=null;fetch('/api/sounding/'+p.o).then(r=>r.json()).then(j=>{SND[key]=j.rows||null})}const t=SND[key];return t?t[Math.min(p.row,t.length-1)]:null}
-function renderLive(){const f=S&&S.song&&S.song.facts;if(!f){put('live','');return}const p=(solo||!isFinite(audio.duration))?null:posAt(audio.currentTime),rows=soundingAt(p);
+function renderLive(){const f=S&&S.song&&S.song.facts;if(!f){put('live','');return}const p=LV.playing&&LV.oi>=0?playPos():(solo||!isFinite(audio.duration))?null:posAt(audio.currentTime),rows=soundingAt(p);
   put('live',rows?rows.map(([c,s,h])=>`<span class="chipc ${S.solo===c?'on':''} ${audible(c)?'':'off'}" onclick="soloCh(${c})" title="channel ${pad(c+1)} ${esc(f.channels[c])} · slot ${s?pad(s)+' '+esc(sName(s)):'?'}${h?' · a looped tone':''} · click to solo this channel (playback rewinds a second when the soloed render lands), again to unsolo">${esc(f.channels[c].toUpperCase())} ${s?pad(s):'??'}${h?'~':''}</span>`).join(''):'')}
-audio.addEventListener('play',render);audio.addEventListener('pause',render);
+audio.addEventListener('play',()=>{if(LV.playing)lvStop();const L=loopSpan();if(L&&(audio.currentTime<L[0]||audio.currentTime>=L[1]))audio.currentTime=L[0];render()});audio.addEventListener('pause',render);
 setInterval(()=>{const d=audio.duration||0,t=audio.currentTime||0;$('progfill').style.width=$('proghead').style.left=d?(100*t/d)+'%':'0';$('pos').textContent=d?`${fmtT(t)} / ${fmtT(d)}`:'';$('playbtn').textContent=audio.paused?'▶':'❚❚';
-  renderLive();if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-pattern').classList.contains('on'))followPlayhead()},100);
+  loopTick();renderLive();if(S&&S.song&&S.song.facts&&PAT.order>=0&&$('t-pattern').classList.contains('on'))followPlayhead();
+  if($('t-spectrum').classList.contains('on'))$('spechead').style.left=d?(100*t/d)+'%':'0'},100);
 // ---- listening notes: a tag at the playhead; the server adds the channels sounding there and writes <song>.notes.json + .md
 let lastNote=null;
 function noteRow(n,full){const picked=n.channels||[];
@@ -421,8 +1070,8 @@ function noteRow(n,full){const picked=n.channels||[];
    ${full?`<span class="src" style="white-space:nowrap">${esc(n.playing.source)}${n.playing.candidate?' '+esc(n.playing.candidate):''}${n.playing.muted&&n.playing.muted.length?' · '+n.playing.muted.length+' muted':''}${n.version&&S.version&&n.version.hash!==S.version.hash?' · older version '+esc(n.version.hash):''}</span>`:''}
    <span class="rej" onclick="act('noteedit',{id:${n.id},delete:true})" title="delete this note">✕</span></div>`}
 async function addNote(){const tag='note',f=S&&S.song&&S.song.facts;if(!f)return;const c=S.candidates.find(x=>x.id===sel),alone=solo&&!!c;
-  const p=alone||!isFinite(audio.duration)?{o:S.orders?S.orders[0]:0,row:0}:posAt(audio.currentTime);
-  const j=await act('note',{order:p.o,row:p.row,tag,source:c?(alone?'sample alone':'candidate'):'song',candidate:c?c.name:null});
+  const live=LV.playing&&LV.oi>=0,p=live?playPos():alone||!isFinite(audio.duration)?{o:S.orders?S.orders[0]:0,row:0}:posAt(audio.currentTime);
+  const j=await act('note',{order:p.o,row:p.row,tag,source:live?'live engine':c?(alone?'sample alone':'candidate'):'song',candidate:live?null:c?c.name:null});
   if(j&&j.id){lastNote=j.id;render();const inp=$('notelast').querySelector('input');if(inp)inp.focus()}}
 function toggleCh(id,ch){const n=(S.notes||[]).find(x=>x.id===id);if(!n)return;const c=n.channels.includes(ch)?n.channels.filter(x=>x!==ch):[...n.channels,ch];act('noteedit',{id,channels:c})}
 function renderNotes(f){const ns=S.notes||[];$('notesn').textContent=ns.length?`· ${ns.length}`:'';$('notecount').textContent=ns.length;

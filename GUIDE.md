@@ -29,7 +29,7 @@ python -m vulturetracker build demo/arena.yaml -o demo/arena.it       # compile,
 python -m vulturetracker build demo/arena.yaml --render demo/arena.wav # compile and render in one go
 python -m vulturetracker render demo/arena.it -o demo/arena.wav --repeat 1
 python -m vulturetracker info demo/arena.it                           # what libopenmpt sees
-python -m vulturetracker import some.it -o some.yaml                  # existing .it -> song file + WAVs
+python -m vulturetracker import some.xm -o some.yaml                  # existing .it/.xm/.s3m/.mod -> song file + WAVs
 ```
 
 `pip install -e .` also installs a `vulturetracker` command.
@@ -42,7 +42,9 @@ python -m vulturetracker gui demo2/iron_relay.yaml
 
 opens the app in its own window (`pip install pywebview`; without it, or with `--browser`, it opens in your
 default browser instead; either way it is served on localhost and nothing leaves your machine). Run it with
-no song to get the open-a-song screen with recent songs and the demos. Pick a sample slot and
+no song to get the open-a-song screen with recent songs and the demos; its NEW SONG makes a song file at the path
+given (never over an existing file) with the channels asked for, an empty 64-row pattern and one instrument playing a
+one-second tone written beside the song as `<name>_tone.wav`, and opens it in the Pattern tab. Pick a sample slot and
 a section of the song, add candidate WAVs by path or glob, and each candidate is rendered inside the song with
 only that slot swapped. Keys `1`–`0` switch candidates without losing the playback position, `S`/`M` toggle
 SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes every channel that never plays the slot,
@@ -54,18 +56,162 @@ you are listening to renders first; after a mute or fader change the old render 
 and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
 playhead with the slot each plays (a looped tone until its note-off, a one-shot until its sample runs out); click one
 to solo it (playback rewinds a second when the soloed render lands, so the moment you clicked on is heard soloed).
-SPEED slows playback to 75, 50, 33, 25 or 20 % with the pitch kept. The Song Overview tab has a stems rail that is also a mixer: mute or solo channels, a volume and pan fader per
-channel, a MIX VOL master with the peak of what is playing, and a GAIN fader per sample slot in the slot table; every
+SPEED slows playback to 75, 50, 33, 25 or 20 % with the pitch kept (type… takes any value from 10 to 200 %). The
+strip just above the progress bar is the playback loop: drag on it to loop a span of what plays (snapped to rows),
+click it to clear the loop; LOOP FROM / TO under SECTION TO LOOP takes the span as order and row numbers (the orders
+of the song, `to` inclusive). The loop is playback only: the render stays the section, so switching candidates or
+moving a fader keeps the loop and no render waits on it; it works for the song and for every candidate whenever the
+span lies inside the rendered section (otherwise it says so), jumps back within a few milliseconds of its end, is kept
+in `<song>.tryout.json` and recorded with listening notes. The SPECTRUM tab is the spectrogram of the render that is
+playing (the song or a candidate in it, with the mutes and the unwritten mix), computed by the app from that WAV: time
+across with the order boundaries marked, aligned with the playhead (click or drag to seek), frequency up in Hz on a
+LOG axis (20 Hz to 22 kHz) or a LIN one (where imaging and aliasing near the top show), colour = level in dBFS from
+-100 to -10 (a full-scale sine is 0 dB); each band shows its loudest bin, so a narrow tone between bands is not lost.
+The Song Overview tab has a stems rail that is also a mixer: mute or solo channels, a volume and pan fader per
+channel, a MIX VOL master with the peak of what is playing, and a GAIN fader per sample slot in the slot table (click
+any fader's number, or an instrument-panel value, to type it: Enter applies it the way the fader would, clamped to the
+song format's range, Escape cancels; a pan takes 0–64, L50, R20, C or S for surround); every
 move re-renders the tryout at once (the section is compiled once and the values are patched into the module's header),
 and the meter next to each channel is that channel soloed, its RMS in dB over the active part of the section (the way
 `scratch/ut99-clean/compare.py` measures a module). Nothing is written until WRITE MIX → SONG, which shows the YAML
 change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place). EXPORT STEMS
-writes one WAV per playing channel to `<song>_stems/`. The tab also has the arrangement grid and the slot table. The Pattern tab is the
-read-only pattern view, the whole window wide, following the selected order and the playhead. Render & Export builds the `.it` (and a WAV)
+writes one WAV per playing channel to `<song>_stems/`; EXPORT SONG AS writes the whole song beside it as MP3 (192 kbit/s),
+OGG (Vorbis quality 6, about 192 kbit/s; Ogg loops gaplessly, which is what a game engine wants) or FLAC (lossless),
+with + STEMS also one file per channel in `<song>_stems/`, the song as written, encoded by ffmpeg: `ffmpeg.exe` beside
+the standalone exe (the build copies it to `dist/`), else imageio-ffmpeg's, else one on PATH. The tab also has the arrangement grid and the slot table. The Pattern tab is the
+pattern view and editor, the whole window wide, following the selected order and the playhead. It has a cursor (click a
+cell; the arrows, Tab, Page Up/Down, Home and End move it through rows, channels and the note, instrument, volume,
+effect letter and effect parameter columns) and the LIVE transport: libopenmpt compiled to WebAssembly plays, in the page's
+own audio thread, the whole song as it is now with the unwritten mix. ▶ FROM CURSOR (Space, F7; Space again stops,
+and the cursor stays where it stopped; a double-click on a row plays from there), ▶ SONG from the start, ↻ PATTERN
+(F6) loops the pattern at the cursor, ■ (F8) stops. The view follows what plays, the channel headers show each
+channel's level, SOUNDING lists what sounds, N drops a note at the live position. Mutes and solo from the stems rail,
+the playback loop (LOOP FROM / TO) and SPEED act on it at once, without a render; a fader, the instrument panel or a
+change to the song file recompiles the song and swaps it in where it plays. The piano keys (Z to M and Q to U, two
+octaves from OCT) preview the PREVIEW instrument: on the song while it plays, alone while stopped; in the Pattern tab
+they take the place of the app's letter keys (M, S, N, U, X), and the NOTE… button still drops notes.
+
+**Editing patterns.** Esc (or ● EDIT) turns on edit mode. In the note column the piano keys enter a note with the INS
+instrument (and preview it) and move the cursor down by STEP rows; 1 enters a note-off (`===`), ` a fade (`~~~`), \\ a
+cut (`^^^`). Digits type the instrument (two digits), the volume column takes a command letter (v p a b c d e f g h) and
+two digits, the effect columns an effect letter and two hex digits; values are clamped to their range. Delete or . clears
+the column under the cursor; Insert pushes the channel down from the cursor, Backspace pulls it up. Each change shows
+at once and is written into the song file in place: only that row's cell changes (the other cells, the row label, the
+comments and every other line stay as they are; rows the pattern leaves implied are written out when a later row is
+edited). Before anything is written the whole song is compiled: a change the song format refuses (an instrument that
+does not exist, say) is not written and the bar says why. Ctrl+Z / Ctrl+Y (↶ ↷) undo and redo the edits of this
+session. Edits are refused while the song file has changed on disk (RELOAD first), so they never overwrite a change
+made elsewhere. While the live engine plays, each edit is swapped in where it plays (about 0.35 s for Nadir) and the
+view stays on the pattern being edited. A song whose patterns are written by a generator loses these edits when the
+generator is rerun. Patterns whose rows are not a literal `data: |` block are shown but cannot be edited here.
+
+**MIDI input.** Click MIDI in the live bar to switch MIDI input on: the first time, the window asks whether the page
+may use MIDI devices (Allow; the answer is kept, and MIDI stays on at the next launch until it is clicked off). A MIDI
+keyboard plugged in before or while the app runs is then picked up through the page's Web MIDI, and the live bar shows
+its name next to MIDI and VEL→VOL. Its keys play like the piano
+keys, MIDI note 60 being C-5: a preview through the live engine (the INS instrument; in the Instruments tab the
+instrument on show, in the Samples tab the slot), at the key's loudness with VEL→VOL; releasing the key releases the
+note. In edit mode on the Pattern tab each key also enters its note at the cursor with the INS instrument, and with
+VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. Notes are entered one at a time at
+the cursor (no chords spread over channels, no recording at the play position while the song plays). The app serves its
+page from port 8723 when that is free (another app window takes any free port) and keeps the window's browser profile in
+`%APPDATA%\VultureTracker\webview`, so the page's own settings (speed, latency, hex rows, MIDI) and the MIDI permission
+carry over from one launch to the next.
+
+**Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
+stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
+plays, higher on the first row of each bar, by the song's row highlight (rows per beat and per bar, which also draw the
+pattern's row lines); the click is mixed in the engine, so it lands within a millisecond of the row. The small scope
+beside it shows the engine's output. The Pattern tab's hint line says what the volume command and the effect under the
+cursor do (from this file's tables in SONG_FORMAT.md). The Song tab's CLEAN-UP lists what the order list never plays:
+patterns outside it, instruments no played pattern names, samples no used instrument maps; ✕ removes one (refused, and
+the bar says why, while something still uses it), REMOVE ALL UNUSED (click twice) removes them all as one undo step.
+WAVs dragged from the file manager can be dropped on a slot in the Samples tab (or on its waveform) to replace the slot's
+WAV the way the Tryout's apply does, on the slot list (Samples tab, or SAMPLE SLOTS in the Instruments tab) for new
+slots, or on the Tryout's candidate list to try them in the slot. A dropped WAV is saved beside the song under its own
+name (the page cannot see where it came from; an identical copy already there is reused, a different one is numbered).
+
+**Selections and commands.** Drag over cells, or hold Shift with the arrows (and Page Up/Down, Home, End), to select a
+block the way trackers do: the first channel from the column the selection starts in, the last up to the column it
+ends in, the channels between whole. Ctrl+A selects the pattern (the channels on show), Ctrl+L the cursor's channel; a
+plain move or click drops the selection. The SELECTION bar (and its keys) works on the selection, or on the cursor's
+cell when there is none: COPY (Ctrl+C; also puts the rows on the system clipboard in the song's cell notation), CUT
+(Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overwrite), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
+end of the pattern, e.g. one bar of hats over eight), CLEAR
+(Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
+cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
+from the first selected row to the last, per channel, where both ends carry the same command) and AMPLIFY (the
+volume column by a percentage; a note without a volume gets one, counted from 64, the usual default). FIND… (Ctrl+F)
+finds cells by note, instrument, volume and effect (`*` any characters, `?` one, an empty field anything; F3 or NEXT
+the next match, in this pattern or the whole song, on the channels on show) and REPLACE ALL writes the given fields
+into every match. Every command is one step for Ctrl+Z, a song-wide replace included.
+
+**The Song tab** edits the song's structure, each change written into the song file in place and undone by Ctrl+Z (or ↶)
+in the Pattern tab. SONG SETTINGS: click the title, tempo, speed, global volume, mix volume or stereo separation to
+type it (a trailing comment on its line stays). ORDER LIST: click an entry to select it (a double-click, or EDIT ▸, opens
+it in the Pattern tab); ◀ ▶ move it, REMOVE, DUPLICATE (the same pattern again after it), CLONE PATTERN (a copy of its
+pattern under a new name takes its place, so it can change without touching the other orders that play the pattern),
+INSERT or SET a pattern (or a `+++` skip, a `---` end) from the list, NEW PATTERN (empty, the given rows, after the
+selected entry). PATTERNS: click a name to rename it (the order list follows) or its row count to change it (rows past a
+new end are removed); CLONE; DELETE (click twice) only when no order plays it. CHANNELS: click a name to rename it;
+▲ ▼ move a channel (its cells move in every pattern, and so do its tryout mute and unwritten faders); ✕ (click twice)
+removes it and its cells in every pattern; + CHANNEL adds one at the end. The order list must be written on one line,
+patterns as `name:` with `rows:` and `data: |`, channels one `- {...}` entry per line and the module as a block, which
+is how the songs here are written; anything else is refused with the reason.
+
+**The Instruments tab** edits the song's instruments and adds sample slots, each change written into the instrument's
+entry in place (one step for Ctrl+Z in the Pattern tab) and swapped into the live engine, so the piano keys (Z to M, Q to
+U, from the Pattern tab's OCT) play the instrument on show as it now is. NEW (playing the chosen slot), CLONE and DELETE
+(click twice; refused while a pattern plays it). Every field of the song format: name, fadeout, global volume, pan,
+random volume and pan, filter cutoff and resonance, pitch-pan separation and centre (click to type; an empty value
+turns an optional one off), NNA, DCT and DCA. NOTES → SAMPLE SLOTS: one slot for every note, or USE A KEYMAP for
+ranges (C-0..B-4) each playing a slot at its own pitch, transposed (+12) or at one pitch (C-5, for drums); the strip
+shows the slot every one of the 120 notes plays. The volume, panning and pitch (or, with `filter`, filter-cutoff)
+envelopes are graphs: drag a node, click empty space to add one, right-click a node to remove it; SUSTAIN takes a node
+(2) or a span (1-3), LOOP a span, and `carry` and on/off are checkboxes. SAMPLE SLOTS adds a slot for a WAV (typed or
+BROWSE…); swapping a slot's WAV stays the Tryout tab's job. Settings the Tryout's INSTRUMENT panel holds unwritten for
+an instrument are written or reset there first. A pattern with no notes, and every pattern in edit mode, shows all
+its channels.
+
+**The Samples tab** edits a slot's WAV and its entry. The waveform is drawn from peaks the server computes for the span
+on show (both channels of a stereo WAV); the mouse wheel zooms around the pointer, Shift+wheel or the bar under it
+scrolls, VIEW ALL / SELECTION / LOOP / + / − set the span, and past one frame per pixel the frames themselves are drawn.
+Drag on the waveform to select; the info line gives the frames, the selection (frames and time) and the frame under the
+pointer. The LOOP (blue, `L`) and SUSTAIN LOOP (amber, `S`) lines are dragged to move them, typed (START, END: frames of
+the WAV, as in the song file), set from the selection (SELECTION → LOOP), or switched between off, forward, ping-pong and
+the WAV's own loop (`from_wav`); each change is written into the sample's entry in place (a one-line entry keeps its
+layout when only plain values change) and is one step for Ctrl+Z (here too). ▶ HOLD plays the slot through the live
+engine, with the instrument that plays it (at the note that plays it at C-5) and the song as written, so a loop just
+moved is heard once the engine has swapped the song in (the bar says so while it does); letting go is the note-off, so a
+sustain loop ends. The piano keys play it too. EDIT → NEW WAV: TRIM TO SELECTION, FADE IN, FADE OUT, NORMALIZE (peak to
+full scale), REVERSE and REMOVE DC work on the selection, or on the whole sample when there is none; CROSSFADE LOOP fades
+the end of the loop into the audio just before its start (equal power, the length in ms; it needs that much audio before
+the loop start). Each writes a new WAV beside the song (`<name>-trim.wav`, numbered, never over an existing file, the
+source untouched), points the slot at it and keeps the loops with the audio (a trim moves them, a reverse of the whole
+sample mirrors them); undo points the slot back, and the WAVs stay on disk. PROPERTIES: name, base note or c5 speed
+(either replaces the other), default volume, global volume (refused while the Tryout mixer holds an unwritten GAIN for
+the slot), default pan, bits, stereo, and the auto-vibrato (type, speed, depth, rate). A value the song format refuses
+is not written and the bar says why.
+
+The render
+player and the live engine never play at once. LATENCY LOW measured 8 ms of output latency in WebView2 (the status
+shows base plus output); LATENCY SAFE (40 ms) is there if playback crackles. Render & Export builds the `.it` (and a WAV)
 and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (the newest 60).
 
+**Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
+tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets
+the note die away), RELEASE (the instrument's `fadeout`: how fast a replaced or released note fades), a resonant
+low-pass (CUTOFF, 127 = off, labelled with its approximate -6 dB point; RESONANCE) with a SWEEP on every note (FROM and
+TO a share of the cutoff, over TIME ticks), and RANDOM VOL per note. The curve above the sliders draws the volume
+envelope and the sweep. The settings apply to the song and to every candidate in the slot, re-render the tryout on each
+move and belong to the unwritten mix: kept in `<song>.tryout.json`, recorded with listening notes, dropped by RESET (or
+RESET MIX) and written into the instrument's line (`volume_envelope`, `fadeout`, `filter_cutoff`, `filter_resonance`,
+`pitch_envelope` with `filter: true`, `random_volume`) by WRITE (or WRITE MIX), which shows the change first. An
+envelope in the song that the panel cannot draw (more nodes, a loop) is marked custom and stays until one of its
+sliders moves. The header folds the panel.
+
 **Listening notes.** NOTE… (`N`) in the bar under the player drops a note at the playhead. A note records the time, order and row, what was playing (the song or a candidate, the
-mutes, the unwritten faders) and the channels sounding there (each channel's last note cell with its sample number;
+mutes, the unwritten mix) and the channels sounding there (each channel's last note cell with its sample number;
 `~` marks a looped tone held from an earlier note); click the chip of the channel you mean and add words if you like.
 Notes live in `<song>.notes.json` and are rendered as `<song>.notes.md`, a report grouped by order (the tryout ratings
 at the end) for a collaborator who cannot listen; the NOTES tab lists and edits them. Nothing touches the song file.
@@ -194,7 +340,21 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   `sample_rate: 44100` resamples every sample to the playback rate at compile time, band-limited, which removes that
   imaging in every player at the cost of file size). `vulturetracker/resample.py` holds the resampler.
 - `import` keeps patterns, instruments, envelopes and samples. It drops embedded MIDI macros and
-  OpenMPT-only extensions (with a warning).
+  OpenMPT-only extensions (with a warning). It also reads XM, S3M and 31-sample MOD files (`vulturetracker/modreader.py`,
+  told apart by their headers; the app's start screen has IMPORT A MODULE, which writes `name.yaml` and `name_samples/`
+  beside the module and opens it). Each is mapped onto IT the way it plays in libopenmpt, measured against it
+  (`tests/test_modimport.py` renders small modules both ways): ProTracker and FastTracker 2 effects to their IT letters,
+  notes to IT's C-5 = the sample's c5 speed (MOD samples at the PAL Amiga rate, 8287 Hz), IT's old-effects mode for
+  vibrato and tremolo, MOD channels at a quarter and three quarters of the pan, Scream Tracker 3's shared effect memory
+  written out, XM's per-instrument samples as one list with relative note and finetune in each c5 speed, XM key-offs on
+  instruments without a volume envelope as note cuts, XM envelope loops a tick shorter, patterns longer than IT's 200
+  rows split into 192-row parts (the order list, jumps and breaks follow), and only what the song plays kept when it has
+  more than 99 instruments or samples. The mix volume is measured: libopenmpt mixes each format (and XMs by the tracker
+  that saved them) at a level of its own, so the import renders the original and the converted module and sets the mix
+  volume to match. What IT cannot say is dropped and listed at the top of the song file (Amiga filter, finetune and
+  invert-loop commands, AdLib instruments, slow XM pan slides rounded); a pan law of its own (MilkyTracker files) and
+  XM vibrato phases a tick apart are not converted. On 7 MODs, 7 S3Ms and 19 XMs from the Mod Archive and elsewhere, the
+  imported songs play within a median 0.3 dB of libopenmpt's level (the worst file 1.3 dB) over their first minute.
 - `vulturetracker/api.py` exposes plain functions (`new_song`, `add_sample`, `add_instrument`,
   `set_pattern`, `set_orders`, `check`, `build`, `render`) for tools and agents.
 - The writer follows [ITTECH.TXT](https://github.com/schismtracker/schismtracker/wiki/ITTECH.TXT)

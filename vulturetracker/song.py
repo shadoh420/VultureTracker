@@ -771,11 +771,15 @@ def _check_images(ctx, mod, lowest):
                            f"(module sample_rate: 88200)")
 
 
+# libyaml's parser when PyYAML has it (about ten times faster; the same nodes, marks and styles, so the same module)
+_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
 def load_song_text(text, base_dir=".", filename="<song>"):
     """Parse and validate song YAML. Returns (Module, warnings); raises SongError listing every problem found."""
     ctx = Ctx(filename)
     try:
-        node = yaml.compose(text, Loader=yaml.SafeLoader)
+        node = yaml.compose(text, Loader=_LOADER)
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None)
         line = mark.line + 1 if mark else 1

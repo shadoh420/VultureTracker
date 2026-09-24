@@ -42,6 +42,9 @@ patterns:
       03: ... .. ... ... | ... .. ... ...
 orders: [p1, p2]
 """
+# the same song played through instruments (the instrument panel edits them): A plain, B with an envelope of its own
+SONG_INS = SONG.replace("patterns:\n", "instruments:\n  1: {name: A, sample: 1, fadeout: 128}  # the lead\n"
+                        "  2: {name: B, sample: 2, volume_envelope: {nodes: [[0, 64], [3, 50], [9, 20], [20, 0]]}}\npatterns:\n")
 # the same song with a block-style module: the mixer writes its lines in place
 SONG_BLOCK = SONG.replace("module: {title: T, tempo: 125, speed: 6, channels: [{name: A}, {name: B}]}\n",
                           "module:\n  title: T\n  tempo: 125\n  speed: 6\n  channels:\n    - {name: A}\n    - {name: B, pan: 40}\n")
@@ -86,6 +89,9 @@ class TestGui(unittest.TestCase):
         self.assertEqual(f["channels"], ["A", "B"])
         self.assertEqual(f["use"], [[[1], [2]], [[2], []]])
         self.assertAlmostEqual(f["orders"][0]["seconds"], 4 * 6 * 2.5 / 125)
+        # each playable order keeps its index in the module (the live engine reports that), past a +++ marker too
+        g = gui.song_facts(SONG.replace("orders: [p1, p2]", "orders: [p1, +++, p2]"), self.dir, "song")
+        self.assertEqual([o["order"] for o in g["orders"]], [0, 2])
 
     def test_render_diff_apply(self):
         st = self.state()
@@ -214,6 +220,48 @@ class TestGui(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.dir / "song_stems").glob("*.wav")), ["01-A.wav", "02-B.wav"])
         self.assertGreater((self.dir / "song_stems" / "02-B.wav").stat().st_size, 1000)
 
+    def wait_export(self, st):
+        for _ in range(400):
+            if st.stems["status"] in ("done", "failed"):
+                return
+            time.sleep(0.05)
+
+    def test_mp3_export(self):
+        try:
+            gui.ffmpeg_exe()
+        except OSError:
+            self.skipTest("no ffmpeg (imageio-ffmpeg or PATH)")
+        st = self.state()
+        st.request_stems("mp3", song=True, stems=True)
+        self.wait_export(st)
+        self.assertEqual(st.stems["status"], "done", st.stems)
+        self.assertEqual((st.stems["total"], st.stems["song"]), (3, str(self.dir / "song.mp3")))
+        self.assertEqual(sorted(p.name for p in (self.dir / "song_stems").iterdir()), ["01-A.mp3", "02-B.mp3"])
+        for p in (self.dir / "song.mp3", self.dir / "song_stems" / "02-B.mp3"):
+            head = p.read_bytes()[:3]
+            self.assertTrue(head == b"ID3" or head[0] == 0xFF, (p, head))  # an ID3 tag or an MPEG frame sync
+        for fmt, magic in (("ogg", b"OggS"), ("flac", b"fLaC")):  # the other encoded formats, the song alone
+            st.request_stems(fmt, song=True, stems=False)
+            self.wait_export(st)
+            self.assertEqual((st.stems["status"], st.stems["total"]), ("done", 1), st.stems)
+            self.assertEqual((self.dir / f"song.{fmt}").read_bytes()[:4], magic)
+        # the song alone, and a missing ffmpeg says what it needs instead of rendering
+        (self.dir / "song.mp3").unlink()
+        from unittest import mock
+        with mock.patch.object(gui, "ffmpeg_exe", side_effect=OSError("MP3 export needs ffmpeg")):
+            st.request_stems("mp3", song=True, stems=False)
+            self.wait_export(st)
+        self.assertEqual((st.stems["status"], st.stems["error"], st.stems["dir"]), ("failed", "MP3 export needs ffmpeg", None))
+        self.assertFalse((self.dir / "song.mp3").exists())
+
+    def test_ffmpeg_beside_the_exe_comes_first(self):
+        from unittest import mock
+        (self.dir / "vulturetracker.exe").write_bytes(b"")
+        (self.dir / "ffmpeg.exe").write_bytes(b"")
+        with mock.patch.object(gui.sys, "frozen", True, create=True), \
+                mock.patch.object(gui.sys, "executable", str(self.dir / "vulturetracker.exe")):
+            self.assertEqual(gui.ffmpeg_exe(), str(self.dir / "ffmpeg.exe"))
+
     def test_sounding(self):
         st = self.state()
         # a.wav and b.wav last 0.3 s and a row is 0.12 s, so a hit sounds for three rows
@@ -231,6 +279,11 @@ class TestGui(unittest.TestCase):
         st.mod.patterns[0].rows[1][0].note = 62
         st.sound_table = None
         self.assertEqual([(x["ch"], x["sample"], x["ago"], x["note"]) for x in st.sounding(0, 1)], [(0, 1, 0, "D-5")])
+        # a one-shot lasts its length at the note's rate: two octaves up, the 0.3 s hit is over within a row
+        st.mod.patterns[0].rows[1][0].note = 84
+        st.sound_table = None
+        self.assertEqual([x["ch"] for x in st.sounding(0, 1)], [0])
+        self.assertEqual([x["ch"] for x in st.sounding(0, 2)], [1])
 
     def test_notes_file_and_report(self):
         st = self.state()
@@ -295,6 +348,405 @@ class TestGui(unittest.TestCase):
         st.set_want(None)
         self.assertIsNone(st.want)
         self.assertIsNone(gui.channel_levels(b"", 2, cancel=lambda: True))  # a cancelled pass renders nothing
+
+    def test_voice_params(self):
+        ins = {"name": "Call", "sample": 7, "nna": "fade", "fadeout": 128}
+        self.assertEqual(gui.voice_of(ins), ({"attack": 0, "decay": 0, "sustain": 64, "release": 128, "cutoff": 127,
+                                              "resonance": 0, "sweep_from": 64, "sweep_to": 64, "sweep_ticks": 0,
+                                              "random": 0}, []))
+        e = gui.voice_entry(ins, {"attack": 2, "decay": 10, "sustain": 40, "cutoff": 90, "resonance": 30,
+                                  "sweep_from": 26, "sweep_ticks": 16, "random": 20})
+        self.assertEqual(e["volume_envelope"], {"nodes": [[0, 0], [2, 64], [12, 40]], "sustain": 2})  # held until note-off
+        self.assertEqual(e["pitch_envelope"], {"nodes": [[0, -6], [16, 32]], "filter": True})  # 26/64 of the cutoff, opening
+        self.assertEqual((e["filter_cutoff"], e["filter_resonance"], e["random_volume"], e["nna"]), (90, 30, 20, "fade"))
+        p, custom = gui.voice_of(e)
+        self.assertEqual((p["attack"], p["decay"], p["sustain"], p["sweep_from"], p["sweep_to"], p["sweep_ticks"], custom),
+                         (2, 10, 40, 26, 64, 16, []))  # the panel reads back what it wrote
+        self.assertEqual(gui.voice_entry(e, {"attack": 0, "sustain": 64, "cutoff": 127, "resonance": 0, "sweep_from": 64,
+                                             "random": 0}), ins)  # all back at rest: the fields go
+        self.assertNotIn("sustain", gui.voice_entry(ins, {"sustain": 0, "decay": 8})["volume_envelope"])  # dies away
+        sub = {"name": "Sub", "sample": 4, "volume_envelope": {"nodes": [[0, 64], [6, 58], [40, 38], [140, 0]]}}
+        self.assertEqual(gui.voice_of(sub)[1], ["volume"])  # a shape the panel cannot show
+        self.assertEqual(gui.voice_entry(sub, {"cutoff": 80})["volume_envelope"], sub["volume_envelope"])  # kept
+        self.assertNotIn("volume_envelope", gui.voice_entry(sub, {"attack": 0}))  # moving its slider replaces it
+
+    def test_instrument_panel_compile_and_write(self):
+        import numpy as np
+        from vulturetracker.openmpt import LoadedModule
+        (self.dir / "song.yaml").write_bytes(SONG_INS.encode("utf-8"))
+        st = self.state()
+        st.meta["slot"] = 1
+        self.assertEqual([(v["num"], v["name"], v["custom"], v["edit"]) for v in st.snapshot()["voice"]], [(1, "A", [], {})])
+        before = st.compiled_it()
+        k = st.ckey()
+
+        def power_near(it, hz):  # A's tone: the 440 Hz file (root A-5) played on C-5 sounds 262 Hz
+            with LoadedModule(it) as lm:
+                x = np.frombuffer(lm.render(RATE), "<i2").astype(float).reshape(-1, 2).mean(axis=1)
+            f = np.fft.rfftfreq(len(x), 1 / RATE)
+            return float((np.abs(np.fft.rfft(x)) ** 2)[(f > hz - 10) & (f < hz + 10)].sum())
+        st.set_mix({"instrument": {"1": {"cutoff": 0}}})
+        self.assertLess(power_near(st.compiled_it(), 261.6), 0.25 * power_near(before, 261.6))  # the closed filter
+        st.set_mix({"instrument": {"1": {"cutoff": 0, "attack": 4, "random": 25, "release": 128, "sweep_to": 99},
+                                   "2": {"cutoff": 60}}})
+        self.assertEqual(st.mix()["instrument"], {"1": {"cutoff": 0, "attack": 4, "random": 25}, "2": {"cutoff": 60}})
+        # sweep_to 99 is clamped to 64 and the release is 128: both the song's own values, so no change
+        self.assertNotEqual(st.ckey(), k)  # compiled in, so part of the compile key
+        d = st.compiled_it()
+        nord = struct.unpack_from("<H", d, 0x20)[0]
+        off = struct.unpack_from("<I", d, 0xC0 + nord)[0]  # instrument 1's header
+        self.assertEqual(d[off:off + 4], b"IMPI")
+        self.assertEqual((d[off + 0x3A], d[off + 0x1A]), (0x80, 25))  # filter cutoff 0 (enabled bit), random volume
+        self.assertEqual(d[off + 0x130] & 5, 5)  # the volume envelope, enabled, with a sustain point
+        new, redump = st.mix_text()
+        self.assertFalse(redump)
+        self.assertIn("  1: {name: A, sample: 1, fadeout: 128, volume_envelope: {nodes: [[0, 0], [4, 64]], sustain: 1}, "
+                      "filter_cutoff: 0, filter_resonance: 0, random_volume: 25}  # the lead\n", new)
+        self.assertIn("filter_cutoff: 60", new)
+        self.assertIn("volume_envelope: {nodes: [[0, 64], [3, 50], [9, 20], [20, 0]]}", new)  # B's own envelope stays
+        st.apply_mix()
+        self.assertEqual(st.mix(), {})
+        self.assertEqual(st.song["instruments"][1]["filter_cutoff"], 0)
+        self.assertEqual(st.snapshot()["voice"][0]["song"]["attack"], 4)
+
+
+    def test_spectrogram(self):
+        import numpy as np
+        # 2 s of a full-scale 1 kHz sine, then 1 s of silence: the level, the band and the time axis
+        x = np.round(32767 * np.sin(2 * np.pi * 1000 * np.arange(2 * RATE) / RATE)).astype("<i2")
+        pcm = np.repeat(np.concatenate([x, np.zeros(RATE, "<i2")]), 2).tobytes()
+        gui._write_pcm(self.dir / "r.wav", pcm)
+        for scale in ("log", "lin"):
+            db, edges = gui.spectrogram(self.dir / "r.wav", scale, cols=300, rows=200)
+            self.assertEqual(db.shape, (200, 300))
+            row = int(db[:, 100].argmax())
+            self.assertLessEqual(edges[row] - 45, 1000)  # the loudest band holds 1 kHz (within a bin's width)
+            self.assertGreaterEqual(edges[row + 1] + 45, 1000)
+            self.assertGreater(db[row, 100], -1.5)        # a full-scale sine reads about 0 dBFS
+            self.assertLess(db[:, 260:].max(), -120)      # the last third is silent: columns follow time
+            self.assertGreater(db[row, 195], -6)          # still sounding just before 2 s
+        png = gui.spectrogram_png(str(self.dir / "r.wav"), "t", "log")
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", png[16:24]), (1200, 256))  # width, height
+
+
+    def test_typed_values_clamp_to_the_song_format(self):
+        # a typed value goes through the fader's path (set_mix): out of range, it lands on the song format's limit
+        ins = SONG_INS[SONG_INS.index("instruments:"):SONG_INS.index("patterns:")]
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.replace("patterns:\n", ins + "patterns:\n").encode("utf-8"))
+        st = self.state()
+        st.set_mix({"volume": {"0": 99}, "pan": {"0": "surround", "1": -7}, "mix_volume": 500, "sample_volume": {"2": 80},
+                    "instrument": {"1": {"release": 999, "cutoff": -4, "random": 101}}})
+        self.assertEqual(st.mix(), {"volume": {"0": 64}, "pan": {"0": "surround", "1": 0}, "mix_volume": 128,
+                                    "sample_volume": {"2": 64}, "instrument": {"1": {"release": 256, "cutoff": 0, "random": 100}}})
+        self.assertEqual(st.snapshot()["voice_range"]["release"], (0, 256))  # the page clamps to the same ranges
+        new, redump = st.mix_text()
+        self.assertFalse(redump)
+        self.assertIn("    - {name: A, volume: 64, pan: surround}\n    - {name: B, pan: 0}\n", new)
+        self.assertIn("mix_volume: 128", new)
+        self.assertIn("fadeout: 256", new)
+
+
+    def test_playback_loop(self):
+        st = self.state()
+        k, section = st.key(), st.orders
+        st.set_loop({"from": [1, 9], "to": [0, 2]})  # reversed and past the pattern's end: clamped and put in order
+        self.assertEqual(st.snapshot()["loop"], {"from": [0, 2], "to": [1, 3]})
+        self.assertEqual((st.key(), st.orders), (k, section))  # playback only: no render key or section changes
+        self.assertEqual(json.loads((self.dir / "song.tryout.json").read_text())["loop"], {"from": [0, 2], "to": [1, 3]})
+        note = st.add_note({"order": 0, "row": 2})
+        self.assertEqual(note["playing"]["loop"], {"from": [0, 2], "to": [1, 3]})
+        self.assertIn("looping ord 0 row 2 to ord 1 row 3", st.report())
+        st.set_loop({})
+        self.assertIsNone(st.snapshot()["loop"])
+
+
+    def test_swap_keeps_a_name_an_instrument_refers_to(self):
+        # a keymap that names the slot ("A tone") must still resolve with a candidate in it, rendered and written
+        (self.dir / "song.yaml").write_bytes(SONG_INS.replace("{name: A, sample: 1, fadeout: 128}",
+                                                              "{name: A, keymap: [{notes: C-5, sample: A tone}]}").encode("utf-8"))
+        st = self.state()
+        cand = str(self.dir / "cand.wav")
+        self.assertTrue(st.compiled_it(cand).startswith(b"IMPM"))
+        self.assertIn("+  1: {file: cand.wav, name: A tone, base_note: E-5}", st.diff(cand)["lines"])
+        st.meta["slot"] = 2  # slot 2 is referenced by number only: it takes the WAV's name
+        self.assertIn("+  2: {file: cand.wav, name: cand, base_note: E-5}", st.diff(cand)["lines"])
+
+
+    def test_live_engine_serves_the_whole_song_with_the_mix(self):
+        from vulturetracker.openmpt import LoadedModule
+        st = self.state()
+        st.meta["orders"] = [1, 2]  # a tryout section does not narrow what the live engine plays
+        st.set_mix({"volume": {"1": 20}, "mix_volume": 90})
+        d = st.live_it()
+        self.assertEqual((d[0x81], d[0x31]), (20, 90))  # the unwritten mix is in the header
+        with LoadedModule(d) as lm:
+            self.assertEqual(lm.info()["orders"], [0, 1])
+        js = gui.worklet_js().decode("utf-8")
+        self.assertTrue(js.startswith("const loadGlue = function (libopenmpt, require, __dirname) {"))
+        self.assertIn("function openmptEngine(", js)
+        self.assertIn("registerProcessor('vt-engine', VTEngine);", js)
+
+
+    def test_pattern_edit_in_place_and_undo(self):
+        # p1 as the generators write it (labels, a comment row, a trailing comment), two rows given of eight; p2 bare
+        text = SONG.replace("""  p1:
+    rows: 4
+    data: |
+      00: C-5 01 ... ... | ... .. ... ...
+      01: ... .. ... ... | ... .. ... ...
+      02: ... .. ... ... | C-5 02 ... ...
+      03: ... .. ... ... | ... .. ... ...
+""", """  p1:
+    rows: 8
+    data: |
+      ; a        | b
+      000: C-5 01 ... ... | ... .. ... ...  ; the hit
+      001: ... .. ... ... |   ...   .. ...   ...
+""")
+        (self.dir / "song.yaml").write_bytes(text.encode("utf-8"))
+        st = self.state()
+        st.edit_cells(0, [{"row": 0, "ch": 1, "cell": "E-5 02 v40 ..."}])
+        new = (self.dir / "song.yaml").read_bytes().decode("utf-8")
+        self.assertIn("      000: C-5 01 ... ... | E-5 02 v40 ...  ; the hit\n", new)
+        self.assertIn("      001: ... .. ... ... |   ...   .. ...   ...\n", new)  # the untouched row keeps its spacing
+        st.edit_cells(0, [{"row": 4, "ch": 0, "cell": "===" + " .. ... ..."}, {"row": 1, "ch": 0, "cell": "D-5 01 ... A06"}])
+        new = (self.dir / "song.yaml").read_bytes().decode("utf-8")
+        self.assertIn("      001: D-5 01 ... A06 |   ...   .. ...   ...\n"
+                      "      002: ... .. ... ... | ... .. ... ...\n      003: ... .. ... ... | ... .. ... ...\n"
+                      "      004: === .. ... ... | ... .. ... ...\n  p2:", new)  # implied rows written out, labels in their width
+        self.assertEqual(st.pattern_rows(0)["rows"][4][0], "=== .. ... ...")
+        self.assertEqual(st.snapshot()["undo"], 2)
+        # a cell the song format refuses is not written
+        before = (self.dir / "song.yaml").read_bytes()
+        with self.assertRaises(gui.SongError):
+            st.edit_cells(1, [{"row": 0, "ch": 1, "cell": "C-5 01 v99 ..."}])
+        self.assertEqual((self.dir / "song.yaml").read_bytes(), before)
+        # an unlabelled block, a new cell beyond the row's two
+        st.edit_cells(1, [{"row": 2, "ch": 1, "cell": "G-5 02 ... ..."}])
+        self.assertEqual(st.pattern_rows(1)["rows"][2], ["... .. ... ...", "G-5 02 ... ..."])
+        # undo walks back to the original text, redo forward again
+        st.undo()
+        st.undo()
+        st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_bytes().decode("utf-8"), text)
+        self.assertEqual(st.snapshot()["redo"], 3)
+        st.undo(redo=True)
+        self.assertIn("E-5 02 v40", (self.dir / "song.yaml").read_bytes().decode("utf-8"))
+        # a change on disk since the app read the song blocks edits and undo
+        time.sleep(0.02)
+        (self.dir / "song.yaml").write_bytes(text.encode("utf-8"))
+        import os
+        os.utime(self.dir / "song.yaml", None)
+        with self.assertRaises(ValueError):
+            st.edit_cells(0, [{"row": 0, "ch": 0, "cell": "... .. ... ..."}])
+
+
+    def test_edits_across_patterns_are_one_undo_step(self):
+        st = self.state()
+        st.edit_patterns([(0, [{"row": 1, "ch": 0, "cell": "E-5 01 ... ..."}]), (1, [{"row": 3, "ch": 1, "cell": "G-5 02 ... ..."}])])
+        self.assertEqual((st.pattern_rows(0)["rows"][1][0], st.pattern_rows(1)["rows"][3][1]), ("E-5 01 ... ...", "G-5 02 ... ..."))
+        self.assertEqual(st.snapshot()["undo"], 1)
+        # one refused cell refuses the whole step
+        with self.assertRaises(gui.SongError):
+            st.edit_patterns([(0, [{"row": 0, "ch": 1, "cell": "D-5 02 ... ..."}]), (1, [{"row": 0, "ch": 1, "cell": "D-5 07 ... ..."}])])
+        self.assertEqual(st.pattern_rows(0)["rows"][0][1], "... .. ... ...")
+        st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_bytes().decode("utf-8"), SONG)
+
+
+    def test_song_structure_edits(self):
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+        read = lambda: (self.dir / "song.yaml").read_bytes().decode("utf-8")  # noqa: E731
+        st.song_edit([{"op": "orders", "orders": ["p1", "p2", "p1"]}])
+        self.assertIn("orders: [p1, p2, p1]\n", read())
+        # a new pattern and a clone, placed in the order list in the same step
+        st.song_edit([{"op": "pattern_new", "name": "p3", "rows": 8}, {"op": "pattern_clone", "src": "p1", "name": "p1b"},
+                      {"op": "orders", "orders": ["p1", "p3", "p2", "p1b"]}])
+        text = read()
+        self.assertIn("  p3:\n    rows: 8\n    data: |\norders: [p1, p3, p2, p1b]", text)
+        self.assertIn("  p1b:\n    rows: 4\n    data: |\n      00: C-5 01 ... ... |", text)
+        self.assertEqual([o["pattern"] for o in st.facts["orders"]], ["p1", "p3", "p2", "p1b"])
+        st.edit_cells(st.facts["orders"][1]["index"], [{"row": 2, "ch": 1, "cell": "D-5 02 ... ..."}])
+        self.assertEqual(st.pattern_rows(st.facts["orders"][1]["index"])["rows"][2][1], "D-5 02 ... ...")
+        # rename (the order list follows), resize (rows past the end go), delete (only when unused)
+        st.song_edit([{"op": "pattern_rename", "old": "p2", "new": "verse"}, {"op": "pattern_rows", "name": "p1", "rows": 2},
+                      {"op": "orders", "orders": ["p1", "p3", "verse"]}, {"op": "pattern_delete", "name": "p1b"}])
+        text = read()
+        self.assertIn("  verse:\n", text)
+        self.assertIn("orders: [p1, p3, verse]", text)
+        self.assertIn("  p1:\n    rows: 2\n    data: |\n      00: C-5 01 ... ... | ... .. ... ...\n      01: ... .. ... ... | ... .. ... ...\n  verse:", text)
+        self.assertNotIn("p1b", text)
+        with self.assertRaises(ValueError):
+            st.song_edit([{"op": "pattern_delete", "name": "p1"}])
+        # channels: rename, add, move (cells, mutes and faders follow), remove
+        st.set_mix({"volume": {"0": 30}})
+        st.song_edit([{"op": "channel_rename", "ch": 1, "name": "Bass line"}, {"op": "channel_add", "name": "Pad"}])
+        self.assertIn("    - {name: Bass line, pan: 40}\n    - {name: Pad}\n", read())
+        st.song_edit([{"op": "channel_move", "ch": 0, "to": 2}])
+        self.assertEqual(st.facts["channels"], ["Bass line", "Pad", "A"])
+        self.assertEqual(st.pattern_rows(st.facts["orders"][0]["index"])["rows"][0], ["... .. ... ...", "... .. ... ...", "C-5 01 ... ..."])
+        self.assertEqual(st.mix()["volume"], {"2": 30})
+        st.song_edit([{"op": "channel_remove", "ch": 1}])
+        self.assertEqual(st.facts["channels"], ["Bass line", "A"])
+        self.assertEqual(st.pattern_rows(st.facts["orders"][0]["index"])["rows"][0], ["... .. ... ...", "C-5 01 ... ..."])
+        self.assertEqual(st.mix()["volume"], {"1": 30})
+        # module settings keep their comments and layout
+        st.song_edit([{"op": "module", "key": "tempo", "value": 400}, {"op": "module", "key": "title", "value": "New: title"}])
+        text = read()
+        self.assertIn("  tempo: 255\n", text)
+        self.assertIn('  title: "New: title"\n', text)
+        self.assertEqual(st.facts["title"], "New: title")
+        # every step undoes back to the original text
+        while st.snapshot()["undo"]:
+            st.undo()
+        self.assertEqual(read(), SONG_BLOCK)
+
+
+    def test_new_song_and_instrument_edits(self):
+        p = gui.create_song(self.dir / "fresh", channels=3)
+        self.assertEqual(p.name, "fresh.yaml")
+        self.assertTrue((self.dir / "fresh_tone.wav").exists())
+        self.assertNotIn(b"\r\n", p.read_bytes())
+        with self.assertRaises(ValueError):
+            gui.create_song(p)  # never over an existing file
+        st = gui.State(p)
+        self.states.append(st)
+        self.assertEqual((st.facts["channels"], st.error), (["Ch 1", "Ch 2", "Ch 3"], None))
+        read = lambda: p.read_bytes().decode("utf-8")  # noqa: E731
+        st.song_edit([{"op": "sample_new", "file": str(self.dir / "a.wav")},
+                      {"op": "instrument_new", "entry": {"name": "Lead", "sample": 2, "nna": "fade"}}])
+        self.assertIn("  2: {file: a.wav, name: a}\ninstruments:\n  1: {name: fresh_tone, sample: 1}\n  2: {name: Lead, sample: 2, nna: fade}\n", read())
+        env = {"nodes": [[0, 64], [8, 32], [20, 0]], "sustain": 1}
+        st.song_edit([{"op": "instrument_set", "num": 2, "entry": {"name": "Lead", "keymap": [{"notes": "C-0..B-4", "sample": 1},
+                      {"notes": "C-5..B-9", "sample": 2, "transpose": -12}], "volume_envelope": env, "fadeout": 32}}])
+        ins = st.mod.instruments[1]
+        self.assertEqual((ins.keymap[40][1], ins.keymap[70], ins.fadeout), (1, (58, 2), 32))
+        self.assertEqual(st.song["instruments"][2]["volume_envelope"], env)
+        with self.assertRaises(gui.SongError):  # a sustain node that does not exist is refused, nothing written
+            st.song_edit([{"op": "instrument_set", "num": 2, "entry": {"name": "Lead", "sample": 2, "volume_envelope": {"nodes": [[0, 64]], "sustain": 3}}}])
+        st.set_mix({"instrument": {"1": {"cutoff": 40}}})
+        with self.assertRaises(ValueError):  # unwritten tryout settings on the instrument come first
+            st.song_edit([{"op": "instrument_set", "num": 1, "entry": {"name": "x", "sample": 1}}])
+        st.set_mix({})
+        st.edit_cells(0, [{"row": 0, "ch": 0, "cell": "C-5 02 ... ..."}])
+        with self.assertRaises(gui.SongError):  # a pattern plays instrument 2
+            st.song_edit([{"op": "instrument_delete", "num": 2}])
+        st.edit_cells(0, [{"row": 0, "ch": 0, "cell": "... .. ... ..."}])
+        st.song_edit([{"op": "instrument_delete", "num": 2}])
+        self.assertEqual(list(st.song["instruments"]), [1])
+
+    def test_sample_editor(self):
+        (self.dir / "song.yaml").write_bytes(SONG_INS.encode("utf-8"))
+        st = self.state()
+        song, src = self.dir / "song.yaml", (self.dir / "a.wav").read_bytes()
+        original = song.read_bytes()
+        read = lambda: song.read_bytes().decode("utf-8")  # noqa: E731
+        v = st.sample_view(1, 0, None, 100)
+        self.assertEqual((v["frames"], v["rate"], v["channels"], len(v["max"][0]), v["player"]), (13230, RATE, 1, 100, [0, 60]))
+        self.assertGreater(v["max"][0][0], 0.3)
+        z = st.sample_view(1, 100, 150, 100)  # zoomed in past one frame per column: the frames themselves
+        self.assertEqual((len(z["min"][0]), z["min"], z["a"], z["b"]), (50, z["max"], 100, 150))
+        # loop points and properties are written into the entry in place, one undo step each
+        st.song_edit([{"op": "sample_set", "num": 1, "entry": {"file": "a.wav", "name": "A tone", "loop": {"start": 1000, "end": 5000}}}])
+        self.assertIn("  1: {file: a.wav, name: A tone, loop: {start: 1000, end: 5000}}\n", read())
+        self.assertEqual((st.mod.samples[0].loop.start, st.mod.samples[0].loop.end), (1000, 5000))
+        e = dict(st.song["samples"][1], base_note="A-5", name="Lead A")  # scalars only: the line keeps its layout
+        st.song_edit([{"op": "sample_set", "num": 1, "entry": e}])
+        self.assertIn("  1: {file: a.wav, name: Lead A, loop: {start: 1000, end: 5000}, base_note: A-5}\n", read())
+        self.assertEqual(st.mod.samples[0].c5_speed, round(RATE * 2 ** (-9 / 12)))
+        before = read()
+        with self.assertRaises(gui.SongError):  # a loop past the end is refused, nothing written
+            st.song_edit([{"op": "sample_set", "num": 1, "entry": dict(e, loop={"start": 0, "end": 99999})}])
+        self.assertEqual(read(), before)
+        st.set_mix({"sample_volume": {"1": 30}})
+        with self.assertRaises(ValueError):  # an unwritten GAIN on the slot comes first
+            st.song_edit([{"op": "sample_set", "num": 1, "entry": dict(e, global_volume=40)}])
+        st.set_mix({})
+        # edits of the audio write a new WAV beside the song and point the slot at it; the source is never touched
+        st.song_edit([{"op": "sample_process", "num": 1, "action": "trim", "a": 500, "b": 10500}])
+        self.assertEqual(st.song["samples"][1]["file"], "a-trim.wav")
+        self.assertEqual(st.song["samples"][1]["loop"], {"start": 500, "end": 4500})
+        self.assertEqual(st.sample_view(1)["frames"], 10000)
+        st.song_edit([{"op": "sample_process", "num": 1, "action": "crossfade", "frames": 400}])
+        self.assertEqual(st.song["samples"][1]["file"], "a-crossfade.wav")
+        x = st._sample_wav(1)[3][0]
+        y = gui.wav_array(str(self.dir / "a-trim.wav"), 0)[1][0]
+        self.assertLess(abs(x[4499] - y[499]), 0.01)  # the loop's last frame now leads into its start
+        self.assertEqual(x[4099], y[4099])
+        st.song_edit([{"op": "sample_process", "num": 1, "action": "reverse"}])
+        self.assertEqual(st.song["samples"][1]["loop"], {"start": 5500, "end": 9500})
+        for action in ("fade_in", "fade_out", "normalize", "dc"):
+            st.song_edit([{"op": "sample_process", "num": 1, "action": action, "a": 0, "b": 2000}])
+        self.assertAlmostEqual(float(abs(st._sample_wav(1)[3][0][:2000]).max()), 1.0, places=3)
+        wavs = sorted(p.name for p in self.dir.glob("*.wav"))
+        with self.assertRaises(ValueError):  # a crossfade with no audio before the loop start: refused, no file left
+            st.song_edit([{"op": "sample_process", "num": 2, "action": "crossfade", "frames": 100}])
+        self.assertEqual(sorted(p.name for p in self.dir.glob("*.wav")), wavs)
+        while st.history:
+            st.undo()
+        self.assertEqual((song.read_bytes(), (self.dir / "a.wav").read_bytes()), (original, src))
+
+
+    def test_import_beside_the_module(self):
+        from tests.test_modimport import EMPTY4, TONE, grid, write_mod
+        mod = self.dir / "old.mod"
+        mod.write_bytes(write_mod([("tone", TONE, 64, 0, 0, 4000)], [grid([(0, 0, (428, 1, 0, 0))], EMPTY4)], [0]))
+        out, warnings = gui.import_beside(mod)
+        self.assertEqual((out.name, (self.dir / "old_samples" / "01_tone.wav").exists(), warnings[:0]), ("old.yaml", True, []))
+        st = gui.State(out)
+        self.states.append(st)
+        self.assertEqual((st.error, len(st.facts["channels"]), st.pattern_rows(0)["rows"][0][0]), (None, 4, "C-5 01 ... ..."))
+        self.assertEqual(gui.import_beside(mod)[0].name, "old-2.yaml")  # never over the first import
+
+    def test_the_page_keeps_its_address(self):
+        import socket
+        with socket.socket() as s:  # a free port stands in for PORT
+            s.bind(("127.0.0.1", 0))
+            free = s.getsockname()[1]
+        old, gui.PORT = gui.PORT, free
+        try:
+            a = gui.make_server()
+            self.assertEqual(a.server_address[1], free)
+            b = gui.make_server()  # taken: a second app window gets another port, never the same one
+            self.assertNotEqual(b.server_address[1], free)
+            for srv in (a, b):
+                srv.server_close()
+        finally:
+            gui.PORT = old
+
+    def test_conveniences(self):
+        h = gui.effect_help()  # the song format's tables
+        self.assertEqual((h["v"]["v"], h["e"]["O"][:13], h["s"]["S73"][:16]), ("set note volume (00–64)", "sample offset", "set this note's "))
+        self.assertEqual(len(h["e"]), 26)
+        song = SONG_INS.replace("patterns:\n", "patterns:\n  spare:\n    rows: 2\n    data: |\n      00: C-5 03 ... ... | ... .. ... ...\n")
+        song = song.replace("  2: {file: b.wav, name: B tone}\n", "  2: {file: b.wav, name: B tone}\n  3: {file: cand.wav, name: C}\n")
+        song = song.replace("patterns:\n  spare", "  3: {name: C, sample: 3}\npatterns:\n  spare")
+        (self.dir / "song.yaml").write_bytes(song.encode("utf-8"))
+        st = self.state()
+        self.assertEqual(st.facts["highlight"], [4, 16])
+        self.assertEqual(st.unused(), {"patterns": ["spare"], "instruments": [3], "samples": [3]})
+        with self.assertRaises(gui.SongError):  # the unused pattern still names instrument 3
+            st.song_edit([{"op": "instrument_delete", "num": 3}])
+        st.song_edit([{"op": "pattern_delete", "name": "spare"}, {"op": "instrument_delete", "num": 3}, {"op": "sample_delete", "num": 3}])
+        self.assertEqual((st.unused(), len(st.history)), ({"patterns": [], "instruments": [], "samples": []}, 1))
+        self.assertNotIn("cand.wav", st.text)
+        # a dropped WAV: saved beside the song, an identical copy reused, another numbered, anything else refused
+        (self.dir / "src").mkdir()
+        write_wav(self.dir / "src" / "short.wav", RATE, [sine(660, 0.1)], root_note=64)
+        data = (self.dir / "src" / "short.wav").read_bytes()
+        p = st.save_upload("My Drop.wav", data)
+        self.assertEqual((p.name, st.save_upload("My Drop.wav", data)), ("My_Drop.wav", p))
+        self.assertEqual(st.save_upload("My Drop.wav", (self.dir / "b.wav").read_bytes()).name, "My_Drop-2.wav")
+        with self.assertRaises(ValueError):
+            st.save_upload("x.wav", b"not a wav")
+        self.assertFalse((self.dir / "x.wav").exists())
+        # dropped on a slot: the slot plays it (the tryout's swap rules), a loop past its end goes
+        e = dict(st.song["samples"][1], loop={"start": 0, "end": 13000})
+        st.song_edit([{"op": "sample_set", "num": 1, "entry": e}])
+        st.song_edit([{"op": "sample_file", "num": 1, "file": str(p)}])
+        self.assertEqual(st.song["samples"][1], {"file": "My_Drop.wav", "name": "My_Drop", "base_note": "E-5"})
 
 
 if __name__ == "__main__":

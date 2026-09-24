@@ -2,7 +2,9 @@
 
 The exe is the whole CLI; `vulturetracker.exe gui song.yaml` opens the tryout app in the default browser.
 Bundled: the package, gui.html and the vendored libopenmpt DLLs. Not bundled: Surge XT, Dexed, OB-Xd and the
-sample packs (the `synth`/`audition` verbs still need `tools/` next to a checkout, as SAMPLING.md describes)."""
+sample packs (the `synth`/`audition` verbs still need `tools/` next to a checkout, as SAMPLING.md describes).
+ffmpeg (for the MP3/OGG/FLAC export) is copied beside the exe as dist/ffmpeg.exe from imageio-ffmpeg, not packed into it:
+a packed file is unpacked to %TEMP% on every launch. Ship both files; its build is GPL-3 (THIRD_PARTY.md)."""
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +22,8 @@ cmd = [
     "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build"), "--specpath", str(ROOT / "build"),
     "--add-data", f"{ROOT / 'vulturetracker' / 'gui.html'}{sep}vulturetracker",
     "--add-data", f"{ROOT / 'vulturetracker' / 'icon.png'}{sep}vulturetracker",
+    "--add-data", f"{ROOT / 'SONG_FORMAT.md'}{sep}vulturetracker",  # the Pattern tab's effect help reads its tables
+    "--add-data", f"{ROOT / 'vulturetracker' / 'web'}{sep}vulturetracker/web",  # the live engine (libopenmpt wasm, worklet)
     "--icon", str(ICO),
     "--collect-submodules", "vulturetracker",
     # synth/audition need the plugins from tools/ anyway; keep pedalboard (GPL-3) and mido out of the exe
@@ -32,4 +36,12 @@ cmd = [
 for dll in (ROOT / "vendor").glob("*.dll"):
     cmd += ["--add-binary", f"{dll}{sep}vendor"]
 print(" ".join(cmd))
-sys.exit(subprocess.call(cmd, cwd=ROOT))
+code = subprocess.call(cmd, cwd=ROOT)
+try:
+    import shutil
+    import imageio_ffmpeg
+    shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(), ROOT / "dist" / "ffmpeg.exe")
+    print("copied ffmpeg beside the exe: dist/ffmpeg.exe")
+except (ImportError, RuntimeError, OSError) as e:
+    print(f"no ffmpeg beside the exe ({e}): the exe exports MP3/OGG/FLAC only with ffmpeg on PATH")
+sys.exit(code)

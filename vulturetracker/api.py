@@ -42,7 +42,7 @@ def to_yaml(song: dict) -> str:
 
 
 def from_yaml(text: str) -> dict:
-    return yaml.safe_load(text)
+    return yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
 
 
 def load(path) -> dict:
@@ -188,11 +188,17 @@ def tryout_song(song_or_path, orders=None) -> dict:
 
 def swap_sample(song: dict, slot, cand, name_from_file=True) -> dict:
     """Point sample slot `slot` at candidate WAV `cand` (in place). The WAV's smpl root sets base_note unless the
-    slot pins c5_speed; a `loop: from_wav` is dropped when the WAV has no loop. Returns the slot entry."""
+    slot pins c5_speed; a `loop: from_wav` is dropped when the WAV has no loop. The slot takes the WAV's name unless an
+    instrument refers to the slot by its name (`sample:` or a keymap entry), which would then no longer resolve. Returns
+    the slot entry."""
     from .notation import format_note
     from .wavload import read_wav
+    old = song["samples"][slot].get("name")
+    refs = [ins.get("sample") for ins in (song.get("instruments") or {}).values() if isinstance(ins, dict)]
+    refs += [k.get("sample") for ins in (song.get("instruments") or {}).values() if isinstance(ins, dict)
+             for k in ins.get("keymap") or [] if isinstance(k, dict)]
     entry = song["samples"][slot] = {"file": str(cand), **{k: v for k, v in song["samples"][slot].items() if k != "file"}}
-    if name_from_file:
+    if name_from_file and not (old and old in refs):
         entry["name"] = Path(cand).stem[:25]
     w = read_wav(cand)
     if w.root is not None and "c5_speed" not in entry:

@@ -515,9 +515,19 @@ def module_to_song(mod: Module, song_path, samples_dir) -> dict:
 
 
 def import_it(it_path, song_path, samples_dir):
-    """Convert an .it file to a song YAML plus WAVs. Returns (song dict, warnings)."""
+    """Convert a module (.it, or .xm / .s3m / .mod through modreader, told apart by their headers) to a song YAML plus
+    WAVs. Returns (song dict, warnings)."""
     from .api import save
-    mod, warnings = read_it(Path(it_path).read_bytes())
+    from .modreader import match_level, read_module
+    data = Path(it_path).read_bytes()
+    mod, warnings = read_module(data)
+    if data[:4] != b"IMPM":
+        want = mod.mix_volume
+        diff = match_level(mod, data)
+        if diff is not None and abs(diff) > 0.5 and mod.mix_volume in (1, 128):
+            warnings.append(f"the level is {diff:+.1f} dB from libopenmpt's and the mix volume stops at {mod.mix_volume}")
+        elif diff is not None and mod.mix_volume != want:
+            warnings.append(f"mix volume {mod.mix_volume}: the level libopenmpt plays the original at ({diff:+.1f} dB)")
     song = module_to_song(mod, song_path, samples_dir)
     header = f"# Imported from {Path(it_path).name} by vulturetracker import\n"
     for w in warnings:

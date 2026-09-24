@@ -22,7 +22,7 @@ Read this first. It says what this repository is, what it is not, where things l
 
 A song is a YAML file (`SONG_FORMAT.md`); `python -m vulturetracker build song.yaml --render song.wav` compiles it to
 an Impulse Tracker `.it`, verifies it with libopenmpt and renders WAV. `synth` renders samples from free synths and
-recordings by recipe (`SAMPLING.md`), `import` turns an existing module into a song file, and `gui` is the app
+recordings by recipe (`SAMPLING.md`), `import` turns an existing module (IT, XM, S3M, MOD) into a song file, and `gui` is the app
 (`GUIDE.md`): the tryout (candidate samples rendered inside the song, rated, written with `U`), the mixer, listening
 notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the pattern view, stems export.
 `python -m vulturetracker --help` lists the commands.
@@ -31,8 +31,8 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 
 | Path | What | In git? |
 |---|---|---|
-| `vulturetracker/` | the package: `song.py` + `model.py` + `itwriter.py` (compiler), `itreader.py` (import), `openmpt.py` (libopenmpt), `gui.py` + `gui.html` (the app), `resample.py`, `synth.py`, `notation.py`, `wavload.py`, `api.py` | yes |
-| `tests/` | `python -m unittest tests.test_gui tests.test_pipeline tests.test_resample` (about 3 s); `test_synth`/`test_import` need the plugins and fixtures | yes (fixtures ignored) |
+| `vulturetracker/` | the package: `song.py` + `model.py` + `itwriter.py` (compiler), `itreader.py` + `modreader.py` (import of IT, XM, S3M, MOD), `openmpt.py` (libopenmpt), `gui.py` + `gui.html` (the app), `web/` (the live engine: libopenmpt 0.8.9 as WebAssembly and its AudioWorklet; `tests/test_engine.py` checks it under node), `resample.py`, `synth.py`, `notation.py`, `wavload.py`, `api.py` | yes |
+| `tests/` | `python -m unittest tests.test_gui tests.test_pipeline tests.test_resample tests.test_engine tests.test_modimport` (about 11 s; `test_engine` needs node); `test_synth`/`test_import` need the plugins and fixtures | yes (fixtures ignored) |
 | `demo/`, `demo2/`, `demo3/`, `demo4/` | the demo songs with their generators; `demo4/vantage.yaml` is the piece the owner likes best | yaml and scripts yes, `.it`/`.wav` ignored |
 | `suite/` | the UT99 tribute suite: `HANDOFF.md` (current state), `NEXT-PROMPT.md` (how the next piece is to be made), `nadir/` (the first piece) | yes, renders ignored |
 | `samples/` | committed samples per demo and piece with an `ATTRIBUTION.md` each; `samples/local/` is scratch and ignored | partly |
@@ -56,14 +56,27 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   heard. Sounds are offered as tryout candidates and the owner picks them in the app; levels are the owner's (the
   faders and WRITE MIX), not the agent's. Feedback arrives as listening notes (`<song>.notes.md`): read the words and
   the sounding list of each note, act on them, and do not ask what the report already answers.
-- **Taste (durable):** dark, subdued, dream-like melodic sounds; no bell, pluck, pizzicato, square, flute or buzzy saw
-  leads, no orchestral rolls or gongs; gameplay drive even when dark; one moving line at a time; one pedal rather than
-  colour changes or chord progressions (they read as "prog rock"); no repeating arpeggio or sequence figures unless the
-  reference has them; drums the owner has approved stay row for row; every melodic voice in its own single-sample slot.
-  Build a piece against **one** reference track (the way Vantage was built against Foregone Destruction), never a
-  synthesis of several; `suite/NEXT-PROMPT.md` is the agreed procedure.
-- **No anti-aliasing regressions.** Songs set `module: sample_rate: 44100`; no note plays a sample more than about seven
-  semitones above its root; renders are oversampled; a spectrogram should be empty above the drums' ceiling.
+- **Follow the reference (since 2026-09-22; this replaces the old taste list).** Build a piece against **one**
+  reference track (the way Vantage was built against Foregone Destruction), never a synthesis of several;
+  `suite/NEXT-PROMPT.md` is the agreed procedure. The old taste rules (dark and dream-like only; no bells, plucks,
+  squares, flutes or saws; no arpeggios or sequences; one pedal, no colour changes) did not serve the pieces and no
+  longer apply. Nothing is excluded in advance: arpeggios, sequences, saw-like or distorted tones, bells, bass motion
+  and chord colours are all allowed wherever the reference uses them. Every choice starts from what the reference
+  measurably does (`scratch/ut99-clean/melodic.py` and `perchannel.py`: its cells and how often they repeat, the movement
+  on each note, its echoes, its samples as played, its level). The reference's idioms may be followed closely (its echo
+  delays and levels, its colour set, its sequence copies, offsets and gates); the notes, melodic cells and sounds stay
+  our own (see Copyright). The balance starts where the reference's is (for Nether Animal, the tonal layers about 10 dB
+  under the low end); the faders stay the owner's, and the owner's ear decides every sound in the tryout. Drums, sub and
+  other sounds the owner has approved stay as they are, row for row, unless the owner says otherwise. Every melodic
+  voice sits in its own single-sample slot so the tryout can swap it.
+- **No anti-aliasing regressions.** Songs set `module: sample_rate: 44100` and renders are oversampled. A sample may be
+  played as far above its root as its content allows: its bandwidth times the transposition ratio stays under about
+  18 kHz and under the drums' ceiling (a sample 4.5 kHz wide may play two octaves up, one 9 kHz wide one octave up).
+  Storing a sample at a low rate and playing it octaves up, as the references do, is fine. Playing a bright sample more
+  than about three semitones below its root is not: libopenmpt's 8-tap interpolator lets images of the top of its band
+  through under 20 kHz (about -20 dB for full-band content). `check` warns when a sample's lowest note leaves images
+  within 60 dB of it; play it higher, add a lower multisample, or set `sample_rate: 88200`. The spectrogram check stays:
+  nothing above the drums' ceiling. (Until 2026-09-22 the limit was about seven semitones above the root.)
 
 ## Working conventions and pitfalls
 
@@ -79,8 +92,8 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   `gui.html` is re-read per request, `gui.py` needs a restart. Delete any notes the harness made on a real song.
 - Release recipe: bump `version` in `pyproject.toml`, commit "Version X", `git tag -a vX`, push `main` and the tag,
   `python tools/build_exe.py`, smoke-test `dist/vulturetracker.exe gui demo2/iron_relay.yaml --no-browser --port 8766`
-  (poll `/api/state`, GET `/`), `sha256sum`, then `gh release create vX dist/vulturetracker.exe --title --notes-file
-  --latest`. Write the notes file as UTF-8 without BOM from Python or an editor, never through PowerShell 5.1 text
+  (poll `/api/state`, GET `/`), `sha256sum`, then `gh release create vX dist/vulturetracker.exe dist/ffmpeg.exe --title --notes-file
+  --latest` (the build copies ffmpeg beside the exe for the MP3/OGG/FLAC export; it ships as its own file). Write the notes file as UTF-8 without BOM from Python or an editor, never through PowerShell 5.1 text
   cmdlets (the 0.2.1 notes came out with "â†’" for "→" and a BOM that way), and check the published body with
   `gh api repos/shadoh420/VultureTracker/releases/tags/vX --jq .body`.
 - Windows PowerShell 5.1 is the host shell: no `&&`, no `??`; Git Bash is available for POSIX syntax.
