@@ -349,6 +349,46 @@ class TestGui(unittest.TestCase):
         st.undo()
         self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK.replace("title: T", "title: T2"))
 
+    def test_a_song_that_does_not_parse_or_compile_still_opens(self):
+        (self.dir / "song.yaml").write_bytes((SONG + "patterns: [\n").encode("utf-8"))  # a YAML syntax error
+        st = self.state()
+        self.assertIn("YAML syntax", st.error[0])
+        self.assertEqual((st.facts, st.song, st.snapshot()["song"]["error"]), (None, {}, st.error))
+        with self.assertRaises(ValueError):  # edits need the compiled song: refused with the reason
+            st.edit_cells(0, [{"row": 0, "ch": 0, "cell": "... .. ... ..."}])
+        (self.dir / "song.yaml").write_bytes(b"module: {channels: 1}\npatterns: {p: 'C-5 01'}\norders: [p]\n")  # no samples
+        st2 = self.state()
+        self.assertTrue(st2.snapshot()["song"]["error"])
+        with self.assertRaises(ValueError):
+            st2.edit_cells(0, [{"row": 0, "ch": 0, "cell": "... .. ... ..."}])
+        (self.dir / "empty").mkdir()  # a path that does not exist leaves nothing behind
+        with self.assertRaises(OSError):
+            gui.State(self.dir / "empty" / "ghost.yaml")
+        self.assertEqual(list((self.dir / "empty").iterdir()), [])
+
+    def test_zero_padded_slot_numbers(self):
+        # 08: is a legal slot key (the compiler reads it as 8); the app's dict of the song must read it the same way
+        text = SONG.replace("  2: {file: b.wav, name: B tone}\n", "  08: {file: b.wav, name: B tone}\n").replace("C-5 02", "C-5 08")
+        (self.dir / "song.yaml").write_bytes(text.encode("utf-8"))
+        (self.dir / "song.tryout.json").write_text('{"slot": 3}', encoding="utf-8")  # a slot the song no longer has
+        st = self.state()
+        self.assertEqual((st.error, list(st.song["samples"]), st.slot), (None, [1, 8], 1))
+        st.meta["slot"] = 8
+        self.assertEqual(st.snapshot()["slot_entry"]["name"], "B tone")
+        self.assertEqual(st.sample_view(8)["frames"], 13230)
+        st.set_mix({"sample_volume": {"8": 40}})
+        new, redump = st.mix_text()
+        self.assertFalse(redump)
+        self.assertIn("  08: {file: b.wav, name: B tone, global_volume: 40}\n", new)
+
+    def test_entries_written_across_lines_are_refused(self):
+        (self.dir / "song.yaml").write_bytes(SONG.replace("  2: {file: b.wav, name: B tone}\n", "  2: {file: b.wav,\n      name: B tone}\n").encode("utf-8"))
+        st = self.state()
+        self.assertIsNone(st.error)
+        with self.assertRaises(ValueError):
+            st.song_edit([{"op": "sample_set", "num": 2, "entry": {"file": "b.wav", "name": "B", "volume": 50}}])
+        self.assertIn("  2: {file: b.wav,\n      name: B tone}\n", (self.dir / "song.yaml").read_text(encoding="utf-8"))
+
     def test_notes_archive_when_the_song_changes_outside_the_app(self):
         st = self.state()
         st.add_note({"order": 0, "row": 2, "tag": "keep"})
