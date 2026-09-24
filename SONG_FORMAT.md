@@ -76,7 +76,7 @@ a letter.
 | `compatible_gxx` | bool | false | IT "compatible Gxx" mode (keep false) |
 | `channels` | 1–64, or list | required | channel count, or one entry per channel |
 | `message` | text | none | song message stored in the file |
-| `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points follow and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
+| `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points and `c5_speed` follow, and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
@@ -108,7 +108,7 @@ samples:
 | `file` | path | required* | WAV file: PCM 8/16/24/32-bit or float, any rate, mono or stereo. *A slot with only `name` (no `file`) is an empty sample slot. |
 | `name` | ≤25 chars | file stem | sample name; instruments may refer to a sample by this name |
 | `base_note` | note | `C-5` | the note at which the WAV plays at its recorded pitch |
-| `c5_speed` | 256–9999999 | from WAV | playback rate for C-5, in Hz. Use instead of `base_note` for fine tuning. |
+| `c5_speed` | 256–9999999 | from WAV | playback rate for C-5, in Hz, for the WAV as written (rescaled with it under `module: sample_rate`). Use instead of `base_note` for fine tuning. |
 | `volume` | 0–64 | 64 | default note volume (used when a cell has no volume command) |
 | `global_volume` | 0–64 | 64 | fixed scaling of this sample |
 | `pan` | 0–64 | none | if set, notes using this sample start at this pan |

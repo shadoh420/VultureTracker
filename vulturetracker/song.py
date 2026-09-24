@@ -337,6 +337,7 @@ def _sample(ctx, num, spec, line, base_dir):
     loop = _loop(ctx, m.get("loop"), _line(m, "loop"), wav, frames, f"{where} loop")
     sustain_loop = _loop(ctx, m.get("sustain_loop"), _line(m, "sustain_loop"), wav, frames, f"{where} sustain_loop")
     target = getattr(ctx, "sample_rate", None)
+    wav_rate = wav.rate   # c5_speed is given for the WAV as written
     if target and target != wav.rate:   # module sample_rate: band-limited resampling, so playback neither images nor aliases
         try:
             from .resample import place_loops, resample_pcm
@@ -365,7 +366,7 @@ def _sample(ctx, num, spec, line, base_dir):
     smp.global_volume = _int(ctx, m, "global_volume", 0, 64, 64, where)
     smp.pan = _int(ctx, m, "pan", 0, 64, None, where) if m.get("pan") is not None else None
     if "c5_speed" in m:
-        smp.c5_speed = _int(ctx, m, "c5_speed", 256, 9999999, None, where)
+        smp.c5_speed = round(_int(ctx, m, "c5_speed", 256, 9999999, None, where) * wav.rate / wav_rate)
         if "base_note" in m:
             ctx.error(_line(m, "base_note"), f"{where}: give either base_note or c5_speed, not both")
     else:

@@ -325,6 +325,22 @@ class TestValidation(Base):
         self.assertFalse(warned("C-4 01", ", sample_rate: 88200"))    # stored at twice the rate: above 20 kHz again
         self.assertFalse(warned("C-3 02"))                            # a 2.2 kHz tone two octaves down: images too weak
 
+    def test_c5_speed_follows_resampling(self):
+        # c5_speed is given for the WAV as written: resampling 22050 -> 44100 doubles it, so the pitch stays
+        write_wav(self.dir / "half.wav", 22050, [sine(441)])
+
+        def c5(module):
+            text = f"""
+                module: {{channels: 1{module}}}
+                samples: {{1: {{file: half.wav, c5_speed: 22044}}}}
+                patterns: {{p: "C-5 01\\n"}}
+                orders: [p]
+            """
+            return load_song_text(textwrap.dedent(text), self.dir)[0].samples[0].c5_speed
+
+        self.assertEqual(c5(""), 22044)
+        self.assertEqual(c5(", sample_rate: 44100"), 44088)
+
 
 class TestWav(Base):
     def test_formats(self):
