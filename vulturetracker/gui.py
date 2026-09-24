@@ -1270,23 +1270,29 @@ class State:
         return self._diff(*self.mix_text())
 
     def apply(self, cand):
+        """The slot pointed at `cand` in the song file: the way every edit is written (refused while the song changed on
+        disk, compiled whole first, one undo step)."""
         with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.patched_text(cand)
-            self.write_song(new)
+            loaded = load_song_text(new, self.base_dir, str(self.song_path))  # SongError: nothing is written
             self.meta["candidates"].pop(str(self.slot), None)  # the choice is made: the slot's list goes (ratings stay, keyed by file)
             if self.want == cand:
                 self.want = None
             self.save_meta()
-            self.reload(archive=False)
+            self._commit(new, loaded)
         self._put(0, ("build", False))
 
     def apply_mix(self):
         with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.mix_text()
-            self.write_song(new)
+            loaded = load_song_text(new, self.base_dir, str(self.song_path))
             self.meta["mix"] = {}
             self.save_meta()
-            self.reload(archive=False)
+            self._commit(new, loaded)
         self._put(0, ("build", False))
 
     # ---- build / export
@@ -1456,9 +1462,10 @@ class State:
     MODULE_KEYS = {"title": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
                    "separation": (0, 128)}
 
-    def _commit(self, new):
-        """`new` as the song, if the whole of it compiles (SongError otherwise: nothing written); one undo step."""
-        loaded = load_song_text(new, self.base_dir, str(self.song_path))
+    def _commit(self, new, loaded=None):
+        """`new` as the song, if the whole of it compiles (SongError otherwise: nothing written); one undo step. `loaded`:
+        the (module, warnings) of `new`, when the caller compiled it already."""
+        loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
         self.history.append(self.text)
         self.future.clear()
         self.write_song(new)

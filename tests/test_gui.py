@@ -320,6 +320,35 @@ class TestGui(unittest.TestCase):
         self.assertEqual(data.count(b"\r\n"), data.count(b"\n"))  # a CRLF file stays CRLF
         self.assertIn(b"  2: {file: cand.wav, name: cand, base_note: E-5}\r\n", data)
 
+    def test_apply_and_write_mix_are_checked_and_undoable(self):
+        # U and WRITE MIX are written the way every edit is: refused while the song changed on disk (the hand edit would
+        # be lost), compiled whole before anything is written, and one undo step each
+        import os
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+        st.set_mix({"volume": {"0": 32}})
+        time.sleep(0.02)
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.replace("title: T", "title: T2").encode("utf-8"))
+        os.utime(self.dir / "song.yaml", None)
+        with self.assertRaises(ValueError):
+            st.apply_mix()
+        with self.assertRaises(ValueError):
+            st.apply(str(self.dir / "cand.wav"))
+        self.assertIn("title: T2", (self.dir / "song.yaml").read_text(encoding="utf-8"))  # the hand edit is still there
+        st.reload()
+        st.apply_mix()
+        self.assertEqual((st.facts["volume"], st.mix(), len(st.history)), ([32, 64], {}, 1))
+        write_wav(self.dir / "hi.wav", RATE, [sine(660)], root_note=125)  # a smpl root above B-9: base_note would be ~~~
+        before = (self.dir / "song.yaml").read_bytes()
+        with self.assertRaises(gui.SongError):
+            st.apply(str(self.dir / "hi.wav"))
+        self.assertEqual(((self.dir / "song.yaml").read_bytes(), st.error), (before, None))
+        st.apply(str(self.dir / "cand.wav"))
+        self.assertEqual((st.song["samples"][1]["file"], len(st.history)), ("cand.wav", 2))
+        st.undo()
+        st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK.replace("title: T", "title: T2"))
+
     def test_notes_archive_when_the_song_changes_outside_the_app(self):
         st = self.state()
         st.add_note({"order": 0, "row": 2, "tag": "keep"})
