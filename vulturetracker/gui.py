@@ -2046,7 +2046,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data[start:end + 1])
 
+    def _foreign(self):
+        """A request from another web page (its Origin is not this server's), or one that reached the server under another
+        host name (a DNS-rebinding page): refused, since the POSTs open, create and write files. The page's own requests
+        carry this origin; local tools (the tests, scripts) send none."""
+        port = self.server.server_address[1]
+        if (self.headers.get("Host") or "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost"):
+            return True
+        origin = self.headers.get("Origin")
+        return origin is not None and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+
     def do_GET(self):
+        if self._foreign():
+            return self._send(403, {"error": "not this app's page"})
         st = self.state
         path = self.path.split("?")[0]
         if path == "/":
@@ -2114,6 +2126,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self._foreign():
+            return self._send(403, {"error": "not this app's page"})
         st = self.state
         n = int(self.headers.get("Content-Length") or 0)
         act = self.path.split("?")[0].rsplit("/", 1)[-1]

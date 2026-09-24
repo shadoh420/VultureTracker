@@ -700,6 +700,30 @@ class TestGui(unittest.TestCase):
         self.assertEqual((st.error, len(st.facts["channels"]), st.pattern_rows(0)["rows"][0][0]), (None, 4, "C-5 01 ... ..."))
         self.assertEqual(gui.import_beside(mod)[0].name, "old-2.yaml")  # never over the first import
 
+    def test_other_pages_are_refused(self):
+        import threading
+        import urllib.error
+        import urllib.request
+        srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        port = srv.server_address[1]
+
+        def call(path, data=None, **headers):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers=headers)
+            try:
+                return urllib.request.urlopen(req, timeout=5).status
+            except urllib.error.HTTPError as e:
+                return e.code
+        try:
+            self.assertEqual(call("/api/start"), 200)  # a local tool: no Origin
+            self.assertEqual(call("/api/start", Origin=f"http://127.0.0.1:{port}"), 200)  # the page itself
+            self.assertEqual(call("/api/new", b'{"path": "x.yaml"}', Origin="https://example.com"), 403)  # another page's form post
+            self.assertEqual(call("/api/start", Host="attacker.example"), 403)  # DNS rebinding
+            self.assertFalse(Path("x.yaml").exists())
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT

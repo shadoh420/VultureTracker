@@ -464,6 +464,10 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   imported, opened and played by the live engine. Left out: a pan law of its own (MilkyTracker: balance differs for panned
   samples), XM vibrato's one-tick phase, 15-sample Soundtracker MODs, XM 1.02/1.03, ADPCM samples, AdLib instruments.
   Tests: test_modimport (5 tests, 48 cases, 3 s), test_import_beside_the_module.
+- Committed and pushed on the owner's word: 1be2a7a (rounds 6-15, README with new screenshots, pyproject shipping
+  `web/`). After it (uncommitted): the server refuses requests from other web pages (an Origin that is not its own) and
+  under another host name (DNS rebinding), `Handler._foreign`, 403; every POST can open, create or write files, and the
+  fixed port made the server easy to find. Test `test_other_pages_are_refused`; the window's own requests pass (steps32).
 - Round 14 (same day; item 3, the conveniences of §9): `gui.py` `effect_help` (SONG_FORMAT.md's volume, effect and S tables
   parsed; `tools/build_exe.py` bundles SONG_FORMAT.md; GET `/api/effects`), facts `highlight` (rows per beat and bar),
   `State.unused` (patterns outside the orders, instruments no played cell names, samples no used instrument maps;
