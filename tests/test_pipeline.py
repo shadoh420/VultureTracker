@@ -371,6 +371,26 @@ class TestWav(Base):
                 self.assertEqual(m.info()["samples"], 1)
 
 
+    def test_malformed_headers_are_wav_errors(self):
+        # a header the reader cannot use is a WavError (which check reports by line), never a ZeroDivisionError or a
+        # struct.error escaping as a crash
+        from vulturetracker.wavload import WavError
+
+        def wav(fmt, payload=b"\0" * 8):
+            body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(payload)) + payload
+            return b"RIFF" + struct.pack("<I", len(body)) + body
+
+        pack = lambda tag, nch, rate, align, bits: struct.pack("<HHIIHH", tag, nch, rate, rate * align, align, bits)  # noqa: E731
+        for name, fmt in (("no channels", pack(1, 0, 44100, 2, 16)), ("no alignment", pack(1, 1, 44100, 0, 16)),
+                          ("width 0", pack(1, 4, 44100, 2, 16)), ("rate 0", pack(1, 1, 0, 2, 16)), ("short fmt", b"\1\0\1\0")):
+            (self.dir / "bad.wav").write_bytes(wav(fmt))
+            with self.assertRaises(WavError, msg=name):
+                read_wav(self.dir / "bad.wav")
+            res = api.check("module: {channels: 1}\nsamples: {1: {file: bad.wav}}\npatterns: {p: {rows: 4, data: 'C-5 01'}}\norders: [p]\n", self.dir)
+            self.assertFalse(res["ok"], name)
+            self.assertIn("bad.wav", res["errors"][0])
+
+
 class TestDocs(unittest.TestCase):
     def test_song_format_minimal_example_compiles(self):
         doc = (ROOT / "SONG_FORMAT.md").read_text(encoding="utf-8")
