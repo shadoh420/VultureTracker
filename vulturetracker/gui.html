@@ -696,20 +696,20 @@ function insDelete(){if(INS_SEL==null||!insEntry()||EDQ.n)return;const n=+INS_SE
 async function insBrowse(){const j=await (await fetch('/api/browsewav',{method:'POST',body:'{}'})).json();if(j.path)$('ins-wav').value=j.path}
 function insSlot(){const f=$('ins-wav').value.trim();if(!f)return;$('ins-wav').value='';songEdit([{op:'sample_new',file:f}])}
 // the envelope graph: x = ticks, y = value; drag a node, click empty space to add one, right-click a node to remove it
-function envGeom(env,lo,hi){const last=env.nodes[env.nodes.length-1][0],T=Math.max(32,Math.ceil(last*1.25/8)*8),W=640,H=120;
+function envGeom(env,lo,hi,T0){const last=env.nodes[env.nodes.length-1][0],T=T0||Math.max(32,Math.ceil(last*1.25/8)*8),W=640,H=120;
   return {T,W,H,x:t=>34+(W-44)*t/T,y:v=>8+(H-24)*(hi-v)/(hi-lo),t:px=>Math.round((px-34)*T/(W-44)),v:py=>Math.round(hi-(py-8)*(hi-lo)/(H-24))}}
-function envSvg(kind,env,lo,hi){const g=envGeom(env,lo,hi),n=env.nodes,sus=env.sustain==null?[]:Array.isArray(env.sustain)?env.sustain:[env.sustain,env.sustain],lp=env.loop||[],ms=2500/S.song.facts.tempo,off=env.enabled===false;
+function envSvg(kind,env,lo,hi){const g=envGeom(env,lo,hi,ENVD&&ENVD.kind===kind?ENVD.T:0),n=env.nodes,sus=env.sustain==null?[]:Array.isArray(env.sustain)?env.sustain:[env.sustain,env.sustain],lp=env.loop||[],ms=2500/S.song.facts.tempo,off=env.enabled===false;
   const ln=(i,col)=>n[i]?`<line x1="${g.x(n[i][0])}" x2="${g.x(n[i][0])}" y1="4" y2="${g.H-14}" stroke="${col}" stroke-dasharray="3 2"/>`:'';
   const ticks=[0,.25,.5,.75,1].map(f=>Math.round(g.T*f)).map(t=>`<text x="${g.x(t)}" y="${g.H-2}" fill="#79848a" font-size="9" text-anchor="middle">${t} · ${t*ms<1000?Math.round(t*ms)+'ms':(t*ms/1000).toFixed(1)+'s'}</text>`).join('');
   return `<svg width="${g.W}" height="${g.H}" style="display:block;background:#0b0e0f;cursor:crosshair;opacity:${off?.45:1}"><text x="4" y="12" fill="#79848a" font-size="9">${hi}</text><text x="4" y="${g.H-16}" fill="#79848a" font-size="9">${lo}</text>
     ${lo<0?`<line x1="34" x2="${g.W-10}" y1="${g.y(0)}" y2="${g.y(0)}" stroke="#242a2e"/>`:''}${sus.map(i=>ln(i,'#d9a441')).join('')}${lp.map(i=>ln(i,'#5f7d94')).join('')}
     <polyline points="${n.map(([t,v])=>`${g.x(t)},${g.y(v)}`).join(' ')}" fill="none" stroke="#7ee787" stroke-width="1.5"/>
     ${n.map(([t,v],i)=>`<circle data-i="${i}" cx="${g.x(t)}" cy="${g.y(v)}" r="5" fill="${sus.includes(i)?'#d9a441':'#7ee787'}" stroke="#0b0e0f" style="cursor:grab"><title>node ${i}: tick ${t}, ${v}</title></circle>`).join('')}${ticks}</svg>`}
-function envAt(e,box,env,lo,hi){const g=envGeom(env,lo,hi),r=box.getBoundingClientRect();return [g.t(e.clientX-r.left),Math.max(lo,Math.min(hi,g.v(e.clientY-r.top)))]}
-function envDown(e,kind,lo,hi){if(e.button!==0)return;e.preventDefault();const box=e.currentTarget,env=JSON.parse(JSON.stringify(insEntry()[kind])),i=e.target.dataset&&e.target.dataset.i;
-  if(i==null){const [t,v]=envAt(e,box,env,lo,hi);if(t<=0||env.nodes.some(nd=>nd[0]===t)||env.nodes.length>=25)return;const k=env.nodes.findIndex(nd=>nd[0]>t),at=k<0?env.nodes.length:k;
+function envAt(e,r,env,lo,hi,T0){const g=envGeom(env,lo,hi,T0);return [g.t(e.clientX-r.left),Math.max(lo,Math.min(hi,g.v(e.clientY-r.top)))]}
+function envDown(e,kind,lo,hi){if(e.button!==0)return;e.preventDefault();const r=e.currentTarget.getBoundingClientRect(),env=JSON.parse(JSON.stringify(insEntry()[kind])),i=e.target.dataset&&e.target.dataset.i;
+  if(i==null){const [t,v]=envAt(e,r,env,lo,hi);if(t<=0||env.nodes.some(nd=>nd[0]===t)||env.nodes.length>=25)return;const k=env.nodes.findIndex(nd=>nd[0]>t),at=k<0?env.nodes.length:k;
     env.nodes.splice(at,0,[t,v]);shiftIdx(env,at,1);insSet(x=>x[kind]=env);return}
-  ENVD={kind,i:+i,env};const mv=ev=>{const [t,v]=envAt(ev,box,ENVD.env,lo,hi),n=ENVD.env.nodes,k=ENVD.i;n[k]=[k===0?0:Math.max(n[k-1][0]+1,Math.min(k+1<n.length?n[k+1][0]-1:9999,t)),v];renderIns()},
+  ENVD={kind,i:+i,env,T:envGeom(env,lo,hi).T};const mv=ev=>{const [t,v]=envAt(ev,r,ENVD.env,lo,hi,ENVD.T),n=ENVD.env.nodes,k=ENVD.i;n[k]=[k===0?0:Math.max(n[k-1][0]+1,Math.min(k+1<n.length?n[k+1][0]-1:9999,t)),v];renderIns()},
     up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);const d=ENVD;ENVD=null;insSet(x=>x[d.kind]=d.env)};
   addEventListener('mousemove',mv);addEventListener('mouseup',up)}
 // node indices in sustain and loop follow an inserted (d = 1) or removed (d = -1) node; a span that loses its node goes
