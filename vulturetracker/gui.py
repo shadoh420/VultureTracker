@@ -1645,7 +1645,7 @@ class State:
         while len(parts) <= ch:
             if parts and not parts[-1].endswith(" "):
                 parts[-1] += " "
-            parts.append(" ... .. ... ... ")
+            parts.append(" ... .. ... ...")
         old = parts[ch]
         lead, trail = old[: len(old) - len(old.lstrip())], old[len(old.rstrip()):]
         if ch == 0 and not lead and label and not pre:
@@ -1675,10 +1675,11 @@ class State:
         if self.mod is None:
             raise ValueError("the song does not compile (RENDER & EXPORT lists the errors): fix it in the YAML first")
 
-    def _edit_block(self, lines, index, cells):
-        """`cells` written into pattern `index`'s rows in `lines` (in place)."""
+    def _edit_block(self, lines, index, cells, nch=None):
+        """`cells` written into pattern `index`'s rows in `lines` (in place). `nch`: the channel count when an edit of the
+        same step added channels."""
         pat = self.mod.patterns[index]
-        nch, nrows = len(self.mod.channels), len(pat.rows)
+        nch, nrows = nch or len(self.mod.channels), len(pat.rows)
         first, end = self._pattern_block(lines, pat.name)
         rows = [i for i in range(first, end) if lines[i].split(";", 1)[0].strip()]
         labels = [re.match(r"^\s*(\d+)\s*:", lines[i]) for i in rows]
@@ -1883,7 +1884,8 @@ class State:
             ind = " " * (self._ind(lines[items[-1]]) if items else self._ind(lines[head]) + 2)
             at = items[-1] + 1 if items else head + 1
             name = str(op.get("name") or f"Ch {len(items) + 1}").strip()[:20]
-            lines.insert(at, f"{ind}- {{name: {self._yname(name)}}}\n")
+            pan = "" if op.get("pan") is None else f", pan: {max(0, min(64, int(op['pan'])))}"
+            lines.insert(at, f"{ind}- {{name: {self._yname(name)}{pan}}}\n")
         elif kind == "channel_remove":
             head, items = self._channel_lines(lines)
             i = int(op["ch"])
@@ -1915,6 +1917,8 @@ class State:
             order = list(range(len(items)))
             order.insert(b, order.pop(a))
             remap.append(lambda k, order=order: order.index(k))
+        elif kind == "echo":
+            self._echo(lines, orders, op, remap)
         elif kind == "sample_file":  # the slot pointed at another WAV (dropped on it), as the tryout's apply does it
             import copy
             num, f = int(op["num"]), Path(str(op["file"]))
@@ -2052,6 +2056,110 @@ class State:
         else:
             raise ValueError(f"unknown song edit '{kind}'")
 
+    # effects an echo copy leaves out: song-wide ones (speed, jumps, breaks, tempo, global volume, pattern loops and
+    # delays), which would act twice, and pan (the echo channel's pan is its own, set on its fader)
+    ECHO_SKIP = set("ABCTVWXY")
+    ECHO_SKIP_S = {0x6, 0x8, 0x9, 0xB, 0xE}
+
+    def _echo(self, lines, orders, op, remap):
+        """The `echo` op: the notes of channel `ch` copied into channel `to` (or a new channel, `to` null: "<name> echo",
+        added at the end) `rows` rows later and `ticks` ticks late (SDx on each note), each volume at `level` percent.
+        `pattern`: a pattern index, with `r0`..`r1` its rows (default all); null: every pattern, whole. `pan`: the new
+        channel's pan (0-64). A volume is the
+        cell's own, else the one the note starts at (the sample's default volume when the cell names an instrument, else
+        the channel's last); the echo channel's pan is its fader's, so pan commands are not copied, nor song-wide
+        effects. A copy that lands past its pattern's end is dropped, and one onto a cell that is not empty is skipped,
+        each counted in the report. Part of the song edit's one undo step."""
+        from .model import Cell, NOTE_FADE
+        self._need_compiled()
+        mod, nch = self.mod, len(self.mod.channels)
+        src, delay, ticks = int(op["ch"]), int(op.get("rows") or 0), int(op.get("ticks") or 0)
+        level = max(0.0, min(400.0, float(op.get("level", 60)))) / 100
+        if not 0 <= src < nch:
+            raise ValueError(f"no channel {src + 1}")
+        if not (0 <= delay < 200 and 0 <= ticks <= 15) or delay + ticks == 0:
+            raise ValueError("an echo is 0-199 rows and 0-15 ticks late, and later than the note")
+        if ticks >= mod.speed:
+            raise ValueError(f"at speed {mod.speed} a row has {mod.speed} ticks: a delay of {ticks} would skip the note")
+        if op.get("to") is None:
+            names = [c.name for c in mod.channels]
+            base = f"{names[src]} echo"[:20]
+            name = next(n for n in (base if k == 1 else f"{base[:17]} {k}" for k in itertools.count(1)) if n not in names)
+            self._song_op(lines, orders, {"op": "channel_add", "name": name, "pan": op.get("pan")}, remap)
+            to, width, new = nch, nch + 1, True
+        else:
+            to, width, new = int(op["to"]), nch, False
+            if not 0 <= to < nch or to == src:
+                raise ValueError("the echo goes into another channel of the song")
+        insmode = mod.instruments is not None
+
+        def default_volume(ins, note):
+            if not ins:
+                return None
+            if insmode:
+                if ins > len(mod.instruments) or note is None or note >= 120:
+                    return None
+                smp = mod.instruments[ins - 1].keymap[note][1]
+            else:
+                smp = ins
+            return mod.samples[smp - 1].volume if 0 < smp <= len(mod.samples) else None
+
+        written = past = skipped = lost = 0
+        idxs = [int(op["pattern"])] if op.get("pattern") is not None else range(len(mod.patterns))
+        for idx in idxs:
+            pat = mod.patterns[idx]
+            n = len(pat.rows)
+            r0 = max(0, int(op.get("r0") or 0)) if op.get("pattern") is not None else 0
+            r1 = min(n - 1, int(op["r1"])) if op.get("pattern") is not None and op.get("r1") is not None else n - 1
+            vol, last_ins, cells = 64, 0, []
+            for r in range(0, r1 + 1):  # rows before r0 only set the channel's volume and instrument
+                c = pat.rows[r][src]
+                if c.instrument:
+                    last_ins = c.instrument
+                    dv = default_volume(c.instrument, c.note)
+                    vol = dv if dv is not None else vol
+                if c.volcmd is not None and c.volcmd <= 64:
+                    vol = c.volcmd
+                if r < r0 or c.is_empty():
+                    continue
+                e = Cell(c.note, c.instrument, None, 0, 0)
+                note_on = c.note is not None and c.note < 120
+                if c.volcmd is not None and c.volcmd <= 64 or note_on:
+                    e.volcmd = max(0, min(64, round(vol * level)))
+                elif c.volcmd is not None and not 128 <= c.volcmd <= 192:  # slides, portamento, vibrato; not pan
+                    e.volcmd = c.volcmd
+                letter = chr(64 + c.effect) if c.effect else ""
+                keep = letter and letter not in self.ECHO_SKIP and not (letter == "S" and c.param >> 4 in self.ECHO_SKIP_S)
+                if keep:
+                    e.effect, e.param = c.effect, c.param
+                if ticks and c.note is not None:
+                    lost += bool(keep and not (letter == "S" and c.param >> 4 == 0xD))
+                    e.effect, e.param = 19, 0xD0 | ticks  # SDx
+                if e.is_empty():
+                    continue
+                at = r + delay
+                if at >= n:
+                    past += 1
+                    continue
+                if not new and not pat.rows[at][to].is_empty():
+                    skipped += 1
+                    continue
+                if e.note == NOTE_FADE or e.note is not None and e.note >= 120:
+                    e.instrument = 0
+                cells.append({"row": at, "ch": to, "cell": format_cell(e)})
+            if cells:
+                self._edit_block(lines, idx, cells, width)
+                written += len(cells)
+        if not written:
+            raise ValueError("nothing to echo: no notes on that channel in the rows given" + (
+                f" ({past} would land past the pattern's end, {skipped} on cells that are not empty)" if past or skipped else ""))
+        name = f"new channel {to + 1}" if new else f"channel {to + 1}"
+        msg = f"echo of channel {src + 1} into {name}: {written} cells"
+        msg += f", {past} past a pattern's end dropped" if past else ""
+        msg += f", {skipped} skipped (the cell there was not empty)" if skipped else ""
+        msg += f", {lost} effects replaced by the tick delay" if lost else ""
+        self._report.append(msg)
+
     def _write_orders(self, lines, orders):
         """The order list `orders` written in `lines` in the layout it has: a one-line flow list stays one line (its
         trailing comment kept); a block list (`- name` per line) stays a block, each entry that survives keeping its line
@@ -2114,6 +2222,7 @@ class State:
             before = [str(o) for o in (self.song.get("orders") or [])]
             orders, remap = list(before), []
             self._created = []  # WAVs written by sample edits: removed again when the edit is refused
+            self._report = []   # what an op tells the page (the echo's counts)
             try:
                 for op in ops:
                     self._song_op(lines, orders, op, remap)
@@ -2141,6 +2250,7 @@ class State:
             self._attach_meta(meta_before)
             self.save_meta()
             self.queue_all()
+            return {"report": "; ".join(self._report)} if self._report else {}
 
     def undo(self, redo=False):
         """Back to the song text before the last write (or forward again). The tryout settings that write changed (mutes
@@ -2552,7 +2662,7 @@ class Handler(BaseHTTPRequestHandler):
                 st.edit_patterns([(g["pattern"], g["cells"]) for g in body["patterns"]] if "patterns" in body
                                  else [(body["pattern"], body["cells"])])
             elif act == "songedit":
-                st.song_edit(body["ops"])
+                return self._send(200, {"ok": True, **(st.song_edit(body["ops"]) or {})})
             elif act in ("undo", "redo"):
                 st.undo(redo=act == "redo")
             elif act == "applymix":

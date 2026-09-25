@@ -495,6 +495,9 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   numbers, engine load ids), the docs it named corrected; the tracker gaps left built (HUMANIZE, MIDI and piano keys
   record at the playing row while the engine plays the pattern on show, the Tryout tab's RECIPE box with
   `synth.render_one`); `docs/AUDIT-2026-09.md` and `docs/TRACKER-GAPS.md` removed; ArenaPrototype no longer named.
+  Then, at the owner's request (a friend heard the leads in a video and suggested tracker delay): ECHO in the Pattern
+  tab's selection bar, song_edit op `echo` (`State._echo`: a channel's notes copied into a new or existing channel, rows
+  and ticks later, at a percent of their volume; song-wide and pan effects not copied), `test_echo` and the page test.
   Tests 108 there (`VT_CHROMIUM` drives `tests/test_page.py`). To check locally in the real window: the RECIPE box with
   a Surge patch (only file recipes could be rendered there), MIDI recording with a keyboard, and the build of the exe.
 

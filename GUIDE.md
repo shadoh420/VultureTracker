@@ -153,7 +153,16 @@ end of the pattern, e.g. one bar of hats over eight), CLEAR
 cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
 from the first selected row to the last, per channel, where both ends carry the same command) and AMPLIFY (the
 volume column by a percentage; a note without a volume gets one, counted from 64, the usual default) and HUMANIZE
-(each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). FIND… (Ctrl+F)
+(each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). ECHO is the
+tracker delay: the selected channel's notes (or, with no selection, the cursor's whole channel) are copied into another
+channel ROWS later (and TICKS later on top, as `SDx` on each note), each at the given percent of its volume (its own
+`vNN`, else the sample's default volume where the cell names an instrument, else the channel's last); in THIS PATTERN or
+the channel's notes in every pattern of the WHOLE SONG. The target is a new channel added at the end (`<name> echo`,
+panned LEFT, CENTRE or RIGHT; its fader moves it after) or an existing one, where cells that are not empty are left
+alone. Song-wide effects (speed, tempo, jumps, breaks, global volume, pattern loops and delays) and pan commands are not
+copied, and a copy that would land past its pattern's end is dropped; the bar reports the counts. Run it twice into
+channels panned apart (say 3 rows at 60 % to the left, 6 rows at 35 % to the right) for a stereo echo; one or two ticks
+with no rows doubles a lead instead. Each ECHO is one step for Ctrl+Z, the channel it adds included. FIND… (Ctrl+F)
 finds cells by note, instrument, volume and effect (`*` any characters, `?` one, an empty field anything; F3 or NEXT
 the next match, in this pattern or the whole song, on the channels on show) and REPLACE ALL writes the given fields
 into every match. Every command is one step for Ctrl+Z, a song-wide replace included.

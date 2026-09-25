@@ -1117,6 +1117,42 @@ class TestGui(unittest.TestCase):
         with self.assertRaises(ValueError):
             st.recipe_write("note: A-5\n")  # neither patch nor file
 
+    def test_echo(self):
+        # tracker delay: a channel's notes copied into another channel, later and quieter, as one undo step with the
+        # channel it adds; song-wide effects and pan are not copied, a tick delay is SDx, copies past the pattern's end
+        # are dropped and cells that are not empty are left alone
+        song = SONG_BLOCK.replace("      00: C-5 01 ... ... | ... .. ... ...\n      01: ... .. ... ... | ... .. ... ...\n",
+                                  "      00: C-5 01 ... A04 | ... .. ... ...\n      01: D-5 .. v40 H44 | ... .. ... ...\n", 1)
+        song = song.replace("      03: ... .. ... ... | ... .. ... ...\n  p2:", "      03: E-5 .. p10 X20 | ... .. ... ...\n  p2:")
+        (self.dir / "song.yaml").write_bytes(song.encode("utf-8"))
+        st = self.state()
+        read = lambda: (self.dir / "song.yaml").read_text(encoding="utf-8")  # noqa: E731
+        r = st.song_edit([{"op": "echo", "ch": 0, "to": None, "pan": 12, "pattern": 0, "rows": 1, "level": 50}])
+        self.assertEqual(r, {"report": "echo of channel 1 into new channel 3: 2 cells, 1 past a pattern's end dropped"})
+        self.assertIn("    - {name: A echo, pan: 12}\n", read())
+        self.assertEqual(st.facts["channels"], ["A", "B", "A echo"])
+        rows = st.pattern_rows(0)["rows"]
+        self.assertEqual([r[2] for r in rows], ["... .. ... ...", "C-5 01 v32 ...", "D-5 .. v20 H44", "... .. ... ..."])
+        self.assertTrue(all(not line.endswith(" \n") for line in read().splitlines(keepends=True)))
+        # into the existing echo channel two ticks late: the note there is left alone, the rest delayed with SD2; the
+        # E-5's pan command (p10, X20) is not copied, its volume is the channel's last (v40)
+        r = st.song_edit([{"op": "echo", "ch": 0, "to": 2, "pattern": 0, "rows": 0, "ticks": 2, "level": 25}])
+        self.assertEqual(r["report"], "echo of channel 1 into channel 3: 2 cells, 1 skipped (the cell there was not empty), "
+                                      "1 effects replaced by the tick delay")
+        self.assertEqual([r[2] for r in st.pattern_rows(0)["rows"]], ["C-5 01 v16 SD2", "C-5 01 v32 ...", "D-5 .. v20 H44", "E-5 .. v10 SD2"])
+        # the whole song: every pattern, the second echo named apart
+        st.song_edit([{"op": "echo", "ch": 1, "to": None, "pattern": None, "rows": 1, "level": 100}])
+        self.assertEqual(st.facts["channels"][3], "B echo")
+        self.assertEqual([st.pattern_rows(0)["rows"][r][3] for r in range(4)], ["... .. ... ..."] * 3 + ["C-5 02 v64 ..."])
+        self.assertEqual([st.pattern_rows(1)["rows"][r][3] for r in range(4)], ["... .. ... ..."] * 4)  # p2's B is empty
+        for bad in ({"ch": 0, "to": 0}, {"ch": 0, "to": 2, "rows": 0, "ticks": 6}, {"ch": 0, "to": 3, "rows": 0},
+                    {"ch": 1, "to": 3, "pattern": 1}):
+            with self.assertRaises(ValueError, msg=bad):
+                st.song_edit([{"op": "echo", "pattern": 0, "rows": 1, **bad}])
+        while st.snapshot()["undo"]:
+            st.undo()
+        self.assertEqual(read(), song)
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT

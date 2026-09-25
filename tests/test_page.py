@@ -76,7 +76,7 @@ class TestPage(unittest.TestCase):
 
     def test_pattern_editing_in_the_page(self):
         # T3: the page's editing code in the browser: a note entered at the cursor from the piano keys, a channel
-        # selected and transposed, copy and paste, humanize, undo; every change lands in the song file. And a notice the server
+        # selected and transposed, copy and paste, humanize, an echo, undo; every change lands in the song file. And a notice the server
         # gives (a meta file it could not read) is shown once
         if sync_playwright is None:
             self.skipTest("playwright not installed")
@@ -124,7 +124,17 @@ class TestPage(unittest.TestCase):
                     page.evaluate("Math.random = () => 0; SEL = null; setCursor(0, 0, 0, 0); selHumanize()")  # the most down
                     settle()
                     self.assertIn("      00: C#5 01 v58 ... |", text())
-                    for _ in range(4):
+                    # ECHO: the cursor's channel into a new channel on the right, one row later at half the volume
+                    page.evaluate("SEL = null; setCursor(0, 0, 0, 0)")
+                    page.select_option("#echo-to", "new:48")
+                    page.fill("#echo-rows", "1")
+                    page.fill("#echo-lvl", "50")
+                    page.click("#selbar >> text=ECHO")
+                    settle()
+                    self.assertIn("    - {name: A echo, pan: 48}\n", text())
+                    self.assertIn("      01: D#5 01 ... ... | ... .. ... ... | C#5 01 v29 ...\n", text())
+                    self.assertIn("echo of channel 1 into new channel 3: 2 cells", page.text_content("#sel-msg"))
+                    for _ in range(5):
                         page.keyboard.press("Control+z")
                         settle()
                     browser.close()
