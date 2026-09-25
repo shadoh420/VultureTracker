@@ -597,6 +597,18 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   and listed kick0/4/5/2 and samples' kick.wav, → CANDIDATE added it, the filter and zoom worked, no page errors.
   Tests: tests/test_library.py (7: the reader against every format, features, family precision, the stamp cache, a
   query outside the index, `tryout --like`, the app's endpoints).
+  Then 1d, `resynth:` as a recipe source (`vulturetracker/mosaic.py`, SAMPLING.md): target and corpus cut into Hann
+  blocks (block, overlap), each target block matched by 12 MFCCs (per-block floor, so level does not steer timbre;
+  z-scored over the corpus) to a corpus block (variety: random among the n nearest with a seed; reuse: blocks of the
+  last 8 avoided), scaled to the target block's level, overlap-added; then a smooth per-hop level correction, since
+  unrelated blocks overlap-added sum their power (the break rebuilt from samples/nadir: median level error per 50 ms
+  3.6 dB before, 0.6 after; level correlation 0.81 -> 0.89; 111 blocks from 9812 in 0.9 s), and a peak over full scale
+  scaled down (logged), never clipped. Numpy only: a `resynth` recipe needs neither synth nor pedalboard (an empty
+  `fx:` no longer imports pedalboard). Measured in tests/test_mosaic.py: a target rebuilt from itself comes back at
+  37 dB SNR (the blocks under the -60 dBFS gate stay silent); a kick/hat pattern rebuilt from other kicks and hats
+  picks the right kind for all 8 hits and follows the level within 1.5 dB (median); variety and reuse widen the
+  choice, a seed repeats it; the app's RECIPE box renders an edited resynth entry into `<name>-r1.wav` as a candidate.
+  Not heard: the owner's ear decides whether any of it is useful.
 
 ## Next steps, in order
 

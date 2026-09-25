@@ -289,7 +289,9 @@ the first two principal components of the same features (near means alike, thoug
 distance), coloured by folder; rings mark the slot's sample, its candidates, and the sounds nearest the one chosen.
 Click a point to hear it and list its nearest sounds; → CANDIDATE OF SLOT adds it, ≈ ADD ITS NEAREST adds them. The
 wheel zooms, a drag pans, a double-click fits the map; the filter dims what does not match a name or folder. From the
-command line, `tryout --like WAV -k N` adds the N nearest to the candidates given (or renders them alone).
+command line, `tryout --like WAV -k N` adds the N nearest to the candidates given (or renders them alone). A sample
+recipe can also rebuild a sound from blocks of other sounds (`resynth:`, SAMPLING.md); the RECIPE box renders its
+edits as candidates like any other entry.
 
 **Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
 tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets

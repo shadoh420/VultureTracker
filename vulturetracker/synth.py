@@ -19,8 +19,13 @@ TOOLS = (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "VultureTracker" / 
          else ROOT / "tools")
 DEFAULT_SURGE = TOOLS / "surge-xt" / "Surge Synth Team"
 RECIPE_KEYS = ["out_dir", "sample_rate", "defaults", "samples"]
-SAMPLE_KEYS = ["patch", "file", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
+SAMPLE_KEYS = ["patch", "file", "resynth", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
                "hold", "tail", "params", "gain", "normalize", "mono", "trim", "loop", "fade_out", "reverse", "root_offset"]
+
+
+# `resynth:` (mosaic.resynth): a target rebuilt from blocks of a corpus; its keys and their defaults
+RESYNTH_KEYS = {"target": None, "corpus": None, "block": 0.05, "overlap": 4, "variety": 1, "reuse": 0.0, "level": 1.0,
+                "mix": 0.0, "seed": 0, "gate": -60.0, "corpus_seconds": 120.0}
 
 
 class RecipeError(ValueError):
@@ -349,6 +354,8 @@ def load_files(files, rate, where):
 def fx_chain(fx, where="fx"):
     """`fx:` list -> pedalboard.Pedalboard. Items are an effect name or {name: {parameter: value}}; names are
     pedalboard's effect classes in any case, with or without underscores (highpass_filter = HighpassFilter)."""
+    if not fx:  # nothing to print: no pedalboard needed (a numpy-only source renders without it)
+        return lambda x, rate: x
     import pedalboard
     effects = {n.lower(): getattr(pedalboard, n) for n in dir(pedalboard)
                if isinstance(getattr(pedalboard, n), type) and issubclass(getattr(pedalboard, n), pedalboard.Plugin)
@@ -431,12 +438,21 @@ def expand(recipe):
         unknown = set(spec) - set(SAMPLE_KEYS)
         if unknown:
             raise RecipeError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(SAMPLE_KEYS)})")
-        if ("patch" in spec) == ("file" in spec):
-            raise RecipeError(f"{where}: needs exactly one of 'patch' (a synth) or 'file' (audio file)")
+        if sum(k in spec for k in ("patch", "file", "resynth")) != 1:
+            raise RecipeError(f"{where}: needs exactly one of 'patch' (a synth), 'file' (audio file) or 'resynth' "
+                              "(a target rebuilt from a corpus)")
         merged = {**defaults, **spec}
-        if "file" in spec:
+        if "resynth" in spec:
+            rs = spec["resynth"]
+            if not isinstance(rs, dict) or not rs.get("target") or not rs.get("corpus"):
+                raise RecipeError(f"{where}: resynth needs target (a WAV) and corpus (WAVs, globs or folders)")
+            bad = set(rs) - set(RESYNTH_KEYS)
+            if bad:
+                raise RecipeError(f"{where}: resynth: unknown keys {sorted(bad)} (allowed: {', '.join(RESYNTH_KEYS)})")
+        if "file" in spec or "resynth" in spec:
             if "notes" in spec or "chord" in spec or "phrase" in spec:
-                raise RecipeError(f"{where}: 'file' samples take 'note' (the recorded pitch), not notes/chord/phrase")
+                raise RecipeError(f"{where}: 'file' and 'resynth' samples take 'note' (the recorded pitch), not "
+                                  "notes/chord/phrase")
             yield name, merged
             continue
         if "notes" in spec:
@@ -465,7 +481,7 @@ def _load_recipe(path):
 def _job_root(name, spec):
     """(output name, sounding root) of one expanded job, without rendering it."""
     where = f"sample '{name}'"
-    root = _note(spec.get("note", "C-5"), where) if "file" in spec else _events(spec, where)[2]
+    root = _note(spec.get("note", "C-5"), where) if "file" in spec or "resynth" in spec else _events(spec, where)[2]
     root += int(spec.get("root_offset", 0))  # patches that sound in a different octave than the key played
     if not 0 <= root < 120:
         raise RecipeError(f"{where}: root_offset moves the root outside C-0..B-9")
@@ -533,6 +549,8 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
         start = int(float(spec.get("start", 0)) * rate)
         end = start + int(float(spec["length"]) * rate) if "length" in spec else None
         audio = audio[:, start:end]  # the fade_out below smooths a cut end
+    elif "resynth" in spec:
+        audio, source = _resynth(path, spec, rate, where, log)
     else:
         events, seconds, _ = _events(spec, where)
         source = spec["patch"]
@@ -551,13 +569,74 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
         f"  <- {source}")
     mono = pcm.astype(float).mean(axis=0) / 32768
     # A file sample without a note: is taken as unpitched (drums); everything else gets its pitch checked.
-    est = None if "file" in spec and "note" not in spec else estimate_pitch(mono[int(0.05 * rate):], rate)
+    est = (None if ("file" in spec or "resynth" in spec) and "note" not in spec
+           else estimate_pitch(mono[int(0.05 * rate):], rate))
     if est and est[1] < 0.1:
         off = 12 * __import__("math").log2(est[0] / (440 * 2 ** ((root - 69) / 12)))
         if abs(off) > 0.5:
             log(f"  warning: '{name}' sounds about {off:+.1f} semitones from its root "
                 f"{notation.format_note(root)}; if the patch is octave-shifted set root_offset: {round(off):+d}")
     return file, root, loop
+
+
+def _wavs(base, items, where):
+    """WAV paths from a list of files, globs and folders (relative to `base`), sorted within each item, no repeats."""
+    import glob as _glob
+    from .library import walk
+    out = []
+    for item in [items] if isinstance(items, str) else items:
+        p = Path(base, str(item))
+        found = walk([p]) if p.is_dir() else sorted(f for f in _glob.glob(str(p), recursive=True)
+                                                    if f.lower().endswith(".wav")) or ([str(p)] if p.is_file() else [])
+        if not found:
+            raise RecipeError(f"{where}: resynth: nothing matches {item}")
+        out += [str(Path(f).resolve()) for f in found]
+    return list(dict.fromkeys(out))
+
+
+def _read_mono(f, rate, seconds=None):
+    """A WAV as mono float64 at `rate` (numpy only), its first `seconds` (at its own rate) when given."""
+    import numpy as np
+    from .library import read_audio
+    from .resample import resample
+    x, r, _ = read_audio(f, seconds)
+    return resample(x, r, rate) if r != rate else np.asarray(x, float)
+
+
+def _resynth(path, spec, rate, where, log):
+    """The `resynth:` source: its target (cut by start/length) rebuilt from blocks of its corpus (mosaic.resynth), read
+    at the recipe's rate; the corpus files are read in order until corpus_seconds of them. Returns (1 x frames, label)."""
+    from . import mosaic
+    rs = {**RESYNTH_KEYS, **spec["resynth"]}
+    target = _wavs(path.parent, rs["target"], where)
+    x = _read_mono(target[0], rate)
+    start = int(float(spec.get("start", 0)) * rate)
+    x = x[start: start + int(float(spec["length"]) * rate) if "length" in spec else None]
+    corpus, total = [], 0.0
+    for f in _wavs(path.parent, rs["corpus"], where):
+        if Path(f) == Path(target[0]).resolve():
+            continue
+        try:
+            c = _read_mono(f, rate, max(0.1, float(rs["corpus_seconds"]) - total))
+        except (OSError, ValueError) as e:
+            log(f"  skipped {Path(f).name}: {e}")
+            continue
+        corpus.append(c)
+        total += len(c) / rate
+        if total >= float(rs["corpus_seconds"]):
+            break
+    try:
+        y, info = mosaic.resynth(x, corpus, rate, float(rs["block"]), int(rs["overlap"]), int(rs["variety"]),
+                                 float(rs["reuse"]), float(rs["level"]), float(rs["mix"]), int(rs["seed"]), float(rs["gate"]))
+    except ValueError as e:
+        raise RecipeError(f"{where}: resynth: {e}")
+    peak = float(abs(y).max())
+    if peak > 0.999:  # blocks brought to the target's level can overshoot it: scaled under full scale, never clipped
+        y = y * (0.999 / peak)
+    log(f"  resynth: {info['blocks']} blocks of {Path(target[0]).name} from {info['corpus_blocks']} blocks of "
+        f"{len(corpus)} files ({total:.1f} s), {info['distinct']} distinct"
+        + (f"; {20 * __import__('math').log10(peak / 0.999):.1f} dB down to stay under full scale" if peak > 0.999 else ""))
+    return y[None, :], f"resynth {Path(target[0]).name} <- {len(corpus)} files"
 
 
 def audition(pattern, out_wav, note="C-4", hold=1.5, tail=1.0, rate=44100, log=print):

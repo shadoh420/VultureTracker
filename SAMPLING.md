@@ -102,7 +102,8 @@ samples:
 |---|---|---|
 | `patch` | | Surge XT: `Category/Name` (factory), `3rdparty/Author/Category/Name`, or a path to an `.fxp`. Dexed: `dexed:Cartridge/Voice` (voices of each `.syx` cartridge in Dexed's cartridge folder or `tools/synths/cartridges/`). OB-Xd: `obxd:Bank/Program` (programs of each `.fxb` bank). Use `audition` with a glob to list and hear them. |
 | `file` | | instead of `patch`: an audio file (WAV, FLAC, AIFF, OGG, MP3; relative to the recipe), or a list of files mixed together (e.g. close and overhead mics of one drum hit). Resampled to `sample_rate`. |
-| `start`, `length` | 0, all | `file` only: seconds to skip, and seconds to keep (effects tails still ring past `length`) |
+| `resynth` | | instead of `patch` or `file`: a target WAV rebuilt from blocks of other WAVs (see below) |
+| `start`, `length` | 0, all | `file` and `resynth` (its target): seconds to skip, and seconds to keep (effects tails still ring past `length`) |
 | `note` | | `patch`: the key to play, in tracker names (`C-5` = MIDI 60 = middle C). `file`: the pitch recorded in the file (default `C-5`) |
 | `notes` | | a list of keys, rendering one file per key (for multisampled instruments) |
 | `chord` | | a list of keys played together as one sample (root = the first) |
@@ -128,8 +129,34 @@ Unpitched sounds (drums, noise) aren't checked, and neither are `file` samples w
 (taken as drums). For recorded files this checks the `note:` you
 gave, and it is how file names were confirmed to be scientific pitch: VSCO's `E3` is tracker `E-4`.
 
-Every sample needs exactly one of `patch` or `file`. `file` samples take `note` (never `notes`, `chord` or
-`phrase`); `hold`, `velocity` and `params` only apply to patches.
+Every sample needs exactly one of `patch`, `file` or `resynth`. `file` and `resynth` samples take `note` (never
+`notes`, `chord` or `phrase`); `hold`, `velocity` and `params` only apply to patches.
+
+## Resynthesis from a corpus (`resynth:`)
+
+```yaml
+  mosaic:
+    resynth:
+      target: loops/break.wav          # the sound whose rhythm and loudness are followed
+      corpus: [kit/, pads/*.wav]       # WAV files, globs or folders (relative to the recipe) whose sounds rebuild it
+      block: 0.05                      # seconds per block
+      overlap: 4                       # blocks per block length: the hop is block / overlap
+      variety: 1                       # pick at random among this many nearest blocks (with seed)
+      reuse: 0.5                       # avoid the corpus blocks used in the last 8 blocks (0: no, 1: strongly)
+      level: 1.0                       # how far each block follows the target block's loudness (0: its own)
+      mix: 0.0                         # the target itself blended back in
+    normalize: -1
+```
+
+The idea is Samplebrain's (nothing of its code is used): the target and every corpus file are cut into overlapping
+blocks, each block is described by 12 MFCCs (the same mel bands the MAP tab's index uses), and every target block is
+replaced by the corpus block nearest it in timbre, brought to the target block's level and overlap-added with a Hann
+window. A drum loop rebuilt from pads keeps its rhythm with the pads' sounds; a voice rebuilt from a drum kit talks in
+hits. Target blocks under `gate` dBFS (default -60) stay silent; `corpus_seconds` (default 120) caps how much of the
+corpus is read (the files in order, each from its start); `seed` (default 0) makes `variety` repeatable. The output
+is mono, at the recipe's `sample_rate`; the rest of the chain (`fx`, `trim`, `loop`, `normalize`) follows as for any
+sample. Numpy only: no synth and no pedalboard are needed unless `fx:` is used. `synth` logs how many blocks and
+distinct corpus blocks were used.
 
 ## Printed effects (`fx:`)
 
