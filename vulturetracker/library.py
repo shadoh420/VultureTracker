@@ -150,7 +150,8 @@ def harmonics(x, rate, hz, n=N_HARM):
     periods per bin, so a low note's harmonics fall in separate bins); a harmonic above Nyquist: -60."""
     size = min(len(x), int(0.5 * rate))
     ms = max(1, rate // 100)
-    e = np.convolve(x * x, np.ones(size), mode="valid")[::ms] if len(x) > size else np.zeros(1)
+    c = np.concatenate(([0.0], np.cumsum(x.astype(np.float64) ** 2)))  # moving sum of power, O(n)
+    e = (c[size:] - c[:-size])[::ms] if len(x) > size else np.zeros(1)
     a = int(np.argmax(e)) * ms
     seg = x[a:a + size]
     nfft = 1 << int(math.ceil(math.log2(max(len(seg), 8 * rate / hz, 64))))

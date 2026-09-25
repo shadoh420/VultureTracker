@@ -28,17 +28,27 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
   instrument field, with envelopes as draggable graphs and a keymap editor. A sample editor with a zoomable waveform,
   loop and sustain-loop points, and trim / fade / normalize / reverse / DC removal / crossfaded loops written as new WAVs
   beside the song (never over a source file), with effects (gain, filters, EQ, loudness, pitch, stretch, truncate
-  silence), slicing at the hits into slots and a kit, and auto loop points. Composition helpers in the Pattern tab
-  (groove, Euclidean rhythms, chords over channels, round-robin and velocity layers) and rows rendered into a new slot.
+  silence, noise reduction), slicing at the hits into slots, a kit, a multisample or a pattern at the slices' timing,
+  and auto loop points. Composition helpers in the Pattern tab (groove, Euclidean rhythms, chords over channels,
+  round-robin and velocity layers) and rows rendered into a new slot.
+- **Making sounds in the app.** The Paint tab turns a picture over frequency and time into sound, or lays it over a
+  sample as a filter. The Faust tab compiles [Faust](https://faust.grame.fr) code in the page and renders notes into
+  slots or candidates (the compiler is downloaded on first use).
 - **Recording.** The Record tab records from an audio interface (WASAPI or ASIO) with meters and a tuner; takes are
-  trimmed, their note found, and sent to the Tryout as candidates or into new slots tuned to the cent.
+  trimmed, their note found, and sent to the Tryout as candidates, into new slots tuned to the cent, or into one
+  multisample.
 - **Choosing sounds in context.** The Tryout tab renders candidate samples inside the song, measures them against the
   current one and writes the choice with one key; a mixer with channel and sample faders; listening notes dropped at the
   playhead with the channels sounding there, kept as a report for a collaborator who cannot listen; a spectrogram.
+- **Finding sounds.** Your sample folders are indexed by timbre: FIND SIMILAR fills the Tryout with the library's
+  nearest sounds to the slot's sample or a candidate, and the Map tab lays the whole library out by likeness, to click
+  and hear.
 - **Import and export.** IT, XM, S3M and MOD files become song files (samples extracted as WAVs, measured against how
-  libopenmpt plays the original). Songs render to WAV, MP3, OGG and FLAC, whole or as per-channel stems.
+  libopenmpt plays the original); Guitar Pro 3-5 tabs become song files with placeholder sounds to swap in the
+  Tryout. Songs render to WAV, MP3, OGG and FLAC, whole or as per-channel stems.
 - **Samples by recipe.** `synth` renders samples from free synths (Surge XT, Dexed, OB-Xd) and CC0 recordings by recipe
-  ([SAMPLING.md](SAMPLING.md)), with anti-aliased resampling so notes played far from their root stay clean.
+  ([SAMPLING.md](SAMPLING.md)), Faust code, or a target rebuilt from blocks of other WAVs (`resynth:`), with
+  anti-aliased resampling so notes played far from their root stay clean.
 
 ## Install
 
@@ -51,6 +61,7 @@ pip install pyyaml pywebview numpy imageio-ffmpeg sounddevice
 Python 3.10+. Only PyYAML is required to compile songs. pywebview opens the app in its own window (without it, the app
 opens in the browser); numpy is needed for measurements, the spectrogram, the sample editor and resampling;
 imageio-ffmpeg provides the ffmpeg that the MP3 / OGG / FLAC export runs; sounddevice is the RECORD tab's audio input.
+Optional: `pip install pyguitarpro` for the Guitar Pro import; node for `faust:` recipes on the command line.
 Windows x64 has libopenmpt in `vendor/`; elsewhere install libopenmpt or point `LIBOPENMPT` at it.
 `pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
 
@@ -62,6 +73,7 @@ python -m vulturetracker check song.yaml                   # validate; errors sh
 python -m vulturetracker build song.yaml --render song.wav # compile, verify with libopenmpt, render
 python -m vulturetracker import some.xm -o some.yaml       # an .it, .xm, .s3m or .mod -> song file + WAVs
 python -m vulturetracker synth recipe.yaml                 # render samples from free synths or recordings
+python -m vulturetracker index ~/samples --like kick.wav   # index sample folders; the nearest sounds to a WAV
 python -m vulturetracker --help                            # every command
 ```
 
@@ -85,7 +97,7 @@ VultureTracker is MIT licensed ([LICENSE](LICENSE)) and stands on other people's
 - The live engine is libopenmpt's official WebAssembly build (BSD-3-Clause and BSL-1.0, with minimp3, miniz and
   stb_vorbis compiled in), in `vulturetracker/web/` with its license texts.
 - The exe bundles Python (PSF), pywebview (BSD-3-Clause) with Microsoft's WebView2 SDK loader, pythonnet (MIT),
-  NumPy (BSD-3-Clause), PyYAML (MIT), mido (MIT) and [pedalboard](https://github.com/spotify/pedalboard) (GPL-3.0,
+  NumPy (BSD-3-Clause), PyYAML (MIT), mido (MIT), sounddevice with PortAudio (MIT), PyGuitarPro (LGPL-3.0) and [pedalboard](https://github.com/spotify/pedalboard) (GPL-3.0,
   the synth host), packed by PyInstaller; because of pedalboard the exe as a whole is distributed under the GPL-3.0,
   while this repository's code stays MIT ([THIRD_PARTY.md](THIRD_PARTY.md)). [FFmpeg](https://ffmpeg.org) (GPL-3.0) ships beside it as a separate program for the
   encoded exports.

@@ -190,7 +190,7 @@ class TestPage(unittest.TestCase):
                     page.check("#slc-pat")
                     page.click("#t-smp span.btn:text-is('SLICE → SLOTS')")
                     page.wait_for_function("SMP_MSG.includes('pattern')", timeout=15000)
-                    page.wait_for_function("!EDQ.n")
+                    page.wait_for_function("!EDQ.n && !$('smp-msg').textContent.includes('writing')")  # the refresh re-renders it
                     self.assertIn("plays each over the keys nearest its note (A-4, C#5, F-5)", page.inner_text("#smp-msg"))
                     self.assertEqual(page.inner_text("#sel-msg"), "")
                     self.assertIn("hits_slices", [pt.name for pt in st.mod.patterns])

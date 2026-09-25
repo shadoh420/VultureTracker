@@ -738,6 +738,16 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   139 -> 570 ms: the workers hold the GIL between libopenmpt's calls (the decimation and the WAV writing are Python and
   numpy). The default stays 1 worker. For the owner to try on Windows: `set VT_WORKERS=3` before starting the app, and
   `python tools/bench.py --tryout 6` with and without it.
+- The owner's decisions on the cloud branch (2026-09-25, local session): plugins (7a) not in the song format: echoes
+  stay echo channels (plain IT plays the same in every player, as the references do it); `tools/dmo_spike.py` stays as
+  the record, and a Pattern-tab ECHO helper that writes an echo channel (delay, level, repeats) comes later. Phrases:
+  not needed for now (the proposal above stays as the design if it ever is). Chunk 2c (recording along with the song)
+  is to be built after the release. The exe packs PyGuitarPro. Found on Windows: `library.harmonics` found the loudest
+  half second with `np.convolve` against a half-second window (O(n x window), over 20 s for 42 files, failing
+  test_find_similar_in_the_app); now a cumulative-sum moving sum (same values within 1e-10), the library tests in 4 s. test_page's
+  samples-tab test read #smp-msg before the refresh re-rendered it: now waits for the text. On Windows: every test
+  module passes (faustwasm fetched: the Faust renders and the FAUST tab's page test too, Edge); the 1298 WAVs of samples/
+  and tools/cc0 index in 31 s; MAP, PAINT and FAUST open without console errors. The owner's ear checks come after 0.5.0.
 
 ## Next steps, in order
 
