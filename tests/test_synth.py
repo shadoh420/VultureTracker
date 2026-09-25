@@ -143,6 +143,8 @@ class TestSurgeRender(unittest.TestCase):
             self.surge = Synths()
         except Exception as e:  # no pedalboard, no Surge XT
             self.skipTest(f"Surge XT unavailable: {e}")
+        if not self.surge.patches:  # the index is empty without Surge XT, Dexed or OB-Xd installed
+            self.skipTest("no synth patches installed (tools/fetch_surge.py, tools/fetch_instruments.py)")
 
     def test_patch_renders_at_expected_pitch(self):
         from vulturetracker.synth import estimate_pitch
