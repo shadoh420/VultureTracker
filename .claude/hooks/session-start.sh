@@ -15,7 +15,7 @@ fi
 
 # --ignore-installed: Ubuntu's own PyYAML has no libyaml (CSafeLoader); pip's wheel has it, as on Windows
 python3 -m pip install -q --disable-pip-version-check --ignore-installed pyyaml
-python3 -m pip install -q --disable-pip-version-check numpy imageio-ffmpeg Pillow playwright
+python3 -m pip install -q --disable-pip-version-check numpy imageio-ffmpeg Pillow playwright pyguitarpro
 
 if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -x /opt/pw-browsers/chromium ]; then
   echo 'export VT_CHROMIUM=/opt/pw-browsers/chromium' >> "$CLAUDE_ENV_FILE"

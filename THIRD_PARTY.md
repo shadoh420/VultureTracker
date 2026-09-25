@@ -38,6 +38,7 @@ upstream sources linked below. The source code in the repository stays MIT.
 | mido | 1.3.3 | MIT | https://github.com/mido/mido/blob/main/LICENSE |
 | sounddevice | 0.5.6 | MIT | https://github.com/spatialaudio/python-sounddevice/blob/master/LICENSE |
 | PortAudio (the DLLs in sounddevice's Windows wheel, `_sounddevice_data`) | the wheel's build | MIT-style (PortAudio license) | https://github.com/spatialaudio/portaudio-binaries (the ASIO DLL there also compiles in Steinberg's ASIO SDK, dual-licensed since October 2025 under GPL-3.0 or Steinberg's own license; it ships here under GPL-3.0 with the rest of the exe; the SDK: https://www.steinberg.net/developers/) |
+| [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) and attrs, when installed at build time | 0.11, 26.1 | LGPL-3.0, MIT | https://github.com/Perlence/PyGuitarPro/blob/master/LICENSE (source: the same repository); https://github.com/python-attrs/attrs/blob/main/LICENSE. Guitar Pro import only; LGPL-3.0 inside a GPL-3.0 exe: the source links above are the offer |
 | PyInstaller bootloader | 6.22.3 | GPL-2.0-or-later with the bootloader exception (the packed program keeps its own license) | https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt |
 
 pedalboard and mido host the synths for the app's RECIPE box; the synths themselves are not packed (below). sounddevice and PortAudio are the
@@ -59,6 +60,7 @@ In a source checkout the same binary comes from the `imageio-ffmpeg` package (BS
 | [Dexed](https://github.com/asb2m10/dexed) | GPL-3.0 | DX7 renderer, fetched by `tools/fetch_instruments.py` (or by the exe's RECIPE box). It ships the "SynprezFM" DX7 cartridges by Jean-Marc Desprez (credited in Dexed's README, no license statement); demo3's Rhodes lead and string pad are renders of two of those patches |
 | [OB-Xd](https://www.discodsp.com/obxd/) (discoDSP) | GPL-3.0 | Oberheim renderer, installed by `tools/fetch_instruments.py --install-obxd` |
 | [pedalboard](https://github.com/spotify/pedalboard) (Spotify) and mido | GPL-3.0, MIT | in a source checkout: optional dependencies (`pip install pedalboard mido`); packed inside the exe (above) |
+| [PyGuitarPro](https://github.com/Perlence/PyGuitarPro) | LGPL-3.0 | in a source checkout: an optional dependency for the Guitar Pro import (`pip install pyguitarpro`) |
 | Pillow | MIT-CMU | build-time only: `tools/build_exe.py` regenerates the exe icon from `assets/vulturetracker.png` |
 | Big Rusty Drums by Karoryfer Samples; VSCO2 Community Edition and VCSL by Versilian Studios | CC0-1.0 | recordings fetched by `tools/fetch_cc0.py`; renders used in demo3 and demo4 are credited in `samples/demo3/ATTRIBUTION.md` and `samples/demo4/ATTRIBUTION.md` |
 | MusicRadar SampleRadar drum-machine packs | MusicRadar's royalty-free terms (use in music; no redistribution) | drum hits kept in the gitignored `samples/local/`; never committed |

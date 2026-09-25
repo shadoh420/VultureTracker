@@ -30,6 +30,7 @@ python -m vulturetracker build demo/arena.yaml --render demo/arena.wav # compile
 python -m vulturetracker render demo/arena.it -o demo/arena.wav --repeat 1
 python -m vulturetracker info demo/arena.it                           # what libopenmpt sees
 python -m vulturetracker import some.xm -o some.yaml                  # existing .it/.xm/.s3m/.mod -> song file + WAVs
+python -m vulturetracker import riff.gp5 -o riff.yaml                 # a Guitar Pro tab, with placeholder sounds
 python -m vulturetracker index C:/samples samples                      # index WAVs by timbre (the app's MAP tab)
 python -m vulturetracker tryout song.yaml --sample 3 --like kick.wav -k 8 # the 8 sounds nearest kick.wav, in the song
 ```
@@ -465,6 +466,20 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   warns when the images of its lowest note come within 60 dB), and low-rate samples interpolated by the player (the module setting
   `sample_rate: 44100` resamples every sample to the playback rate at compile time, band-limited, which removes that
   imaging in every player at the cost of file size). `vulturetracker/resample.py` holds the resampler.
+- `import` also reads Guitar Pro tabs (.gp3, .gp4, .gp5; `pip install pyguitarpro`, LGPL-3; the app's IMPORT A
+  MODULE OR A TAB takes them too), with placeholder sounds to swap in the tryout (`vulturetracker/gpimport.py`): a
+  plucked-string multisample for guitars (basses a darker one; a sample every octave, played at most 2 semitones under
+  and 9 over its root) and a small synthesised kit on the General MIDI drum keys. A pitched track gets a channel per
+  string it uses, a drum track one per note of its fullest beat, a tempo change a channel of its own (Txx). The grid is
+  the coarsest that holds every beat (4 rows a quarter for sixteenths, 6 or 12 with triplets, up to 48), with speed and
+  tempo chosen so a row lasts what it lasts in the tab (the header's BPM readout assumes 4 rows a beat, so it reads
+  high on a finer grid). Measures become patterns (identical ones shared) and the repeats and alternate endings are
+  played out into the order list. A note lasts its beat (a note-off where it ends) unless it rings on or is tied; palm
+  mutes and staccato last half, dead notes are cut after a tick (SC1), ghost notes are quieter; velocity goes to the
+  volume column; bends and the whammy bar become pitch slides row by row (E and F), slides between notes E and F over
+  the first note (a legato slide's target not struck again), hammer-ons and pull-offs a GFF on the next note, vibrato
+  H, natural harmonics their pitch. Grace notes, trills, tremolo picking and mix-table volume and pan are left out and
+  counted in the warnings.
 - `import` keeps patterns, instruments, envelopes and samples. It drops embedded MIDI macros and
   OpenMPT-only extensions (with a warning). It also reads XM, S3M and 31-sample MOD files (`vulturetracker/modreader.py`,
   told apart by their headers; the app's start screen has IMPORT A MODULE, which writes `name.yaml` and `name_samples/`

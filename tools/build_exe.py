@@ -44,6 +44,10 @@ if importlib.util.find_spec("sounddevice"):
     cmd += ["--hidden-import", "sounddevice"]
     if importlib.util.find_spec("_sounddevice_data"):
         cmd += ["--collect-all", "_sounddevice_data"]
+# Guitar Pro import (PyGuitarPro, LGPL-3.0, and attrs, MIT): packed when installed at build time, else the import says
+# what is missing
+if importlib.util.find_spec("guitarpro"):
+    cmd += ["--collect-submodules", "guitarpro", "--hidden-import", "attr"]
 print(" ".join(cmd))
 code = subprocess.call(cmd, cwd=ROOT)
 try:

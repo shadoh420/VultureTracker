@@ -671,6 +671,26 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
     macros: {SF1: [1, wet]}        # SF1 then Zxx sets plugin 1's wet/dry (00-7F), per row, like the filter's SF0
   ```
   with the app's mixer showing the plugins as sends and the tryout keeping them in renders. Not built.
+  Then chunk 7b, Guitar Pro import (`vulturetracker/gpimport.py`, PyGuitarPro 0.11, LGPL-3, optional: `pip install
+  pyguitarpro`, the `gp` extra; the cloud hook installs it, build_exe packs it when installed, THIRD_PARTY.md lists it):
+  a string per channel for pitched tracks, a channel per simultaneous note for drums, a tempo channel; grid =
+  `grid_for` (the coarsest rows-per-quarter holding every beat start and length), `speed_tempo` (24 ticks a quarter
+  when it can: tempo = BPM); `play_order` plays repeats and alternate endings out; notes collected per lane then
+  written in time order (`_lane_cells`), so ties extend, legato (hammer, legato slide) writes GFF, slides and bends
+  glide with E/F row by row correcting rounding (`_glide`). Placeholders: Karplus-Strong plucks (numpy, a period
+  per block) every octave C-2..C-8 low-passed to 9 kHz, keys 2 under to 9 over each root, so `check` gives no
+  anti-aliasing warning (3 under at full width had warned: images at -46 dB); a synthesised kit on the GM keys (a key
+  it lacks plays the snare). Checked by hand on a tab written with PyGuitarPro (tests/test_gpimport.py, the same tab):
+  pitch from string + fret (A string fret 3 = C-4), the tie to row 12, the hammer-on (D-5 GFF), the full bend (F04 F03
+  F04 = 2.06 semitones over half the note), the shift slide and vibrato, dead note SC1, palm mute at half, let ring,
+  harmonic at 12 = E-6, eighth triplets 2 rows apart at 6 rows a quarter (speed 4), the tempo change T8C, measure 2
+  played twice with its note-off only on the first pass. Rendered with the drums muted and measured with pitch_of:
+  C-4 131.1 Hz, the hammered D-5 293.8, the bend 393.2 -> 441.4 Hz (+5 cents from slide rounding), the second pass on
+  time (441.2 Hz at 4.8 s); the vibrato note reads +25 cents (H44's swing). App: IMPORT A MODULE OR A TAB on the start
+  screen (`import_beside` by suffix; the browse dialog lists .gp3-5), checked in Chromium: riff.gp5 opened with 9
+  channels, 4 orders, 8.91 s, no page errors. Not built: the read-only tab view (alphaTab) and fretboard entry; GPX
+  (Guitar Pro 6+) is not read by PyGuitarPro; the header's BPM readout assumes 4 rows a beat (the song format has no
+  row-highlight key).
 
 ## Next steps, in order
 
