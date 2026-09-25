@@ -1,6 +1,6 @@
 [project]
 name = "vulturetracker"
-version = "0.3.0"
+version = "0.4.0"
 description = "Compile human-readable YAML songs to Impulse Tracker modules"
 requires-python = ">=3.10"
 dependencies = ["pyyaml>=6"]
