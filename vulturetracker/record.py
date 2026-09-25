@@ -8,10 +8,12 @@ the input back, so there is no software latency to hear.
 VT_FAKE_AUDIO=1 replaces the devices with a simulated two-input interface (a plucked G-4, 196 Hz, every 1.5 s on
 input 1, a quiet hum on input 2), for the tests and for trying the tab without an interface."""
 import collections
+import importlib
 import math
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -83,17 +85,39 @@ class FakeBackend:
         return s
 
 
+class OnThread:
+    """A stream whose stop and close run on the backend's audio thread, as its start did."""
+
+    def __init__(self, ex, stream):
+        self.ex, self.stream = ex, stream
+
+    def stop(self):
+        self.ex.submit(self.stream.stop).result()
+
+    def close(self):
+        self.ex.submit(self.stream.close).result()
+
+
 class SoundDeviceBackend:
+    """sounddevice, with every PortAudio call on one thread of its own: an ASIO driver (Focusrite USB ASIO) opens only on
+    the thread that loaded PortAudio ('Failed to load ASIO driver' elsewhere), and the server answers each request on a
+    new thread."""
     name = "sounddevice"
 
     def __init__(self):
+        self.ex = ThreadPoolExecutor(1, thread_name_prefix="audio")
         try:
-            import sounddevice as sd
+            self.sd = self.ex.submit(importlib.import_module, "sounddevice").result()
         except (ImportError, OSError) as e:  # not installed, or no PortAudio library found
             raise RecordError(f"recording needs sounddevice (pip install sounddevice): {e}")
-        self.sd = sd
 
     def devices(self):
+        return self.ex.submit(self._devices).result()
+
+    def open(self, device, channels, rate, callback, exclusive=False):
+        return OnThread(self.ex, self.ex.submit(self._open, device, channels, rate, callback, exclusive).result())
+
+    def _devices(self):
         apis = self.sd.query_hostapis()
         out = []
         for d in self.sd.query_devices():
@@ -102,7 +126,7 @@ class SoundDeviceBackend:
                             "inputs": d["max_input_channels"], "rate": int(d["default_samplerate"])})
         return out
 
-    def open(self, device, channels, rate, callback, exclusive=False):
+    def _open(self, device, channels, rate, callback, exclusive):
         sd = self.sd
         info = sd.query_devices(device)
         api = sd.query_hostapis(info["hostapi"])["name"]
@@ -114,7 +138,9 @@ class SoundDeviceBackend:
                                callback=callback, extra_settings=extra)
             s.start()
         except Exception as e:  # noqa: BLE001 - PortAudio's errors name the problem (rate, channels, busy device)
-            raise RecordError(f"{info['name']} ({api}) would not open at {rate} Hz with {channels} inputs: {e}")
+            hint = (f"; EXCLUSIVE opens only at the rate the device is set to ({int(info['default_samplerate'])} Hz here: set in "
+                    f"its control panel, such as Focusrite Control, or pick that RATE)") if exclusive and "WASAPI" in api else ""
+            raise RecordError(f"{info['name']} ({api}) would not open at {rate} Hz with {channels} inputs: {e}{hint}")
         return s
 
 

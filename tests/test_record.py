@@ -11,7 +11,7 @@ import numpy as np
 from vulturetracker import dsp, gui, record
 from vulturetracker.wavload import read_wav, write_wav
 
-from tests.test_gui import RATE, SONG, sine
+from tests.test_gui import RATE, SONG, SONG_INS, sine
 
 
 def fake_recorder():
@@ -117,6 +117,18 @@ class TestTakesInTheSong(unittest.TestCase):
             st.save_take(np.zeros((1, RATE)), RATE, {})
         self.assertEqual([x["file"] for x in st.takes], ["guitar-02.wav", "guitar-01.wav"])
 
+    def test_a_new_slot_gets_an_instrument_in_a_song_with_instruments(self):
+        # found on a real Scarlett: a take sent to a new slot had no instrument, so ▶ HOLD and the patterns could not play it
+        (self.dir / "ins.yaml").write_text(SONG_INS, newline="\n")
+        st = gui.State(self.dir / "ins.yaml")
+        try:
+            t = st.save_take(self.take(), RATE, {"name": "guitar", "dest": "slot"})
+            self.assertEqual(st.song["instruments"][t["instrument"]], {"name": "guitar-01", "sample": t["slot"]})
+            # ▶ HOLD plays it at the note it was played (G-4), not at C-5, which sounded 15 semitones up for an A-3 take
+            self.assertEqual(st.sample_view(t["slot"], 0, None, 100)["player"], [t["instrument"] - 1, 55])
+        finally:
+            st.close()
+
     def test_record_routes(self):
         os.environ["VT_FAKE_AUDIO"] = "1"
         gui.Handler.state = self.st
@@ -144,6 +156,61 @@ class TestTakesInTheSong(unittest.TestCase):
             self.assertEqual(H.rec_command({"cmd": "asio", "on": False}), {})
         finally:
             gui.REC_SETTINGS = saved
+
+
+class TestSoundDeviceErrors(unittest.TestCase):
+    def test_every_portaudio_call_on_one_thread(self):
+        # found on a real Scarlett: Focusrite USB ASIO failed to load when OPEN came on another thread than the import
+        import sys
+        import threading
+        from types import SimpleNamespace
+        calls = []
+        seen = lambda what: calls.append((what, threading.get_ident()))  # noqa: E731
+
+        class Stream:
+            def __init__(self, **k):
+                seen("InputStream")
+            start, stop, close = (lambda self: seen("start")), (lambda self: seen("stop")), (lambda self: seen("close"))
+        fake = SimpleNamespace(InputStream=Stream, WasapiSettings=dict,
+                               query_hostapis=lambda i=None: seen("apis") or ({"name": "ASIO"} if i is not None else [{"name": "ASIO"}]),
+                               query_devices=lambda d=None: seen("devices") or (
+                                   {"name": "Focusrite USB ASIO", "hostapi": 0, "default_samplerate": 48000.0} if d is not None else
+                                   [{"index": 0, "name": "Focusrite USB ASIO", "hostapi": 0, "max_input_channels": 2,
+                                     "default_samplerate": 48000.0}]))
+        saved = sys.modules.get("sounddevice")
+        sys.modules["sounddevice"] = fake
+        try:
+            be = record.SoundDeviceBackend()
+            self.assertEqual(be.devices()[0]["name"], "Focusrite USB ASIO")
+            for _ in range(2):  # opened and closed from two request threads
+                t = threading.Thread(target=lambda: be.open(0, 2, 48000, None).close())
+                t.start()
+                t.join()
+        finally:
+            sys.modules.pop("sounddevice")
+            if saved is not None:
+                sys.modules["sounddevice"] = saved
+        self.assertEqual(len({tid for _, tid in calls}), 1)
+        self.assertNotEqual(calls[0][1], threading.get_ident())
+        self.assertEqual([w for w, _ in calls].count("start"), 2)
+
+    def test_exclusive_at_another_rate_names_the_devices_rate(self):
+        # found on a real Scarlett: WASAPI exclusive at 44100 on a device set to 48000 failed with only "Invalid sample rate"
+        class SD:
+            WasapiSettings = staticmethod(lambda **k: k)
+            query_devices = staticmethod(lambda d: {"name": "Scarlett", "hostapi": 0, "default_samplerate": 48000.0})
+            query_hostapis = staticmethod(lambda i: {"name": "Windows WASAPI"})
+
+            @staticmethod
+            def InputStream(**k):
+                raise RuntimeError("Error opening InputStream: Invalid sample rate [PaErrorCode -9997]")
+        be = record.SoundDeviceBackend.__new__(record.SoundDeviceBackend)
+        be.sd = SD
+        with self.assertRaisesRegex(record.RecordError, r"Invalid sample rate.*set to \(48000 Hz"):
+            be._open(0, 2, 44100, None, exclusive=True)
+        with self.assertRaises(record.RecordError) as e:
+            be._open(0, 2, 44100, None, exclusive=False)
+        self.assertNotIn("EXCLUSIVE", str(e.exception))
 
 
 if __name__ == "__main__":

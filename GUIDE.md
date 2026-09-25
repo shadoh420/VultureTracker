@@ -224,7 +224,8 @@ pointer. The LOOP (blue, `L`) and SUSTAIN LOOP (amber, `S`) lines are dragged to
 the WAV, as in the song file), set from the selection (SELECTION → LOOP), or switched between off, forward, ping-pong and
 the WAV's own loop (`from_wav`); each change is written into the sample's entry in place (a one-line entry keeps its
 layout when only plain values change) and is one step for Ctrl+Z (here too). ▶ HOLD plays the slot through the live
-engine, with the instrument that plays it (at the note that plays it at C-5) and the song as written, so a loop just
+engine, with the instrument that plays it (at the note that plays the WAV at its own speed: its base_note, or the
+note its c5_speed puts there, C-5 when neither is set) and the song as written, so a loop just
 moved is heard once the engine has swapped the song in (the bar says so while it does); letting go is the note-off, so a
 sustain loop ends. The piano keys play it too. EDIT → NEW WAV: TRIM TO SELECTION, FADE IN, FADE OUT, NORMALIZE (peak to
 full scale), REVERSE and REMOVE DC work on the selection, or on the whole sample when there is none; CROSSFADE LOOP fades
@@ -264,7 +265,7 @@ seconds from before the click. Each take is written as a 16-bit WAV in `takes/` 
 numbered), its silent edges trimmed (TRIM SILENCE UNDER, keeping 10 ms before the first sound) and its note found (FIND
 THE NOTE: written as the WAV's root note), then goes where THEN says: a CANDIDATE OF THE SLOT in the Tryout (heard in
 the song, rated, written with U like any candidate), a NEW SAMPLE SLOT (tuned to the cent: its c5 speed makes the note
-found play true), or KEEP IN THE LIST. TAKES THIS SESSION lists them (▶ plays one; → CANDIDATE and → NEW SLOT send it on
+found play true; in a song with instruments, a new instrument plays it), or KEEP IN THE LIST. TAKES THIS SESSION lists them (▶ plays one; → CANDIDATE and → NEW SLOT send it on
 later). In the Samples tab, AUTO LOOP proposes loop points for a sustained sound (a whole number of its periods late in
 its steady part, on rising zero crossings where the waveform matches best); CROSSFADE LOOP then smooths the wrap.
 Recording needs `pip install sounddevice` in a source checkout (the exe carries it); `VT_FAKE_AUDIO=1` swaps in a

@@ -150,6 +150,55 @@ class TestPage(unittest.TestCase):
                         break
                     time.sleep(0.05)
 
+    def test_record_tab_controls_hold_between_polls(self):
+        # found on a real Scarlett: the tab polls ten times a second, and each poll rebuilt the takes table (a click on ▶
+        # was lost between press and release) and put the open rate back into RATE (48000 could not be picked)
+        if sync_playwright is None:
+            self.skipTest("playwright not installed")
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+            os.environ["VT_FAKE_AUDIO"] = "1"
+            st = gui.Handler.state = gui.State(d / "song.yaml")
+            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as p:
+                    exe = os.environ.get("VT_CHROMIUM")
+                    try:
+                        browser = p.chromium.launch(**({"executable_path": exe} if exe else {}))
+                    except PlaywrightError as e:
+                        self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
+                    page = browser.new_page()
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
+                    page.evaluate("tab('rec')")
+                    page.wait_for_function("REC.st && REC.st.devices && REC.st.devices.length")
+                    page.click("#rec-open")
+                    page.wait_for_function("REC.st.status.open && REC.st.status.rate === 44100")
+                    t = np.arange(RATE) / RATE
+                    st.save_take((0.5 * np.sin(2 * np.pi * 196 * t))[None], RATE, {"name": "pluck", "dest": "keep"})
+                    page.wait_for_function("document.querySelector('#rec-takes .btn')")
+                    play = page.query_selector("#rec-takes .btn")
+                    time.sleep(0.5)  # five polls
+                    self.assertTrue(play.evaluate("e => e.isConnected"))
+                    page.select_option("#rec-rate", "48000")  # reopens at the new rate
+                    page.wait_for_function("REC.st.status.open && REC.st.status.rate === 48000")
+                    time.sleep(0.3)
+                    self.assertEqual(page.input_value("#rec-rate"), "48000")
+                    browser.close()
+            finally:
+                srv.shutdown()
+                srv.server_close()
+                if gui.Handler.recorder:
+                    gui.Handler.recorder.close()
+                gui.Handler.state = gui.Handler.recorder = gui.Handler.rec_devices = None
+                os.environ.pop("VT_FAKE_AUDIO", None)
+                st.close()
+
 
 if __name__ == "__main__":
     unittest.main()

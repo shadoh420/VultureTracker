@@ -2622,7 +2622,8 @@ class State:
 
     def send_take(self, name, dest):
         """Take `name` (of State.takes) sent on: `candidate` of the current slot, a new `slot` tuned to the cent (its
-        c5_speed makes the detected note play true), or `keep` (nothing). Returns the take's entry."""
+        c5_speed makes the detected note play true; a song with instruments gets one that plays it), or `keep`
+        (nothing). Returns the take's entry."""
         take = next((x for x in self.takes if x["file"] == name), None)
         if take is None:
             raise ValueError(f"no take {name} in this session")
@@ -2641,7 +2642,11 @@ class State:
             if take["hz"] and take["note"]:  # the detected note plays true: its speed scaled by the cents it was off
                 note = parse_note(take["note"])
                 keep["c5_speed"] = round(take["rate"] * 2 ** ((60 - note) / 12) * 440 * 2 ** ((note - 69) / 12) / take["hz"])
-            self.song_edit([{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "keep": keep}])
+            ops = [{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "keep": keep}]
+            if self.song.get("instruments"):  # cells play instruments: one that plays the slot, else it cannot be heard
+                take["instrument"] = max(int(i) for i in self.song["instruments"]) + 1
+                ops.append({"op": "instrument_new", "num": take["instrument"], "entry": {"name": out.stem[:25], "sample": num}})
+            self.song_edit(ops)
             take["slot"] = num
         elif dest != "keep":
             raise ValueError("a take goes to the slot's candidates, a new slot, or stays in the list")
@@ -2680,16 +2685,22 @@ class State:
     def sample_view(self, num, a=0, b=None, n=1000):
         """The editor's view of slot `num`: the WAV (frames, rate, channels, bits), its loops in the WAV's frames, the
         peaks of frames a..b in `n` columns, and what previews it in the live engine: [instrument index as libopenmpt
-        counts (0-based; the sample in a song without instruments), note], preferring the note that plays it at C-5."""
+        counts (0-based; the sample in a song without instruments), note], preferring the note that plays the WAV at its own
+        speed (its base_note, or the note its c5_speed puts there: a recorded take is heard as it was played)."""
         with self.lock:
             entry, path, w, x = self._sample_wav(num)
             frames = x.shape[1]
             a = max(0, min(frames - 1, int(a)))
             b = frames if b is None else max(a + 1, min(frames, int(b)))
             mn, mx = wave_peaks(x, a, b, max(16, min(4000, int(n))))
-            player = [int(num) - 1, 60]
+            if entry.get("c5_speed"):
+                root = round(60 - 12 * math.log2(int(entry["c5_speed"]) / w.rate))
+            else:
+                from .notation import parse_note
+                root = parse_note(str(entry.get("base_note") or "C-5"))
+            player = [int(num) - 1, root]
             if self.mod and self.mod.instruments is not None:
-                hits = [(played != 60, i, note) for i, ins in enumerate(self.mod.instruments)
+                hits = [(played != root, i, note) for i, ins in enumerate(self.mod.instruments)
                         for note, (played, smp) in enumerate(ins.keymap) if smp == int(num)]
                 player = [min(hits)[1], min(hits)[2]] if hits else None
             loops = entry_loops(entry, w)

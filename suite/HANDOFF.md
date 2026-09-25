@@ -542,8 +542,34 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   the song, trimmed, their note found, sent to the slot's candidates or a new slot tuned to the cent), AUTO LOOP in the
   Samples tab, an ASIO choice saved in %APPDATA%/VultureTracker/record.json (read before sounddevice loads), the exe
   build collecting sounddevice and its PortAudio DLLs. `VT_FAKE_AUDIO=1` runs the tab on the simulated interface.
-  Left for the owner's machine: the real Scarlett (WASAPI shared and exclusive, ASIO), levels, latency, the exe; 2c
-  (recording along with the song: count-in, latency calibration, loop takes) is not built.
+  2c (recording along with the song: count-in, latency calibration, loop takes) is not built.
+  Tested on the owner's machine 2026-09-25 with a **Scarlett Solo 3rd Gen** (USB 1235:8211; mic XLR = input 1, the
+  instrument jack = input 2; Focusrite driver 4.143 installed that day; its devices are named "Analogue 1 + 2
+  (Focusrite USB Audio)", MME cuts it to 31 characters, and "Focusrite USB ASIO"), a guitar on input 2, no mic:
+  1. Listed under MME, DirectSound, WASAPI, WDM-KS; WASAPI shared input 2 at 44100 and 48000: meters follow, input 1
+     sits at -95 dBFS, CLIP lights with the gain up. 2. Tuner: all six open strings in the right octave, steady within
+     about 3 cents (the guitar 20-42 cents sharp); once an octave-up D-5 for a second on the D attack. No reference tuner
+     to compare with; a take's note (pitch_of) agreed with the tuner within 2-3 cents. 3. Candidate, new slot (A-3 at
+     110.0 Hz from c5_speed) and keep all work; a 45 s take: 45.10 s after REC against 45.13 s of wall clock (50 ms
+     polling), 0 overflows; trims right. 4. Stereo: input 1 left, input 2 right; mono is the mean (-6 dB for one
+     input). 5. EXCLUSIVE opens at the device's rate (48000), refuses 44100 and 96000 ("Invalid sample rate
+     [PaErrorCode -9997]"). 6. ASIO listed and opens at 44100 and 48000 (it switches the device's rate); a take matched
+     WASAPI (level within 1 dB, pitch within 3 cents). 7. AUTO LOOP + CROSSFADE LOOP work; the owner: "a bit smoother
+     with the crossfade"; measured: the wrap step 10x -> 1.5x the normal sample step, but a fading guitar note loses
+     9-13 dB across the 1.75 s loop AUTO LOOP chose (a pulse per loop). 8. The exe (built that day) lists all four
+     drivers, records, plays takes, makes the tuned slot with its instrument.
+  Fixed (tests in test_record and test_page; test_page runs here with `pip install playwright` and
+  VT_CHROMIUM=Edge's msedge.exe): the takes table was rebuilt on every 100 ms poll, so ▶ / → CANDIDATE / → NEW SLOT
+  clicks were lost (now rebuilt only when the takes change); RATE (and INPUT) snapped back to the open values (a change
+  now reopens the input); a take sent to a new slot had no instrument, so nothing could play it in a song with
+  instruments (it now gets one, as SLICE does); ▶ HOLD played every slot at C-5, a take 15 semitones up (it now plays
+  the note that plays the WAV at its own speed: base_note, or what c5_speed puts there); ASIO failed to open ("Failed
+  to load ASIO driver": the driver opens only on the thread that loaded PortAudio, and each request has its own thread;
+  every PortAudio call now runs on one audio thread); EXCLUSIVE at another rate now names the device's rate. Not
+  changed: FIND THE NOTE on a strummed chord reads an octave low (E-2 for an E chord: the chord's common period);
+  the app plays no input back (monitoring is the interface's; the owner had no headphones for the Solo, and Windows'
+  "Listen to this device" works); 2 s per request to `localhost` from Python's urllib on this machine (IPv6 first):
+  scripts should use 127.0.0.1.
 
 ## Next steps, in order
 
