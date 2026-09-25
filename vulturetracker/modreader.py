@@ -7,7 +7,7 @@ libopenmpt and the imported song compiled to IT (tests/test_modimport.py)."""
 import math
 import struct
 
-from .itreader import _cstr, _sanitize
+from .itreader import ITReadError, _cstr, _sanitize
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
                     NOTE_CUT, NOTE_OFF, ORDER_SKIP)
 
@@ -375,6 +375,9 @@ def read_xm(data: bytes):
         plen, _pack, nrows, psize = struct.unpack_from("<IBHH", data, pos)
         pd = data[pos + plen: pos + plen + psize]
         pos += plen + psize
+        if nrows > 1024:  # no tracker plays it (FT2 stops at 256, libopenmpt at 1024): left empty, not allocated
+            warn("patterns with more than 1024 rows dropped (left empty)")
+            nrows, pd = 64, b""
         rows = [[Cell() for _ in range(len(mod.channels))] for _ in range(max(1, nrows))]
         i = 0
         for r in range(nrows):
@@ -673,7 +676,17 @@ def match_level(mod, data, seconds=30):
     return diff
 
 def read_module(data: bytes):
-    """IT, XM, S3M or MOD by the file's own signature -> (Module, warnings)."""
+    """IT, XM, S3M or MOD by the file's own signature -> (Module, warnings). A truncated or garbled file is a ModReadError
+    (or the IT reader's ITReadError): no struct.error, IndexError or ValueError from inside a reader reaches the caller."""
+    try:
+        return _read_module(data)
+    except (ITReadError, ModReadError):
+        raise
+    except (struct.error, IndexError, ValueError) as e:
+        raise ModReadError(f"the file is truncated or malformed ({type(e).__name__}: {e})")
+
+
+def _read_module(data: bytes):
     from .itreader import read_it
     if data[:4] == b"IMPM":
         return read_it(data)

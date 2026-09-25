@@ -225,6 +225,10 @@ def read_it(data: bytes):
             mod.patterns.append(None)
             continue
         plen, rows = struct.unpack_from("<HH", data, p)
+        if not 1 <= rows <= 1024:  # libopenmpt drops such a pattern too; and 65535 rows would be a 500 MB grid
+            warnings.append(f"pattern {len(mod.patterns)}: {rows} rows is not a valid IT pattern; left empty")
+            mod.patterns.append(None)
+            continue
         pd = data[p + 8: p + 8 + plen]
         grid = [[Cell() for _ in range(64)] for _ in range(rows)]
         masks = [0] * 64

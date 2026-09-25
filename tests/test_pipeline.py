@@ -308,6 +308,23 @@ class TestValidation(Base):
                          "bad.yaml:10: error: orders: unknown pattern 'nothere'"]:
             self.assertIn(expected, text)
 
+    def test_writer_limits_and_yaml_loops_are_errors_not_tracebacks(self):
+        # IT holds at most 65535 bytes of cell data per pattern and of message: the writer says so (a ValueError the CLI
+        # and the app report), and YAML that nests without end is a SongError
+        row = " | ".join(["C-5 01 v64 A06"] * 64)
+        text = ("module: {channels: 64}\nsamples: {1: {file: low.wav}}\npatterns:\n  p:\n    rows: 200\n    data: |\n"
+                + "".join(f"      {r:03d}: {row}\n" for r in range(150)) + "orders: [p]\n")
+        with self.assertRaisesRegex(ValueError, "65535"):
+            api.compile_song(text, self.dir)
+        text = "module: {channels: 1, message: '" + "x" * 70000 + "'}\nsamples: {1: {file: low.wav}}\npatterns: {p: {rows: 4, data: 'C-5 01'}}\norders: [p]\n"
+        with self.assertRaisesRegex(ValueError, "65535"):
+            api.compile_song(text, self.dir)
+        for text in ("module: &m {channels: 1, message: *m}\nsamples: {1: {file: low.wav}}\npatterns: {p: 'C-5 01'}\norders: [p]\n",
+                     "module: {channels: 1}\nsamples: {1: {file: low.wav}}\npatterns: {p: 'C-5 01'}\norders: [p]\nx: " + "[" * 5000 + "]" * 5000 + "\n"):
+            res = api.check(text, self.dir)
+            self.assertFalse(res["ok"])
+            self.assertIn("nests too deeply", res["errors"][0])
+
     def test_pitch_down_images_warn(self):
         write_wav(self.dir / "bright.wav", RATE, [sine(18000)])
 

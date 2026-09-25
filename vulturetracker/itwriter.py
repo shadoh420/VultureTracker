@@ -112,6 +112,9 @@ def _pattern(pat, num_channels) -> bytes:
             if mask:
                 packed += bytes(((ch + 1) | 0x80, mask)) + data
         packed.append(0)
+    if len(packed) > 65535:
+        raise ValueError(f"pattern '{pat.name}': {len(packed)} bytes of cell data; IT holds at most 65535 per pattern "
+                         "(fewer rows, channels or filled cells)")
     return struct.pack("<HH4x", len(packed), len(pat.rows)) + packed
 
 
@@ -125,6 +128,8 @@ def write_it(mod: Module) -> bytes:
     ins_blobs = [_instrument(i) for i in instruments]
     pat_blobs = [_pattern(p, len(mod.channels)) for p in mod.patterns]
     message = mod.message.replace("\r\n", "\n").replace("\n", "\r").encode("ascii", "replace") + b"\0" if mod.message else b""
+    if len(message) > 65535:
+        raise ValueError(f"the module message is {len(message)} bytes; IT stores at most 65535")
 
     # Lay out the file: header, pointer tables, message, instruments, sample headers, patterns, sample data.
     pos = HEADER_SIZE + len(orders) + 4 * (len(instruments) + len(mod.samples) + len(mod.patterns))
