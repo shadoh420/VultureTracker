@@ -48,6 +48,7 @@ function openmptEngine(M, memory, table) {
       return got;
     }
     seek(order, row) { return M._openmpt_module_set_position_order_row(this.mod, order, row || 0) }
+    seekSeconds(t) { return M._openmpt_module_set_position_seconds(this.mod, t) }
     position() {
       return {order: M._openmpt_module_get_current_order(this.mod), row: M._openmpt_module_get_current_row(this.mod),
               seconds: M._openmpt_module_get_position_seconds(this.mod)};

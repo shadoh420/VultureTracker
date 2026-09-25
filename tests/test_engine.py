@@ -52,6 +52,20 @@ class TestEngine(unittest.TestCase):
         self.assertGreater(len(r["plain"]), 4)
         self.assertEqual(r["swapped"], r["plain"])
 
+    def test_swap_keeps_the_voices_still_fading(self):
+        # a note re-struck under NNA fade leaves the old voice fading under the new one; a song swapped in just after
+        # (an edit) must keep that voice: a seek straight to the row dropped it (a pad dipped 12 dB for a second)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440, seconds=2.0)])
+            (d / "song.it").write_bytes(api.compile_song(api.from_yaml(FADE_SONG), d)[0])
+            (d / "fade.js").write_text(FADE_JS, encoding="utf-8")
+            out = subprocess.run([NODE, str(d / "fade.js"), str(ROOT / "vulturetracker" / "web"), str(d / "song.it")],
+                                 capture_output=True, text=True, timeout=60, check=True)
+        r = json.loads(out.stdout)
+        self.assertGreater(r["level"], 0.05)       # the song sounds after the swap
+        self.assertLess(r["diff"], 1e-4)           # and exactly as without one
+
     def test_wasm_engine_matches_the_dll(self):
         import numpy as np
         with tempfile.TemporaryDirectory() as tmp:
@@ -144,6 +158,51 @@ async function run(swapAt) {
   return rows;
 }
 (async () => { console.log(JSON.stringify({plain: await run(-1), swapped: await run(100)})) })();
+"""
+
+
+# one channel, a two-second tone struck on rows 0 and 4 with NNA fade: after row 4 the first note fades under the second
+FADE_SONG = """module: {title: F, tempo: 125, speed: 6, channels: [{name: A}]}
+samples:
+  1: {file: a.wav, name: A tone}
+instruments:
+  1: {name: Pad, sample: 1, nna: fade, fadeout: 8}
+patterns:
+  p1:
+    rows: 8
+    data: |
+      00: C-5 01 ... ...
+      01: ... .. ... ...
+      02: ... .. ... ...
+      03: ... .. ... ...
+      04: C-5 01 ... ...
+      05: ... .. ... ...
+      06: ... .. ... ...
+      07: ... .. ... ...
+orders: [p1]
+"""
+# plays FADE_SONG from the start twice, once with the same song swapped in on row 5; prints the largest difference
+# between the two from there on and the level there
+FADE_JS = SWAP_JS.split("async function run")[0] + r"""
+async function run(swap) {
+  const p = await make(), out = [];
+  p.command({type: 'load', bytes: it.slice().buffer});
+  p.command({type: 'play', order: 0, row: 0});
+  let at = -1;
+  for (let b = 0; b < 700; b++) {
+    if (at < 0 && p.song.position().row >= 5) { at = b; if (swap) p.command({type: 'load', bytes: it.slice().buffer, keep: true}) }
+    const L = new Float32Array(128), R = new Float32Array(128);
+    p.process([], [[L, R]]);
+    if (at >= 0 && b < at + 200) out.push(...L);
+  }
+  return out;
+}
+(async () => {
+  const a = await run(false), b = await run(true);
+  let diff = 0, level = 0;
+  for (let i = 0; i < a.length; i++) { diff = Math.max(diff, Math.abs(a[i] - b[i])); level = Math.max(level, Math.abs(a[i])) }
+  console.log(JSON.stringify({diff, level}));
+})();
 """
 
 

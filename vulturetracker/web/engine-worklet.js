@@ -35,6 +35,7 @@ if (typeof TextDecoder === 'undefined') {
     }
   };
 }
+const PRE = 4;   // seconds a swapped-in song plays silently before it takes over (see load)
 class VTEngine extends AudioWorkletProcessor {
   constructor(options) {
     super();
@@ -47,6 +48,8 @@ class VTEngine extends AudioWorkletProcessor {
     this.metro = null;
     this.click = null;
     this.lastRow = null;
+    this.pending = null;
+    this.factor = 1;
     this.port.onmessage = e => this.command(e.data);
     loadOpenmpt(loadGlue, options.processorOptions.wasm).then(E => {
       this.E = E;
@@ -57,25 +60,42 @@ class VTEngine extends AudioWorkletProcessor {
   command(m) {
     try {
       if (m.type === 'load') {
-        const bytes = new Uint8Array(m.bytes), old = this.song, at = m.keep && old ? old.position() : null;
-        // a seek lands on the start of the row: the part of the row already played is rendered again and dropped, so
-        // the swapped-in song goes on from the same frame instead of repeating it (up to a row: 91 ms at tempo 110 speed 4)
-        let skip = 0;
-        if (at) { old.seek(at.order, at.row); skip = Math.max(0, Math.round((at.seconds - old.position().seconds) * sampleRate)) }
+        const bytes = new Uint8Array(m.bytes), old = this.song, keep = m.keep && old;
         const song = new this.E.Song(bytes), preview = new this.E.Song(bytes);
         for (let c = 0; c < preview.channels; c++) preview.mute(c, true);
-        if (at) {
+        for (const c of m.muted || []) song.mute(c, true);
+        if (this.factor !== 1) song.tempoFactor(this.factor);
+        if (this.preview) this.preview.free();
+        this.preview = preview;
+        if (this.pending) this.pending.song.free();
+        this.pending = null;
+        if (keep && this.factor === 1) {
+          // the swapped-in song starts PRE seconds back and plays that part silently, a few quanta's worth per quantum,
+          // while the old one goes on; it takes over on the frame the old one has reached. A seek straight to the row
+          // would give each channel its current note but drop the voices still fading from earlier notes (a pad's
+          // tail under its next note's attack: the pad dipped by 12 dB for a second after an edit). A tail longer than PRE
+          // is still cut. Only at speed 100 %: with a tempo factor libopenmpt's seconds run at real time, its seek by
+          // seconds does not
+          const t = old.position().seconds;
+          song.seekSeconds(Math.max(0, t - PRE));
+          this.pending = {song, need: Math.max(0, Math.round((t - song.position().seconds) * sampleRate))};
+          if (!this.playing) this.catchUp(Infinity);
+        } else if (keep) {
+          // a seek lands on the start of the row: the part of the row already played is rendered again and dropped, so
+          // the swapped-in song goes on from the same frame instead of repeating it (up to a row: 91 ms at tempo 110 speed 4)
+          const at = old.position();
+          old.seek(at.order, at.row);
+          let skip = Math.max(0, Math.round((at.seconds - old.position().seconds) * sampleRate));
           song.seek(at.order, at.row);
           const L = new Float32Array(4096), R = new Float32Array(4096);
           while (skip > 0) { const got = song.read(sampleRate, Math.min(4096, skip), L, R); if (!got) break; skip -= got }
-        } else if (m.order != null) song.seek(m.order, m.row);
-        for (const c of m.muted || []) song.mute(c, true);
-        this.song = song;
-        if (old) old.free();
-        if (this.preview) this.preview.free();
-        this.preview = preview;
-        this.port.postMessage({type: 'loaded', channels: song.channels, at: song.position()});
+          this.take(song);
+        } else {
+          if (m.order != null) song.seek(m.order, m.row);
+          this.take(song);
+        }
       } else if (m.type === 'play') {
+        if (this.pending) { const s = this.pending.song; this.pending = null; this.take(s) }
         if (m.order != null) this.song.seek(m.order, m.row);
         this.playing = true;
         this.lastRow = null;
@@ -85,10 +105,13 @@ class VTEngine extends AudioWorkletProcessor {
         this.playing = false;
       } else if (m.type === 'mute') {
         this.song.mute(m.ch, m.on);
+        if (this.pending) this.pending.song.mute(m.ch, m.on);
       } else if (m.type === 'loop') {
         this.loop = m.span;
       } else if (m.type === 'tempo') {
+        this.factor = m.factor;
         this.song.tempoFactor(m.factor);
+        if (this.pending) this.pending.song.tempoFactor(m.factor);
       } else if (m.type === 'note') {
         const on = this.playing ? 'song' : 'preview', ch = this[on].playNote(m.ins, m.note, m.vol == null ? 1 : m.vol, m.pan || 0);
         this.port.postMessage({type: 'note', id: m.id, ch, on});
@@ -101,11 +124,26 @@ class VTEngine extends AudioWorkletProcessor {
     }
   }
 
+  // the pending song renders (silently) up to `max` frames towards the old song's position; there, it takes over
+  catchUp(max) {
+    const P = this.pending, L = new Float32Array(4096), R = new Float32Array(4096);
+    while (P.need > 0 && max > 0) { const got = P.song.read(sampleRate, Math.min(4096, P.need, max), L, R); if (!got) break; P.need -= got; max -= got }
+    if (P.need > 0 && max > 0) P.need = 0;  // the song ended first
+    if (P.need === 0) { this.pending = null; this.take(P.song) }
+  }
+
+  take(song) {
+    if (this.song) this.song.free();
+    this.song = song;
+    this.port.postMessage({type: 'loaded', channels: song.channels, at: song.position()});
+  }
+
   process(inputs, outputs) {
     const out = outputs[0], L = out[0], R = out[1] || out[0], n = L.length;
     L.fill(0);
     R.fill(0);
     if (!this.song) return true;
+    const before = this.pending && this.song.position().seconds;
     if (this.playing && !this.loop && !this.metro) this.song.read(sampleRate, n, L, R);
     else if (this.playing) {  // in steps of 32 frames: past the loop's end (or before its start) it jumps back, and a new
       // beat row starts a click, each within 0.7 ms
@@ -122,6 +160,18 @@ class VTEngine extends AudioWorkletProcessor {
           this.lastRow = at;
           if (p.row % this.metro.beat === 0) this.click = {n: 0, at: Math.min(n, i + 32), f: p.row % this.metro.bar === 0 ? 2000 : 1250};
         }
+      }
+    }
+    if (this.pending) {
+      const dt = this.song.position().seconds - before;
+      if (dt < 0 || dt > 2 * n / sampleRate) {   // the old song jumped (a loop): the new one seeks there instead
+        const p = this.song.position(), s = this.pending.song;
+        this.pending = null;
+        s.seek(p.order, p.row);
+        this.take(s);
+      } else {
+        if (this.playing) this.pending.need += n;
+        this.catchUp(32 * n);
       }
     }
     if (this.click) {  // 30 ms of a decaying sine
