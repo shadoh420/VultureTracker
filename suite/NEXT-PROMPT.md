@@ -27,7 +27,7 @@ The prompt below carries these rules.
 ---
 
 This is a VultureTracker task (the tracker-music compiler at C:\Users\c\TrackerForge, origin
-github.com/shadoh420/VultureTracker; not ArenaPrototype). Read suite/HANDOFF.md first, then suite/NEXT-PROMPT.md.
+github.com/shadoh420/VultureTracker). Read suite/HANDOFF.md first, then suite/NEXT-PROMPT.md.
 Read GUIDE.md and SONG_FORMAT.md only when you need them.
 
 Goal: an original track that could sit on the Unreal Tournament (1999) soundtrack next to <TRACK>, built the way

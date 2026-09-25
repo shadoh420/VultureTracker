@@ -61,14 +61,13 @@ python -m vulturetracker synth recipe.yaml                 # render samples from
 python -m vulturetracker --help                            # every command
 ```
 
-Tests: `python -m unittest discover tests` (the live-engine checks need node).
+Tests: `python -m unittest discover tests` (the live-engine checks need node; the page checks need Playwright's Chromium).
 
 ## Docs
 
 - [GUIDE.md](GUIDE.md): the app tab by tab, the demos and the suite, samples, tests, notes
 - [SONG_FORMAT.md](SONG_FORMAT.md): the complete song format
 - [SAMPLING.md](SAMPLING.md): making samples with Surge XT, Dexed, OB-Xd and CC0 recordings
-- [docs/TRACKER-GAPS.md](docs/TRACKER-GAPS.md): the app measured against OpenMPT, feature by feature, and what is built
 - [PROVENANCE.md](PROVENANCE.md): what the demos derive from reference material
 - [AGENTS.md](AGENTS.md): orientation for people and AI agents working on the repository
 
