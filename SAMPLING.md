@@ -103,6 +103,7 @@ samples:
 | `patch` | | Surge XT: `Category/Name` (factory), `3rdparty/Author/Category/Name`, or a path to an `.fxp`. Dexed: `dexed:Cartridge/Voice` (voices of each `.syx` cartridge in Dexed's cartridge folder or `tools/synths/cartridges/`). OB-Xd: `obxd:Bank/Program` (programs of each `.fxb` bank). Use `audition` with a glob to list and hear them. |
 | `file` | | instead of `patch`: an audio file (WAV, FLAC, AIFF, OGG, MP3; relative to the recipe), or a list of files mixed together (e.g. close and overhead mics of one drum hit). Resampled to `sample_rate`. |
 | `resynth` | | instead of `patch` or `file`: a target WAV rebuilt from blocks of other WAVs (see below) |
+| `faust` | | instead of `patch`: Faust code, or a `.dsp` file beside the recipe, rendered one note at a time (see below) |
 | `start`, `length` | 0, all | `file` and `resynth` (its target): seconds to skip, and seconds to keep (effects tails still ring past `length`) |
 | `note` | | `patch`: the key to play, in tracker names (`C-5` = MIDI 60 = middle C). `file`: the pitch recorded in the file (default `C-5`) |
 | `notes` | | a list of keys, rendering one file per key (for multisampled instruments) |
@@ -129,8 +130,34 @@ Unpitched sounds (drums, noise) aren't checked, and neither are `file` samples w
 (taken as drums). For recorded files this checks the `note:` you
 gave, and it is how file names were confirmed to be scientific pitch: VSCO's `E3` is tracker `E-4`.
 
-Every sample needs exactly one of `patch`, `file` or `resynth`. `file` and `resynth` samples take `note` (never
+Every sample needs exactly one of `patch`, `file`, `resynth` or `faust`. `file` and `resynth` samples take `note` (never
 `notes`, `chord` or `phrase`); `hold`, `velocity` and `params` only apply to patches.
+
+## Faust code (`faust:`)
+
+```yaml
+  pluck:
+    faust: |
+      import("stdfaust.lib");
+      freq = hslider("freq", 440, 20, 4000, 0.01);
+      gate = button("gate");
+      bright = hslider("bright", 0.5, 0, 1, 0.01);
+      process = os.sawtooth(freq) * en.adsr(0.002, 0.3, 0.2, 0.2, gate) : fi.lowpass(2, 300 + bright * 6000);
+    notes: [C-4, C-5]        # or note:, or faust: pluck.dsp for a file beside the recipe
+    hold: 0.6
+    tail: 0.4
+    params: {bright: 0.3}    # the other controls, by label
+```
+
+[Faust](https://faust.grame.fr) (GRAME's language for signal processing, with its libraries of oscillators, filters,
+physical models and effects) is compiled and rendered offline by the Faust compiler built as WebAssembly (faustwasm,
+LGPL-3.0, fetched from npm into `tools/faustwasm` by the app's FAUST tab or RECIPE box, or `python -c "from
+vulturetracker import faust; faust.fetch()"`; about 6 MB kept). A control labelled `freq` gets the note's pitch (the
+note is also the WAV's root), `gain` the velocity / 127, a `gate` button is held for `hold` seconds and released for
+`tail`; `params` sets any other control by its label (an unknown label is an error). One note per sample (`note` or
+`notes`, not `chord` or `phrase`); the rest of the chain (`fx`, `trim`, `loop`, `normalize`) follows as for any sample.
+Rendering in a recipe runs under [node](https://nodejs.org) (`web/faust-render.mjs`); the app's FAUST tab renders the
+same code in the page without it.
 
 ## Resynthesis from a corpus (`resynth:`)
 

@@ -17,6 +17,9 @@ fi
 python3 -m pip install -q --disable-pip-version-check --ignore-installed pyyaml
 python3 -m pip install -q --disable-pip-version-check numpy imageio-ffmpeg Pillow playwright pyguitarpro
 
+# the Faust compiler (faustwasm, LGPL-3.0) for the Faust tests: fetched from npm into the ignored tools/faustwasm
+(cd "$(dirname "$0")/../.." && python3 -c "from vulturetracker import faust; faust.have() or faust.fetch()") || true
+
 if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -x /opt/pw-browsers/chromium ]; then
   echo 'export VT_CHROMIUM=/opt/pw-browsers/chromium' >> "$CLAUDE_ENV_FILE"
 fi

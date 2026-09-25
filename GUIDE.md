@@ -323,6 +323,16 @@ dark turns that frequency down at that moment (the columns spread over the whole
 slot through it and FILTER SLOT writes it as a new WAV (`<name>-spectral_mask.wav`) and points the slot at it (one undo
 step). The picture and its settings are kept in the browser per song.
 
+**The Faust tab** takes [Faust](https://faust.grame.fr) code (EXAMPLE puts back a two-saw voice with a resonant
+filter) and compiles it in the page (COMPILE, or Ctrl+Enter; the compiler's message appears under the code). NOTE sets a
+control labelled `freq` and is the WAV's root, HOLD holds a `gate` button down, TAIL goes on after its release, VELOCITY
+sets a `gain` control (vel / 127); every other slider of the code appears under CONTROLS. ▶ PREVIEW renders the note and
+plays it; → NEW SLOT writes `faust-<name>.wav` beside the song as a new slot (its base note the NOTE; with an
+instrument in a song with instruments; one undo step), → CANDIDATE adds it to the tryout slot's candidates. A render
+over full scale is scaled under it (the message says so). The compiler (faustwasm, LGPL-3.0, about 6 MB) is fetched
+from npm on first use with GET FAUST, into `tools/faustwasm` (the exe: `%LOCALAPPDATA%/VultureTracker/tools/faustwasm`).
+A sample recipe renders the same code with `faust:` (SAMPLING.md; needs node).
+
 **Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
 tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets
 the note die away), RELEASE (the instrument's `fadeout`: how fast a replaced or released note fades), a resonant

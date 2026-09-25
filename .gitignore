@@ -31,3 +31,4 @@ build/
 suite/*/*.it
 suite/*/*.wav
 suite/*/*.mp3
+tools/faustwasm/

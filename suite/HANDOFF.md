@@ -691,6 +691,21 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   channels, 4 orders, 8.91 s, no page errors. Not built: the read-only tab view (alphaTab) and fretboard entry; GPX
   (Guitar Pro 6+) is not read by PyGuitarPro; the header's BPM readout assumes 4 rows a beat (the song format has no
   row-highlight key).
+  Then chunk 7c, Faust rather than SuperCollider (scsynth needs SC installed, a Windows installer of about 100 MB;
+  Faust's compiler exists as WebAssembly, which the page can run, so the exe needs no install): `vulturetracker/faust.py`
+  fetches faustwasm 0.18.5 (LGPL-3.0) from npm and keeps 7 files (6.2 MB: the ESM build, libfaust-wasm .js / .wasm /
+  .data with the Faust libraries) in the ignored `tools/faustwasm` (the exe: %LOCALAPPDATA%); `web/faust-render.mjs`
+  compiles and renders one note (freq from the note, gain from the velocity, a gate held for hold s and released for
+  tail s, other controls by label) in node or in the page. Recipe source `faust:` (code or a .dsp file; note or notes)
+  runs it under node; a missing faustwasm raises SynthMissing("faust"), so the RECIPE box offers the download; a
+  missing node is a plain error. FAUST tab: code box with an example, COMPILE (errors shown), sliders for the other
+  controls, NOTE / HOLD / TAIL / VELOCITY, PREVIEW, → NEW SLOT (base note = NOTE, via POST upload + `place`), →
+  CANDIDATE; `State.place_wav` now serves PAINT and FAUST. Measured: compile + render of a note under node 0.2 s,
+  in Chromium 0.37 s; an A-5 sine renders at 440.02 Hz; the page's render and node's of the same code differ by at most
+  1 LSB (3.1e-5); after a compile error the compiler goes on working (emscripten logs "Aborted(... exception catching
+  is not enabled)" to the console; the page ignores it). Tests: test_faust (extraction from a fake package; renders,
+  controls, errors, the recipe source with notes and a .dsp file: pitches within 3 cents), test_page's FAUST tab test;
+  the cloud hook fetches faustwasm. Not built: polyphony, MIDI, a live (real-time) Faust node; SuperCollider.
 
 ## Next steps, in order
 

@@ -1313,7 +1313,7 @@ class State:
 
     def request_fetch_synth(self, kind):
         from .synth import FETCH
-        if kind not in FETCH:
+        if kind not in FETCH and kind != "faust":
             raise ValueError(f"no download for '{kind}'")
         with self.lock:
             self.recipe_job = {"status": "fetching", "error": None, "log": [], "file": None, "need": kind, "got": 0, "size": 0}
@@ -1322,8 +1322,10 @@ class State:
     def _fetch_synth(self, kind):
         """Download a synth the recipe panel's last render missed, then render that entry again."""
         from .synth import fetch_synth
+        if kind == "faust":
+            from .faust import fetch as fetch_synth  # noqa: F811 - faustwasm, from npm
         try:
-            fetch_synth(kind, lambda got, size: self.recipe_job.update(got=got, size=size))
+            fetch_synth(*([] if kind == "faust" else [kind]), lambda got, size: self.recipe_job.update(got=got, size=size))
         except (OSError, ValueError) as e:  # urllib's errors are OSErrors; a bad zip is a ValueError
             return self._recipe_failed(f"the download failed: {type(e).__name__}: {e}", need=kind)
         retry, self._recipe_retry = self._recipe_retry, None
@@ -2857,27 +2859,37 @@ class State:
                    if not p.exists() and not p.with_suffix(".png").exists())
         write_wav(out, RATE, np.clip(np.round(y * 32768), -32768, 32767).astype(np.int32).tolist())
         out.with_suffix(".png").write_bytes(png_rgb(spectral.picture_png(pic["amp"], pic["pan"])))
-        if act == "candidate":
+        try:
+            words = self.place_wav(out, act, stereo)
+        except Exception:
+            out.unlink(missing_ok=True)
+            out.with_suffix(".png").unlink(missing_ok=True)
+            raise
+        return {"report": f"{out.name} ({pic['seconds']:.2f} s{', stereo' if stereo else ''}) {words}", "file": str(out)}
+
+    def place_wav(self, out, dest, stereo=False):
+        """A WAV the app wrote beside the song, sent on: `candidate` (added to the tryout slot's candidates) or `slot` (a
+        new slot, with an instrument in a song with instruments: one undo step; its root note, from the WAV's smpl chunk,
+        as the base note). Returns the report's words."""
+        out = Path(out)
+        if dest == "candidate":
             with self.lock:
                 if str(out) not in self.cands():
                     self.cands().append(str(out))
                 self.save_meta()
             self.queue_all()
-            return {"report": f"{out.name} ({pic['seconds']:.2f} s{', stereo' if stereo else ''}) added to slot "
-                              f"{self.slot:02d}'s candidates", "file": str(out)}
+            return f"added to slot {self.slot:02d}'s candidates"
+        if dest != "slot":
+            raise ValueError("a new WAV goes to the slot's candidates or a new slot")
         num = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
-        ops = [{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "stereo": stereo}]
+        root = read_wav(out).root
+        keep = {"base_note": format_note(root)} if root is not None and 0 <= root < 120 and root != 60 else {}
+        ops = [{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "stereo": stereo, "keep": keep}]
         if self.song.get("instruments"):
             ops.append({"op": "instrument_new", "num": max(int(i) for i in self.song["instruments"]) + 1,
                         "entry": {"name": out.stem[:25], "sample": num}})
-        try:
-            self.song_edit(ops)
-        except Exception:
-            out.unlink(missing_ok=True)
-            out.with_suffix(".png").unlink(missing_ok=True)
-            raise
-        return {"report": f"{out.name} ({pic['seconds']:.2f} s{', stereo' if stereo else ''}) in new slot {num:02d}"
-                          + (f", played by instrument {ops[1]['num']:02d}" if len(ops) > 1 else ""), "file": str(out)}
+        self.song_edit(ops)
+        return f"in new slot {num:02d}" + (f", played by instrument {ops[1]['num']:02d}" if len(ops) > 1 else "")
 
     def current_file_of(self, num):
         f = ((self.song.get("samples") or {}).get(int(num)) or {}).get("file")
@@ -3103,6 +3115,23 @@ class Handler(BaseHTTPRequestHandler):
     recorder = None      # record.Recorder, made on the RECORD tab's first request
     rec_devices = None   # the input devices, listed once (again on REFRESH)
     library = None       # library.Library, read on the first FIND SIMILAR or MAP request
+    faust_job = None     # the faustwasm download: {"status", "got", "size", "error"}
+
+    @classmethod
+    def fetch_faust(cls):
+        from . import faust
+        if cls.faust_job and cls.faust_job["status"] == "fetching":
+            return cls.faust_job
+        job = cls.faust_job = {"status": "fetching", "got": 0, "size": 0, "error": None}
+
+        def run():
+            try:
+                faust.fetch(lambda got, size: job.update(got=got, size=size))
+                job["status"] = "done"
+            except (OSError, ValueError) as e:
+                job.update(status="failed", error=f"{type(e).__name__}: {e}")
+        threading.Thread(target=run, daemon=True).start()
+        return job
 
     @classmethod
     def rec(cls):
@@ -3309,6 +3338,20 @@ class Handler(BaseHTTPRequestHandler):
             if not lib.has(q.get("path", "")):
                 return self._send(404, {"error": "not in the library"})
             return self._send(200, {"near": lib.nearest(q["path"], max(1, min(50, int(q.get("k") or 8))))})
+        if path == "/api/faust":
+            from . import faust
+            return self._send(200, {"have": faust.have(), "dir": str(faust.faust_dir()), "version": faust.VERSION,
+                                    "job": Handler.faust_job})
+        if path == "/web/faust-render.mjs":
+            return self._send(200, WEB.joinpath("faust-render.mjs").read_bytes(), "text/javascript; charset=utf-8")
+        if path.startswith("/faust/"):  # the fetched faustwasm files, nothing else
+            from . import faust
+            base = faust.faust_dir().resolve()
+            f = (base / path[7:]).resolve()
+            if not f.is_relative_to(base) or not f.is_file():
+                return self._send(404, {"error": "not found"})
+            kind = {".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm"}.get(f.suffix, "application/octet-stream")
+            return self._send(200, f.read_bytes(), kind)
         if path == "/libwav":
             from urllib.parse import parse_qs
             f = parse_qs(self.path.partition("?")[2]).get("path", [""])[0]
@@ -3420,6 +3463,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": self.browse(wav=True)})
             elif act == "rec":
                 return self._send(200, self.rec_command(body))
+            elif act == "fetchfaust":  # faustwasm from npm, on a thread; GET /api/faust reports it
+                return self._send(200, self.fetch_faust())
             elif act == "library":  # roots: the folders to index (saved); then a scan, waited for a moment
                 lib = self.lib()
                 if body.get("roots") is not None:
@@ -3475,6 +3520,11 @@ class Handler(BaseHTTPRequestHandler):
                 if isinstance(res, bytes):
                     return self._send(200, res, "audio/wav")
                 return self._send(200, res)
+            elif act == "place":  # a WAV the page uploaded (the FAUST tab's render): to the candidates or a new slot
+                f = Path(str(body["path"])).resolve()
+                if f.parent != st.base_dir or f.suffix.lower() != ".wav":
+                    raise ValueError("only a WAV beside the song")
+                return self._send(200, {"report": f"{f.name} " + st.place_wav(f, body.get("dest"), bool(body.get("stereo")))})
             elif act == "want":
                 st.set_want(st.cands()[int(body["id"])] if body.get("id") is not None else None)
             elif act == "note":

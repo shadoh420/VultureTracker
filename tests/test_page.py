@@ -214,6 +214,60 @@ class TestPage(unittest.TestCase):
                         break
                     time.sleep(0.05)
 
+    def test_faust_tab_renders_in_the_page(self):
+        # the FAUST tab compiles the example in the page (faustwasm), shows its sliders, renders a note, uploads it as a
+        # new slot with the note as its base note; a compile error is shown and the next compile works
+        from vulturetracker import faust
+        if sync_playwright is None or not faust.have():
+            self.skipTest("needs playwright and faustwasm")
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)])
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.yaml").write_bytes(SONG_INS.encode())
+            st = gui.Handler.state = gui.State(d / "song.yaml")
+            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            errors = []
+            try:
+                with sync_playwright() as p:
+                    exe = os.environ.get("VT_CHROMIUM")
+                    try:
+                        browser = p.chromium.launch(**({"executable_path": exe} if exe else {}))
+                    except PlaywrightError as e:
+                        self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
+                    page = browser.new_page(viewport={"width": 1400, "height": 900})
+                    page.on("pageerror", lambda e: errors.append(str(e)))
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
+                    page.evaluate("localStorage.removeItem('faustcode'); tab('faust')")
+                    page.wait_for_function("$('fa-code').value.length > 0")
+                    page.click("#t-faust span.btn:text-is('COMPILE')")
+                    page.wait_for_function("FA.ctrls.length === 5", timeout=30000)
+                    self.assertEqual(page.locator("#fa-ctrls input").count(), 2)  # cutoff and detune; freq, gate, gain set by the note
+                    page.fill("#fa-note", "A-4")
+                    page.fill("#fa-name", "saw")
+                    page.click("#t-faust span.btn:text-is('→ NEW SLOT')")
+                    page.wait_for_function("$('fa-msg').textContent.includes('new slot')", timeout=30000)
+                    self.assertEqual(st.song["samples"][3], {"file": "faust-saw.wav", "name": "faust-saw", "stereo": True,
+                                                             "base_note": "A-4"})
+                    page.fill("#fa-code", "process = foo;")
+                    page.click("#t-faust span.btn:text-is('COMPILE')")
+                    page.wait_for_function("$('fa-err').textContent.includes('undefined symbol')")
+                    page.click("#t-faust span.btn:text-is('EXAMPLE')")
+                    page.wait_for_function("$('fa-err').textContent === '' && FA.ctrls.length === 5")
+                    browser.close()
+                self.assertEqual(errors, [])
+            finally:
+                srv.shutdown()
+                srv.server_close()
+                gui.Handler.state = None
+                st.close()
+                for _ in range(400):
+                    if not any(r["status"] == "rendering" for r in st.renders.values()):
+                        break
+                    time.sleep(0.05)
+
     def test_record_tab_controls_hold_between_polls(self):
         # found on a real Scarlett: the tab polls ten times a second, and each poll rebuilt the takes table (a click on ▶
         # was lost between press and release) and put the open rate back into RATE (48000 could not be picked)

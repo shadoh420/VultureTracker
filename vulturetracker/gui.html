@@ -111,6 +111,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab" data-t="rec" onclick="tab('rec')">RECORD</div>
   <div class="tab" data-t="map" onclick="tab('map')">MAP</div>
   <div class="tab" data-t="paint" onclick="tab('paint')">PAINT</div>
+  <div class="tab" data-t="faust" onclick="tab('faust')">FAUST</div>
   <div class="tab" data-t="spectrum" onclick="tab('spectrum')">SPECTRUM</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
@@ -356,6 +357,32 @@ option.hascand{color:var(--acc);font-weight:700}
   </div>
 </div>
 
+<div class="main" id="t-faust">
+  <div class="panel col" style="flex:1;min-width:0">
+    <div class="ph" style="gap:8px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">FAUST</span><span class="btn sm" onclick="faCompile(true).catch(()=>{})" title="compile the code (Ctrl+Enter): its controls appear on the right">COMPILE</span><span class="btn sm" onclick="faExample()" title="put the example back (the code in the box is replaced)">EXAMPLE</span><span class="mono" id="fa-state" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><a href="https://faustdoc.grame.fr/manual/syntax/" target="_blank" style="font-size:10px;color:var(--blue)">FAUST SYNTAX</a><a href="https://faustlibraries.grame.fr/" target="_blank" style="font-size:10px;color:var(--blue)">LIBRARIES</a></div>
+    <textarea id="fa-code" spellcheck="false" style="flex:1;min-height:0;resize:none;font:12px/1.5 var(--mono);padding:10px 12px" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();faCompile(true).catch(()=>{})}" oninput="faSaveCode()"></textarea>
+    <div class="err" id="fa-err" style="flex:none;max-height:30%;overflow:auto;padding:0 12px"></div>
+  </div>
+  <div class="col" style="width:340px;flex:none;overflow-y:auto">
+    <div class="panel" style="flex:none" id="fa-get-panel"><div class="ph"><span class="k">THE FAUST COMPILER</span></div><div class="pb" id="fa-get"></div></div>
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">NOTE</span><span class="meta">what the render plays</span></div>
+      <div class="pb" style="display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center;font:10px var(--mono)">
+        <span class="k">NOTE</span><span><input id="fa-note" value="C-5" style="width:54px" title="sets a control labelled freq to its pitch, and is the WAV's root note"> <span id="fa-hz" style="color:var(--dim)"></span></span>
+        <span class="k">HOLD</span><span><input id="fa-hold" type="number" min="0.01" max="30" step="0.1" value="1" style="width:60px"> S <span style="color:var(--dim)">a control labelled gate is held down</span></span>
+        <span class="k">TAIL</span><span><input id="fa-tail" type="number" min="0" max="30" step="0.1" value="0.5" style="width:60px"> S <span style="color:var(--dim)">after its release</span></span>
+        <span class="k">VELOCITY</span><span><input id="fa-vel" type="number" min="1" max="127" value="100" style="width:60px"> <span style="color:var(--dim)">a control labelled gain gets vel / 127</span></span>
+      </div></div>
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">CONTROLS</span><span class="meta">the code's sliders, after COMPILE</span></div><div class="pb" id="fa-ctrls" style="font:10px var(--mono)"></div></div>
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">SOUND</span><span class="kbd" id="fa-slot"></span></div>
+      <div class="pb">
+        <div style="display:flex;gap:2px"><span class="btn" onclick="faPreview()" title="render the note in this page and play it">▶ PREVIEW</span><span class="btn" onclick="PTA.pause()">■</span><input id="fa-name" value="faust" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: faust-&lt;name&gt;.wav beside the song"></div>
+        <div style="display:flex;gap:2px;margin-top:4px"><span class="btn" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="faSave('slot')" title="write it beside the song as a new slot (base note = NOTE; with an instrument in a song with instruments); one undo step">→ NEW SLOT</span><span class="btn" style="flex:1;text-align:center" onclick="faSave('candidate')" title="write it beside the song and add it to the tryout slot's candidates">→ CANDIDATE</span></div>
+        <div class="mono" id="fa-msg" style="margin-top:10px;font-size:10px;color:var(--dim);white-space:pre-wrap"></div>
+        <div style="margin-top:10px;font-size:10px;color:var(--dim)">Compiled and rendered in this page (the Faust compiler as WebAssembly). A sample recipe can render the same code with <span class="mono">faust:</span> (SAMPLING.md; needs node).</div>
+      </div></div>
+  </div>
+</div>
+
 <div class="main" id="t-spectrum">
   <div class="panel col" style="flex:1;min-width:0">
     <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SPECTROGRAM</span><span id="specsrc" style="flex:1;min-width:0;font-size:10.5px;color:#8d979c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><span id="speclegend" style="display:flex;align-items:center;gap:5px;font:9px var(--mono);color:var(--dim)"></span><span style="display:flex;gap:2px"><span class="btn sm" id="sc-log" onclick="setSpecScale('log')" title="frequency on a log axis, 20 Hz to the Nyquist frequency">LOG</span><span class="btn sm" id="sc-lin" onclick="setSpecScale('lin')" title="frequency on a linear axis (the top octave is half the height: where imaging and aliasing show)">LIN</span></span></div>
@@ -496,7 +523,7 @@ async function importModule(pick){const path=$('imppath').value.trim();if(!pick&
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen()}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -564,7 +591,7 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();renderFaust();
   const L=S.library;if(L&&L.busy&&$('simmsg').style.display==='block')$('simmsg').textContent=`indexing the library: ${L.status.done}/${L.status.total}`;
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
@@ -1394,6 +1421,55 @@ function mapAddRoot(){const v=$('map-root').value.trim();if(!v)return;$('map-roo
 function mapDelRoot(i){const L=S.library;mapPost({roots:L.roots.filter((_,k)=>k!==i),scan:true})}
 function renderMap(){if(!mapOn()||!S.library)return;renderMapSide();if(S.library.loaded&&S.library.generation!==MAP.gen&&!S.library.busy)mapLoad();else drawMap();renderMapSel()}
 addEventListener('resize',()=>{if(mapOn())drawMap();if(ptOn())ptDraw()});
+// ---- the FAUST tab: Faust code compiled and one note rendered in the page (web/faust-render.mjs over faustwasm, which the
+// server fetches from npm on request and serves under /faust/); the WAV goes up to the song's folder (/api/upload) and on
+// to the candidates or a new slot (POST place). The code is kept in this browser.
+const FA={m:null,F:null,loading:null,ctrls:[],vals:{},code:null};
+const FA_EXAMPLE=`import("stdfaust.lib");
+// one voice: freq, gate and gain are set by NOTE, HOLD and VELOCITY; the other sliders show up on the right
+freq = hslider("freq", 261.6, 20, 4000, 0.01);
+gate = button("gate");
+gain = hslider("gain", 0.8, 0, 1, 0.01);
+cutoff = hslider("cutoff", 1800, 100, 8000, 1);
+detune = hslider("detune", 0.3, 0, 2, 0.01);
+voice = (os.sawtooth(freq) + os.sawtooth(freq * (1 + detune / 100))) / 2;
+process = voice * en.adsr(0.005, 0.25, 0.5, 0.4, gate) * gain * 0.4 : fi.resonlp(cutoff, 1.5, 1) <: _, _;`;
+const faOn=()=>$('t-faust').classList.contains('on');
+function faExample(){$('fa-code').value=FA_EXAMPLE;faSaveCode();faCompile(true).catch(()=>{})}
+function faSaveCode(){try{localStorage.faustcode=$('fa-code').value}catch(e){}}
+async function faOpen(){if(!$('fa-code').value){let c='';try{c=localStorage.faustcode||''}catch(e){}$('fa-code').value=c||FA_EXAMPLE}
+  const j=await (await fetch('/api/faust')).json();FA.have=j.have;const job=j.job||{};$('fa-get-panel').style.display=j.have?'none':'block';
+  put('fa-get',j.have?'':job.status==='fetching'?`<div class="mono" style="font-size:10px">downloading… ${job.size?Math.round(job.got*100/job.size)+' %':''}</div>`:
+    `<div style="font-size:10.5px;color:var(--mid);margin-bottom:6px">The Faust compiler (faustwasm ${esc(j.version)}, GRAME, LGPL-3.0, from npm: about 6 MB kept in <span class="mono">${esc(j.dir)}</span>) is not here yet.</div><span class="btn" onclick="faFetch()">GET FAUST</span>${job.error?`<div class="err">${esc(job.error)}</div>`:''}`);
+  $('fa-state').textContent=j.have?(FA.F?'Faust '+FA.F.version:'ready'):'the compiler is missing: GET FAUST on the right';if(job.status==='fetching')setTimeout(()=>faOn()&&faOpen(),700);renderFaust()}
+async function faFetch(){await fetch('/api/fetchfaust',{method:'POST',body:'{}'});faOpen()}
+function faHz(){const n=ptNote($('fa-note').value);return isFinite(n)?440*2**((n-69)/12):NaN}
+function renderFaust(){if(!faOn()||!S||!S.song)return;$('fa-slot').textContent='TRYOUT SLOT '+pad(S.slot);const hz=faHz();$('fa-hz').textContent=isFinite(hz)?hz.toFixed(2)+' Hz':'a note: C-5, A#3…'}
+async function faLoad(){if(FA.F)return FA.F;if(!FA.loading)FA.loading=(async()=>{$('fa-state').textContent='loading the Faust compiler…';FA.m=await import('/web/faust-render.mjs');FA.F=await FA.m.loadFaust('/faust');$('fa-state').textContent='Faust '+FA.F.version;return FA.F})();
+  try{return await FA.loading}catch(e){FA.loading=null;throw e}}
+async function faCompile(show){const code=$('fa-code').value;$('fa-err').textContent='';
+  try{await faLoad();const proc=await FA.m.compileFaust(FA.F,code,44100);FA.code=code;FA.ctrls=FA.m.controls(proc);if(show)faCtrls();if(show)$('fa-state').textContent=`Faust ${FA.F.version} · compiled: ${proc.getNumOutputs()} output${proc.getNumOutputs()>1?'s':''}, ${FA.ctrls.length} controls`;return proc}
+  catch(e){$('fa-err').textContent=String(e.message||e);$('fa-state').textContent='the code does not compile (below)';throw e}}
+const FA_AUTO=['freq','gate','gain'];
+function faCtrls(){const cs=FA.ctrls.filter(c=>!FA_AUTO.includes(c.label.toLowerCase()));
+  put('fa-ctrls',cs.length?cs.map(c=>{const v=FA.vals[c.label]!=null?FA.vals[c.label]:c.init,num=c.type==='button'||c.type==='checkbox';
+    return `<div class="vrow"><span class="vl" title="${esc(c.address)}">${esc(c.label)}</span>${num?`<input type="checkbox" ${v?'checked':''} onchange="FA.vals[${attr(c.label)}]=this.checked?1:0">`:`<input type="range" min="${c.min}" max="${c.max}" step="${c.step||(c.max-c.min)/1000}" value="${v}" oninput="FA.vals[${attr(c.label)}]=+this.value;this.nextElementSibling.textContent=(+this.value).toPrecision(4)"><span class="vv">${(+v).toPrecision(4)}</span>`}</div>`}).join(''):'<span style="color:var(--dim)">none besides freq, gate and gain</span>')}
+async function faRender(){const proc=await faCompile(FA.code!==$('fa-code').value);if(FA.code!==$('fa-code').value)faCtrls();const hz=faHz();if(!isFinite(hz))throw new Error('NOTE is a note: C-5, A#3…');
+  const params={};for(const c of FA.ctrls)if(FA.vals[c.label]!=null&&!FA_AUTO.includes(c.label.toLowerCase()))params[c.label]=FA.vals[c.label];
+  const r=FA.m.renderNote(proc,{hz,velocity:+$('fa-vel').value||100,hold:+$('fa-hold').value||1,tail:+$('fa-tail').value||0,params,rate:44100});
+  let peak=0;for(const ch of r.channels)for(const v of ch)peak=Math.max(peak,Math.abs(v));if(!r.channels.length)throw new Error('the code has no output: process = … ;');return {channels:r.channels,peak}}
+function faWav(channels,rate,root){const n=channels[0].length,nc=channels.length,data=n*nc*2,smpl=36,buf=new ArrayBuffer(44+data+8+smpl),v=new DataView(buf);let o=0;
+  const str=s=>{for(const c of s)v.setUint8(o++,c.charCodeAt(0))},u32=x=>{v.setUint32(o,x,true);o+=4},u16=x=>{v.setUint16(o,x,true);o+=2};
+  str('RIFF');u32(36+data+8+smpl);str('WAVE');str('fmt ');u32(16);u16(1);u16(nc);u32(rate);u32(rate*nc*2);u16(nc*2);u16(16);str('data');u32(data);
+  let peak=0;for(const ch of channels)for(const x of ch)peak=Math.max(peak,Math.abs(x));const g=peak>0.999?0.999/peak:1;
+  for(let i=0;i<n;i++)for(let c=0;c<nc;c++){v.setInt16(o,Math.max(-32768,Math.min(32767,Math.round(channels[c][i]*g*32767))),true);o+=2}
+  str('smpl');u32(smpl);u32(0);u32(0);u32(Math.round(1e9/rate));u32(root);u32(0);u32(0);u32(0);u32(0);u32(0);return {buf,scaled:g<1}}
+async function faPreview(){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,ptNote($('fa-note').value));if(PTA.src)URL.revokeObjectURL(PTA.src);PTA.src=URL.createObjectURL(new Blob([w.buf],{type:'audio/wav'}));PTA.play().catch(()=>{});
+  $('fa-msg').textContent=`playing ${(r.channels[0].length/44100).toFixed(2)} s, peak ${(20*Math.log10(r.peak||1e-9)).toFixed(1)} dBFS${w.scaled?' (over full scale: scaled down)':''}`}catch(e){$('fa-msg').textContent=String(e.message||e)}}
+async function faSave(dest){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,ptNote($('fa-note').value)),name=($('fa-name').value||'faust').replace(/[^\w.-]+/g,'_');
+  const up=await (await fetch('/api/upload?name='+encodeURIComponent('faust-'+name+'.wav'),{method:'POST',body:w.buf})).json();if(up.error)throw new Error(up.error);
+  const j=await (await fetch('/api/place',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:up.path,dest,stereo:r.channels.length>1})})).json();
+  $('fa-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'')+(w.scaled?' (scaled under full scale)':'');refresh()}catch(e){$('fa-msg').textContent=String(e.message||e)}}
 // ---- the PAINT tab (spectral.py): a picture over frequency (rows, lowest at the bottom) and time (columns); brightness is
 // the level, the colour the pan (red left, yellow centre, green right). Kept in this browser per song (localStorage).
 const PT={rows:72,cols:128,amp:null,pan:null,tool:'brush',drag:null};const PTA=new Audio();const ptOn=()=>$('t-paint').classList.contains('on');
