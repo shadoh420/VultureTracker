@@ -52,6 +52,38 @@ PROFILE = RECENT.parent / "webview"
 OLD_RECENT = RECENT.parent.with_name("TrackerForge") / "recent.json"  # the app's previous name
 
 
+def _atomic(path, data):
+    """`data` (bytes) as the file at `path`, written to a temporary file beside it and moved over it, so a crash or a
+    power loss mid-write leaves the old file or the new one, never a truncated one."""
+    path = Path(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _atomic_text(path, text):
+    """Text written as write_text writes it (the platform's line endings), through _atomic."""
+    _atomic(path, text.replace("\n", os.linesep).encode("utf-8"))
+
+
+def _read_json(path, default, notices):
+    """A JSON file the app keeps beside the song, or `default` when there is none. One that does not parse (a write cut
+    short before writes were atomic, or a hand edit) is moved aside to `<name>.corrupt` and `default` is used, with a
+    notice for the page, so the song still opens."""
+    if not path.exists():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, UnicodeDecodeError) as e:
+        bad = path.with_name(path.name + ".corrupt")
+        os.replace(path, bad)
+        notices.append(f"{path.name} could not be read ({e}); it was moved to {bad.name} and the app started it afresh")
+        return default
+
+
 def recent_songs():
     for f in (RECENT, OLD_RECENT):
         try:
@@ -363,8 +395,8 @@ def patch_it(data, silenced=(), mix=None):
 
 
 def channel_levels(data, nch, cancel=None):
-    """Each channel soloed (every other channel's header volume zeroed, the way scratch/ut99-clean/compare.py measures a
-    module): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
+    """Each channel soloed (every other channel's header volume zeroed, the way the suite's local-only
+    scratch/ut99-clean/compare.py measures a module): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
     `cancel()` true between channels abandons the pass (returns None)."""
     import numpy as np
     out = []
@@ -683,10 +715,13 @@ class State:
         self.cache_dir = self.base_dir / ".tryout"
         self.meta_path = self.song_path.with_name(self.song_path.stem + ".tryout.json")
         self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
-        if self.meta_path.exists():
-            self.meta.update(json.loads(self.meta_path.read_text(encoding="utf-8")))
+        self.closed = False
+        self.notices = []     # what the page should tell once: a meta or notes file that could not be read
+        meta = _read_json(self.meta_path, {}, self.notices)
+        self.meta.update(meta if isinstance(meta, dict) else {})
         self.notes_path = self.song_path.with_name(self.song_path.stem + ".notes.json")
-        self.notes = json.loads(self.notes_path.read_text(encoding="utf-8")) if self.notes_path.exists() else []
+        notes = _read_json(self.notes_path, [], self.notices)
+        self.notes = notes if isinstance(notes, list) else []
         self.lock = threading.RLock()
         self.jobs = queue.PriorityQueue()  # (priority, sequence, job): what is playing first, then the song, the rest, meters last
         self._seq = itertools.count()
@@ -697,7 +732,10 @@ class State:
         self.meters = None    # soloed channel levels of the section with the unwritten mix applied
         self.meas = {}        # wav path -> measurement (memo, kept while the file's stamp holds: meas_stamp)
         self.meas_stamp = {}
-        self.history, self.future = [], []  # song texts before each app write of the patterns (undo) and after an undo (redo)
+        # before each app write of the song (undo) and after an undo (redo): {"text": the song text, "meta": the tryout
+        # settings that write changed (a channel's mutes and faders remapped, the mix written, the slot's candidates
+        # cleared by U), as they were, or None}
+        self.history, self.future = [], []
         self.build = None     # last build/export result
         self.stems = None     # stems export progress
         self.error = None
@@ -718,7 +756,8 @@ class State:
         with self.lock:
             raw = self.song_path.read_bytes()
             self.crlf = b"\r\n" in raw
-            self.text = raw.decode("utf-8").replace("\r\n", "\n")
+            self.bom = raw.startswith(b"\xef\xbb\xbf")  # older Notepad; kept on write, but not in the text the editors read
+            self.text = raw[3 if self.bom else 0:].decode("utf-8").replace("\r\n", "\n")
             self.mtime = self.song_path.stat().st_mtime
             try:
                 self.mod, warnings = loaded or load_song_text(self.text, self.base_dir, str(self.song_path))
@@ -754,11 +793,12 @@ class State:
             return False
 
     def save_meta(self):
-        self.meta_path.write_text(json.dumps(self.meta, indent=1), encoding="utf-8")
+        _atomic_text(self.meta_path, json.dumps(self.meta, indent=1))
 
     def write_song(self, text):
-        """The song file, written with the line endings it had (write_text would turn every LF into CRLF on Windows)."""
-        self.song_path.write_bytes(text.replace("\n", "\r\n" if self.crlf else "\n").encode("utf-8"))
+        """The song file, written with the line endings (and the byte-order mark) it had (write_text would turn every LF into
+        CRLF on Windows), atomically."""
+        _atomic(self.song_path, (b"\xef\xbb\xbf" if self.bom else b"") + text.replace("\n", "\r\n" if self.crlf else "\n").encode("utf-8"))
 
     def _put(self, prio, job):
         self.jobs.put((prio, next(self._seq), job))
@@ -945,9 +985,17 @@ class State:
             self.renders[k] = {"status": "queued", "file": str(self.cache_dir / f"{k}.wav"), "error": None}
             self._put(1, (k, path))
 
+    def close(self):
+        """Another song replaced this one in the app: the worker stops after the job it is on (it would keep rendering
+        into this song's cache and prune it against the new state's writes)."""
+        self.closed = True
+        self._put(-1, ("close",))
+
     def _worker(self):
-        while True:
+        while not self.closed:
             job = self.jobs.get()[2]
+            if job[0] == "close":
+                return
             if job[0] == "build":
                 self._build(job[1])
                 continue
@@ -1049,6 +1097,7 @@ class State:
         with self.lock:
             note = {"id": max((n["id"] for n in self.notes), default=0) + 1, "when": datetime.datetime.now().isoformat(timespec="seconds"),
                     "version": self.version(), "order": order, "pattern": o["pattern"], "row": row,
+                    "span": [o["start"], o["seconds"]],  # the order's place in this version (an archive's report uses it)
                     "time": round(o["start"] + o["seconds"] * row / o["rows"], 2),
                     "tag": str(body.get("tag") or "note")[:40], "text": str(body.get("text") or "")[:2000],
                     "channels": sorted({int(c) for c in body.get("channels") or []}),
@@ -1076,8 +1125,8 @@ class State:
             self.save_notes()
 
     def save_notes(self):
-        self.notes_path.write_text(json.dumps(self.notes, indent=1), encoding="utf-8")
-        self.notes_path.with_suffix(".md").write_text(self.report(), encoding="utf-8")
+        _atomic_text(self.notes_path, json.dumps(self.notes, indent=1))
+        _atomic_text(self.notes_path.with_suffix(".md"), self.report())
 
     def _archive_old_notes(self):
         """Notes made against another version of the song text move to `<song>.notes-<hash>.json` and `.md` beside it,
@@ -1090,11 +1139,11 @@ class State:
         for h in sorted({(n.get("version") or {}).get("hash") or "unknown" for n in old}):
             batch = [n for n in old if ((n.get("version") or {}).get("hash") or "unknown") == h]
             p = self.song_path.with_name(f"{self.song_path.stem}.notes-{h}.json")
-            kept = json.loads(p.read_text(encoding="utf-8")) if p.exists() else []
+            kept = _read_json(p, [], self.notices)
             seen = {(n["id"], n.get("when")) for n in kept}
             kept += [n for n in batch if (n["id"], n.get("when")) not in seen]
-            p.write_text(json.dumps(kept, indent=1), encoding="utf-8")
-            p.with_suffix(".md").write_text(self.report(kept, batch[0].get("version")), encoding="utf-8")
+            _atomic_text(p, json.dumps(kept, indent=1))
+            _atomic_text(p.with_suffix(".md"), self.report(kept, batch[0].get("version")))
         self.notes = [n for n in self.notes if n not in old]
         self.save_notes()
 
@@ -1113,8 +1162,14 @@ class State:
         for n in notes:
             by.setdefault(n["order"], []).append(n)
         for order in sorted(by):
-            o = f["orders"][order] if f and order < len(f["orders"]) else None
-            L += [f"## ord {order} `{o['pattern']}` ({fmt(o['start'])} to {fmt(o['start'] + o['seconds'])})" if o else f"## ord {order}", ""]
+            # the order as the notes' own version had it (an archive's notes were made on another order list); notes from
+            # before the span was kept fall back to the current song for notes on this version, else to the pattern name
+            n0 = next((n for n in by[order] if n.get("span")), None)
+            o = {"pattern": n0["pattern"], "start": n0["span"][0], "seconds": n0["span"][1]} if n0 else (
+                f["orders"][order] if f and order < len(f["orders"]) and version is None else None)
+            name = o["pattern"] if o else by[order][0].get("pattern")
+            L += [f"## ord {order} `{name}` ({fmt(o['start'])} to {fmt(o['start'] + o['seconds'])})" if o
+                  else f"## ord {order} `{name}`" if name else f"## ord {order}", ""]
             for n in sorted(by[order], key=lambda n: (n["row"], n["id"])):
                 picked = set(n.get("channels") or [])
                 snd = []
@@ -1148,11 +1203,53 @@ class State:
 
     # ---- writing the song
 
-    ENTRY = r"^(\s+)({key})([ \t]*)(\{{.*\}})?([ \t]*(?:#.*)?)$"  # indent, key, spaces, one-line flow mapping, trailing comment
+    class _Entry:
+        def __init__(self, groups):
+            self._g = groups
+
+        def groups(self):
+            return self._g
+
+        def group(self, k):
+            return self._g[k - 1]
+
+    @classmethod
+    def _entry(cls, line, key):
+        """A mapping entry `key` on `line` as (indent, key, spaces, one-line flow mapping or None, trailing spaces and
+        comment); the flow mapping ends at the brace that closes it (quotes and nesting followed), so a `}` in a trailing
+        comment is never taken for part of it. None when the line is not such an entry. The result has .groups() and
+        .group(k) like a match."""
+        m = re.match(rf"^(\s+)({key})([ \t]*)(.*?)$", line.rstrip("\n"))
+        if not m:
+            return None
+        indent, k, sp, rest = m.groups()
+        if not rest.startswith("{"):
+            return cls._Entry((indent, k, sp, None, rest)) if re.fullmatch(r"[ \t]*(#.*)?", rest) else None
+        depth, quote, j = 0, None, 0
+        while j < len(rest):
+            c = rest[j]
+            if quote:
+                if c == "\\" and quote == '"':
+                    j += 1
+                elif c == quote:
+                    quote = None
+            elif c in "'\"":
+                quote = c
+            elif c in "{[":
+                depth += 1
+            elif c in "}]":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        flow, tail = rest[:j + 1], rest[j + 1:]
+        if depth != 0 or not re.fullmatch(r"[ \t]*(#.*)?", tail):
+            return None
+        return cls._Entry((indent, k, sp, flow, tail))
 
     @staticmethod
     def _redump(lines, i, m, entry, keys=None):
-        """Replace the mapping at line i (`m` matched ENTRY) with `entry` in its own layout: a one-line flow mapping stays
+        """Replace the mapping at line i (`m` from _entry) with `entry` in its own layout: a one-line flow mapping stays
         one line (with `keys`, only those scalar values are substituted inside it, so a hand-aligned line keeps its
         spacing), a block (the deeper-indented lines that follow) is re-dumped as a block. Returns the number of lines
         the entry now occupies."""
@@ -1199,12 +1296,12 @@ class State:
                 section, sub = line.split(":")[0], None
                 mod_line = i if section == "module" else mod_line
             elif section == "samples":
-                m = re.match(self.ENTRY.format(key=r"\d+:"), line)
+                m = self._entry(line, r"\d+:")
                 if m and int(m.group(2)[:-1]) in samples:
                     n = self._redump(lines, i, m, samples[int(m.group(2)[:-1])], keys)
                     pending.discard(("smp", int(m.group(2)[:-1])))
             elif section == "instruments":
-                m = re.match(self.ENTRY.format(key=r"\d+:"), line)
+                m = self._entry(line, r"\d+:")
                 if m and int(m.group(2)[:-1]) in instruments:
                     n = self._redump(lines, i, m, instruments[int(m.group(2)[:-1])])
                     pending.discard(("ins", int(m.group(2)[:-1])))
@@ -1213,7 +1310,7 @@ class State:
                     sub, item, cind = "ch", -1, ind
                 elif sub == "ch" and ind >= cind and s.startswith("-"):
                     item += 1
-                    m = re.match(self.ENTRY.format(key="-"), line)
+                    m = self._entry(line, "-")
                     if item in channels and m:
                         n = self._redump(lines, i, m, channels[item], keys)
                         pending.discard(("ch", item))
@@ -1285,11 +1382,13 @@ class State:
                 raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.patched_text(cand)
             loaded = load_song_text(new, self.base_dir, str(self.song_path))  # SongError: nothing is written
+            before = self._meta_view()
             self.meta["candidates"].pop(str(self.slot), None)  # the choice is made: the slot's list goes (ratings stay, keyed by file)
             if self.want == cand:
                 self.want = None
             self.save_meta()
             self._commit(new, loaded)
+            self._attach_meta(before)
         self._put(0, ("build", False))
 
     def apply_mix(self):
@@ -1298,9 +1397,11 @@ class State:
                 raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.mix_text()
             loaded = load_song_text(new, self.base_dir, str(self.song_path))
+            before = self._meta_view()
             self.meta["mix"] = {}
             self.save_meta()
             self._commit(new, loaded)
+            self._attach_meta(before)
         self._put(0, ("build", False))
 
     # ---- build / export
@@ -1479,10 +1580,22 @@ class State:
         """`new` as the song, if the whole of it compiles (SongError otherwise: nothing written); one undo step. `loaded`:
         the (module, warnings) of `new`, when the caller compiled it already."""
         loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
-        self.history.append(self.text)
+        self.history.append({"text": self.text, "meta": None})
         self.future.clear()
         self.write_song(new)
         self.reload(archive=False, loaded=loaded)
+
+    META_KEYS = ("candidates", "muted", "solo", "mix", "orders", "loop")  # the tryout settings a song write may change
+
+    def _meta_view(self):
+        import copy
+        return copy.deepcopy({k: self.meta.get(k) for k in self.META_KEYS})
+
+    def _attach_meta(self, before):
+        """The tryout settings the last write changed, as they were, kept with its undo step (see undo)."""
+        changed = {k: v for k, v in before.items() if v != self.meta.get(k)}
+        if changed and self.history:
+            self.history[-1]["meta"] = changed
 
     @staticmethod
     def _ind(line):
@@ -1631,7 +1744,7 @@ class State:
         elif kind == "channel_rename":
             head, items = self._channel_lines(lines)
             i, name = int(op["ch"]), str(op["name"]).strip()[:20]
-            m = re.match(self.ENTRY.format(key="-"), lines[items[i]])
+            m = self._entry(lines[items[i]], "-")
             if not m or not m.group(4):
                 raise ValueError(f"channel {i + 1} is not a one-line '- {{...}}' entry: rename it in the YAML")
             self._redump(lines, items[i], m, {"name": self._yname(name) if name else '""'}, keys=("name",))
@@ -1740,7 +1853,7 @@ class State:
                 if str(num) in (self.mix().get("sample_volume") or {}) and entry.get("global_volume") != old.get("global_volume"):
                     raise ValueError(f"slot {num} has an unwritten GAIN in the tryout's mixer: WRITE MIX or RESET MIX first")
                 j = next((j for j, n in kids if n == num), None)
-                m = re.match(self.ENTRY.format(key=r"\d+:"), lines[j])
+                m = self._entry(lines[j], r"\d+:")
                 if m is None:
                     raise ValueError(f"sample {num} is written across several lines: write it on one line, or as a block, to edit it here")
                 # a one-line entry whose changed values are all scalars (and none removed) keeps its layout: only those
@@ -1773,7 +1886,7 @@ class State:
                 j = next((j for j, n in kids if n == num), None)
                 if j is None:
                     raise ValueError(f"no instrument {num}")
-                m = re.match(self.ENTRY.format(key=r"\d+:"), lines[j])
+                m = self._entry(lines[j], r"\d+:")
                 if m is None:
                     raise ValueError(f"instrument {num} is written across several lines: write it on one line, or as a block, to edit it here")
                 self._redump(lines, j, m, entry)
@@ -1811,6 +1924,53 @@ class State:
         else:
             raise ValueError(f"unknown song edit '{kind}'")
 
+    def _write_orders(self, lines, orders):
+        """The order list `orders` written in `lines` in the layout it has: a one-line flow list stays one line (its
+        trailing comment kept); a block list (`- name` per line) stays a block, each entry that survives keeping its line
+        (its trailing comment) and the comment lines above it, new entries written in the block's indentation. A flow
+        list written across several lines becomes one line, refused when comments inside it would be lost."""
+        i = self._top(lines, "orders")
+        head = lines[i].rstrip("\n")
+        m = re.match(r"^orders\s*:\s*\[.*\]\s*(#.*)?$", head)
+        if m:
+            lines[i] = f"orders: [{', '.join(self._yname(o) for o in orders)}]" + (f"  {m.group(1)}" if m.group(1) else "") + "\n"
+            return
+        end = self._span(lines, i)
+        body = lines[i + 1:end]
+        if re.match(r"^orders\s*:\s*\[", head):  # a flow list across several lines
+            if any("#" in x for x in [head] + body):
+                raise ValueError("the order list is a flow list across several lines with comments in it: write it on one "
+                                 "line, or as a block (one '- name' per line), to edit it here without losing them")
+            lines[i:end] = [f"orders: [{', '.join(self._yname(o) for o in orders)}]\n"]
+            return
+        if head.split("#")[0].split(":", 1)[1].strip():
+            raise ValueError("the order list is written in a way the app cannot edit in place: write it on one line")
+        groups, pending = [], []  # (name, [comment lines above it + its own line])
+        for line in body:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                pending.append(line)
+                continue
+            em = re.match(r"^\s*-\s*(['\"]?)(.*?)\1\s*(#.*)?$", line.rstrip("\n"))
+            if not em or not em.group(2) or em.group(2).startswith(("[", "{")):
+                raise ValueError("the order list has an entry the app cannot edit in place: write one '- name' per line")
+            groups.append((em.group(2), pending + [line]))
+            pending = []
+        ind = next((g[1][-1][: self._ind(g[1][-1])] for g in groups), "  ")
+        used, out = set(), []
+        for name in orders:
+            k = next((k for k, g in enumerate(groups) if g[0] == name and k not in used), None)
+            if k is None:
+                out.append(f"{ind}- {self._yname(name)}\n")
+            else:
+                used.add(k)
+                out += groups[k][1]
+        out += pending
+        out = [x if x.endswith("\n") else x + "\n" for x in out]
+        if body and not body[-1].endswith("\n") and out:  # the file ended without a newline: it still does
+            out[-1] = out[-1][:-1]
+        lines[i + 1:end] = out
+
     def song_edit(self, ops):
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
         channel_rename, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
@@ -1822,6 +1982,7 @@ class State:
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the edit does not overwrite that change")
             lines = self.text.splitlines(keepends=True)
+            meta_before = self._meta_view()
             before = [str(o) for o in (self.song.get("orders") or [])]
             orders, remap = list(before), []
             self._created = []  # WAVs written by sample edits: removed again when the edit is refused
@@ -1829,10 +1990,7 @@ class State:
                 for op in ops:
                     self._song_op(lines, orders, op, remap)
                 if orders != before:
-                    i = self._top(lines, "orders")
-                    one = f"orders: [{', '.join(self._yname(o) for o in orders)}]"
-                    m = re.match(r"^orders\s*:\s*\[.*\]\s*(#.*)?$", lines[i].rstrip("\n"))
-                    lines[i:self._span(lines, i) if not m else i + 1] = [one + (f"  {m.group(1)}" if m and m.group(1) else "") + "\n"]
+                    self._write_orders(lines, orders)
                 self._commit("".join(lines))
             except Exception:
                 for f in self._created:
@@ -1852,19 +2010,28 @@ class State:
                 meta["orders"] = None
             if meta.get("loop") and max(meta["loop"]["from"][0], meta["loop"]["to"][0]) >= n:
                 meta["loop"] = None
+            self._attach_meta(meta_before)
             self.save_meta()
             self.queue_all()
 
     def undo(self, redo=False):
-        """Back to the song text before the last pattern edit (or forward again)."""
+        """Back to the song text before the last write (or forward again). The tryout settings that write changed (mutes
+        and faders following a channel that moved or went, the mix WRITE MIX cleared, the candidates U cleared, a section
+        or loop dropped with the orders) go back with it, so a mute stays on the channel it was set on."""
+        import copy
         with self.lock:
             src, dst = (self.future, self.history) if redo else (self.history, self.future)
             if not src:
                 return
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first (the undo history is for the song the app wrote)")
-            dst.append(self.text)
-            self.write_song(src.pop())
+            step = src.pop()
+            meta = step.get("meta")
+            dst.append({"text": self.text, "meta": copy.deepcopy({k: self.meta.get(k) for k in meta}) if meta else None})
+            self.write_song(step["text"])
+            if meta:
+                self.meta.update(copy.deepcopy(meta))
+                self.save_meta()
             self.reload(archive=False)
 
     # ---- sample editor
@@ -1998,6 +2165,7 @@ class State:
                 "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
                 "undo": len(self.history), "redo": len(self.future), "unused": self.unused(),
+                "notices": self.notices,
                 "instruments": {str(k): v for k, v in (self.song.get("instruments") or {}).items()},
                 "structure": {"orders": [str(o) for o in self.song.get("orders") or []],
                               "patterns": [{"name": p.name, "rows": len(p.rows), "index": i,
@@ -2018,7 +2186,9 @@ class Handler(BaseHTTPRequestHandler):
 
     @classmethod
     def open_song(cls, path):
-        cls.state = State(path)
+        old, cls.state = cls.state, State(path)
+        if old is not None:
+            old.close()
         remember_song(cls.state.song_path)
 
     @classmethod
@@ -2059,9 +2229,22 @@ class Handler(BaseHTTPRequestHandler):
         rng = self.headers.get("Range")
         code = 200
         if rng and rng.startswith("bytes="):
-            a, _, b = rng[6:].partition("-")
-            start = int(a or 0)
-            end = int(b) if b else end
+            a, _, b = rng[6:].split(",")[0].strip().partition("-")  # one range: the first of a list
+            try:
+                if a:
+                    start, end = int(a), min(int(b), end) if b else end
+                elif b:  # the last b bytes
+                    start = max(0, len(data) - int(b))
+                else:
+                    raise ValueError
+            except ValueError:
+                return self._send(400, {"error": f"bad Range header: {rng}"})
+            if start > end or start >= len(data):
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{len(data)}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             code = 206
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -2251,6 +2434,11 @@ class Handler(BaseHTTPRequestHandler):
 
 class _Server(ThreadingHTTPServer):
     allow_reuse_address = False  # on Windows SO_REUSEADDR would let a second app take a port the first still listens on
+
+    def handle_error(self, request, client_address):
+        """A page that went away mid-answer (closed, reloaded, a seek that cancelled a request) is no error to print."""
+        if not isinstance(sys.exc_info()[1], ConnectionError):
+            super().handle_error(request, client_address)
 
 
 def make_server(port=0):

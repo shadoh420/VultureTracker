@@ -309,16 +309,26 @@ class TestValidation(Base):
             self.assertIn(expected, text)
 
     def test_writer_limits_and_yaml_loops_are_errors_not_tracebacks(self):
-        # IT holds at most 65535 bytes of cell data per pattern and of message: the writer says so (a ValueError the CLI
-        # and the app report), and YAML that nests without end is a SongError
+        # IT holds at most 65535 bytes of cell data per pattern and of message: `check` says so with the line (so every
+        # app edit is refused before it is written), the writer too for a module made another way; and YAML that nests
+        # without end is a SongError
+        from vulturetracker.itwriter import write_it
         row = " | ".join(["C-5 01 v64 A06"] * 64)
         text = ("module: {channels: 64}\nsamples: {1: {file: low.wav}}\npatterns:\n  p:\n    rows: 200\n    data: |\n"
                 + "".join(f"      {r:03d}: {row}\n" for r in range(150)) + "orders: [p]\n")
+        res = api.check(text, self.dir)
+        self.assertEqual(res["ok"], False)
+        self.assertRegex(res["errors"][0], r"<song>:4: error: pattern 'p': 67400 bytes .*65535")
+        mod = load_song_text("module: {channels: 64}\nsamples: {1: {file: low.wav}}\npatterns: {p: {rows: 200, data: 'C-5 01'}}\n"
+                             "orders: [p]\n", self.dir)[0]
+        full = type(mod.patterns[0].rows[0][0])(note=60, instrument=1, volcmd=64, effect=1, param=6)
+        mod.patterns[0].rows = [[full] * 64 for _ in range(150)] + mod.patterns[0].rows[150:]
         with self.assertRaisesRegex(ValueError, "65535"):
-            api.compile_song(text, self.dir)
+            write_it(mod)
         text = "module: {channels: 1, message: '" + "x" * 70000 + "'}\nsamples: {1: {file: low.wav}}\npatterns: {p: {rows: 4, data: 'C-5 01'}}\norders: [p]\n"
-        with self.assertRaisesRegex(ValueError, "65535"):
-            api.compile_song(text, self.dir)
+        res = api.check(text, self.dir)
+        self.assertEqual(res["ok"], False)
+        self.assertIn("at most 65534", res["errors"][0])
         for text in ("module: &m {channels: 1, message: *m}\nsamples: {1: {file: low.wav}}\npatterns: {p: 'C-5 01'}\norders: [p]\n",
                      "module: {channels: 1}\nsamples: {1: {file: low.wav}}\npatterns: {p: 'C-5 01'}\norders: [p]\nx: " + "[" * 5000 + "]" * 5000 + "\n"):
             res = api.check(text, self.dir)
@@ -406,6 +416,49 @@ class TestWav(Base):
             res = api.check("module: {channels: 1}\nsamples: {1: {file: bad.wav}}\npatterns: {p: {rows: 4, data: 'C-5 01'}}\norders: [p]\n", self.dir)
             self.assertFalse(res["ok"], name)
             self.assertIn("bad.wav", res["errors"][0])
+
+
+class TestAuditPins(Base):
+    def test_a_render_is_the_whole_song(self):
+        # F6: a render is as long as the song (it was cut at ten minutes, silently); only a render that repeats forever
+        # has a cap. A 717-second song, rendered at 8 kHz to keep the test quick
+        song = ("module: {tempo: 32, speed: 255, channels: 1}\nsamples: {1: {file: low.wav}}\n"
+                "patterns: {p: {rows: 36, data: 'C-5 01'}}\norders: [p]\n")
+        with LoadedModule(api.compile_song(song, self.dir)[0]) as lm:
+            dur = lm.duration()
+            self.assertGreater(dur, 700)
+            self.assertAlmostEqual(len(lm.render(8000, oversample=1)) / 4 / 8000, dur, delta=0.2)
+        with LoadedModule(api.compile_song(song, self.dir)[0]) as lm:
+            lm.ENDLESS_SECONDS = 30
+            self.assertAlmostEqual(len(lm.render(8000, repeat=-1, oversample=1)) / 4 / 8000, 30, delta=0.6)
+
+    def test_zero_prefixed_numbers_read_alike(self):
+        # C3: the app's dict of the song reads '0125' as the compiler does (decimal), not as YAML 1.1 octal
+        self.assertEqual(api.from_yaml("module: {tempo: 0125, speed: 010}"), {"module": {"tempo": 125, "speed": 10}})
+
+    def test_cli(self):
+        # T9: the commands through main(): check, build with a render, info, render, import (an IT back to a song)
+        import contextlib
+        import io
+        from vulturetracker.__main__ import main
+        song = self.dir / "s.yaml"
+        song.write_text("module: {channels: 1}\nsamples: {1: {file: low.wav}}\npatterns: {p: {rows: 4, data: 'C-5 01'}}\norders: [p]\n",
+                        encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["check", str(song)]), 0)
+            self.assertEqual(main(["build", str(song), "--render", str(self.dir / "s.wav")]), 0)
+            self.assertEqual(main(["info", str(self.dir / "s.it"), "--json"]), 0)
+            self.assertEqual(main(["render", str(self.dir / "s.it"), "-o", str(self.dir / "r.wav"), "--oversample", "1"]), 0)
+            self.assertEqual(main(["import", str(self.dir / "s.it"), "-o", str(self.dir / "back.yaml")]), 0)
+            self.assertEqual(main(["check", str(self.dir / "missing.yaml")]), 1)
+        self.assertTrue(api.check(self.dir / "back.yaml")["ok"])
+        self.assertEqual(read_wav(self.dir / "r.wav").rate, RATE)
+        bad = self.dir / "bad.yaml"
+        bad.write_text("module: {channels: 1}\n", encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()) as o:
+            self.assertEqual(main(["check", str(bad)]), 1)
+        self.assertIn("error(s)", o.getvalue())
 
 
 class TestDocs(unittest.TestCase):

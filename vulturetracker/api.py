@@ -1,6 +1,7 @@
 """Plain functions over the song document (a dict mirroring the YAML), shaped so each can later
 become an MCP tool. The YAML text stays the source of truth: every edit goes through a dict that
 is saved back as YAML, and validation always re-parses that YAML so errors carry line numbers."""
+import re
 from pathlib import Path
 
 import yaml
@@ -41,8 +42,22 @@ def to_yaml(song: dict) -> str:
     return yaml.dump(song, Dumper=_Dumper, sort_keys=False, width=120, allow_unicode=False)
 
 
+class _Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+    pass
+
+
+def _int(loader, node):
+    """An int scalar as the compiler reads it: '08', '010' and '0125' are decimal, not YAML 1.1 octal."""
+    if re.fullmatch(r"[-+]?0\d+", node.value):
+        return int(node.value, 10)
+    return yaml.SafeLoader.construct_yaml_int(loader, node)
+
+
+_Loader.add_constructor("tag:yaml.org,2002:int", _int)
+
+
 def from_yaml(text: str) -> dict:
-    return yaml.load(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
+    return yaml.load(text, Loader=_Loader)
 
 
 def load(path) -> dict:
@@ -181,9 +196,33 @@ def tryout_song(song_or_path, orders=None) -> dict:
     import copy
     base = copy.deepcopy(song_or_path) if isinstance(song_or_path, dict) else load(song_or_path)
     if orders:
+        start = orders[0]
         base["orders"] = base["orders"][orders[0]:orders[1]]
-        base["patterns"] = {k: v for k, v in base["patterns"].items() if k in base["orders"]}
+        base["patterns"] = {k: _retarget_jumps(v, start, len(base["orders"])) for k, v in base["patterns"].items()
+                            if k in [str(o) for o in base["orders"]]}
     return base
+
+
+_JUMP = re.compile(r"(?<![^\s|])B([0-9A-F]{2})(?![^\s|])")
+
+
+def _retarget_jumps(spec, start, n):
+    """A pattern of a slice of the order list that starts at order `start` and holds `n` orders: each `Bxx` in its rows
+    renumbered to the slice's order indices, or cleared when it jumps outside the slice (the section then runs to its
+    end, and the compiler's check that a jump lands in the order list holds)."""
+    def row(line):
+        body, sc, comment = line.partition(";")
+        body = _JUMP.sub(lambda m: f"B{int(m.group(1), 16) - start:02X}" if start <= int(m.group(1), 16) < start + n
+                         else "...", body)
+        return body + sc + comment
+
+    def data(text):
+        return "\n".join(row(line) for line in text.split("\n")) if isinstance(text, str) else text
+    if isinstance(spec, str):
+        return data(spec)
+    if isinstance(spec, dict) and "data" in spec:
+        return {**spec, "data": data(spec["data"])}
+    return spec
 
 
 def swap_sample(song: dict, slot, cand, name_from_file=True) -> dict:
@@ -201,7 +240,7 @@ def swap_sample(song: dict, slot, cand, name_from_file=True) -> dict:
     if name_from_file and not (old and old in refs):
         entry["name"] = Path(cand).stem[:25]
     w = read_wav(cand)
-    if w.root is not None and "c5_speed" not in entry:
+    if w.root is not None and 0 <= w.root < 120 and "c5_speed" not in entry:  # a smpl unity note above B-9 is no note
         entry["base_note"] = format_note(w.root)
     if entry.get("loop") == "from_wav" and not w.loops:
         del entry["loop"]

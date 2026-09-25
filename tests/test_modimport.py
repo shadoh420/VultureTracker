@@ -336,3 +336,58 @@ class TestModImport(unittest.TestCase):
         r = compare(bytes(d), "xm")
         self.assertLess(abs(r["median"]), 0.2)
         self.assertEqual(r["song"]["module"]["mix_volume"], 68)
+
+
+class _Bits:
+    """An IT 2.14 compressed block written bit by bit, least significant bit first (the reader's order)."""
+    def __init__(self):
+        self.v, self.n = 0, 0
+
+    def put(self, value, width):
+        self.v |= (value & ((1 << width) - 1)) << self.n
+        self.n += width
+
+    def block(self):
+        body = self.v.to_bytes((self.n + 7) // 8, "little")
+        return struct.pack("<H", len(body)) + body
+
+
+class TestITReader(unittest.TestCase):
+    def test_decompress_known_stream(self):
+        # 8-bit: two deltas at the full width (9 bits), a change to width 4 (method 3), two 4-bit deltas, a change to
+        # width 8 (method 1: escape, then 3 bits holding width - 1 ... read as v + 1 = 7 -> 8), two 8-bit deltas
+        from vulturetracker.itreader import _decompress
+        b = _Bits()
+        b.put(5, 9), b.put(-3 & 0xFF, 9), b.put(0x100 | 3, 9)  # full width: bit 8 clear is a value, set a width (4)
+        b.put(2, 4), b.put(-1, 4), b.put(8, 4), b.put(6, 3)  # escape to width 8
+        b.put(10, 8), b.put(-20, 8)
+        data = b.block()
+        self.assertEqual(_decompress(data, 0, 6, False, False), ([5, 2, 4, 3, 13, -7], len(data)))
+        self.assertEqual(_decompress(data, 0, 6, False, True)[0], [5, 7, 11, 14, 27, 20])  # IT 2.15: deltas of deltas
+        # 16-bit at the full width (17 bits), across two blocks
+        b1, b2 = _Bits(), _Bits()
+        b1.put(1000, 17), b1.put(-3000 & 0xFFFF, 17)
+        b2.put(32767, 17)
+        out, pos = _decompress(b1.block() + b2.block(), 0, 2, True, False)
+        self.assertEqual(out, [1000, -2000])
+        with self.assertRaises(ITReadError):
+            _decompress(b1.block()[:3], 0, 2, True, False)  # truncated
+
+    def test_long_patterns_are_split_and_high_numbers_dropped(self):
+        # an IT pattern of 300 rows (libopenmpt plays up to 1024) imports as parts the song format can hold (P5); cells
+        # and keymaps naming numbers above 99 are dropped with a warning (P6), so the imported song compiles
+        from vulturetracker.itreader import _sanitize, module_to_song, read_it
+        it = imported(write_mod([("tone", TONE, 64, 0, 0, 4000)], [grid([(0, 0, (428, 1, 0, 0))], EMPTY4)], [0]), "mod")[0]
+        d = bytearray(it)
+        nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
+        struct.pack_into("<H", d, struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * nsmp)[0] + 2, 300)
+        mod, warnings = read_it(bytes(d))
+        self.assertEqual([len(p.rows) for p in mod.patterns], [192, 108])
+        self.assertTrue(any("longer than 200 rows" in w for w in warnings))
+        mod.patterns[0].rows[1][0].instrument = 150
+        w = []
+        _sanitize(mod, w)
+        self.assertEqual((mod.patterns[0].rows[1][0].instrument, any("above 99" in x for x in w)), (0, True))
+        with tempfile.TemporaryDirectory() as tmp:
+            song = module_to_song(mod, Path(tmp) / "m.yaml", Path(tmp) / "m_samples")
+            self.assertTrue(api.check(api.to_yaml(song), tmp)["ok"])

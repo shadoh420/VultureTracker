@@ -386,6 +386,7 @@ const audible=c=>S.solo!=null?S.solo===c:!S.muted.includes(c);
 function grid(f,inSel,h){const n=f.orders.length,wide=h>9;let out=`<div class="grid" style="grid-template-columns:${wide?78:34}px repeat(${n},minmax(0,1fr))"><div></div>${f.orders.map((o,i)=>`<div class="rl ${inSel(i)?'sel':''}" style="height:${h}px" onclick="setStart(${i})" title="${esc(o.pattern)}">${i%4?'':i}</div>`).join('')}`;
   f.channels.forEach((ch,c)=>{const off=audible(c)?'':' off',col=famCol(ch);out+=`<div class="cn${off}" style="font-size:${wide?8.5:8}px;line-height:${h}px" title="${esc(ch)}">${esc((wide?ch:ch.slice(0,5)).toUpperCase())}${wide?`<i class="fb" style="height:${h-2}px;background:${col||'transparent'}"></i>`:''}</div>`+f.orders.map((o,i)=>{const u=f.use[i][c];return `<div class="cell ${u.length?'used':''} ${u.includes(S.slot)?'slot':''} ${inSel(i)?'sel':''}${off}" style="height:${h}px${col?';--fam:'+col:''}" onclick="setStart(${i})" title="ord ${i} ${esc(o.pattern)}: samples ${u.join(' ')}"></div>`}).join('')});
   return out+'</div>'}
+const NOTICED=new Set();  // notices the server gave once (a meta or notes file it could not read), shown once
 function render(){
   const f=S.song.facts,name=S.song.path.replace(/\\/g,'/').split('/');
   put('chipname',`<span style="color:var(--dim)">${esc(name.slice(-2,-1)[0])}/</span>${esc(name.slice(-1)[0])}`);
@@ -393,6 +394,7 @@ function render(){
   $('dirty').style.display=S.song.dirty?'flex':'none';
   $('queue').textContent=`render queue ${S.queue} · cache ${S.cache}`;
   $('songerr').textContent=S.song.error?S.song.error.join('\n'):'';
+  const nw=(S.notices||[]).filter(x=>!NOTICED.has(x));nw.forEach(x=>NOTICED.add(x));if(nw.length)setTimeout(()=>alert(nw.join('\n\n')));
   // slot
   const ents=S.song.sample_entries,cc=S.cand_counts||{},sname=k=>ents[k].name||((f&&f.samples.find(s=>s.num===+k))||{}).name||'';
   put('slotsel',Object.keys(ents).map(k=>`<option value="${k}" class="${cc[k]?'hascand':''}" ${+k===S.slot?'selected':''}>${pad(k)} ${esc(sname(k))}${cc[k]?` ▸ ${cc[k]} candidate${cc[k]>1?'s':''}`:''}</option>`).join(''));
@@ -573,17 +575,21 @@ function lvStart(){if(LV.ready)return LV.ready;
     await new Promise((ok,fail)=>{node.port.onmessage=e=>{if(e.data.type==='ready'){LV.version=e.data.version;ok()}else if(e.data.type==='error')fail(new Error(e.data.text))}});
     node.port.onmessage=e=>lvMsg(e.data);await lvLoad(false)})();
   LV.ready.catch(e=>{LV.err=String(e.message||e);LV.ready=null;renderLiveBar()});return LV.ready}
+// each load carries an id: its 'loaded' ends the wait for it and every earlier load (a pending swap replaced by a newer
+// one never reports), its 'error' ends the wait with the reason; the key then names the failure, so the next change retries
 async function lvLoad(keep){const key=lvKey(),r=await fetch('/api/it');if(!r.ok){LV.err='compile failed: '+((await r.json()).error||r.status);renderLiveBar();return}
-  const bytes=await r.arrayBuffer();LV.sent={};LV.key=key;
-  await new Promise(ok=>{LV.onLoaded=ok;LV.node.port.postMessage({type:'load',bytes,keep},[bytes])});LV.err=null;lvSync()}
+  const bytes=await r.arrayBuffer(),id=LV.loadId=(LV.loadId||0)+1;LV.sent={};LV.key=key;LV.loads=LV.loads||{};
+  try{await new Promise((ok,fail)=>{LV.loads[id]={ok,fail};LV.node.port.postMessage({type:'load',bytes,keep,id},[bytes])})}
+  catch(e){LV.key='failed '+key;LV.err='the module did not load: '+(e.message||e);renderLiveBar();return}
+  LV.err=null;lvSync()}
 function lvMsg(m){if(m.type==='pos'){LV.pos=m;LV.playing=m.playing;LV.oi=S&&S.song.facts?S.song.facts.orders.findIndex(o=>o.order===m.order):-1;
     if($('t-pattern').classList.contains('on'))document.querySelectorAll('.lvu').forEach(e=>{const v=m.playing?m.vu[+e.id.slice(3)]||0:0;e.style.width=Math.min(100,v*100)+'%'})}
-  else if(m.type==='loaded'){if(LV.onLoaded)LV.onLoaded()}
+  else if(m.type==='loaded'){for(const id in LV.loads||{})if(+id<=m.id){LV.loads[id].ok();delete LV.loads[id]}}
   else if(m.type==='note'){const h=LV.held[m.id];if(h&&h.release){LV.node.port.postMessage({type:'noteoff',ch:m.ch,on:m.on});delete LV.held[m.id]}else if(h)LV.held[m.id]=m}
-  else if(m.type==='error'){LV.err=m.text;renderLiveBar()}}
+  else if(m.type==='error'){const w=m.id!=null&&LV.loads&&LV.loads[m.id];if(w){delete LV.loads[m.id];w.fail(new Error(m.text))}else{LV.err=m.text;renderLiveBar()}}}
 // what the engine should be doing, sent only when it changes: mutes (solo = every other channel), the loop, the speed; a changed song or mix swaps the song in
 function lvSync(){if(!LV.node||!S||!S.song.facts){renderLiveBar();return}const f=S.song.facts,P=LV.node.port;
-  if(LV.key&&LV.key!==lvKey()&&!LV.loading){LV.loading=true;lvLoad(true).finally(()=>{LV.loading=false})}
+  if(LV.key&&LV.key!==lvKey()&&LV.key!=='failed '+lvKey()&&!LV.loading){LV.loading=true;lvLoad(true).finally(()=>{LV.loading=false})}
   f.channels.forEach((_,c)=>{const on=!audible(c);if(LV.sent['m'+c]!==on){LV.sent['m'+c]=on;P.postMessage({type:'mute',ch:c,on})}});
   const o=f.orders[CUR.o],L=lvPatLoop&&o?{from:[o.order,0],to:[o.order,o.rows-1]}:S.loop&&f.orders[S.loop.from[0]]&&f.orders[S.loop.to[0]]?{from:[f.orders[S.loop.from[0]].order,S.loop.from[1]],to:[f.orders[S.loop.to[0]].order,S.loop.to[1]]}:null,ls=JSON.stringify(L);
   if(LV.sent.loop!==ls){LV.sent.loop=ls;P.postMessage({type:'loop',span:L})}

@@ -7,9 +7,10 @@ import tempfile
 import textwrap
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
-from vulturetracker import gui
+from vulturetracker import api, gui
 from vulturetracker.wavload import write_wav
 
 RATE = 44100
@@ -338,13 +339,18 @@ class TestGui(unittest.TestCase):
         st.reload()
         st.apply_mix()
         self.assertEqual((st.facts["volume"], st.mix(), len(st.history)), ([32, 64], {}, 1))
-        write_wav(self.dir / "hi.wav", RATE, [sine(660)], root_note=125)  # a smpl root above B-9: base_note would be ~~~
+        write_wav(self.dir / "hi.wav", RATE, [sine(660)], root_note=125)  # a smpl root above B-9 is no base_note (C2)
+        st.apply(str(self.dir / "hi.wav"))
+        self.assertNotIn("~~~", (self.dir / "song.yaml").read_text(encoding="utf-8"))
+        self.assertEqual((st.error, len(st.history)), (None, 2))
         before = (self.dir / "song.yaml").read_bytes()
-        with self.assertRaises(gui.SongError):
-            st.apply(str(self.dir / "hi.wav"))
-        self.assertEqual(((self.dir / "song.yaml").read_bytes(), st.error), (before, None))
+        with mock.patch.object(gui, "load_song_text", side_effect=gui.SongError(["broken"], [])):
+            with self.assertRaises(gui.SongError):  # a write that does not compile: nothing is written
+                st.apply(str(self.dir / "cand.wav"))
+        self.assertEqual(((self.dir / "song.yaml").read_bytes(), len(st.history)), (before, 2))
         st.apply(str(self.dir / "cand.wav"))
-        self.assertEqual((st.song["samples"][1]["file"], len(st.history)), ("cand.wav", 2))
+        self.assertEqual((st.song["samples"][1]["file"], len(st.history)), ("cand.wav", 3))
+        st.undo()
         st.undo()
         st.undo()
         self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK.replace("title: T", "title: T2"))
@@ -819,6 +825,260 @@ class TestGui(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
             gui.Handler.state = None
+
+    # ---- the September 2026 audit's findings, each pinned
+
+    def serve(self, state):
+        """The HTTP server on a free port with `state` open; returns (port, stop)."""
+        import threading
+        gui.Handler.state = state
+        srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        def stop():
+            srv.shutdown()
+            srv.server_close()
+            gui.Handler.state = None
+        return srv.server_address[1], stop
+
+    @staticmethod
+    def fetch(port, path, data=None, **headers):
+        """(status, headers, body) of a request to the local server."""
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers, e.read()
+
+    def test_undo_brings_the_tryout_settings_back(self):
+        # F3: removing a channel moves the mutes and faders of the channels after it; undo puts them back on the channel
+        # they were set on (and redo moves them again); undo of WRITE MIX brings the unwritten mix back, of U the list
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+        st.song_edit([{"op": "channel_add", "name": "C"}])
+        st.meta["muted"] = [2]
+        st.save_meta()
+        st.set_mix({"volume": {"2": 10}})
+        st.song_edit([{"op": "channel_remove", "ch": 1}])
+        self.assertEqual((st.meta["muted"], st.mix()["volume"]), ([1], {"1": 10}))
+        st.undo()
+        self.assertEqual((st.facts["channels"], st.meta["muted"], st.mix()["volume"]), (["A", "B", "C"], [2], {"2": 10}))
+        st.undo(redo=True)
+        self.assertEqual((st.facts["channels"], st.meta["muted"], st.mix()["volume"]), (["A", "C"], [1], {"1": 10}))
+        st.apply_mix()
+        self.assertEqual(st.mix(), {})
+        st.undo()
+        self.assertEqual(st.mix()["volume"], {"1": 10})
+        st.add_candidates("cand.wav")
+        st.apply(str(self.dir / "cand.wav"))
+        self.assertEqual(st.cands(), [])
+        st.undo()
+        self.assertEqual(st.cands(), [str((self.dir / "cand.wav").resolve())])
+        # an edit that changes no tryout setting leaves them alone on undo (a fader moved since stays)
+        st.edit_cells(0, [{"row": 1, "ch": 0, "cell": "D-5 01 ... ..."}])
+        st.set_mix({"volume": {"0": 20}})
+        st.undo()
+        self.assertEqual(st.mix()["volume"], {"0": 20})
+
+    def test_sample_process_undo_keeps_the_new_wav(self):
+        # T6: undo of an edit of a slot's audio points the slot back at its WAV; the new WAV stays beside the song
+        (self.dir / "song.yaml").write_bytes(SONG_INS.encode("utf-8"))
+        st = self.state()
+        st.song_edit([{"op": "sample_process", "num": 1, "action": "reverse"}])
+        new = self.dir / st.song["samples"][1]["file"]
+        self.assertEqual(new.name, "a-reverse.wav")
+        st.undo()
+        self.assertEqual((st.song["samples"][1]["file"], new.exists()), ("a.wav", True))
+
+    def test_a_tryout_section_with_a_jump_outside_it_renders(self):
+        # F4: the loop idiom (B00 at the end of the last pattern) jumps outside a section that does not hold order 0;
+        # the section's copy drops that jump (and renumbers one inside the slice) instead of failing to compile
+        song = SONG.replace("      03: ... .. ... ... | ... .. ... ...\norders", "      03: ... .. ... ... | ... .. ... B00\norders")
+        song = song.replace("orders: [p1, p2]", "orders: [p1, p1, p2]").replace("      02: ... .. ... ... | C-5 02 ... ...",
+                                                                                "      02: ... .. ... B02 | C-5 02 ... ...")
+        d = api.from_yaml(song)
+        self.assertEqual(api.tryout_song(d, (2, 3))["patterns"]["p2"]["data"].splitlines()[3], "03: ... .. ... ... | ... .. ... ...")
+        cut = api.tryout_song(d, (1, 3))
+        self.assertIn("02: ... .. ... B01 | C-5 02 ... ...", cut["patterns"]["p1"]["data"])  # order 2 is the slice's 1
+        api.compile_song(cut, self.dir)
+        (self.dir / "song.yaml").write_bytes(song.encode("utf-8"))
+        st = self.state()
+        st.meta["orders"] = [2, 3]
+        st.queue_all()
+        for _ in range(100):
+            r = st.renders.get(st.key())
+            if r and r["status"] in ("ready", "failed"):
+                break
+            time.sleep(0.05)
+        self.assertEqual(r["status"], "ready", r.get("error"))
+
+    def test_a_block_order_list_keeps_its_layout_and_comments(self):
+        # F5: an order list written one '- name' per line stays so; an entry that survives keeps its comments
+        block = "orders:\n  - p1  # intro\n  # the drop\n  - p2\n"
+        (self.dir / "song.yaml").write_bytes(SONG.replace("orders: [p1, p2]\n", block).encode("utf-8"))
+        st = self.state()
+        st.song_edit([{"op": "orders", "orders": ["p2", "p1", "p1"]}])
+        self.assertTrue((self.dir / "song.yaml").read_text(encoding="utf-8").endswith(
+            "orders:\n  # the drop\n  - p2\n  - p1  # intro\n  - p1\n"))
+        self.assertEqual([o["pattern"] for o in st.facts["orders"]], ["p2", "p1", "p1"])
+        st.song_edit([{"op": "orders", "orders": ["p1"]}])
+        self.assertTrue((self.dir / "song.yaml").read_text(encoding="utf-8").endswith("orders:\n  - p1  # intro\n"))
+        (self.dir / "song.yaml").write_bytes(SONG.replace("orders: [p1, p2]\n", "orders: [p1,  # a\n  p2]\n").encode("utf-8"))
+        st.reload()
+        with self.assertRaisesRegex(ValueError, "comments"):
+            st.song_edit([{"op": "orders", "orders": ["p2"]}])
+
+    def test_a_byte_order_mark_is_kept_and_does_not_hide_module(self):
+        # F8: a song saved with a BOM before `module:` is edited in place and keeps its BOM
+        (self.dir / "song.yaml").write_bytes(b"\xef\xbb\xbf" + SONG_BLOCK.split("\n", 1)[1].encode("utf-8"))  # module: first
+        st = self.state()
+        st.set_mix({"volume": {"0": 32}})
+        self.assertFalse(st.mix_text()[1])  # written in place, not re-dumped
+        st.apply_mix()
+        st.song_edit([{"op": "module", "key": "tempo", "value": 140}])
+        data = (self.dir / "song.yaml").read_bytes()
+        self.assertTrue(data.startswith(b"\xef\xbb\xbfmodule:\n  title: T\n  tempo: 140\n"))
+        self.assertEqual((st.facts["tempo"], st.facts["volume"][0]), (140, 32))
+
+    def test_corrupt_meta_and_notes_files_are_moved_aside(self):
+        # F7: the files are written whole or not at all; one that does not parse no longer blocks opening the song
+        (self.dir / "song.tryout.json").write_text('{"slot": 1, "cand', encoding="utf-8")
+        (self.dir / "song.notes.json").write_text("[{", encoding="utf-8")
+        st = self.state()
+        self.assertEqual(len(st.snapshot()["notices"]), 2)
+        self.assertTrue((self.dir / "song.tryout.json.corrupt").exists() and (self.dir / "song.notes.json.corrupt").exists())
+        st.add_note({"order": 0, "row": 0, "tag": "ok"})
+        self.assertEqual(len(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))), 1)
+        self.assertEqual([p.name for p in self.dir.glob("*.tmp")], [])  # no temporary file left behind
+
+    def test_an_archive_reports_the_orders_its_notes_were_made_on(self):
+        # F9: the archive's report names each order's pattern and time as the notes' version had them
+        st = self.state()
+        st.add_note({"order": 1, "row": 0, "tag": "second order"})
+        old = st.version()["hash"]
+        (self.dir / "song.yaml").write_bytes(SONG.replace("orders: [p1, p2]", "orders: [p2, p1]").encode("utf-8"))
+        st.reload()
+        md = (self.dir / f"song.notes-{old}.md").read_text(encoding="utf-8")
+        self.assertIn("## ord 1 `p2` (0:00.5 to 0:01.0)", md)
+        st.add_note({"order": 1, "row": 0, "tag": "now p1"})
+        self.assertIn("## ord 1 `p1`", (self.dir / "song.notes.md").read_text(encoding="utf-8"))
+        # T9: a second batch of notes on that version merges into its archive
+        st.notes.append(dict(st.notes[0], id=7, when="x", version={"hash": old, "mtime": "x"}))
+        st._archive_old_notes()
+        self.assertEqual(len(json.loads((self.dir / f"song.notes-{old}.json").read_text(encoding="utf-8"))), 2)
+
+    def test_a_brace_in_a_trailing_comment_is_not_the_entry(self):
+        # F12: a fader written into a one-line channel entry whose comment holds a `}` lands in the entry
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.replace("    - {name: A}\n", "    - {name: A}  # pan: 40 }\n").encode("utf-8"))
+        st = self.state()
+        st.set_mix({"pan": {"0": 10}})
+        st.apply_mix()
+        self.assertIn("    - {name: A, pan: 10}  # pan: 40 }\n", (self.dir / "song.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(st.mix(), {})
+
+    def test_a_one_line_module_is_re_dumped_and_keeps_its_values(self):
+        # T8: the mixer's fallback when the lines cannot be found (a one-line module): the whole song re-dumped, which
+        # compiles and keeps every value
+        st = self.state()
+        st.set_mix({"volume": {"1": 20}, "mix_volume": 90})
+        text, redump = st.mix_text()
+        self.assertTrue(redump)
+        mod = gui.load_song_text(text, self.dir)[0]
+        before = st.mod
+        self.assertEqual(([c.volume for c in mod.channels], mod.mix_volume, mod.tempo, [p.name for p in mod.patterns],
+                          [len(p.rows) for p in mod.patterns]),
+                         ([64, 20], 90, before.tempo, [p.name for p in before.patterns], [len(p.rows) for p in before.patterns]))
+
+    def test_http_routes_and_ranges(self):
+        # S3 and T2: every GET route through the server, a Range the file cannot satisfy, and uploads and imports through
+        # do_POST
+        st = self.state()
+        st.add_candidates("cand.wav")
+        for _ in range(100):
+            if all(r["status"] == "ready" for r in st.renders.values()) and st.renders:
+                break
+            time.sleep(0.05)
+        port, stop = self.serve(st)
+        try:
+            key = st.key()
+            code, h, body = self.fetch(port, f"/wav/{key}")
+            size = len(body)
+            self.assertEqual((code, body[:4]), (200, b"RIFF"))
+            code, h, body = self.fetch(port, f"/wav/{key}", Range="bytes=0-999999999")
+            self.assertEqual((code, len(body), h["Content-Range"]), (206, size, f"bytes 0-{size - 1}/{size}"))
+            self.assertEqual(self.fetch(port, f"/wav/{key}", Range="bytes=-10")[2], (self.dir / ".tryout" / f"{key}.wav").read_bytes()[-10:])
+            self.assertEqual(self.fetch(port, f"/wav/{key}", Range="bytes=abc-")[0], 400)
+            code, h, _ = self.fetch(port, f"/wav/{key}", Range=f"bytes={size}-")
+            self.assertEqual((code, h["Content-Range"]), (416, f"bytes */{size}"))
+            self.assertEqual(self.fetch(port, "/raw/0")[2], (self.dir / "cand.wav").read_bytes())
+            self.assertEqual(self.fetch(port, "/raw/5")[0], 404)
+            self.assertEqual(self.fetch(port, f"/spec/{key}")[2][:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(json.loads(self.fetch(port, "/api/wave/1?a=0&b=100&n=20")[2])["frames"], 13230)
+            self.assertEqual(json.loads(self.fetch(port, "/api/pattern/0")[2])["name"], "p1")
+            self.assertEqual(self.fetch(port, "/api/pattern/9")[0], 404)
+            self.assertEqual(len(json.loads(self.fetch(port, "/api/sounding/0")[2])["rows"]), 4)
+            self.assertEqual(self.fetch(port, "/api/it")[2][:4], b"IMPM")
+            code, _, body = self.fetch(port, "/api/upload?name=dropped%20one.wav", (self.dir / "b.wav").read_bytes())
+            self.assertEqual((code, Path(json.loads(body)["path"]).name), (200, "dropped_one.wav"))
+            self.assertEqual(self.fetch(port, "/api/upload?name=x.wav", b"not a wav")[0], 400)
+            (self.dir / "m.it").write_bytes(api.compile_song(api.from_yaml(SONG), self.dir)[0])
+            code, _, body = self.fetch(port, "/api/import", json.dumps({"path": str(self.dir / "m.it")}).encode())
+            self.assertEqual((code, Path(json.loads(body)["path"]).name), (200, "m.yaml"))
+            self.assertTrue(st.closed)  # S5: the song it replaced stopped its worker
+        finally:
+            stop()
+
+    def test_opening_another_song_stops_the_old_worker(self):
+        # S5: the old state's worker thread ends instead of rendering on into its cache
+        import threading
+        gui.Handler.state = None
+        try:
+            gui.Handler.open_song(self.dir / "song.yaml")
+            old = gui.Handler.state
+            self.states.append(old)
+            n = threading.active_count()
+            gui.Handler.open_song(self.dir / "song.yaml")
+            self.states.append(gui.Handler.state)
+            for _ in range(100):
+                if not any(t.is_alive() and t is not threading.current_thread() and getattr(t, "_target", None) == old._worker
+                           for t in threading.enumerate()):
+                    break
+                time.sleep(0.02)
+            self.assertTrue(old.closed)
+            self.assertLessEqual(threading.active_count(), n + 1)
+        finally:
+            gui.Handler.state = None
+
+    def test_prune_keeps_the_newest_renders(self):
+        # T9: the cache keeps the newest `keep` WAVs and forgets the renders it removed
+        st = self.state()
+        for _ in range(100):  # the song's own render first: it is the newest file
+            if st.renders.get(st.key(), {}).get("status") == "ready":
+                break
+            time.sleep(0.05)
+        for k in range(5):
+            p = st.cache_dir / f"old{k}.wav"
+            p.write_bytes(b"RIFF")
+            st.renders[f"old{k}"] = {"status": "ready", "file": str(p), "error": None}
+            import os
+            os.utime(p, (k, k))
+        st._prune(keep=3)
+        self.assertEqual(sorted(p.stem for p in st.cache_dir.glob("old*.wav")), ["old3", "old4"])
+        self.assertEqual(sorted(k for k in st.renders if k.startswith("old")), ["old3", "old4"])
+        self.assertEqual(st.renders[st.key()]["status"], "ready")
+
+    def test_report_ratings_and_a_new_song_with_a_sample(self):
+        # T9: the report's ratings section; create_song with a first sample
+        st = self.state()
+        st.add_candidates("cand.wav")
+        st.meta["ratings"][str((self.dir / "cand.wav").resolve())] = {"stars": 3, "note": "warm"}
+        self.assertIn('## Tryout ratings\n\n- slot 1: cand *** "warm"', st.report())
+        p = gui.create_song(self.dir / "new" / "made.yaml", 4, str(self.dir / "a.wav"))
+        self.assertTrue(api.check(p)["ok"])
+        self.assertIn("a.wav", p.read_text(encoding="utf-8"))
 
     def test_the_page_keeps_its_address(self):
         import socket

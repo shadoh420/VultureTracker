@@ -66,6 +66,30 @@ class TestEngine(unittest.TestCase):
         self.assertGreater(r["level"], 0.05)       # the song sounds after the swap
         self.assertLess(r["diff"], 1e-4)           # and exactly as without one
 
+    def test_loads_report_their_id(self):
+        # a module the engine cannot load answers with the load's id (the page's wait for it ends, E1); a swap replaced
+        # by a newer one before it took over is covered by the newer one's 'loaded', whose id is higher (E2)
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.it").write_bytes(api.compile_song(api.from_yaml(SONG), d)[0])
+            (d / "load.js").write_text(LOAD_JS, encoding="utf-8")
+            out = subprocess.run([NODE, str(d / "load.js"), str(ROOT / "vulturetracker" / "web"), str(d / "song.it")],
+                                 capture_output=True, text=True, timeout=60, check=True)
+        msgs = json.loads(out.stdout)
+        self.assertEqual(msgs[0][:2], ["error", 1])
+        self.assertEqual(msgs[1:], [["loaded", 2], ["loaded", 4]])
+        # the page's side: a 'loaded' ends the wait for its load and every earlier one, an 'error' the wait for its own
+        page = (ROOT / "vulturetracker" / "gui.html").read_text(encoding="utf-8")
+        a = page.index("function lvMsg(")
+        b = page.index("\n// what the engine should be doing")
+        with tempfile.TemporaryDirectory() as tmp:
+            js = Path(tmp) / "msg.js"
+            js.write_text(LVMSG_JS.replace("PAGE", page[a:b]), encoding="utf-8")
+            got = json.loads(subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30, check=True).stdout)
+        self.assertEqual(got, {"done": ["ok 1", "fail 3 bad module", "ok 2", "ok 4"], "left": ["5"], "err": None})
+
     def test_wasm_engine_matches_the_dll(self):
         import numpy as np
         with tempfile.TemporaryDirectory() as tmp:
@@ -86,7 +110,11 @@ class TestEngine(unittest.TestCase):
             self.assertEqual(out.returncode, 0, out.stderr)
             r = json.loads(out.stdout)
         pcm = lambda k: np.frombuffer(base64.b64decode(r[k]), "<i2").astype(int)  # noqa: E731
-        self.assertEqual(r["version"].split("+")[0], library_version().split("+")[0])
+        # the wasm build is 0.8.9, as the vendored DLL is; a system library of another version (Linux distributions ship
+        # 0.7.x) is compared by its renders alone, which agree within 2 LSB all the same
+        self.assertEqual(r["version"].split("+")[0], "0.8.9")
+        if not library_version().startswith("0.8.9"):
+            print(f"\n  note: libopenmpt {library_version()} here, the engine's {r['version']}: renders compared, versions not")
         plain, muted = pcm("plain"), pcm("muted")
         self.assertEqual(len(plain), len(ref))
         self.assertGreater(np.abs(ref).max(), 2000)
@@ -130,6 +158,44 @@ function run(p, metro, blocks) {
   for (let i = 0; i < 128 * blocks; i += 32) { s.read(48000, 32, L, R); const p = s.position(), k = p.order * 1024 + p.row; if (k !== last) { last = k; if (p.row % 2 === 0) expect.push(i + 32) } }
   console.log(JSON.stringify({onsets, expect}));
 })();
+"""
+
+
+# the worklet's loads: garbage (id 1), a good module (2), then while playing two swaps in a row (3, 4): the second
+# replaces the first before it takes over. Prints the loaded/error messages as [type, id]
+LOAD_JS = r"""
+const fs = require('fs'), path = require('path'), WEB = process.argv[2], it = new Uint8Array(fs.readFileSync(process.argv[3]));
+const glue = new Function('libopenmpt', 'require', '__dirname', fs.readFileSync(path.join(WEB, 'libopenmpt.js'), 'utf8') + '\nreturn Module;');
+Object.assign(globalThis, {sampleRate: 48000, currentTime: 0, currentFrame: 0, loadGlue: cfg => glue(cfg, require, WEB),
+  loadOpenmpt: require(path.join(WEB, 'engine-core.js')).loadOpenmpt,
+  AudioWorkletProcessor: class { constructor() { this.port = {postMessage: m => this.onmsg && this.onmsg(m)} } },
+  registerProcessor: (n, c) => { globalThis.Proc = c }});
+require(path.join(WEB, 'engine-worklet.js'));
+(async () => {
+  const p = await new Promise(ok => { const p = new Proc({processorOptions: {wasm: fs.readFileSync(path.join(WEB, 'libopenmpt.wasm'))}}); p.onmsg = m => m.type === 'ready' && ok(p) });
+  const out = [];
+  p.onmsg = m => { if (m.type === 'loaded' || m.type === 'error') out.push([m.type, m.id]) };
+  p.command({type: 'load', bytes: new Uint8Array(100).buffer, id: 1});
+  p.command({type: 'load', bytes: it.slice().buffer, id: 2});
+  p.command({type: 'play', order: 0, row: 0});
+  for (let b = 0; b < 50; b++) p.process([], [[new Float32Array(128), new Float32Array(128)]]);
+  p.command({type: 'load', bytes: it.slice().buffer, keep: true, id: 3});
+  p.command({type: 'load', bytes: it.slice().buffer, keep: true, id: 4});
+  for (let b = 0; b < 200; b++) p.process([], [[new Float32Array(128), new Float32Array(128)]]);
+  console.log(JSON.stringify(out));
+})();
+"""
+
+
+# the page's lvMsg under node, with loads 1-5 waiting: an error for 3, then 'loaded' for 2 and for 4
+LVMSG_JS = r"""
+const done = [], LV = {loads: {}, err: null}, S = null, renderLiveBar = () => {}, $ = () => ({classList: {contains: () => false}});
+for (const id of [1, 2, 3, 4, 5]) LV.loads[id] = {ok: () => done.push('ok ' + id), fail: e => done.push('fail ' + id + ' ' + e.message)};
+PAGE
+lvMsg({type: 'loaded', id: 1});
+lvMsg({type: 'error', id: 3, text: 'bad module'});
+lvMsg({type: 'loaded', id: 4});
+console.log(JSON.stringify({done, left: Object.keys(LV.loads), err: LV.err}));
 """
 
 

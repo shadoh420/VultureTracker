@@ -60,7 +60,7 @@ and no sound is chosen by matching a specific module's sample.
 
 ## Must never be committed (already gitignored, keep it that way)
 
-- [x] `scratch/ut99/`: extracted reference modules, their samples, imports and renders. Reference only, local only.
+- [x] `scratch/ut99-clean/`: extracted reference modules, their samples, imports and renders. Reference only, local only.
 - [x] `demo4/vantage.it` and other `.it` renders: they embed the MusicRadar hits (see below).
 
 ## Third-party sounds that are not Epic's

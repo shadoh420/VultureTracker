@@ -55,10 +55,12 @@ Top-level keys (no others are allowed):
 | `orders` | yes | playback order: a list of pattern names |
 
 Unknown keys anywhere are errors, so typos are caught. Numbers are decimal unless stated otherwise
-(effect parameters are hex). Gaps in sample and instrument numbering are allowed: missing slots are empty.
+(effect parameters are hex); a number written with a leading zero (`08`, `0125`) is decimal too, not YAML 1.1's
+octal, in the compiler and in the app alike. Gaps in sample and instrument numbering are allowed: missing slots are empty.
 
 YAML notes: quote text containing `: ` or starting with `[`, `{`, `#`, `&`, `*`, `!`, `|`, `>`, `%`, `@`.
-Bare `off`, `on`, `yes`, `no` are fine for the enum fields below. Give patterns names that start with
+Bare `off` is fine for the enum fields below that take `off`; a bare `on`, `yes` or `no` reads as true or false,
+which no enum field takes (write the value itself). Give patterns names that start with
 a letter.
 
 ## 3. `module`
@@ -75,7 +77,7 @@ a letter.
 | `old_effects` | bool | false | IT "old effects" mode (keep false) |
 | `compatible_gxx` | bool | false | IT "compatible Gxx" mode (keep false) |
 | `channels` | 1–64, or list | required | channel count, or one entry per channel |
-| `message` | text | none | song message stored in the file |
+| `message` | text | none | song message stored in the file (at most 65534 characters, IT's limit) |
 | `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points and `c5_speed` follow, and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
@@ -117,6 +119,9 @@ samples:
 | `vibrato` | see below | none | automatic vibrato applied to every note |
 | `bits` | 8 or 16 | from WAV | storage depth (8-bit sources stay 8-bit; others become 16-bit) |
 | `stereo` | bool | false | keep a stereo WAV as a stereo sample (libopenmpt/OpenMPT only; Impulse Tracker itself has no stereo). If false, stereo is mixed to mono. |
+
+When the tryout or a dropped WAV points a slot at a new WAV, a `smpl` unity note in the WAV sets `base_note`; one
+above B-9 (119) is no note and is ignored.
 
 Pitch: `base_note: C-3` means the WAV contains a C-3, so playing `C-3` gives the recorded pitch and
 `C-4` plays it an octave up. The compiler sets `c5_speed = wav_rate × 2^((60 − base)/12)`.
@@ -199,7 +204,8 @@ Envelope: `{nodes: [[tick, value], ...], sustain: <i or [a, b]>, loop: [a, b], e
 ```yaml
 patterns:
   verse:
-    rows: 64              # 1..200; defaults to the number of rows written
+    rows: 64              # 1..200; defaults to the number of rows written. The filled cells are stored at up to
+                          # 7 bytes each, and IT holds 65535 bytes per pattern: about 9 000 filled cells
     data: |
       ; comment lines and blank lines are ignored
       00: C-5 01 v64 ... | E-3 02 ... A06 | ...

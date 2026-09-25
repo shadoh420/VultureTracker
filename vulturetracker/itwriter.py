@@ -90,6 +90,19 @@ def _sample_data(smp) -> bytes:
     return bytes(out)
 
 
+PATTERN_BYTES = 65535  # IT's 16-bit length of a pattern's packed cells
+
+
+def packed_size(pat, num_channels) -> int:
+    """The bytes _pattern packs `pat`'s cells into (a full mask per filled cell, one end-of-row byte per row)."""
+    n = len(pat.rows)
+    for row in pat.rows:
+        for cell in row[:num_channels]:
+            k = (cell.note is not None) + bool(cell.instrument) + (cell.volcmd is not None) + 2 * bool(cell.effect or cell.param)
+            n += 2 + k if k else 0
+    return n
+
+
 def _pattern(pat, num_channels) -> bytes:
     # ponytail: always writes a full mask per cell (no last-value compression); files are a bit larger but valid.
     packed = bytearray()
@@ -112,7 +125,7 @@ def _pattern(pat, num_channels) -> bytes:
             if mask:
                 packed += bytes(((ch + 1) | 0x80, mask)) + data
         packed.append(0)
-    if len(packed) > 65535:
+    if len(packed) > PATTERN_BYTES:
         raise ValueError(f"pattern '{pat.name}': {len(packed)} bytes of cell data; IT holds at most 65535 per pattern "
                          "(fewer rows, channels or filled cells)")
     return struct.pack("<HH4x", len(packed), len(pat.rows)) + packed
