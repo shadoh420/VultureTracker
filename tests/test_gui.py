@@ -1183,6 +1183,32 @@ class TestGui(unittest.TestCase):
             st.undo()
         self.assertEqual(read(), song)
 
+    def test_composition_ops(self):
+        # groove, euclid, chord and layers (compose.py) written into the song text, each one undo step with a report
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+        read = lambda: (self.dir / "song.yaml").read_text(encoding="utf-8")  # noqa: E731
+        col = lambda p, ch: [r[ch] for r in st.pattern_rows(p)["rows"]]  # noqa: E731
+        r = st.song_edit([{"op": "euclid", "pattern": 0, "ch": 0, "r0": 0, "r1": 3, "hits": 3, "steps": 4}])
+        self.assertEqual(r, {"report": "euclid: 2 cells in pattern 'p1'"})
+        self.assertEqual(col(0, 0), ["C-5 01 ... ...", "... .. ... ...", "C-5 01 ... ...", "C-5 01 ... ..."])
+        r = st.song_edit([{"op": "groove", "pattern": None, "ticks": [0, 2]}])  # the whole song, every channel
+        self.assertEqual(r, {"report": "groove: 1 cell in the song"})
+        self.assertEqual(col(0, 0)[3], "C-5 01 ... SD2")
+        st.song_edit([{"op": "layers", "pattern": 0, "chans": [0], "r0": 0, "r1": 3, "instruments": [2, 1]}])
+        self.assertEqual([c[:6] for c in col(0, 0)], ["C-5 02", "... ..", "C-5 01", "C-5 02"])
+        with self.assertRaises(ValueError):  # a triad from channel 1 needs three channels; the song has two
+            st.song_edit([{"op": "chord", "pattern": 0, "ch": 0, "shape": "maj"}])
+        st.song_edit([{"op": "chord", "pattern": 0, "ch": 0, "r0": 0, "r1": 0, "shape": "5"}])  # a power chord fits
+        self.assertEqual(st.pattern_rows(0)["rows"][0][:2], ["C-5 02 ... ...", "G-5 02 ... ..."])
+        for bad in ({"op": "groove", "pattern": 0, "ticks": [6]}, {"op": "euclid", "pattern": None, "ch": 0, "hits": 1,
+                    "steps": 2}, {"op": "layers", "pattern": 1, "chans": [5], "instruments": [1]}):
+            with self.assertRaises(ValueError, msg=bad):
+                st.song_edit([bad])
+        while st.snapshot()["undo"]:
+            st.undo()
+        self.assertEqual(read(), SONG_BLOCK)
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT

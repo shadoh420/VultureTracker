@@ -165,7 +165,20 @@ panned LEFT, CENTRE or RIGHT; its fader moves it after) or an existing one, wher
 alone. Song-wide effects (speed, tempo, jumps, breaks, global volume, pattern loops and delays) and pan commands are not
 copied, and a copy that would land past its pattern's end is dropped; the bar reports the counts. Run it twice into
 channels panned apart (say 3 rows at 60 % to the left, 6 rows at 35 % to the right) for a stereo echo; one or two ticks
-with no rows doubles a lead instead. Each ECHO is one step for Ctrl+Z, the channel it adds included. FIND… (Ctrl+F)
+with no rows doubles a lead instead. Each ECHO is one step for Ctrl+Z, the channel it adds included. COMPOSE writes plain
+cells too, each command one step for Ctrl+Z with a count in the bar. GROOVE delays notes (note-offs too) by a tick count
+per row, repeating from the pattern's first row, as `SDx`: `0 2` swings every other row by two ticks, `0 0 2 2` the
+eighths of four-row beats; a 0 removes a delay, and a note that carries another effect keeps it undelayed. EUCLID makes
+the selected rows of one channel (or, with no selection, the cursor's channel from the cursor down) a Euclidean rhythm
+of the cell at their top: HITS spread as evenly as they go over STEPS (3 / 8 is `x..x..x.`), turned left by ROT, a step
+every EVERY rows, each hit kept with the given percent (seeded: the same settings write the same cells); the other rows
+are cleared. CHORD stacks each note of the selected channel (or the cursor's cell) into the chosen chord over that
+channel and the ones to its right, with the note's instrument and volume, INV lowest tones moved up an octave; note-offs
+are copied across so the chord ends whole, and a chord that needs more channels than the song has is refused (add them
+in the SONG tab). LAYERS rewrites the instrument column of each note: CYCLE takes the listed instruments in turn, note
+by note down each channel (round-robin), BY VOLUME picks by the note's volume, the list running quietest to loudest.
+GROOVE and LAYERS work on the selected channels (every channel with no selection), in THIS PATTERN or the WHOLE SONG.
+FIND… (Ctrl+F)
 finds cells by note, instrument, volume and effect (`*` any characters, `?` one, an empty field anything; F3 or NEXT
 the next match, in this pattern or the whole song, on the channels on show) and REPLACE ALL writes the given fields
 into every match. Every command is one step for Ctrl+Z, a song-wide replace included.

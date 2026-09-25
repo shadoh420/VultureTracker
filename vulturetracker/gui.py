@@ -1971,6 +1971,8 @@ class State:
             remap.append(lambda k, order=order: order.index(k))
         elif kind == "echo":
             self._echo(lines, orders, op, remap)
+        elif kind in ("groove", "euclid", "chord", "layers"):
+            self._compose(lines, op)
         elif kind == "sample_file":  # the slot pointed at another WAV (dropped on it), as the tryout's apply does it
             import copy
             num, f = int(op["num"]), Path(str(op["file"]))
@@ -2212,6 +2214,60 @@ class State:
         msg += f", {lost} effects replaced by the tick delay" if lost else ""
         self._report.append(msg)
 
+    def _compose(self, lines, op):
+        """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
+        delays) and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
+        rows r0..r1, or in every pattern (pattern null); `euclid` (ch, hits, steps, rotate, every, prob, seed) and `chord`
+        (ch, shape, inversion) in one pattern. Part of the song edit's one undo step, with a report of what changed."""
+        from . import compose
+        self._need_compiled()
+        mod, kind, nch = self.mod, op["op"], len(self.mod.channels)
+        whole = op.get("pattern") is None
+        if whole and kind in ("euclid", "chord"):
+            raise ValueError(f"{kind} works on a selection in one pattern")
+        chans = [int(c) for c in op["chans"]] if op.get("chans") is not None else list(range(nch))
+        ch = int(op.get("ch", chans[0] if chans else 0))
+        if not chans or not all(0 <= c < nch for c in chans + [ch]):
+            raise ValueError(f"the song has channels 1-{nch}")
+        insmode = mod.instruments is not None
+
+        def default_volume(cell):  # the volume a note without a volume command starts at: its sample's default
+            if not cell.instrument:
+                return None
+            smp = cell.instrument
+            if insmode:
+                if cell.instrument > len(mod.instruments):
+                    return None
+                smp = mod.instruments[cell.instrument - 1].keymap[cell.note][1]
+            return mod.samples[smp - 1].volume if 0 < smp <= len(mod.samples) else None
+
+        written = skipped = 0
+        for idx in range(len(mod.patterns)) if whole else [int(op["pattern"])]:
+            rows = mod.patterns[idx].rows
+            r0 = 0 if whole else max(0, int(op.get("r0") or 0))
+            r1 = len(rows) - 1 if whole or op.get("r1") is None else min(len(rows) - 1, int(op["r1"]))
+            if kind == "groove":
+                cells, s = compose.groove(rows, chans, r0, r1, op.get("ticks") or [], mod.speed)
+                skipped += s
+            elif kind == "euclid":
+                cells = compose.euclid(rows, ch, r0, r1, int(op["hits"]), int(op["steps"]), int(op.get("rotate") or 0),
+                                       int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)))
+            elif kind == "chord":
+                cells = compose.chord(rows, ch, r0, r1, op.get("shape") or "maj", int(op.get("inversion") or 0), nch)
+            else:
+                cells = compose.layers(rows, chans, r0, r1, op.get("instruments") or [], op.get("mode") or "cycle",
+                                       default_volume)
+            if cells:
+                self._edit_block(lines, idx, cells)
+                written += len(cells)
+        where = "the song" if whole else f"pattern '{mod.patterns[int(op['pattern'])].name}'"
+        if not written:
+            raise ValueError(f"{kind}: nothing to change in {where}" + (
+                f" ({skipped} notes carry another effect, which a delay would replace)" if skipped else ""))
+        msg = f"{kind}: {written} cell{'s' if written != 1 else ''} in {where}"
+        msg += f", {skipped} notes left undelayed (they carry another effect)" if skipped else ""
+        self._report.append(msg)
+
     def _write_orders(self, lines, orders):
         """The order list `orders` written in `lines` in the layout it has: a one-line flow list stays one line (its
         trailing comment kept); a block list (`- name` per line) stays a block, each entry that survives keeping its line
@@ -2263,7 +2319,7 @@ class State:
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
         channel_rename, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
         sample_set (the whole entry), sample_file (the slot pointed at another WAV), sample_delete, sample_process (an edit of the slot's audio written as a new WAV beside the song,
-        the slot pointed at it)) to the song text as one undo step. The tryout's
+        the slot pointed at it), echo, groove, euclid, chord, layers) to the song text as one undo step. The tryout's
         channel mutes and unwritten faders follow a channel that moves or goes; its section and loop are dropped when they
         fall outside a changed order list."""
         with self.lock:
