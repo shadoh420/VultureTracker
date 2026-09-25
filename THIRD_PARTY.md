@@ -36,9 +36,12 @@ upstream sources linked below. The source code in the repository stays MIT.
 | PyYAML | 6.0.3 | MIT | https://github.com/yaml/pyyaml/blob/main/LICENSE |
 | [pedalboard](https://github.com/spotify/pedalboard) (Spotify), with JUCE compiled in | 0.9.25 | GPL-3.0 | https://github.com/spotify/pedalboard/blob/master/LICENSE (source: the same repository, tag v0.9.25) |
 | mido | 1.3.3 | MIT | https://github.com/mido/mido/blob/main/LICENSE |
+| sounddevice | 0.5.6 | MIT | https://github.com/spatialaudio/python-sounddevice/blob/master/LICENSE |
+| PortAudio (the DLLs in sounddevice's Windows wheel, `_sounddevice_data`) | the wheel's build | MIT-style (PortAudio license) | https://github.com/spatialaudio/portaudio-binaries (the ASIO DLL there also compiles in Steinberg's ASIO SDK: check that repository's README for its terms before a release) |
 | PyInstaller bootloader | 6.22.3 | GPL-2.0-or-later with the bootloader exception (the packed program keeps its own license) | https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt |
 
-pedalboard and mido host the synths for the app's RECIPE box; the synths themselves are not packed (below).
+pedalboard and mido host the synths for the app's RECIPE box; the synths themselves are not packed (below). sounddevice and PortAudio are the
+RECORD tab's audio input.
 
 ## Beside the exe (`dist/ffmpeg.exe`, shipped as its own file)
 

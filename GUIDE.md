@@ -252,6 +252,24 @@ player and the live engine never play at once. LATENCY LOW measured 8 ms of outp
 shows base plus output); LATENCY SAFE (40 ms) is there if playback crackles. Render & Export builds the `.it` (and a WAV)
 and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (the newest 60).
 
+**The Record tab** records from an audio input (an interface such as a Focusrite Scarlett 2i2, or any input Windows
+lists) into takes beside the song. INPUT lists the devices with their drivers (on Windows WASAPI, MME and DirectSound;
+tick ASIO to list ASIO drivers too, such as a Scarlett's Focusrite USB ASIO, the lowest latency: it takes effect when the
+app next starts), INPUTS picks what a take keeps (input 1, input 2, both as stereo, or both mixed to mono), RATE the
+sample rate, EXCLUSIVE WASAPI's exclusive mode (the app alone on the device, at its own rate). OPEN starts the meters
+(peak per input with a held peak, amber from -6 dBFS, CLIP when a sample reached full scale) and the TUNER (the note the
+chosen inputs hold, in cents, green within 5); nothing is played back: monitor through the interface itself (a
+Scarlett's DIRECT MONITOR switch), so there is no delay to hear. ● REC and ■ STOP make a take, with up to PRE-ROLL
+seconds from before the click. Each take is written as a 16-bit WAV in `takes/` beside the song (`<name>-01.wav`,
+numbered), its silent edges trimmed (TRIM SILENCE UNDER, keeping 10 ms before the first sound) and its note found (FIND
+THE NOTE: written as the WAV's root note), then goes where THEN says: a CANDIDATE OF THE SLOT in the Tryout (heard in
+the song, rated, written with U like any candidate), a NEW SAMPLE SLOT (tuned to the cent: its c5 speed makes the note
+found play true), or KEEP IN THE LIST. TAKES THIS SESSION lists them (▶ plays one; → CANDIDATE and → NEW SLOT send it on
+later). In the Samples tab, AUTO LOOP proposes loop points for a sustained sound (a whole number of its periods late in
+its steady part, on rising zero crossings where the waveform matches best); CROSSFADE LOOP then smooths the wrap.
+Recording needs `pip install sounddevice` in a source checkout (the exe carries it); `VT_FAKE_AUDIO=1` swaps in a
+simulated two-input interface to try the tab without one.
+
 **Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
 tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets
 the note die away), RELEASE (the instrument's `fadeout`: how fast a replaced or released note fades), a resonant

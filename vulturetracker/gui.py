@@ -46,6 +46,7 @@ RATE = 44100
 # the checkout (for the demo list); a frozen exe looks beside itself and one level up (dist/ in a checkout)
 ROOT = Path(sys.executable).resolve().parent.parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 RECENT = Path(os.environ.get("APPDATA", Path.home())) / "VultureTracker" / "recent.json"
+REC_SETTINGS = RECENT.with_name("record.json")  # the RECORD tab's ASIO choice, read before sounddevice loads
 # the page is served from one address every launch when it can be, and the window keeps a WebView2 profile beside the
 # recent list, so what the browser stores per address stays: the page's settings (localStorage) and the MIDI permission
 PORT = 8723
@@ -818,6 +819,7 @@ class State:
         # settings that write changed (a channel's mutes and faders remapped, the mix written, the slot's candidates
         # cleared by U), as they were, or None}
         self.history, self.future = [], []
+        self.takes = []       # this session's recorded takes, newest first (save_take)
         self.build = None     # last build/export result
         self.stems = None     # stems export progress
         self.recipe_job = None  # the recipe panel's last render, write or synth download: {"status", "error", "log", "file", "need"}
@@ -2581,6 +2583,83 @@ class State:
         st = path.stat()
         return entry, path, *wav_array(str(path), (st.st_mtime, st.st_size))
 
+    @property
+    def takes_dir(self):
+        return self.base_dir / "takes"
+
+    def save_take(self, x, rate, opts=None):
+        """A recorded take (float channels x frames) written as a 16-bit WAV in <song dir>/takes/<name>-NN.wav: its
+        silent edges trimmed (`trim`, under `trim_db` dBFS, 10 ms kept before the first sound), its pitch found
+        (`root`: written as the WAV's root note), then sent on (`dest`): `candidate` adds it to the slot's tryout
+        candidates (U writes it, as with any candidate), `slot` adds a new sample slot tuned to the cent (its c5_speed
+        makes the detected note play true), `keep` leaves it in the list. Returns the take's entry, newest first in
+        State.takes."""
+        import numpy as np
+        from . import dsp
+        from .notation import format_note
+        from .wavload import write_wav
+        opts = opts or {}
+        if opts.get("trim", True):
+            a, b = dsp.trim_edges(x, rate, float(opts.get("trim_db", -50)))
+            if b <= a:
+                raise ValueError(f"the take is silent (nothing above {opts.get('trim_db', -50)} dBFS): nothing saved")
+            x = x[:, a:b]
+        hz = dsp.pitch_of(x, rate) if opts.get("root", True) else None
+        note, cents = dsp.note_of(hz) if hz else (None, 0.0)
+        note = note if note is not None and 0 <= note < 120 else None
+        self.takes_dir.mkdir(exist_ok=True)
+        stem = re.sub(r"[^\w.-]+", "_", str(opts.get("name") or "take"))[:40] or "take"
+        out = next(p for p in (self.takes_dir / f"{stem}-{k:02d}.wav" for k in itertools.count(1)) if not p.exists())
+        pcm = np.clip(np.round(x * 32768), -32768, 32767).astype(np.int32).tolist()
+        write_wav(out, rate, pcm, root_note=note)
+        peak = float(np.abs(x).max())
+        take = {"file": out.name, "path": str(out), "seconds": round(x.shape[1] / rate, 3), "channels": x.shape[0],
+                "peak": round(20 * math.log10(peak), 1) if peak > 0 else None, "clipped": peak >= 0.999,
+                "hz": hz or None, "note": format_note(note) if note is not None else None,
+                "cents": round(cents), "rate": rate, "dest": None, "slot": None}
+        self.takes.insert(0, take)
+        return self.send_take(out.name, opts.get("dest") or "candidate")
+
+    def send_take(self, name, dest):
+        """Take `name` (of State.takes) sent on: `candidate` of the current slot, a new `slot` tuned to the cent (its
+        c5_speed makes the detected note play true), or `keep` (nothing). Returns the take's entry."""
+        take = next((x for x in self.takes if x["file"] == name), None)
+        if take is None:
+            raise ValueError(f"no take {name} in this session")
+        out = Path(take["path"])
+        if dest == "candidate":
+            with self.lock:
+                if str(out) not in self.cands():
+                    self.cands().append(str(out))
+                self.save_meta()
+            take["slot"] = self.slot
+            self.queue_all()
+        elif dest == "slot":
+            from .notation import parse_note
+            num = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
+            keep = {"stereo": True} if take["channels"] == 2 else {}
+            if take["hz"] and take["note"]:  # the detected note plays true: its speed scaled by the cents it was off
+                note = parse_note(take["note"])
+                keep["c5_speed"] = round(take["rate"] * 2 ** ((60 - note) / 12) * 440 * 2 ** ((note - 69) / 12) / take["hz"])
+            self.song_edit([{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "keep": keep}])
+            take["slot"] = num
+        elif dest != "keep":
+            raise ValueError("a take goes to the slot's candidates, a new slot, or stays in the list")
+        take["dest"] = dest
+        return take
+
+    def auto_loop(self, num):
+        """Loop points AUTO LOOP proposes for slot `num`: {start, end (exclusive), hz} in the WAV's frames, or an error
+        naming why none (the sound does not hold steady, or holds no pitch and no match)."""
+        from . import dsp
+        with self.lock:
+            _, _, w, x = self._sample_wav(num)
+        hz = dsp.pitch_of(x, w.rate)
+        lp = dsp.find_loop(x, w.rate, hz)
+        if lp is None:
+            raise ValueError("no loop found: the sound does not hold steady for 0.2 s (a drum or a short hit?)")
+        return {"start": lp[0], "end": lp[1], "hz": round(hz, 2) if hz else None}
+
     def slice_points(self, num, mode="onsets", value=50, a=None, b=None):
         """Where SLICE would cut slot `num`'s WAV, frames a..b (default: all of it): at its hits (`onsets`, value the
         sensitivity 0-100) or into `equal` parts (value the count). {"points": the slices' start frames, "end"}."""
@@ -2756,6 +2835,72 @@ class Handler(BaseHTTPRequestHandler):
     state: State = None
     window = None  # pywebview window, when the UI runs in one
 
+    recorder = None      # record.Recorder, made on the RECORD tab's first request
+    rec_devices = None   # the input devices, listed once (again on REFRESH)
+
+    @classmethod
+    def rec(cls):
+        if cls.recorder is None:
+            from .record import Recorder
+            if _read_json(REC_SETTINGS, {}, []).get("asio"):  # sounddevice loads its ASIO build only when this is set first
+                os.environ.setdefault("SD_ENABLE_ASIO", "1")
+            cls.recorder = Recorder()
+        return cls.recorder
+
+    @classmethod
+    def rec_snapshot(cls, devices=False):
+        """The RECORD tab's state: the input devices, the recorder's meters and tuner, the song's takes."""
+        from .record import MODE_NAMES, RecordError
+        r = cls.rec()
+        out = {"available": True, "error": None, "fake": bool(os.environ.get("VT_FAKE_AUDIO")),
+               "asio": bool(os.environ.get("SD_ENABLE_ASIO")), "asio_saved": bool(_read_json(REC_SETTINGS, {}, []).get("asio")),
+               "modes": MODE_NAMES}
+        try:
+            if devices or cls.rec_devices is None:
+                cls.rec_devices = r.devices()
+            out["devices"] = cls.rec_devices
+        except RecordError as e:
+            out.update(available=False, error=str(e), devices=[])
+        out["status"] = r.status()
+        out["takes"] = cls.state.takes if cls.state else []
+        return out
+
+    @classmethod
+    def rec_command(cls, body):
+        """POST /api/rec: {cmd: open (device, mode, rate, exclusive) | mode | close | start (preroll) | stop (name, trim,
+        trim_db, root, dest: candidate / slot / keep) | discard}."""
+        from .record import RecordError
+        r, cmd = cls.rec(), body.get("cmd")
+        try:
+            if cmd == "open":
+                r.open(int(body["device"]), str(body.get("mode") or "1"), int(body.get("rate") or 44100),
+                       bool(body.get("exclusive")))
+            elif cmd == "mode":
+                r.set_mode(str(body["mode"]))
+            elif cmd == "close":
+                r.close()
+            elif cmd == "start":
+                if cls.state is None:
+                    raise RecordError("open a song first: takes are saved beside it")
+                r.start(float(body.get("preroll") or 0))
+            elif cmd == "asio":  # takes effect at the next start: sounddevice has loaded its PortAudio already
+                REC_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_text(REC_SETTINGS, json.dumps({"asio": bool(body.get("on"))}))
+                now = bool(os.environ.get("SD_ENABLE_ASIO"))
+                return {} if now == bool(body.get("on")) else {"error": "saved: restart the app to switch the ASIO driver "
+                                                                        + ("on" if body.get("on") else "off")}
+            elif cmd == "send":
+                return {"take": cls.state.send_take(str(body["file"]), str(body.get("dest") or "candidate"))}
+            elif cmd in ("stop", "discard"):
+                x = r.stop()
+                if cmd == "stop" and x is not None:
+                    return {"take": cls.state.save_take(x, r.rate, body)}
+            else:
+                raise RecordError(f"unknown recorder command {cmd!r}")
+        except (RecordError, ValueError) as e:
+            return {"error": str(e)}
+        return {}
+
     @classmethod
     def open_song(cls, path):
         old, cls.state = cls.state, State(path)
@@ -2870,8 +3015,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, effect_help())
         if path == "/api/start":
             return self._send(200, start_snapshot())
+        if path == "/api/rec":
+            return self._send(200, self.rec_snapshot("devices=1" in self.path))
         if st is None:
             return self._send(404, {"error": "no song open"})
+        if path.startswith("/take/"):
+            f = st.takes_dir / Path(path[6:]).name  # a file of the song's takes folder, nothing else
+            return self._send_file(f, "audio/wav")
+        if path.startswith("/api/autoloop/"):
+            try:
+                return self._send(200, st.auto_loop(int(path[14:])))
+            except (ValueError, OSError, ImportError) as e:
+                return self._send(404, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/api/pattern/"):
             try:
                 return self._send(200, st.pattern_rows(int(path[13:])))
@@ -2959,6 +3114,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": str(out), "warnings": warnings})
             elif act == "browsewav":
                 return self._send(200, {"path": self.browse(wav=True)})
+            elif act == "rec":
+                return self._send(200, self.rec_command(body))
             elif act == "browse":
                 p = self.browse()
                 if p:

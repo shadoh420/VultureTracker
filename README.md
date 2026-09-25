@@ -27,7 +27,11 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
   flood, transpose, interpolate, amplify, find and replace. The order list, patterns, channels and song settings. Every
   instrument field, with envelopes as draggable graphs and a keymap editor. A sample editor with a zoomable waveform,
   loop and sustain-loop points, and trim / fade / normalize / reverse / DC removal / crossfaded loops written as new WAVs
-  beside the song (never over a source file).
+  beside the song (never over a source file), with effects (gain, filters, EQ, loudness, pitch, stretch, truncate
+  silence), slicing at the hits into slots and a kit, and auto loop points. Composition helpers in the Pattern tab
+  (groove, Euclidean rhythms, chords over channels, round-robin and velocity layers) and rows rendered into a new slot.
+- **Recording.** The Record tab records from an audio interface (WASAPI or ASIO) with meters and a tuner; takes are
+  trimmed, their note found, and sent to the Tryout as candidates or into new slots tuned to the cent.
 - **Choosing sounds in context.** The Tryout tab renders candidate samples inside the song, measures them against the
   current one and writes the choice with one key; a mixer with channel and sample faders; listening notes dropped at the
   playhead with the channels sounding there, kept as a report for a collaborator who cannot listen; a spectrogram.
@@ -41,14 +45,14 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
 cd VultureTracker
-pip install pyyaml pywebview numpy imageio-ffmpeg
+pip install pyyaml pywebview numpy imageio-ffmpeg sounddevice
 ```
 
 Python 3.10+. Only PyYAML is required to compile songs. pywebview opens the app in its own window (without it, the app
 opens in the browser); numpy is needed for measurements, the spectrogram, the sample editor and resampling;
-imageio-ffmpeg provides the ffmpeg that the MP3 / OGG / FLAC export runs. Windows x64 has libopenmpt in `vendor/`;
-elsewhere install libopenmpt or point `LIBOPENMPT` at it. `pip install pyinstaller && python tools/build_exe.py` builds
-`dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
+imageio-ffmpeg provides the ffmpeg that the MP3 / OGG / FLAC export runs; sounddevice is the RECORD tab's audio input.
+Windows x64 has libopenmpt in `vendor/`; elsewhere install libopenmpt or point `LIBOPENMPT` at it.
+`pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
 
 ## Use
 

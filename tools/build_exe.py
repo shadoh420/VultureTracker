@@ -2,11 +2,13 @@
 
 The exe is the whole CLI; `vulturetracker.exe gui song.yaml` opens the app in its own window (pywebview), or in the
 default browser without it.
-Bundled: the package, gui.html, the vendored libopenmpt DLLs and pedalboard + mido (the synth host, GPL-3: the exe is
-therefore distributed under GPL-3, THIRD_PARTY.md). Not bundled: Surge XT, Dexed, OB-Xd and the sample packs; the app's
-RECIPE box downloads Surge XT and Dexed into %LOCALAPPDATA%/VultureTracker/tools when a recipe needs them.
+Bundled: the package, gui.html, the vendored libopenmpt DLLs, pedalboard + mido (the synth host, GPL-3: the exe is
+therefore distributed under GPL-3, THIRD_PARTY.md) and sounddevice with its PortAudio DLLs (the RECORD tab, MIT).
+Not bundled: Surge XT, Dexed, OB-Xd and the sample packs; the app's RECIPE box downloads Surge XT and Dexed into
+%LOCALAPPDATA%/VultureTracker/tools when a recipe needs them.
 ffmpeg (for the MP3/OGG/FLAC export) is copied beside the exe as dist/ffmpeg.exe from imageio-ffmpeg, not packed into it:
 a packed file is unpacked to %TEMP% on every launch. Ship both files; its build is GPL-3 (THIRD_PARTY.md)."""
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +38,12 @@ cmd = [
 ]
 for dll in (ROOT / "vendor").glob("*.dll"):
     cmd += ["--add-binary", f"{dll}{sep}vendor"]
+# the RECORD tab's audio input (sounddevice, MIT): on Windows its wheel carries PortAudio in _sounddevice_data, both the
+# plain DLL and the ASIO one; without sounddevice installed the exe builds and the tab says what is missing
+if importlib.util.find_spec("sounddevice"):
+    cmd += ["--hidden-import", "sounddevice"]
+    if importlib.util.find_spec("_sounddevice_data"):
+        cmd += ["--collect-all", "_sounddevice_data"]
 print(" ".join(cmd))
 code = subprocess.call(cmd, cwd=ROOT)
 try:

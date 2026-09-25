@@ -108,6 +108,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab" data-t="song" onclick="tab('song')">SONG</div>
   <div class="tab" data-t="ins" onclick="tab('ins')">INSTRUMENTS</div>
   <div class="tab" data-t="smp" onclick="tab('smp')">SAMPLES</div>
+  <div class="tab" data-t="rec" onclick="tab('rec')">RECORD</div>
   <div class="tab" data-t="spectrum" onclick="tab('spectrum')">SPECTRUM</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
@@ -246,7 +247,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:12px">
           <span class="k" title="each writes a new WAV beside the song (the source file is never touched) and points the slot at it; one undo step">EDIT → NEW WAV</span>
           <span class="btn sm" onclick="smpProcess('trim')" title="keep the selection only (loops move with it)">TRIM TO SELECTION</span><span class="btn sm" onclick="smpProcess('fade_in')" title="over the selection, else the whole sample">FADE IN</span><span class="btn sm" onclick="smpProcess('fade_out')" title="over the selection, else the whole sample">FADE OUT</span><span class="btn sm" onclick="smpProcess('normalize')" title="the peak of the selection (else the whole sample) to full scale">NORMALIZE</span><span class="btn sm" onclick="smpProcess('reverse')" title="the selection, else the whole sample (its loops mirrored)">REVERSE</span><span class="btn sm" onclick="smpProcess('dc')" title="subtract the mean of the selection, else of the whole sample">REMOVE DC</span>
-          <span class="btn sm" style="margin-left:8px" onclick="smpProcess('crossfade',{frames:Math.round((+$('smp-xf').value||0)*W.data.rate/1000)})" title="the end of the loop fades (equal power) into the audio just before its start, so the wrap is seamless; needs that much audio before the loop start">CROSSFADE LOOP</span><input id="smp-xf" type="number" min="1" value="20" style="width:48px;font:10px var(--mono);padding:1px 3px"><span class="k">MS</span>
+          <span class="btn sm" style="margin-left:8px" onclick="smpProcess('crossfade',{frames:Math.round((+$('smp-xf').value||0)*W.data.rate/1000)})" title="the end of the loop fades (equal power) into the audio just before its start, so the wrap is seamless; needs that much audio before the loop start">CROSSFADE LOOP</span><input id="smp-xf" type="number" min="1" value="20" style="width:48px;font:10px var(--mono);padding:1px 3px"><span class="k">MS</span><span class="btn sm" style="margin-left:8px" onclick="smpAutoLoop()" title="loop points for a sustained sound: a whole number of its periods late in its steady part, on rising zero crossings where the waveform matches best (then CROSSFADE LOOP smooths the wrap)">AUTO LOOP</span>
         </div>
         <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:8px">
           <span class="k" title="each works on the selection (else the whole sample), writes a new WAV beside the song and points the slot at it; one undo step. Filters are zero-phase (no phase shift between bands)">EFFECTS → NEW WAV</span>
@@ -291,6 +292,35 @@ option.hascand{color:var(--acc);font-weight:700}
         <div id="specgrid" style="position:absolute;inset:0;pointer-events:none"></div>
         <b id="spechead" style="position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--acc);pointer-events:none"></b>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="main" id="t-rec">
+  <div class="panel" style="flex:1;overflow:auto">
+    <div class="ph"><span class="k">RECORD</span><span id="rec-msg" class="mono" style="font-size:10px;color:var(--amber);margin-left:10px"></span></div>
+    <div class="pb">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+        <span class="k">INPUT</span><select id="rec-dev" style="font:10.5px var(--mono);padding:1px 3px" title="the audio interface and its driver: on Windows WASAPI for most uses; ASIO (a Scarlett's Focusrite USB ASIO) when the app starts with SD_ENABLE_ASIO=1"></select><span class="btn sm" onclick="recPoll(true)" title="list the devices again (after plugging one in)">REFRESH</span>
+        <span class="k" style="margin-left:8px">INPUTS</span><select id="rec-mode" style="font:10.5px var(--mono);padding:1px 3px" onchange="recMode()" title="which of the interface's inputs a take keeps (a Scarlett 2i2: 1 is the left jack, 2 the right)"></select>
+        <span class="k">RATE</span><select id="rec-rate" style="font:10.5px var(--mono);padding:1px 3px"><option value="44100">44100</option><option value="48000">48000</option></select>
+        <label style="font-size:10px;color:var(--dim)" title="list ASIO drivers too (a Scarlett's Focusrite USB ASIO: the lowest latency); takes effect when the app next starts"><input type="checkbox" id="rec-asio" onchange="recCmd({cmd:'asio',on:this.checked})"> ASIO</label>
+        <label style="font-size:10px;color:var(--dim)" title="WASAPI exclusive mode: the app alone on the device, at its own rate (else the shared mode, which converts the rate)"><input type="checkbox" id="rec-excl"> EXCLUSIVE</label>
+        <span class="btn sm" id="rec-open" onclick="recOpen()">OPEN</span>
+      </div>
+      <div id="rec-meters" style="margin-top:14px;max-width:720px"></div>
+      <div style="display:flex;align-items:baseline;gap:14px;margin-top:10px"><span class="k">TUNER</span><span id="rec-tuner" class="mono" style="font-size:22px;color:#c3cbcf;min-width:110px">–</span><span id="rec-cents" class="mono" style="font-size:11px;color:var(--dim)"></span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap">
+        <span class="btn big" id="rec-go" onclick="recGo()" title="start and stop a take">● REC</span><span class="mono" id="rec-time" style="font-size:16px;min-width:64px">0:00.0</span>
+        <span class="k">NAME</span><input id="rec-name" value="take" style="width:110px;font:10.5px var(--mono);padding:1px 3px">
+        <span class="k">PRE-ROLL</span><input id="rec-pre" type="number" value="0.2" step="0.1" min="0" max="0.5" style="width:46px;font:10.5px var(--mono);padding:1px 3px" title="seconds from before REC that open the take (up to 0.5): a note started just before the click is kept"><span class="k">S</span>
+        <label style="font-size:10px;color:var(--dim)"><input type="checkbox" id="rec-trim" checked> TRIM SILENCE UNDER</label><input id="rec-tdb" type="number" value="-50" style="width:42px;font:10.5px var(--mono);padding:1px 3px"><span class="k">DBFS</span>
+        <label style="font-size:10px;color:var(--dim)" title="the pitch the take holds (YIN), written as its root note; a new slot is also tuned to the cent"><input type="checkbox" id="rec-root" checked> FIND THE NOTE</label>
+        <span class="k">THEN</span><select id="rec-dest" style="font:10.5px var(--mono);padding:1px 3px"><option value="candidate">CANDIDATE OF THE SLOT</option><option value="slot">NEW SAMPLE SLOT</option><option value="keep">KEEP IN THE LIST</option></select>
+        <span class="btn sm" onclick="recCmd({cmd:'discard'})" title="stop without saving">DISCARD</span>
+      </div>
+      <div style="margin-top:8px;font-size:10.5px;color:var(--dim)">Monitor through the interface (a Scarlett's DIRECT MONITOR switch): the app does not play the input back. Takes are saved in <span class="mono">takes/</span> beside the song as 16-bit WAVs; a candidate is written into the slot with U in the TRYOUT tab, as any candidate.</div>
+      <div class="k" style="margin-top:18px">TAKES THIS SESSION</div><div id="rec-takes" style="margin-top:6px"></div>
     </div>
   </div>
 </div>
@@ -392,7 +422,7 @@ async function importModule(pick){const path=$('imppath').value.trim();if(!pick&
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp()}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs)}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -807,6 +837,8 @@ function smpProcess(action,extra){if(SMP_SEL==null||!W.data||EDQ.n)return;const 
 function smpFx(action){const v=id=>+$(id).value,P={gain:{db:v('fx-gain')},lowpass:{hz:v('fx-lp'),slope:v('fx-slope')},highpass:{hz:v('fx-hp'),slope:v('fx-slope')},
   eq:{hz:v('fx-eqhz'),db:v('fx-eqdb'),q:v('fx-eqq')},loudness:{db:v('fx-loud')},pitch:{semitones:v('fx-pitch')},stretch:{percent:v('fx-stretch')},
   truncate:{db:v('fx-tdb'),min_ms:v('fx-tmin'),keep_ms:v('fx-tkeep')}}[action];smpProcess(action,{params:P})}
+function smpAutoLoop(){if(SMP_SEL==null||!W.data||EDQ.n)return;fetch('/api/autoloop/'+SMP_SEL).then(r=>r.json()).then(j=>{if(j.error)return smpInfo(j.error.replace(/^\w+: /,''));
+  smpSet(x=>{x.loop={start:j.start,end:j.end}});smpInfo(`loop ${j.start}–${j.end}`+(j.hz?` · ${(j.end-j.start)*j.hz/W.data.rate|0} periods of ${j.hz} Hz`:''))})}
 function smpHear(on){const p=W.data&&W.data.player;if(!p){if(on&&W.data)smpInfo('no instrument plays this slot: nothing to preview it with');return}if(on)lvNoteOn('aud',p[0],p[1]);else lvNoteOff('aud')}
 function smpKey(){const cv=$('smp-wave'),e=smpEntry();return `${S.song.mtime}|${SMP_SEL}|${e&&e.file}|${W.a}|${W.b}|${Math.max(16,Math.round(cv.clientWidth*(devicePixelRatio||1)))}`}
 // one request in flight; a view that changes meanwhile is fetched when it lands (the old peaks are drawn stretched until then)
@@ -1026,6 +1058,38 @@ function selEuclid(){const s=selSpan();if(!s.cur&&!s.one)return selInfo('select 
     rotate:+$('cmp-rot').value||0,every:+$('cmp-every').value||1,prob:+$('cmp-prob').value,seed:1})}
 function selChord(){const s=selSpan();if(!s.cur&&!s.one)return selInfo('select rows of one channel to make chords of');
   compOp({op:'chord',pattern:PAT.idx,ch:s.cur?CUR.ch:s.chans[0],r0:s.cur?CUR.row:s.r0,r1:s.cur?CUR.row:s.r1,shape:$('cmp-chord').value,inversion:+$('cmp-inv').value||0})}
+// ---- the RECORD tab (record.py through /api/rec): an input opened for meters and the tuner, takes between REC and STOP
+// saved beside the song and sent to the slot's candidates or a new slot. Polled ten times a second while the tab is on.
+const REC={devs:null,st:null,timer:null,busy:false};
+const fmtNote=n=>NOTES[n%12]+Math.floor(n/12);
+function recOn(){return $('t-rec').classList.contains('on')}
+async function recPoll(devices){if(REC.busy)return;REC.busy=true;if(devices)REC.devs=true;try{const j=await (await fetch('/api/rec'+(devices?'?devices=1':''))).json();REC.st=j;renderRec()}catch(e){}finally{REC.busy=false}
+  clearTimeout(REC.timer);if(recOn()||(REC.st&&REC.st.status.recording))REC.timer=setTimeout(()=>recPoll(false),100)}
+async function recCmd(body){const r=await (await fetch('/api/rec',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json();
+  $('rec-msg').textContent=r.error||'';if(r.take){const t=r.take;$('rec-msg').textContent=`saved ${t.file} · ${t.seconds.toFixed(2)} s`+(t.note?` · ${t.note} ${t.cents>=0?'+':''}${t.cents} cents`:'')+(t.clipped?' · CLIPPED':'')+(t.dest==='candidate'?` · a candidate of slot ${pad(t.slot)}`:t.dest==='slot'?` · new slot ${pad(t.slot)}`:'');refresh()}
+  recPoll(false);return r}
+function recOpen(){const st=REC.st&&REC.st.status;if(st&&st.open)return recCmd({cmd:'close'});
+  recCmd({cmd:'open',device:+$('rec-dev').value,mode:$('rec-mode').value,rate:+$('rec-rate').value,exclusive:$('rec-excl').checked})}
+function recMode(){const st=REC.st&&REC.st.status;if(st&&st.open)recCmd({cmd:'mode',mode:$('rec-mode').value})}
+function recGo(){const st=REC.st&&REC.st.status;if(!st||!st.open)return $('rec-msg').textContent='OPEN an input first';
+  if(st.recording)recCmd({cmd:'stop',name:$('rec-name').value||'take',trim:$('rec-trim').checked,trim_db:+$('rec-tdb').value,root:$('rec-root').checked,dest:$('rec-dest').value});
+  else recCmd({cmd:'start',preroll:+$('rec-pre').value||0})}
+function recPlay(f){if(REC.audio)REC.audio.pause();REC.audio=new Audio('/take/'+encodeURIComponent(f));REC.audio.play()}
+function renderRec(){const j=REC.st;if(!j)return;const st=j.status,sel=(id,opts,v)=>{const el=$(id),key=JSON.stringify(opts);if(el.dataset.key!==key){el.dataset.key=key;el.innerHTML=opts.map(([k,l])=>`<option value="${esc(k)}">${esc(l)}</option>`).join('')}if(v!=null&&document.activeElement!==el)el.value=v};
+  if(!j.available)$('rec-msg').textContent=j.error;
+  sel('rec-dev',(j.devices||[]).map(d=>[String(d.id),`${d.name} · ${d.hostapi} · ${d.inputs} in`]),st.open?String(st.device):null);
+  sel('rec-mode',Object.entries(j.modes||{}),st.open?st.mode:null);if(st.open)$('rec-rate').value=String(st.rate);
+  if(document.activeElement!==$('rec-asio'))$('rec-asio').checked=!!j.asio_saved;
+  $('rec-open').textContent=st.open?'CLOSE':'OPEN';$('rec-open').classList.toggle('on',st.open);
+  const go=$('rec-go');go.textContent=st.recording?'■ STOP':'● REC';go.style.background=st.recording?'var(--red)':'';go.style.color=st.recording?'#0b0e0f':'';
+  $('rec-time').textContent=fmtT(st.seconds||0);
+  const bar=(i)=>{const p=st.peak[i],h=st.hold[i],w=v=>v==null?0:Math.max(0,Math.min(100,(v+60)/60*100)),c=st.clip[i];
+    return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span class="k" style="width:52px">INPUT ${i+1}</span><div style="position:relative;flex:1;height:12px;background:#0b0e0f;border:1px solid #242a2e">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:${w(p)}%;background:${p!=null&&p>-6?'var(--amber)':'#7ee787'}"></div><div style="position:absolute;top:0;bottom:0;left:${w(h)}%;width:2px;background:#c3cbcf"></div></div>
+      <span class="mono" style="width:70px;font-size:10px;color:#c3cbcf">${p==null?'−∞':p.toFixed(1)} dB</span><span class="mono" style="font-size:10px;padding:0 5px;background:${c?'var(--red)':'#1b2023'};color:${c?'#0b0e0f':'#555f64'}">CLIP</span></div>`};
+  $('rec-meters').innerHTML=st.open?[...Array(st.inputs).keys()].map(bar).join('')+(st.overflows?`<div style="font-size:10px;color:var(--amber)">${st.overflows} input overflows: pick a larger buffer or close other audio programs</div>`:''):'<div style="font-size:10.5px;color:var(--dim)">OPEN an input to see its level and the tuner</div>';
+  const tu=st.tuner;$('rec-tuner').textContent=tu?fmtNote(tu.note):'–';$('rec-cents').textContent=tu?`${tu.cents>=0?'+':''}${tu.cents} cents · ${tu.hz} Hz`:'';$('rec-tuner').style.color=tu&&Math.abs(tu.cents)<=5?'#7ee787':'#c3cbcf';
+  $('rec-takes').innerHTML=(j.takes||[]).length?`<table style="max-width:900px"><tr><th></th><th>FILE</th><th class="r">SECONDS</th><th>NOTE</th><th class="r">PEAK</th><th>WENT TO</th><th></th></tr>`+j.takes.map(t=>`<tr><td><span class="btn sm" onclick="recPlay(${attr(t.file)})">▶</span></td><td class="mono">${esc(t.file)}</td><td class="r">${t.seconds.toFixed(2)}</td><td>${t.note?`${esc(t.note)} ${t.cents>=0?'+':''}${t.cents}¢`:'–'}</td><td class="r" style="color:${t.clipped?'var(--red)':''}">${t.peak==null?'–':t.peak.toFixed(1)}${t.clipped?' CLIP':''}</td><td>${t.dest==='candidate'?'candidate of slot '+pad(t.slot):t.dest==='slot'?'slot '+pad(t.slot):'the list'}</td><td><span class="btn sm" onclick="recCmd({cmd:'send',file:${attr(t.file)},dest:'candidate'})">→ CANDIDATE</span><span class="btn sm" onclick="recCmd({cmd:'send',file:${attr(t.file)},dest:'slot'})">→ NEW SLOT</span></td></tr>`).join('')+'</table>':'<div style="font-size:10.5px;color:var(--dim)">none yet</div>'}
 // the echo's targets: a new channel panned left, centre or right, or any channel of the song
 function renderEchoTo(){const el=$('echo-to');if(!el||!S||!S.song.facts)return;const ch=S.song.facts.channels,key=JSON.stringify(ch);if(el.dataset.key===key)return;
   const v=el.value;el.dataset.key=key;el.innerHTML=[['new:16','NEW · LEFT'],['new:32','NEW · CENTRE'],['new:48','NEW · RIGHT']].concat(ch.map((c,i)=>[String(i),`${pad(i+1)} ${c}`])).map(([k,l])=>`<option value="${esc(k)}">${esc(l)}</option>`).join('');

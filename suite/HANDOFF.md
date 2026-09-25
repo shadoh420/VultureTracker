@@ -536,8 +536,14 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   instrument) followed, each checked in Chromium on a scratch song. Phrases (chunk 5) were left out: the other
   helpers write the same cells, and phrases would need a new song-format feature. Chunk 3b: the Samples tab's EFFECTS
   → NEW WAV (gain, low/high-pass, an EQ band, loudness, pitch at the same length, stretch at the same pitch, truncate
-  silence; `dsp.py`, new `sample_process` actions, loops following changes of length), checked in Chromium. Next: 2a
-  (recording with the owner's Scarlett 2i2) last, by the owner's word.
+  silence; `dsp.py`, new `sample_process` actions, loops following changes of length), checked in Chromium. Chunk 2a,
+  built against a simulated interface (no audio hardware in the cloud): the RECORD tab (`record.py` on sounddevice:
+  devices and drivers, inputs 1 / 2 / stereo / mono, meters with clip, a YIN tuner, pre-roll; takes in `takes/` beside
+  the song, trimmed, their note found, sent to the slot's candidates or a new slot tuned to the cent), AUTO LOOP in the
+  Samples tab, an ASIO choice saved in %APPDATA%/VultureTracker/record.json (read before sounddevice loads), the exe
+  build collecting sounddevice and its PortAudio DLLs. `VT_FAKE_AUDIO=1` runs the tab on the simulated interface.
+  Left for the owner's machine: the real Scarlett (WASAPI shared and exclusive, ASIO), levels, latency, the exe; 2c
+  (recording along with the song: count-in, latency calibration, loop takes) is not built.
 
 ## Next steps, in order
 
