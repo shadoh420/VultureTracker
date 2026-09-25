@@ -34,7 +34,7 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 | `demo/`, `demo2/`, `demo3/`, `demo4/` | the demo songs with their generators; `demo4/vantage.yaml` is the piece the owner likes best | yaml and scripts yes, `.it`/`.wav` ignored |
 | `suite/` | the UT99 tribute suite: `HANDOFF.md` (current state), `NEXT-PROMPT.md` (how the next piece is to be made), `nadir/` (the first piece) | yes, renders ignored |
 | `samples/` | committed samples per demo and piece with an `ATTRIBUTION.md` each; `samples/local/` is scratch and ignored | partly |
-| `tools/` | `build_exe.py`, `demo_video.py`, `bench.py` (times compile, render and an edit on the demos), fetchers; `tools/cc0`, `tools/surge-xt`, `tools/synths`, `tools/royalty-free` are downloaded and ignored | scripts yes |
+| `tools/` | `build_exe.py`, `demo_video.py`, `bench.py` (times compile, render and an edit on the demos), `dmo_spike.py` (OpenMPT's DMO effects written into an .it and measured in both libopenmpt builds; not in the compiler), fetchers; `tools/cc0`, `tools/surge-xt`, `tools/synths`, `tools/royalty-free` are downloaded and ignored | scripts yes |
 | `scratch/` | local only, never committed: `scratch/ut99-clean/` holds the extracted Unreal Tournament modules (copyright Epic) and the analysis scripts (`analyze.py`, `structure.py`, `compare.py`, `spectrogram.py`, `GROUPS.md`) | no |
 | `vendor/` | libopenmpt DLLs for Windows | yes |
 | `.claude/` | `hooks/session-start.sh`: cloud sessions install libopenmpt (Ubuntu's 0.7.x), numpy, pyyaml, Pillow, imageio-ffmpeg and Playwright and set `VT_CHROMIUM`, so the tests run at once | yes |

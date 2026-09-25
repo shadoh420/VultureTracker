@@ -650,6 +650,27 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   → NEW SLOT wrote paint-glide.wav (stereo) + .png, slot 03 and instrument 03; → CANDIDATE; ▶ and FILTER SLOT on slot 01
   (a-spectral_mask.wav); LOAD IMAGE of a red-to-green diagonal PNG (pans -1 .. 0.93); the picture kept over a reload;
   no page errors. Not heard.
+  Then the chunk 7a spike (not in the compiler: the owner's call), `tools/dmo_spike.py`: a compiled .it gets OpenMPT's
+  plugin chunks after its pointer tables (`CHFX`: a plugin per channel; `FX00`..: a 128-byte SNDMIXPLUGININFO with
+  id1 'DXMO' and the DMO's CLSID Data1, e.g. Echo 0xEF3E932C, gain 10, then type 0 and the parameters as floats 0-1,
+  then an empty modular block), every later offset shifted (pointers, message, each sample's data pointer); with
+  special bit 3 a 4896-byte MIDI macro config goes first, so an SFx macro "F0F080z" makes Zxx set the channel plugin's
+  parameter 0. Measured on one channel (an 80 ms 440 Hz hit on rows 0 and 32, speed 6 tempo 125; Echo wet 50 %,
+  feedback 50 %, 500 ms both sides), dBFS over 50 ms after each hit at 0 / 250 / 500 / 750 / 1000 / 1500 ms:
+  dry -29.7 / - / - / - / - / -; with the Echo -35.7 / - / -36.9 / - / -43.0 / -49.0 (the same in libopenmpt 0.7.3
+  through ctypes, 0.8.9 wasm under node, and 0.8.9 in Chromium through the app's own worklet in an OfflineAudioContext);
+  Z7F after hit 1: -240 / - / -30.9 / - / -36.9 / -43.0 (all wet), Z00 after hit 2: the dry hit alone. So the effects
+  and their automation work in every engine the app uses. Other trackers are expected to skip the chunks (they read
+  by the pointers) and play the song dry: not checked. Proposal for the owner, if it goes into the song format:
+  ```yaml
+  module:
+    plugins:                       # at most a few; each channel may play through one
+      1: {dmo: echo, wet: 50, feedback: 50, left_ms: 500, right_ms: 500}
+      2: {dmo: waves_reverb, mix_db: -6, time_ms: 1500}
+    channels: [{name: Lead, plugin: 1}, {name: Pad, plugin: 2}]
+    macros: {SF1: [1, wet]}        # SF1 then Zxx sets plugin 1's wet/dry (00-7F), per row, like the filter's SF0
+  ```
+  with the app's mixer showing the plugins as sends and the tryout keeping them in renders. Not built.
 
 ## Next steps, in order
 
