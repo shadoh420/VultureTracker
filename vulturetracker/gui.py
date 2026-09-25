@@ -738,6 +738,8 @@ class State:
         self.history, self.future = [], []
         self.build = None     # last build/export result
         self.stems = None     # stems export progress
+        self.recipe_job = None  # the recipe panel's render: {"status", "error", "log", "file"}
+        self._recipe_memo = {}  # (recipe path, mtime, size) -> recipe_outputs, or None for a YAML file that is no recipe
         self.error = None
         self.text = ""
         self.mtime = 0.0
@@ -1005,6 +1007,9 @@ class State:
             if job[0] == "meters":
                 self._meters(job[1])
                 continue
+            if job[0] == "recipe":
+                self._recipe_render(*job[1])
+                continue
             k, cand = job
             with self.lock:
                 if self.renders.get(k, {}).get("status") != "queued":
@@ -1049,6 +1054,129 @@ class State:
                 p.unlink(missing_ok=True)
                 self.renders.pop(p.stem, None)
             self.queue_all()
+
+    # ---- the recipe panel: a slot whose WAV a sample recipe (SAMPLING.md) in the song's folder writes can be rendered again
+    # from the app with its entry edited, as a new candidate for the slot (never over the recipe's own WAV); the entry that
+    # made a candidate can be written back into the recipe
+
+    def recipes(self):
+        """[(recipe path, recipe_outputs)] of the sample recipes in the song's folder: YAML files with `samples:` and no
+        `module:`. Memoised per file stamp."""
+        from .synth import RecipeError, recipe_outputs
+        out = []
+        for p in sorted(self.base_dir.iterdir()):
+            if p.suffix.lower() not in (".yaml", ".yml") or p == self.song_path or not p.is_file():
+                continue
+            st = p.stat()
+            key = (str(p), st.st_mtime, st.st_size)
+            if key not in self._recipe_memo:
+                try:
+                    head = yaml.safe_load(p.read_text(encoding="utf-8"))
+                    ok = isinstance(head, dict) and "samples" in head and "module" not in head
+                    self._recipe_memo[key] = recipe_outputs(p) if ok else None
+                except (RecipeError, yaml.YAMLError, OSError, UnicodeDecodeError, ValueError, TypeError, KeyError, AttributeError):
+                    self._recipe_memo[key] = None
+            if self._recipe_memo[key]:
+                out.append((p, self._recipe_memo[key]))
+        return out
+
+    def slot_recipe(self):
+        """The recipe entry behind the slot's WAV: {"recipe", "name", "note", "spec" (the entry as YAML text), "wav"}, or
+        None. A WAV the panel rendered carries the entry that made it (meta "recipe_of")."""
+        from .synth import RecipeError, recipe_entry
+        cur = self.current_file()
+        if not cur:
+            return None
+        made = (self.meta.get("recipe_of") or {}).get(cur)
+        if made and Path(made["recipe"]).exists():
+            return {**made, "wav": cur}
+        for rec, outs in self.recipes():
+            for wav, name, note in outs:
+                if str(wav) == cur:
+                    st = rec.stat()
+                    key = (str(rec), st.st_mtime, st.st_size, name)
+                    if key not in self._recipe_memo:
+                        try:
+                            self._recipe_memo[key] = yaml.safe_dump(recipe_entry(rec, name)[0], default_flow_style=False,
+                                                                    sort_keys=False, width=100)
+                        except RecipeError:
+                            self._recipe_memo[key] = None
+                    if self._recipe_memo[key] is None:
+                        return None
+                    return {"recipe": str(rec), "name": name, "note": note, "wav": cur, "spec": self._recipe_memo[key]}
+        return None
+
+    @staticmethod
+    def _recipe_spec(text):
+        try:
+            spec = yaml.safe_load(text or "")
+        except yaml.YAMLError as e:
+            raise ValueError(f"the sample entry is not YAML: {e}")
+        if not isinstance(spec, dict):
+            raise ValueError("the sample entry is a YAML mapping (patch: ..., note: ..., hold: ...)")
+        return spec
+
+    def request_recipe_render(self, text):
+        """Render the slot's recipe entry as `text` (YAML) says, as a new candidate for the slot (a job on the worker)."""
+        rec = self.slot_recipe()
+        if not rec:
+            raise ValueError(f"slot {self.slot}'s WAV is not written by a sample recipe in the song's folder")
+        spec = self._recipe_spec(text)
+        with self.lock:
+            self.recipe_job = {"status": "queued", "error": None, "log": [], "file": None}
+        self._put(0, ("recipe", (rec, spec, text, self.slot)))
+
+    def _recipe_render(self, rec, spec, text, slot):
+        from .synth import RecipeError, render_one
+        with self.lock:
+            self.recipe_job["status"] = "rendering"
+        src = Path(rec["wav"])
+        stem = re.sub(r"-r\d+$", "", src.stem)
+        out = next(q for q in (src.with_name(f"{stem}-r{k}.wav") for k in itertools.count(1)) if not q.exists())
+        try:
+            render_one(rec["recipe"], rec["name"], spec, rec["note"], out, log=lambda s: self.recipe_job["log"].append(s))
+        except ImportError as e:
+            return self._recipe_failed(f"rendering needs pedalboard and the synths (SAMPLING.md, Setup): {e}")
+        except (RecipeError, OSError, ValueError, KeyError, TypeError) as e:
+            return self._recipe_failed(f"{type(e).__name__}: {e}")
+        with self.lock:
+            self.meta.setdefault("recipe_of", {})[str(out.resolve())] = {k: rec[k] for k in ("recipe", "name", "note")} | {"spec": text}
+            if self.slot == slot:
+                self.add_candidates(str(out))
+            else:
+                self.meta["candidates"].setdefault(str(slot), []).append(str(out.resolve()))
+                self.save_meta()
+            self.recipe_job.update(status="done", file=str(out))
+
+    def _recipe_failed(self, error):
+        with self.lock:
+            self.recipe_job.update(status="failed", error=error)
+
+    def recipe_write(self, text):
+        """The slot's recipe entry replaced by `text` (YAML) in the recipe file, in place: a one-line entry stays one line
+        (its trailing comment kept), a block entry is re-dumped as a block; the rest of the recipe is untouched."""
+        rec = self.slot_recipe()
+        if not rec:
+            raise ValueError(f"slot {self.slot}'s WAV is not written by a sample recipe in the song's folder")
+        spec = self._recipe_spec(text)
+        from .synth import RecipeError, expand
+        try:
+            list(expand({"samples": {rec["name"]: spec}}))
+        except RecipeError as e:
+            raise ValueError(str(e))
+        path = Path(rec["recipe"])
+        raw = path.read_bytes()
+        crlf = b"\r\n" in raw
+        lines = raw.decode("utf-8").replace("\r\n", "\n").splitlines(keepends=True)
+        j = next((j for j, k in self._children(lines, self._top(lines, "samples")) if k == rec["name"]), None)
+        m = self._entry(lines[j], re.escape(rec["name"]) + ":") if j is not None else None
+        if m is None:
+            raise ValueError(f"the recipe's entry '{rec['name']}' is not written as one mapping the app can replace")
+        self._redump(lines, j, m, spec)
+        _atomic(path, "".join(lines).replace("\n", "\r\n" if crlf else "\n").encode("utf-8"))
+        with self.lock:
+            self.meta.setdefault("recipe_of", {})[self.current_file()] = {k: rec[k] for k in ("recipe", "name", "note")} | {"spec": text}
+            self.save_meta()
 
     # ---- listening notes
 
@@ -2120,6 +2248,15 @@ class State:
 
     # ---- snapshot for the page
 
+    def _recipe_snapshot(self):
+        try:
+            rec = self.slot_recipe()
+        except OSError:
+            rec = None
+        if rec:
+            rec = dict(rec, recipe_name=Path(rec["recipe"]).name)
+        return {"slot": rec, "job": self.recipe_job}
+
     def snapshot(self):
         with self.lock:
             slot = self.slot
@@ -2166,6 +2303,7 @@ class State:
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
                 "undo": len(self.history), "redo": len(self.future), "unused": self.unused(),
                 "notices": self.notices,
+                "recipe": self._recipe_snapshot(),
                 "instruments": {str(k): v for k, v in (self.song.get("instruments") or {}).items()},
                 "structure": {"orders": [str(o) for o in self.song.get("orders") or []],
                               "patterns": [{"name": p.name, "rows": len(p.rows), "index": i,
@@ -2419,6 +2557,10 @@ class Handler(BaseHTTPRequestHandler):
                 st.undo(redo=act == "redo")
             elif act == "applymix":
                 st.apply_mix()
+            elif act == "reciperender":
+                st.request_recipe_render(body.get("spec"))
+            elif act == "recipewrite":
+                st.recipe_write(body.get("spec"))
             elif act == "reload":
                 st.reload()
             elif act == "build":

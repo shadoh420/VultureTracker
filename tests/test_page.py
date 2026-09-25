@@ -76,7 +76,7 @@ class TestPage(unittest.TestCase):
 
     def test_pattern_editing_in_the_page(self):
         # T3: the page's editing code in the browser: a note entered at the cursor from the piano keys, a channel
-        # selected and transposed, copy and paste, undo; every change lands in the song file. And a notice the server
+        # selected and transposed, copy and paste, humanize, undo; every change lands in the song file. And a notice the server
         # gives (a meta file it could not read) is shown once
         if sync_playwright is None:
             self.skipTest("playwright not installed")
@@ -121,7 +121,10 @@ class TestPage(unittest.TestCase):
                     page.keyboard.press("Control+v")
                     settle()
                     self.assertIn("      03: ... .. ... ... | C#5 01 ... ...\n", text())
-                    for _ in range(3):
+                    page.evaluate("Math.random = () => 0; SEL = null; setCursor(0, 0, 0, 0); selHumanize()")  # the most down
+                    settle()
+                    self.assertIn("      00: C#5 01 v58 ... |", text())
+                    for _ in range(4):
                         page.keyboard.press("Control+z")
                         settle()
                     browser.close()

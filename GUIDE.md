@@ -51,7 +51,13 @@ SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes ever
 stars/reject/notes are kept per candidate beside the song (`<song>.tryout.json`), and `U` shows the YAML change before
 writing it; once written, that slot's candidate list is cleared (the choice is made; a file's rating is remembered if it
 is added again). With no candidate picked, SONG plays the song itself. Slots that have candidates are marked in the slot list
-(`24 arp ▸ 5 candidates`); rejected candidates sink to the bottom of the list (their number keys stay). The candidate
+(`24 arp ▸ 5 candidates`); rejected candidates sink to the bottom of the list (their number keys stay). When a sample
+recipe (SAMPLING.md) in the song's folder writes the slot's WAV, a RECIPE box under the candidate input shows that
+sample's entry as YAML: edit it (a hold, a note, `params:`, an `fx:` chain) and RENDER CANDIDATE renders it into a new
+WAV beside the slot's (`<name>-r1.wav`, `-r2`, …, never over the recipe's own file) and adds it to the candidates, in the
+background; WRITE TO RECIPE (click twice) writes the entry as it stands into the recipe file in place (a one-line
+entry stays one line with its comment). A candidate rendered this way remembers its entry, so after `U` the box shows
+it. Rendering needs what `synth` needs (pedalboard and the synths; not in the exe). The candidate
 you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
 and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
 playhead with the slot each plays (a looped tone until its note-off, a one-shot until its sample runs out); click one
@@ -115,8 +121,10 @@ its name next to MIDI and VEL→VOL. Its keys play like the piano
 keys, MIDI note 60 being C-5: a preview through the live engine (the INS instrument; in the Instruments tab the
 instrument on show, in the Samples tab the slot), at the key's loudness with VEL→VOL; releasing the key releases the
 note. In edit mode on the Pattern tab each key also enters its note at the cursor with the INS instrument, and with
-VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. Notes are entered one at a time at
-the cursor (no chords spread over channels, no recording at the play position while the song plays). The app serves its
+VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. While the live engine plays the
+pattern on show, a key records instead: its note goes into the cursor's channel at the row playing when it went down,
+and the cursor follows (the piano keys on the computer keyboard record the same way). Notes are entered one at a time
+(no chords spread over channels). The app serves its
 page from port 8723 when that is free (another app window takes any free port) and keeps the window's browser profile in
 `%APPDATA%\VultureTracker\webview`, so the page's own settings (speed, latency, hex rows, MIDI) and the MIDI permission
 carry over from one launch to the next.
@@ -144,7 +152,8 @@ end of the pattern, e.g. one bar of hats over eight), CLEAR
 (Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
 cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
 from the first selected row to the last, per channel, where both ends carry the same command) and AMPLIFY (the
-volume column by a percentage; a note without a volume gets one, counted from 64, the usual default). FIND… (Ctrl+F)
+volume column by a percentage; a note without a volume gets one, counted from 64, the usual default) and HUMANIZE
+(each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). FIND… (Ctrl+F)
 finds cells by note, instrument, volume and effect (`*` any characters, `?` one, an empty field anything; F3 or NEXT
 the next match, in this pattern or the whole song, on the channels on show) and REPLACE ALL writes the given fields
 into every match. Every command is one step for Ctrl+Z, a song-wide replace included.

@@ -1080,6 +1080,43 @@ class TestGui(unittest.TestCase):
         self.assertTrue(api.check(p)["ok"])
         self.assertIn("a.wav", p.read_text(encoding="utf-8"))
 
+    def test_recipe_panel(self):
+        # a slot whose WAV a recipe beside the song writes: its entry is shown, rendered again with an edit as a new
+        # candidate (never over the recipe's WAV), and written back into the recipe in place
+        try:
+            import pedalboard  # noqa: F401
+        except ImportError:
+            self.skipTest("pedalboard not installed (the recipe renders need it)")
+        from vulturetracker import synth
+        recipe = self.dir / "kit.yaml"
+        recipe.write_bytes(b"# the kit\nout_dir: .\nsamples:\n  tone: {file: a.wav, note: A-5, gain: -3}  # the lead\n  other: {file: b.wav}\n")
+        synth.render_recipe(recipe, log=lambda s: None)
+        (self.dir / "song.yaml").write_bytes(SONG.replace("1: {file: a.wav, name: A tone}", "1: {file: tone.wav, name: A tone}").encode("utf-8"))
+        st = self.state()
+        rec = st.snapshot()["recipe"]["slot"]
+        self.assertEqual((rec["recipe_name"], rec["name"], rec["note"], rec["spec"]), ("kit.yaml", "tone", None, "file: a.wav\nnote: A-5\ngain: -3\n"))
+        before = (self.dir / "tone.wav").read_bytes()
+        with self.assertRaises(ValueError):
+            st.request_recipe_render("[not, a, mapping]")
+        st.request_recipe_render("file: a.wav\nnote: A-5\ngain: -9\n")
+        for _ in range(200):
+            if st.recipe_job["status"] in ("done", "failed"):
+                break
+            time.sleep(0.05)
+        self.assertEqual(st.recipe_job["status"], "done", st.recipe_job["error"])
+        new = self.dir / "tone-r1.wav"
+        self.assertEqual((st.cands(), (self.dir / "tone.wav").read_bytes()), ([str(new.resolve())], before))
+        import numpy as np
+        peak = lambda f: np.abs(np.array(gui.read_wav(f).channels[0])).max()  # noqa: E731
+        self.assertAlmostEqual(20 * math.log10(peak(new) / peak(self.dir / "tone.wav")), -6, delta=0.1)
+        st.apply(str(new))  # the slot now plays the render: its entry is the one that made it
+        self.assertEqual(st.slot_recipe()["spec"], "file: a.wav\nnote: A-5\ngain: -9\n")
+        st.recipe_write("file: a.wav\nnote: A-5\ngain: -9\n")
+        self.assertEqual(recipe.read_text(encoding="utf-8"),
+                         "# the kit\nout_dir: .\nsamples:\n  tone: {file: a.wav, note: A-5, gain: -9}  # the lead\n  other: {file: b.wav}\n")
+        with self.assertRaises(ValueError):
+            st.recipe_write("note: A-5\n")  # neither patch nor file
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT

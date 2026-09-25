@@ -277,13 +277,16 @@ MIDI_JS = r"""
 const NOTES=['C-','C#','D-','D#','E-','F-','F#','G-','G#','A-','A#','B-'],noteTxt=n=>NOTES[n%12]+Math.floor(n/12),pad=n=>String(n).padStart(2,'0');
 const cellOf=s=>{const [n,i,v,e]=s.split(' ');return {n,i,v,e}},cellText=p=>`${p.n} ${p.i} ${p.v} ${p.e}`;
 const out=[],tabs=new Set(['t-pattern']),$=id=>({classList:{contains:c=>tabs.has(id)}}),document={querySelector:()=>null};
-let S={song:{facts:{}}},EDIT=false,PAT={rows:[['... .. v20 A06']],order:0},CUR={o:0,row:0,ch:0},INS_SEL=null,W={data:null};
-const insNum=()=>3,putCell=(p,adv)=>out.push(['cell',cellText(p),adv]),lvNoteOn=(...a)=>out.push(['on',...a]),lvNoteOff=k=>out.push(['off',k]);
+let S={song:{facts:{}}},EDIT=false,PAT={rows:[['... .. v20 A06'],['... .. ... ...'],['... .. ... ...']],order:0},CUR={o:0,row:0,ch:0},INS_SEL=null,W={data:null};
+const LV={playing:false,pos:null,oi:-1};
+const insNum=()=>3,putCell=(p,adv)=>out.push(['cell',cellText(p),adv,CUR.row]),lvNoteOn=(...a)=>out.push(['on',...a]),lvNoteOff=k=>out.push(['off',k]);
 PAGE
 MIDI.on=true;midiMsg([0x90,60,127]);midiMsg([0x80,60,0]);          // preview only
 EDIT=true;midiMsg([0x90,61,64]);midiMsg([0x90,61,0]);  // edit mode: entered with the velocity, note-on at 0 = note-off
 MIDI.vel=false;midiMsg([0x90,72,10]);                 // velocity off: the volume column is left alone, full loudness
 MIDI.on=false;midiMsg([0x90,50,100]);                 // MIDI switched off: nothing
+MIDI.on=true;LV.playing=true;LV.oi=0;LV.pos={order:0,row:2};midiMsg([0x90,62,127]);  // recorded at the row playing, no step
+LV.oi=1;midiMsg([0x90,63,127]);LV.playing=false;                      // another pattern plays: at the cursor
 EDIT=false;MIDI.on=true;tabs.clear();tabs.add('t-smp');W.data={player:[4,60]};midiMsg([0x90,64,127]);  // the Samples tab plays the slot's player
 console.log(JSON.stringify(out));
 """
@@ -299,8 +302,10 @@ class TestMidi(unittest.TestCase):
             js.write_text(MIDI_JS.replace("PAGE", page[a:b]), encoding="utf-8")
             out = json.loads(subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30, check=True).stdout)
         self.assertEqual(out, [["on", "m60", None, 60, 1], ["off", "m60"],
-                               ["cell", "C#5 03 v32 A06", True], ["on", "m61", None, 61, 64 / 127], ["off", "m61"],
-                               ["cell", "C-6 03 v20 A06", True], ["on", "m72", None, 72, 1],
+                               ["cell", "C#5 03 v32 A06", True, 0], ["on", "m61", None, 61, 64 / 127], ["off", "m61"],
+                               ["cell", "C-6 03 v20 A06", True, 0], ["on", "m72", None, 72, 1],
+                               ["cell", "D-5 03 ... ...", False, 2], ["on", "m62", None, 62, 1],
+                               ["cell", "D#5 03 ... ...", True, 2], ["on", "m63", None, 63, 1],
                                ["on", "m64", 4, 64, 1]])
 
 
