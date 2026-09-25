@@ -793,6 +793,33 @@ class TestGui(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    def test_bad_requests_are_answered(self):
+        # a body the action cannot use gets a 400 with the reason; the connection is never dropped without an answer
+        import threading
+        import urllib.error
+        import urllib.request
+        gui.Handler.state = self.state()
+        srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        port = srv.server_address[1]
+
+        def call(path, data=None):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data)
+            try:
+                return urllib.request.urlopen(req, timeout=5).status
+            except urllib.error.HTTPError as e:
+                return e.code
+        try:
+            for path, data in (("/api/slot", b'{"slot": []}'), ("/api/slot", b"not json"), ("/api/mute", b"[1, 2]"),
+                               ("/api/edit", b'{"pattern": 0, "cells": 5}')):
+                self.assertEqual(call(path, data), 400, (path, data))
+            self.assertEqual(call("/api/diff/7"), 400)
+            self.assertEqual(call("/api/mixdiff"), 200)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            gui.Handler.state = None
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT

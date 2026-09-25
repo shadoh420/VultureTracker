@@ -2140,15 +2140,16 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, IndexError):
                 return self._send(404, {"error": "no such candidate"})
             return self._send_file(c, "audio/wav")
-        if path.startswith("/api/diff/"):
-            return self._send(200, st.diff(st.cands()[int(path[10:])]))
+        if path.startswith("/api/diff/") or path == "/api/mixdiff":
+            try:
+                return self._send(200, st.mix_diff() if path == "/api/mixdiff" else st.diff(st.cands()[int(path[10:])]))
+            except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError) as e:
+                return self._send(400, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/it":
             try:
                 return self._send(200, st.live_it(), "application/octet-stream")
             except (SongError, OSError, ValueError) as e:
                 return self._send(400, {"error": "\n".join(getattr(e, "errors", []) or [str(e)])})
-        if path == "/api/mixdiff":
-            return self._send(200, st.mix_diff())
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -2164,8 +2165,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": str(st.save_upload(name, self.rfile.read(n)))})
             except (AttributeError, ValueError, OSError) as e:
                 return self._send(400, {"error": f"{type(e).__name__}: {e}"})
-        body = json.loads(self.rfile.read(n) or b"{}")
         try:
+            body = json.loads(self.rfile.read(n) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("the request body must be a JSON object")
             if act == "open":
                 self.open_song(body["path"])
             elif act == "new":
@@ -2241,8 +2244,8 @@ class Handler(BaseHTTPRequestHandler):
                 st.request_stems(body.get("fmt", "wav"), body.get("song", False), body.get("stems", True))
             else:
                 return self._send(404, {"error": "unknown action"})
-        except (KeyError, ValueError, IndexError, OSError, SongError) as e:
-            return self._send(400, {"error": f"{type(e).__name__}: {e}"})
+        except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError, SongError) as e:
+            return self._send(400, {"error": f"{type(e).__name__}: {e}"})  # a bad request is answered, never dropped
         self._send(200, {"ok": True})
 
 
