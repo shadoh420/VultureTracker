@@ -681,7 +681,6 @@ class State:
         self.song_path = Path(song_path).resolve()
         self.base_dir = self.song_path.parent
         self.cache_dir = self.base_dir / ".tryout"
-        self.cache_dir.mkdir(exist_ok=True)
         self.meta_path = self.song_path.with_name(self.song_path.stem + ".tryout.json")
         self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
         if self.meta_path.exists():
@@ -707,6 +706,7 @@ class State:
         self.facts = None
         self.mod = None       # compiled model of the last good load (pattern view)
         self.reload()
+        self.cache_dir.mkdir(exist_ok=True)
         threading.Thread(target=self._worker, daemon=True).start()
 
     # ---- song
@@ -727,7 +727,15 @@ class State:
                 self.error = None
             except SongError as e:
                 self.error = e.errors
-            self.song = api.from_yaml(self.text)
+            try:
+                self.song = api.from_yaml(self.text)
+            except yaml.YAMLError:  # a syntax error: it is in self.error already, and the app opens on it
+                self.song = None
+            if not isinstance(self.song, dict):
+                self.song = {}
+            for sec in ("samples", "instruments"):  # a key written 08: reads as the string "08" here; the compiler reads 8
+                if isinstance(self.song.get(sec), dict):
+                    self.song[sec] = {int(k) if isinstance(k, str) and k.isdigit() else k: v for k, v in self.song[sec].items()}
             files = self.files = [str((self.base_dir / v["file"]).resolve()) for v in (self.song.get("samples") or {}).values()
                      if isinstance(v, dict) and v.get("file")]
             threading.Thread(target=lambda: [self.measured(f) for f in files if Path(f).exists()], daemon=True).start()
@@ -1270,23 +1278,29 @@ class State:
         return self._diff(*self.mix_text())
 
     def apply(self, cand):
+        """The slot pointed at `cand` in the song file: the way every edit is written (refused while the song changed on
+        disk, compiled whole first, one undo step)."""
         with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.patched_text(cand)
-            self.write_song(new)
+            loaded = load_song_text(new, self.base_dir, str(self.song_path))  # SongError: nothing is written
             self.meta["candidates"].pop(str(self.slot), None)  # the choice is made: the slot's list goes (ratings stay, keyed by file)
             if self.want == cand:
                 self.want = None
             self.save_meta()
-            self.reload(archive=False)
+            self._commit(new, loaded)
         self._put(0, ("build", False))
 
     def apply_mix(self):
         with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.mix_text()
-            self.write_song(new)
+            loaded = load_song_text(new, self.base_dir, str(self.song_path))
             self.meta["mix"] = {}
             self.save_meta()
-            self.reload(archive=False)
+            self._commit(new, loaded)
         self._put(0, ("build", False))
 
     # ---- build / export
@@ -1422,10 +1436,15 @@ class State:
         with self.lock:
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the edit does not overwrite that change")
+            self._need_compiled()
             lines = self.text.splitlines(keepends=True)
             for index, cells in groups:
                 self._edit_block(lines, int(index), cells)
             self._commit("".join(lines))  # compiled first (SongError: nothing is written)
+
+    def _need_compiled(self):
+        if self.mod is None:
+            raise ValueError("the song does not compile (RENDER & EXPORT lists the errors): fix it in the YAML first")
 
     def _edit_block(self, lines, index, cells):
         """`cells` written into pattern `index`'s rows in `lines` (in place)."""
@@ -1456,9 +1475,10 @@ class State:
     MODULE_KEYS = {"title": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
                    "separation": (0, 128)}
 
-    def _commit(self, new):
-        """`new` as the song, if the whole of it compiles (SongError otherwise: nothing written); one undo step."""
-        loaded = load_song_text(new, self.base_dir, str(self.song_path))
+    def _commit(self, new, loaded=None):
+        """`new` as the song, if the whole of it compiles (SongError otherwise: nothing written); one undo step. `loaded`:
+        the (module, warnings) of `new`, when the caller compiled it already."""
+        loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
         self.history.append(self.text)
         self.future.clear()
         self.write_song(new)
@@ -1538,6 +1558,7 @@ class State:
 
     def _map_rows(self, lines, fn):
         """Every row of every pattern with its cells' texts passed through `fn` (a channel removed or moved)."""
+        self._need_compiled()
         for pat in self.mod.patterns:
             first, end = self._pattern_block(lines, pat.name)
             for i in range(first, end):
@@ -1720,6 +1741,8 @@ class State:
                     raise ValueError(f"slot {num} has an unwritten GAIN in the tryout's mixer: WRITE MIX or RESET MIX first")
                 j = next((j for j, n in kids if n == num), None)
                 m = re.match(self.ENTRY.format(key=r"\d+:"), lines[j])
+                if m is None:
+                    raise ValueError(f"sample {num} is written across several lines: write it on one line, or as a block, to edit it here")
                 # a one-line entry whose changed values are all scalars (and none removed) keeps its layout: only those
                 # values are replaced; anything else re-dumps the entry
                 changed = [k for k in entry if entry[k] != old.get(k)]
@@ -1750,7 +1773,10 @@ class State:
                 j = next((j for j, n in kids if n == num), None)
                 if j is None:
                     raise ValueError(f"no instrument {num}")
-                self._redump(lines, j, re.match(self.ENTRY.format(key=r"\d+:"), lines[j]), entry)
+                m = re.match(self.ENTRY.format(key=r"\d+:"), lines[j])
+                if m is None:
+                    raise ValueError(f"instrument {num} is written across several lines: write it on one line, or as a block, to edit it here")
+                self._redump(lines, j, m, entry)
             else:
                 if any(n == num for _, n in kids):
                     raise ValueError(f"{section[:-1]} {num} exists already")
@@ -1930,7 +1956,7 @@ class State:
     def snapshot(self):
         with self.lock:
             slot = self.slot
-            entry = self.song["samples"].get(slot, {})
+            entry = (self.song.get("samples") or {}).get(slot, {})
             cur = self.current_file()
             ref = self.measured(cur) if cur and Path(cur).exists() else None
             cands = []
@@ -1943,7 +1969,7 @@ class State:
                               "key": k, "status": r["status"], "error": r.get("error"), "peak": r.get("peak"), "meas": m,
                               "dist": distance(m, ref), "stars": rating.get("stars", 0), "rejected": rating.get("rejected", False),
                               "note": rating.get("note", ""), "current": c == cur})
-            ents = self.song.get("samples", {})
+            ents = self.song.get("samples") or {}
             slot_meas = {}  # per slot: the three numbers the overview table shows (memoised per WAV)
             for k, v in ents.items():
                 f = (self.base_dir / v["file"]).resolve() if isinstance(v, dict) and v.get("file") else None
@@ -2114,15 +2140,16 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, IndexError):
                 return self._send(404, {"error": "no such candidate"})
             return self._send_file(c, "audio/wav")
-        if path.startswith("/api/diff/"):
-            return self._send(200, st.diff(st.cands()[int(path[10:])]))
+        if path.startswith("/api/diff/") or path == "/api/mixdiff":
+            try:
+                return self._send(200, st.mix_diff() if path == "/api/mixdiff" else st.diff(st.cands()[int(path[10:])]))
+            except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError) as e:
+                return self._send(400, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/it":
             try:
                 return self._send(200, st.live_it(), "application/octet-stream")
             except (SongError, OSError, ValueError) as e:
                 return self._send(400, {"error": "\n".join(getattr(e, "errors", []) or [str(e)])})
-        if path == "/api/mixdiff":
-            return self._send(200, st.mix_diff())
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -2138,8 +2165,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": str(st.save_upload(name, self.rfile.read(n)))})
             except (AttributeError, ValueError, OSError) as e:
                 return self._send(400, {"error": f"{type(e).__name__}: {e}"})
-        body = json.loads(self.rfile.read(n) or b"{}")
         try:
+            body = json.loads(self.rfile.read(n) or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("the request body must be a JSON object")
             if act == "open":
                 self.open_song(body["path"])
             elif act == "new":
@@ -2215,8 +2244,8 @@ class Handler(BaseHTTPRequestHandler):
                 st.request_stems(body.get("fmt", "wav"), body.get("song", False), body.get("stems", True))
             else:
                 return self._send(404, {"error": "unknown action"})
-        except (KeyError, ValueError, IndexError, OSError, SongError) as e:
-            return self._send(400, {"error": f"{type(e).__name__}: {e}"})
+        except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError, SongError) as e:
+            return self._send(400, {"error": f"{type(e).__name__}: {e}"})  # a bad request is answered, never dropped
         self._send(200, {"ok": True})
 
 

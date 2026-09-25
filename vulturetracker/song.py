@@ -780,13 +780,15 @@ def load_song_text(text, base_dir=".", filename="<song>"):
     ctx = Ctx(filename)
     try:
         node = yaml.compose(text, Loader=_LOADER)
+        tree = _convert(node, ctx) if node is not None else None
     except yaml.YAMLError as e:
         mark = getattr(e, "problem_mark", None)
         line = mark.line + 1 if mark else 1
         raise SongError([f"{filename}:{line}: error: YAML syntax: {getattr(e, 'problem', e)}"])
+    except RecursionError:
+        raise SongError([f"{filename}:1: error: the YAML nests too deeply, or an alias refers to its own anchor"])
     if node is None:
         raise SongError([f"{filename}:1: error: the song file is empty"])
-    tree = _convert(node, ctx)
     mod = compile_tree(tree, ctx, Path(base_dir))
     if ctx.errors:
         raise SongError(ctx.errors, ctx.warnings)

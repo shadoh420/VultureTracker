@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 from vulturetracker import api, openmpt
-from vulturetracker.itreader import import_it
+from vulturetracker.itreader import ITReadError, import_it
 from vulturetracker.modreader import ModReadError, read_module
 
 RATE = 44100
@@ -269,6 +269,29 @@ class TestModImport(unittest.TestCase):
             if cents is not None:
                 self.assertLess(r["cents"], cents)
         return r
+
+    def test_malformed_files_are_read_errors(self):
+        # a truncated or garbled file is a ModReadError (which the CLI and the app report), never a struct.error,
+        # IndexError or ValueError escaping; a pattern claiming 65535 rows is left empty, not allocated as a giant grid
+        s3m = write_s3m([("tone", TONE, 64, 8363, (0, 4000))], [grid([(0, 0, (C5, 1, None, 0, 0))], E_S3M)], [0])
+        xm = write_xm([{"data": TONE, "loop": (0, 4000)}], [grid([(0, 0, (C4, 1, 0, 0, 0))], E_XM)], [0])
+        mod = write_mod([("tone", TONE, 64, 0, 0, 4000)], [grid([(0, 0, (428, 1, 0, 0))], EMPTY4)], [0])
+        it = imported(mod, "mod")[0]
+        for data in (s3m, xm, mod, it):
+            for n in range(0, len(data), 13):
+                try:
+                    read_module(data[:n])
+                except (ModReadError, ITReadError):
+                    pass
+        d = bytearray(xm)
+        struct.pack_into("<H", d, 60 + 276 + 5, 65535)  # the first pattern's row count
+        m, warnings = read_module(bytes(d))
+        self.assertEqual((len(m.patterns[0].rows), any("1024 rows" in w for w in warnings)), (64, True))
+        d = bytearray(it)
+        nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
+        struct.pack_into("<H", d, struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * nsmp)[0] + 2, 65535)
+        m, warnings = read_module(bytes(d))
+        self.assertEqual((len(m.patterns[0].rows), any("not a valid IT pattern" in w for w in warnings)), (64, True))
 
     def test_signatures(self):
         with self.assertRaises(ModReadError):
