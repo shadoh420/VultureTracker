@@ -110,6 +110,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab" data-t="smp" onclick="tab('smp')">SAMPLES</div>
   <div class="tab" data-t="rec" onclick="tab('rec')">RECORD</div>
   <div class="tab" data-t="map" onclick="tab('map')">MAP</div>
+  <div class="tab" data-t="paint" onclick="tab('paint')">PAINT</div>
   <div class="tab" data-t="spectrum" onclick="tab('spectrum')">SPECTRUM</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
@@ -314,6 +315,47 @@ option.hascand{color:var(--acc);font-weight:700}
   </div>
 </div>
 
+<div class="main" id="t-paint">
+  <div class="panel col" style="flex:1;min-width:0">
+    <div class="ph" style="gap:6px;justify-content:flex-start;position:static;flex-wrap:wrap">
+      <span class="k" style="white-space:nowrap">PAINT</span>
+      <span class="btn sm on" id="pt-brush" onclick="ptTool('brush')" title="paint (drag); right-drag erases">BRUSH</span><span class="btn sm" id="pt-line" onclick="ptTool('line')" title="a straight stroke from where you press to where you let go (a glide)">LINE</span><span class="btn sm" id="pt-erase" onclick="ptTool('erase')">ERASE</span>
+      <span class="k" style="margin-left:8px">SIZE</span><input id="pt-size" type="number" min="1" max="16" value="2" style="width:38px;font:10px var(--mono);padding:1px 3px" title="the brush's radius in cells">
+      <span class="k">BRIGHT</span><input id="pt-bright" type="range" min="1" max="100" value="80" style="width:80px;flex:none" title="the level painted: 100 full, 50 half the RANGE under it" oninput="ptSwatch()">
+      <span class="k">PAN</span><input id="pt-pan" type="range" min="-100" max="100" value="0" style="width:80px;flex:none" title="red: left, yellow: centre, green: right" oninput="ptSwatch()"><i id="pt-swatch" style="display:inline-block;width:14px;height:14px"></i>
+      <span class="btn sm" style="margin-left:8px" onclick="ptImage()" title="an image file drawn over the grid: its light is the level, red and green the pan (or drop an image on the canvas)">LOAD IMAGE…</span><input type="file" id="pt-file" accept="image/*" style="display:none" onchange="ptImageFile(this.files[0])">
+      <span class="btn sm" onclick="twice(this,ptClear)" title="click twice">CLEAR</span>
+      <span class="mono" id="pt-pos" style="flex:1;min-width:0;text-align:right;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden"></span>
+    </div>
+    <div id="pt-box" style="flex:1;min-height:0;position:relative;background:#050607" ondragover="event.preventDefault()" ondrop="event.preventDefault();const f=[...(event.dataTransfer.files||[])].find(f=>/^image\//.test(f.type));if(f)ptImageFile(f)">
+      <canvas id="pt-cv" style="position:absolute;inset:0 0 18px 44px;width:calc(100% - 44px);height:calc(100% - 18px);cursor:crosshair" onmousedown="ptDown(event)" onmousemove="ptMove(event)" onmouseleave="$('pt-pos').textContent=''" oncontextmenu="event.preventDefault()"></canvas>
+      <div id="pt-yaxis" style="position:absolute;left:0;top:0;bottom:18px;width:42px;font:9px var(--mono);color:var(--dim)"></div>
+      <div id="pt-xaxis" style="position:absolute;left:44px;right:0;bottom:0;height:16px;font:9px var(--mono);color:var(--dim)"></div>
+    </div>
+  </div>
+  <div class="col" style="width:320px;flex:none;overflow-y:auto">
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">GRID</span><span class="meta">rows are frequencies, columns moments</span></div>
+      <div class="pb" style="display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center;font:10px var(--mono)">
+        <span class="k">ROWS</span><input id="pt-rows" type="number" min="4" max="256" value="72" onchange="ptResize()">
+        <span class="k">COLUMNS</span><input id="pt-cols" type="number" min="4" max="1024" value="128" onchange="ptResize()">
+        <span class="k">SCALE</span><select id="pt-scale" onchange="ptScale()"><option value="log">LOG FREQUENCY (HZ)</option><option value="notes">ONE ROW PER SEMITONE</option></select>
+        <span class="k">LOW</span><input id="pt-low" value="40" onchange="ptSave();ptDraw()" title="Hz, or a note (C-3) with one row per semitone">
+        <span class="k">HIGH</span><input id="pt-high" value="12000" onchange="ptSave();ptDraw()" title="Hz (up to 18000: the drums' ceiling); with one row per semitone the rows run up from LOW">
+        <span class="k">LENGTH</span><span><input id="pt-secs" type="number" min="0.05" max="60" step="0.05" value="2" style="width:60px" onchange="ptSave();ptDraw()"> S <span id="pt-rowsat" style="color:var(--dim)"></span></span>
+        <span class="k">RANGE</span><span><input id="pt-range" type="number" min="6" max="96" value="48" style="width:60px" onchange="ptSave()"> DB <span style="color:var(--dim)">from dark to full</span></span>
+      </div></div>
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">SOUND</span><span class="kbd" id="pt-slot"></span></div>
+      <div class="pb">
+        <div style="display:flex;gap:2px"><span class="btn" onclick="ptPreview('preview')" title="the picture played as sound: each row a sine at its frequency, brightness its level, colour its pan">▶ PREVIEW</span><span class="btn" onclick="PTA.pause()">■</span><input id="pt-name" value="paint" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: paint-&lt;name&gt;.wav beside the song"></div>
+        <div style="display:flex;gap:2px;margin-top:4px"><span class="btn" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="ptAct('slot')" title="write it beside the song (paint-&lt;name&gt;.wav, the picture as a PNG beside it) as a new slot; in a song with instruments a new instrument plays it; one undo step">→ NEW SLOT</span><span class="btn" style="flex:1;text-align:center" onclick="ptAct('candidate')" title="write it beside the song and add it to the tryout slot's candidates">→ CANDIDATE</span></div>
+        <div class="k" style="margin-top:14px">AS A FILTER</div>
+        <div style="font-size:10px;color:var(--dim);margin:3px 0 5px">the picture laid over a sample's spectrum: dark turns a frequency down at that moment (the columns spread over the whole sample)</div>
+        <div style="display:flex;gap:2px;align-items:center"><select id="pt-fslot" style="flex:1;min-width:0;font:10px var(--mono);padding:1px 3px"></select><span class="btn sm" onclick="ptPreview('filter_preview')" title="hear the slot's sample through the picture">▶</span><span class="btn sm" onclick="ptAct('filter')" title="a new WAV beside the song, the slot pointed at it; one undo step">FILTER SLOT</span></div>
+        <div class="mono" id="pt-msg" style="margin-top:10px;font-size:10px;color:var(--dim);white-space:pre-wrap"></div>
+      </div></div>
+  </div>
+</div>
+
 <div class="main" id="t-spectrum">
   <div class="panel col" style="flex:1;min-width:0">
     <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SPECTROGRAM</span><span id="specsrc" style="flex:1;min-width:0;font-size:10.5px;color:#8d979c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><span id="speclegend" style="display:flex;align-items:center;gap:5px;font:9px var(--mono);color:var(--dim)"></span><span style="display:flex;gap:2px"><span class="btn sm" id="sc-log" onclick="setSpecScale('log')" title="frequency on a log axis, 20 Hz to the Nyquist frequency">LOG</span><span class="btn sm" id="sc-lin" onclick="setSpecScale('lin')" title="frequency on a linear axis (the top octave is half the height: where imaging and aliasing show)">LIN</span></span></div>
@@ -454,7 +496,7 @@ async function importModule(pick){const path=$('imppath').value.trim();if(!pick&
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen()}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -522,7 +564,7 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();
   const L=S.library;if(L&&L.busy&&$('simmsg').style.display==='block')$('simmsg').textContent=`indexing the library: ${L.status.done}/${L.status.total}`;
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
@@ -1351,6 +1393,62 @@ function mapScan(){mapPost({scan:true})}
 function mapAddRoot(){const v=$('map-root').value.trim();if(!v)return;$('map-root').value='';const L=S.library,cur=L.roots&&L.roots.length?L.roots:L.default_roots;mapPost({roots:[...cur,v]})}
 function mapDelRoot(i){const L=S.library;mapPost({roots:L.roots.filter((_,k)=>k!==i),scan:true})}
 function renderMap(){if(!mapOn()||!S.library)return;renderMapSide();if(S.library.loaded&&S.library.generation!==MAP.gen&&!S.library.busy)mapLoad();else drawMap();renderMapSel()}
-addEventListener('resize',()=>{if(mapOn())drawMap()});
+addEventListener('resize',()=>{if(mapOn())drawMap();if(ptOn())ptDraw()});
+// ---- the PAINT tab (spectral.py): a picture over frequency (rows, lowest at the bottom) and time (columns); brightness is
+// the level, the colour the pan (red left, yellow centre, green right). Kept in this browser per song (localStorage).
+const PT={rows:72,cols:128,amp:null,pan:null,tool:'brush',drag:null};const PTA=new Audio();const ptOn=()=>$('t-paint').classList.contains('on');
+function ptKey(){return 'paint|'+(S&&S.song?S.song.path:'')}
+function ptNew(r,c){PT.rows=r;PT.cols=c;PT.amp=new Float32Array(r*c);PT.pan=new Float32Array(r*c)}
+function ptSave(){try{localStorage[ptKey()]=JSON.stringify({rows:PT.rows,cols:PT.cols,amp:Array.from(PT.amp,v=>Math.round(v*1000)),pan:Array.from(PT.pan,v=>Math.round(v*1000)),
+  scale:$('pt-scale').value,low:$('pt-low').value,high:$('pt-high').value,secs:$('pt-secs').value,range:$('pt-range').value,name:$('pt-name').value})}catch(e){}}
+function ptOpen(){if(!PT.amp||PT.key!==ptKey()){PT.key=ptKey();let d=null;try{d=JSON.parse(localStorage[ptKey()]||'null')}catch(e){}
+    if(d&&d.amp&&d.amp.length===d.rows*d.cols){ptNew(d.rows,d.cols);d.amp.forEach((v,i)=>PT.amp[i]=v/1000);d.pan.forEach((v,i)=>PT.pan[i]=v/1000);
+      [['pt-scale','scale'],['pt-low','low'],['pt-high','high'],['pt-secs','secs'],['pt-range','range'],['pt-name','name']].forEach(([id,k])=>{if(d[k]!=null)$(id).value=d[k]})}
+    else ptNew(+$('pt-rows').value||72,+$('pt-cols').value||128);$('pt-rows').value=PT.rows;$('pt-cols').value=PT.cols}
+  ptSwatch();renderPaint();ptDraw()}
+function renderPaint(){if(!ptOn()||!S||!S.song||!S.song.facts)return;$('pt-slot').textContent='TRYOUT SLOT '+pad(S.slot);const cur=$('pt-fslot').value||String(S.slot);
+  put('pt-fslot',S.song.facts.samples.map(x=>`<option value="${x.num}" ${String(x.num)===cur?'selected':''}>${pad(x.num)} ${esc(x.name)}</option>`).join(''));
+  const f=S.song.facts,secs=+$('pt-secs').value||0,row=2.5/f.tempo*f.speed;$('pt-rowsat').textContent=secs&&row?`≈ ${(secs/row).toFixed(1)} rows here`:''}
+function ptColor(a,p){const r=p<=0?1:1-p,g=p>=0?1:1+p;return `rgb(${Math.round(r*a*255)},${Math.round(g*a*255)},0)`}
+function ptSwatch(){$('pt-swatch').style.background=ptColor(+$('pt-bright').value/100,+$('pt-pan').value/100)}
+function ptTool(t){PT.tool=t;['brush','line','erase'].forEach(x=>$('pt-'+x).classList.toggle('on',x===t))}
+function ptScale(){const n=$('pt-scale').value==='notes';$('pt-low').value=n?'C-2':'40';$('pt-high').value=n?'':'12000';if(n){$('pt-rows').value=72;ptResize()}ptSave();ptDraw()}
+const PTN=['C-','C#','D-','D#','E-','F-','F#','G-','G#','A-','A#','B-'];
+const ptNote=s=>{const m=/^([A-G])([-#])(\d)$/i.exec(String(s).trim());if(!m)return +s;return PTN.indexOf(m[1].toUpperCase()+m[2])+12*(+m[3])};
+function ptRange(){const n=$('pt-scale').value==='notes';return n?{scale:'notes',fmin:ptNote($('pt-low').value),fmax:ptNote($('pt-low').value)+PT.rows-1}:{scale:'log',fmin:+$('pt-low').value,fmax:+$('pt-high').value}}
+function ptFreq(r){const R=ptRange();return R.scale==='notes'?440*2**((R.fmin+r-69)/12):R.fmin*(R.fmax/R.fmin)**(r/Math.max(1,PT.rows-1))}
+function ptResize(){const r=Math.max(4,Math.min(256,+$('pt-rows').value||72)),c=Math.max(4,Math.min(1024,+$('pt-cols').value||128));if(r===PT.rows&&c===PT.cols)return;
+  const oa=PT.amp,op=PT.pan,or=PT.rows,oc=PT.cols;ptNew(r,c);for(let y=0;y<r;y++)for(let x=0;x<c;x++){const i=Math.floor(y*or/r)*oc+Math.floor(x*oc/c);PT.amp[y*c+x]=oa[i];PT.pan[y*c+x]=op[i]}ptSave();ptDraw()}
+function ptClear(){PT.amp.fill(0);PT.pan.fill(0);ptSave();ptDraw()}
+function ptDraw(){const cv=$('pt-cv');if(!cv||!ptOn()||!PT.amp)return;const W=cv.clientWidth,H=cv.clientHeight,dpr=devicePixelRatio||1;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
+  const g=cv.getContext('2d'),img=g.createImageData(PT.cols,PT.rows);
+  for(let y=0;y<PT.rows;y++)for(let x=0;x<PT.cols;x++){const i=y*PT.cols+x,a=PT.amp[i],p=PT.pan[i],o=((PT.rows-1-y)*PT.cols+x)*4;img.data[o]=(p<=0?1:1-p)*a*255;img.data[o+1]=(p>=0?1:1+p)*a*255;img.data[o+2]=a?0:14;img.data[o+3]=255}
+  const off=document.createElement('canvas');off.width=PT.cols;off.height=PT.rows;off.getContext('2d').putImageData(img,0,0);g.imageSmoothingEnabled=false;g.drawImage(off,0,0,cv.width,cv.height);
+  const R=ptRange(),yax=[],xax=[];g.fillStyle='rgba(255,255,255,.09)';
+  if(R.scale==='notes'){for(let r=0;r<PT.rows;r++)if((R.fmin+r)%12===0){const y=(PT.rows-1-r+.5)*H/PT.rows;g.fillRect(0,y*dpr,cv.width,1);yax.push([y,'C-'+Math.floor((R.fmin+r)/12)])}}
+  else for(let f=10;f<=20000;f*=10)for(const m of [1,2,5]){const v=f*m;if(v<R.fmin||v>R.fmax)continue;const r=Math.log(v/R.fmin)/Math.log(R.fmax/R.fmin)*(PT.rows-1),y=(PT.rows-1-r+.5)*H/PT.rows;g.fillRect(0,y*dpr,cv.width,1);yax.push([y,v>=1000?v/1000+'k':String(v)])}
+  const secs=+$('pt-secs').value||1,step=secs>8?2:secs>3?1:secs>1.2?.5:.1;for(let t=0;t<=secs+1e-9;t+=step){const x=t/secs*W;g.fillRect(x*dpr,0,1,cv.height);xax.push([x,+t.toFixed(2)+'s'])}
+  put('pt-yaxis',yax.map(([y,t])=>`<span style="position:absolute;right:3px;top:${y-6}px">${t}</span>`).join(''));put('pt-xaxis',xax.map(([x,t])=>`<span style="position:absolute;left:${x+2}px;top:2px">${t}</span>`).join(''))}
+function ptCell(ev){const r=$('pt-cv').getBoundingClientRect();return [Math.max(0,Math.min(PT.cols-1,Math.floor((ev.clientX-r.left)/r.width*PT.cols))),Math.max(0,Math.min(PT.rows-1,PT.rows-1-Math.floor((ev.clientY-r.top)/r.height*PT.rows)))]}
+function ptDab(x,y,erase){const rad=Math.max(1,+$('pt-size').value||1)-1,a=+$('pt-bright').value/100,p=+$('pt-pan').value/100;
+  for(let dy=-rad;dy<=rad;dy++)for(let dx=-rad;dx<=rad;dx++){if(dx*dx+dy*dy>rad*rad+rad)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=PT.cols||Y>=PT.rows)continue;const i=Y*PT.cols+X;if(erase){PT.amp[i]=0;PT.pan[i]=0}else{PT.amp[i]=a;PT.pan[i]=p}}}
+function ptStroke(a,b,erase){const n=Math.max(Math.abs(b[0]-a[0]),Math.abs(b[1]-a[1]),1);for(let k=0;k<=n;k++)ptDab(Math.round(a[0]+(b[0]-a[0])*k/n),Math.round(a[1]+(b[1]-a[1])*k/n),erase)}
+function ptDown(ev){if(!PT.amp)return;ev.preventDefault();const erase=ev.button===2||PT.tool==='erase',c0=ptCell(ev);let last=c0;
+  const snap=PT.tool==='line'&&!erase?[PT.amp.slice(),PT.pan.slice()]:null;if(!snap){ptDab(c0[0],c0[1],erase);ptDraw()}
+  const mv=e=>{const c=ptCell(e);if(snap){PT.amp.set(snap[0]);PT.pan.set(snap[1]);ptStroke(c0,c,false)}else{ptStroke(last,c,erase);last=c}ptDraw();ptMove(e)};
+  const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);ptSave()};addEventListener('mousemove',mv);addEventListener('mouseup',up)}
+function ptMove(ev){if(!PT.amp)return;const [x,y]=ptCell(ev),f=ptFreq(y),R=ptRange(),secs=+$('pt-secs').value||0;
+  $('pt-pos').textContent=`${(x*secs/PT.cols).toFixed(2)} s · ${R.scale==='notes'?PTN[(R.fmin+y)%12]+Math.floor((R.fmin+y)/12)+' · ':''}${f<1000?f.toFixed(1)+' Hz':(f/1000).toFixed(2)+' kHz'} · level ${Math.round(PT.amp[y*PT.cols+x]*100)}`}
+function ptImage(){$('pt-file').click()}
+function ptImageFile(f){if(!f)return;const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=PT.cols;c.height=PT.rows;const g=c.getContext('2d');g.drawImage(img,0,0,PT.cols,PT.rows);
+  const d=g.getImageData(0,0,PT.cols,PT.rows).data;for(let y=0;y<PT.rows;y++)for(let x=0;x<PT.cols;x++){const o=((PT.rows-1-y)*PT.cols+x)*4,r=d[o]/255,gr=d[o+1]/255,b=d[o+2]/255,i=y*PT.cols+x;
+    PT.amp[i]=Math.max(r,gr,b);PT.pan[i]=r+gr>0.02?(gr-r)/Math.max(r,gr):0}URL.revokeObjectURL(img.src);ptSave();ptDraw();$('pt-msg').textContent=`${f.name} drawn over the grid`};img.src=URL.createObjectURL(f)}
+function ptBody(action){const rows=[],pans=[];for(let y=0;y<PT.rows;y++){rows.push(Array.from(PT.amp.subarray(y*PT.cols,(y+1)*PT.cols),v=>Math.round(v*1000)/1000));pans.push(Array.from(PT.pan.subarray(y*PT.cols,(y+1)*PT.cols),v=>Math.round(v*1000)/1000))}
+  return {action,amp:rows,pan:pans,...ptRange(),seconds:+$('pt-secs').value,range_db:+$('pt-range').value,name:$('pt-name').value,num:+$('pt-fslot').value}}
+async function ptPreview(action){$('pt-msg').textContent='rendering…';const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ptBody(action))});
+  if(!r.ok||!(r.headers.get('content-type')||'').startsWith('audio/')){const j=await r.json();$('pt-msg').textContent=(j.error||'').replace(/^\w+: /,'');return}
+  const b=await r.blob();if(PTA.src)URL.revokeObjectURL(PTA.src);PTA.src=URL.createObjectURL(b);PTA.play().catch(()=>{});$('pt-msg').textContent=action==='preview'?'playing the picture':'playing slot '+pad(+$('pt-fslot').value)+' through the picture'}
+async function ptAct(action){$('pt-msg').textContent='writing…';const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ptBody(action))}),j=await r.json();
+  $('pt-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'');refresh()}
 setSpeed(speed);refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
 </script></body></html>

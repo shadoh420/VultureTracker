@@ -633,6 +633,23 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   cuts, seq.wav 10 -> 6 at sensitivity 50) and moved drum cuts 5-47 ms with no ground truth: `onsets` is unchanged, the
   limit is in GUIDE. Tests: test_compose (slice_rows, key_splits), test_gui (multisample + pattern in both song kinds,
   denoise), test_record (takes → multisample), test_page (the Samples tab's report and view reset).
+  Then the next backlog item in its order, chunk 6 (MetaSynth-style spectral tools), in `vulturetracker/spectral.py` and
+  a PAINT tab: a picture of rows (frequencies: log from LOW to HIGH Hz, or one per semitone from a note) by columns
+  (moments over LENGTH s), brightness = level over RANGE dB (full at 1), colour = pan (red left, yellow centre, green
+  right). `paint_render`: a sine per lit row (seeded start phases), level and pan interpolated between column centres
+  at the sample rate, equal-power pan, rows at or over 18 kHz silent. `spectral_mask`: STFT (2048, hop 512) magnitudes
+  times the picture's level, interpolated between rows in log frequency and between columns over the whole sample,
+  phase kept (`dsp._stft` / `_istft`, shared with DENOISE). Measured (tests/test_spectral.py): a lit A-5 row peaks at
+  440.0 Hz, red leaves the right channel at 0, yellow gives -3 dB each side, half brightness at 48 dB range is -24.0 dB;
+  a diagonal over 64 x 64 cells, 100-6400 Hz in 2 s, reads about 108 Hz at the start, 775 at the middle (800 in log)
+  and 5986 at the end; as a filter, one row at 1 kHz over white noise keeps -1.3 dB in the band and -73 dB away from it
+  (range 60), an open-then-shut picture leaves the first half within 0.2 dB and the last half 75 dB down; an all-light
+  picture changes nothing (1e-9). App: POST `paint` (preview and filter_preview answer with WAV bytes; slot, candidate
+  and filter write files: `paint-<name>.wav` + `.png` from `png_rgb`, sample_process action `spectral_mask`). Checked in
+  Chromium (check_paint.py): a brush stroke and a LINE glide drawn with the mouse (422 cells), PREVIEW played 2.0 s,
+  → NEW SLOT wrote paint-glide.wav (stereo) + .png, slot 03 and instrument 03; → CANDIDATE; ▶ and FILTER SLOT on slot 01
+  (a-spectral_mask.wav); LOAD IMAGE of a red-to-green diagonal PNG (pans -1 .. 0.93); the picture kept over a reload;
+  no page errors. Not heard.
 
 ## Next steps, in order
 

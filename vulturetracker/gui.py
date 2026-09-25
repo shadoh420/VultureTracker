@@ -491,6 +491,20 @@ def worklet_js():
             + (WEB / "engine-core.js").read_text(encoding="utf-8") + (WEB / "engine-worklet.js").read_text(encoding="utf-8")).encode("utf-8")
 
 
+def _wav_bytes(y, rate):
+    """Float channels x frames (full scale 1.0) as the bytes of a 16-bit WAV file."""
+    import io
+    import numpy as np
+    pcm = np.clip(np.round(np.asarray(y).T * 32767), -32768, 32767).astype("<i2")
+    b = io.BytesIO()
+    with wave.open(b, "wb") as w:
+        w.setnchannels(pcm.shape[1])
+        w.setsampwidth(2)
+        w.setframerate(int(rate))
+        w.writeframes(pcm.tobytes())
+    return b.getvalue()
+
+
 def _write_pcm(path, pcm):
     with wave.open(str(path), "wb") as f:
         f.setnchannels(2)
@@ -578,7 +592,7 @@ def entry_loops(entry, w):
 
 
 SAMPLE_ACTIONS = ("trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade", "gain", "lowpass", "highpass",
-                  "eq", "loudness", "pitch", "stretch", "truncate", "denoise")
+                  "eq", "loudness", "pitch", "stretch", "truncate", "denoise", "spectral_mask")
 
 
 def _splice(x, a, b, seg, loops):
@@ -645,7 +659,7 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
             raise ValueError("crossfade needs audio before the loop start: move the loop start later")
         t = np.linspace(0, np.pi / 2, xf, endpoint=False, dtype=np.float32)
         x[:, e - xf:e] = x[:, e - xf:e] * np.cos(t) + x[:, s - xf:s] * np.sin(t)
-    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch", "denoise"):
+    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch", "denoise", "spectral_mask"):
         from . import dsp
         q = params or {}
 
@@ -668,6 +682,10 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
             y = dsp.peak_eq(seg, rate, num("hz", 20, nyq * 0.98), num("db", -24, 24), num("q", 0.1, 20, 1))
         elif action == "loudness":
             y = dsp.loudness(seg, num("db", -60, 0, -18))[0]
+        elif action == "spectral_mask":  # the PAINT tab's picture laid over the span's spectrum (spectral.py)
+            from . import spectral
+            pic = paint_args(q)
+            y = spectral.spectral_mask(seg, rate, pic["amp"], pic["fmin"], pic["fmax"], pic["scale"], pic["range_db"])
         elif action == "denoise":
             na, nb = int(num("na", 0, n)), int(num("nb", 0, n))
             if nb - na < 2048:
@@ -702,6 +720,32 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
     if x.shape[1] == 0:
         raise ValueError("the edit leaves no audio")
     return x, loops
+
+
+def paint_args(body):
+    """The PAINT tab's picture and its settings from a request, checked: {amp, pan (rows x columns arrays), seconds, fmin,
+    fmax, scale, range_db}."""
+    import numpy as np
+    try:
+        amp = np.asarray(body["amp"], float)
+        pan = np.asarray(body.get("pan") if body.get("pan") is not None else np.zeros_like(amp), float)
+    except (KeyError, TypeError, ValueError):
+        raise ValueError("paint: the picture is rows x columns of brightness 0-1 (amp) and pan -1..1 (pan)")
+    if amp.ndim != 2 or pan.shape != amp.shape or not (1 <= amp.shape[0] <= 256 and 1 <= amp.shape[1] <= 1024):
+        raise ValueError("paint: a picture is 1-256 rows by 1-1024 columns, with a pan of the same shape")
+    scale = body.get("scale") or "log"
+    if scale not in ("log", "notes"):
+        raise ValueError("paint: the rows are spread in log frequency (log) or one per semitone (notes)")
+    fmin, fmax = float(body.get("fmin", 40)), float(body.get("fmax", 12000))
+    if scale == "notes" and not (0 <= fmin < 120):
+        raise ValueError("paint: the lowest note is C-0 (0) to B-9 (119)")
+    if scale == "log" and not (10 <= fmin < fmax <= 20000):
+        raise ValueError("paint: the range is 10 Hz to 20 kHz, low to high")
+    seconds, range_db = float(body.get("seconds", 2)), float(body.get("range_db", 48))
+    if not 0.01 <= seconds <= 60 or not 6 <= range_db <= 96:
+        raise ValueError("paint: 0.01-60 seconds, a 6-96 dB range")
+    return {"amp": np.clip(amp, 0, 1), "pan": np.clip(pan, -1, 1), "seconds": seconds, "fmin": fmin, "fmax": fmax,
+            "scale": scale, "range_db": range_db}
 
 
 # ---------------------------------------------------------------- the instrument panel
@@ -2769,6 +2813,69 @@ class State:
                f"keys nearest its note ({', '.join(takes[i]['note'] for i, _, _ in splits)})")
         return rep + (f"; {len(takes) - len(splits)} repeating a note get no keys" if len(splits) < len(takes) else "")
 
+    def paint(self, body):
+        """The PAINT tab (spectral.py): `action` preview (the picture played as sound: WAV bytes, peak at -1 dBFS),
+        slot (written as a WAV beside the song, `paint-<name>.wav` with the picture as a PNG beside it, and added as a
+        new slot, with an instrument in a song with instruments: one undo step), candidate (written the same way and
+        added to the tryout slot's candidates), filter_preview (slot `num`'s WAV through the picture: WAV bytes) or filter
+        (the same as an edit of slot `num`: a new WAV, one undo step). Returns bytes for the previews, else a report."""
+        import numpy as np
+        from . import spectral
+        from .wavload import write_wav
+        act = body.get("action")
+        pic = paint_args(body)
+        if act in ("filter", "filter_preview"):
+            num = int(body["num"])
+            if act == "filter":
+                self.song_edit([{"op": "sample_process", "num": num, "action": "spectral_mask",
+                                 "params": {k: (v.tolist() if hasattr(v, "tolist") else v) for k, v in pic.items() if k != "pan"}}])
+                return {"report": f"slot {num:02d} filtered through the picture: {Path(self.current_file_of(num)).name}"}
+            with self.lock:
+                _, _, w, x = self._sample_wav(num)
+            y = spectral.spectral_mask(x, w.rate, pic["amp"], pic["fmin"], pic["fmax"], pic["scale"], pic["range_db"])
+            return _wav_bytes(y, w.rate)
+        y, peak = spectral.paint_render(pic["amp"], pic["pan"], pic["seconds"], RATE, pic["fmin"], pic["fmax"],
+                                        pic["scale"], pic["range_db"], int(body.get("seed") or 0))
+        if peak <= 0:
+            raise ValueError("paint: the picture is dark (nothing painted, or only above the 18 kHz ceiling)")
+        y *= 0.891 / peak
+        stereo = bool(np.abs(y[0] - y[1]).max() > 1e-6)
+        y = y if stereo else y[:1]
+        if act == "preview":
+            return _wav_bytes(y, RATE)
+        if act not in ("slot", "candidate"):
+            raise ValueError("paint: preview, slot, candidate, filter or filter_preview")
+        stem = re.sub(r"[^\w.-]+", "_", str(body.get("name") or "paint"))[:40] or "paint"
+        out = next(p for p in (self.base_dir / f"paint-{stem}{'' if k == 1 else f'-{k}'}.wav" for k in itertools.count(1))
+                   if not p.exists() and not p.with_suffix(".png").exists())
+        write_wav(out, RATE, np.clip(np.round(y * 32768), -32768, 32767).astype(np.int32).tolist())
+        out.with_suffix(".png").write_bytes(png_rgb(spectral.picture_png(pic["amp"], pic["pan"])))
+        if act == "candidate":
+            with self.lock:
+                if str(out) not in self.cands():
+                    self.cands().append(str(out))
+                self.save_meta()
+            self.queue_all()
+            return {"report": f"{out.name} ({pic['seconds']:.2f} s{', stereo' if stereo else ''}) added to slot "
+                              f"{self.slot:02d}'s candidates", "file": str(out)}
+        num = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
+        ops = [{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "stereo": stereo}]
+        if self.song.get("instruments"):
+            ops.append({"op": "instrument_new", "num": max(int(i) for i in self.song["instruments"]) + 1,
+                        "entry": {"name": out.stem[:25], "sample": num}})
+        try:
+            self.song_edit(ops)
+        except Exception:
+            out.unlink(missing_ok=True)
+            out.with_suffix(".png").unlink(missing_ok=True)
+            raise
+        return {"report": f"{out.name} ({pic['seconds']:.2f} s{', stereo' if stereo else ''}) in new slot {num:02d}"
+                          + (f", played by instrument {ops[1]['num']:02d}" if len(ops) > 1 else ""), "file": str(out)}
+
+    def current_file_of(self, num):
+        f = ((self.song.get("samples") or {}).get(int(num)) or {}).get("file")
+        return str((self.base_dir / f).resolve()) if f else ""
+
     def find_similar(self, lib, query, k=8):
         """The `k` sounds of the library `lib` nearest WAV `query` by timbre (library.Library.nearest, after a scan when
         the last is over a minute old), added to the slot's candidates; the slot's own WAV and the candidates it already
@@ -3356,6 +3463,11 @@ class Handler(BaseHTTPRequestHandler):
                 if res and res.get("error"):
                     return self._send(400, res)
                 return self._send(200, res or {"pending": True, "report": lib.status.get("message")})
+            elif act == "paint":  # the PAINT tab: previews answer with WAV bytes, the rest with a report
+                res = st.paint(body)
+                if isinstance(res, bytes):
+                    return self._send(200, res, "audio/wav")
+                return self._send(200, res)
             elif act == "want":
                 st.set_want(st.cands()[int(body["id"])] if body.get("id") is not None else None)
             elif act == "note":

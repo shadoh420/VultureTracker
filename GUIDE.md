@@ -308,6 +308,20 @@ command line, `tryout --like WAV -k N` adds the N nearest to the candidates give
 recipe can also rebuild a sound from blocks of other sounds (`resynth:`, SAMPLING.md); the RECIPE box renders its
 edits as candidates like any other entry.
 
+**The Paint tab** (MetaSynth's idea) draws a sound as a picture: rows are frequencies (lowest at the bottom, spread
+evenly in log frequency from LOW to HIGH Hz, or ONE ROW PER SEMITONE up from a LOW note), columns are moments over
+LENGTH seconds (the tab shows how many of the song's rows that is). BRUSH paints (SIZE is its radius in cells), LINE
+draws a straight stroke (a glide), ERASE and a right-drag erase; BRIGHT is the level (full at 100, RANGE dB under
+full at 0) and PAN the colour: red left, yellow centre, green right. LOAD IMAGE… (or an image dropped on the grid)
+draws any picture over it: its light is the level, red and green the pan. ▶ PREVIEW plays the picture: every row a
+sine at its frequency, its level and pan following the row's cells (smoothly between cells), nothing above 18 kHz;
+→ NEW SLOT writes it beside the song (`paint-<name>.wav`, peak at -1 dBFS, stereo when the colours differ, the picture
+as `paint-<name>.png` beside it) as a new slot (with an instrument in a song with instruments; one undo step) and
+→ CANDIDATE adds it to the tryout slot's candidates. AS A FILTER lays the same picture over a sample's spectrum instead:
+dark turns that frequency down at that moment (the columns spread over the whole sample, the phase kept); ▶ plays the
+slot through it and FILTER SLOT writes it as a new WAV (`<name>-spectral_mask.wav`) and points the slot at it (one undo
+step). The picture and its settings are kept in the browser per song.
+
 **Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
 tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets
 the note die away), RELEASE (the instrument's `fadeout`: how fast a replaced or released note fades), a resonant
