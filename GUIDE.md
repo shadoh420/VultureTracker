@@ -231,7 +231,13 @@ full scale), REVERSE and REMOVE DC work on the selection, or on the whole sample
 the end of the loop into the audio just before its start (equal power, the length in ms; it needs that much audio before
 the loop start). Each writes a new WAV beside the song (`<name>-trim.wav`, numbered, never over an existing file, the
 source untouched), points the slot at it and keeps the loops with the audio (a trim moves them, a reverse of the whole
-sample mirrors them); undo points the slot back, and the WAVs stay on disk. SLICE cuts the WAV (the selection, else all of
+sample mirrors them); undo points the slot back, and the WAVs stay on disk. EFFECTS → NEW WAV work the same way, on the
+selection or the whole sample: GAIN (dB), LOW-PASS and HIGH-PASS (Hz, 12 or 24 dB per octave), EQ (one bell band: Hz,
+dB, Q), LOUDNESS (the RMS of what sounds brought to a dBFS target, never past full scale), PITCH (semitones at the same
+length), STRETCH (percent of the length at the same pitch; loops move with the audio) and TRUNCATE SILENCE (every
+silence under the dBFS level and longer than MIN shortened to KEEP). The filters are zero-phase; PITCH and STRETCH are a
+phase vocoder with phase locking, the stereo image kept (steep stretches smear sharp attacks a little: slice a drum
+loop instead). SLICE cuts the WAV (the selection, else all of
 it) AT THE HITS (sensitivity 0–100: higher finds softer hits; each cut 1 ms before its hit, on a zero crossing) or into
 EQUAL PARTS: FIND shows the cuts on the waveform, numbered, and SLICE → SLOTS writes exactly those, each slice its own
 WAV beside the song (`<name>-slice01.wav`, a 1 ms fade at its end) and a new slot keeping the source's base note, volume

@@ -576,13 +576,39 @@ def entry_loops(entry, w):
     return out
 
 
-SAMPLE_ACTIONS = ("trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade")
+SAMPLE_ACTIONS = ("trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade", "gain", "lowpass", "highpass",
+                  "eq", "loudness", "pitch", "stretch", "truncate")
 
 
-def process_wav(x, action, a, b, loops, frames=0):
+def _splice(x, a, b, seg, loops):
+    """`x` with frames a..b replaced by `seg` (another length): loops before the span stay, loops after it move with the
+    audio, a loop inside it is scaled with it, one across its edge is dropped."""
+    import numpy as np
+    k = seg.shape[1] / max(1, b - a)
+    out = {}
+    for key, lp in loops.items():
+        if not lp:
+            out[key] = lp
+        elif lp[1] <= a:
+            out[key] = lp
+        elif lp[0] >= b:
+            d = seg.shape[1] - (b - a)
+            out[key] = (lp[0] + d, lp[1] + d, lp[2])
+        elif a <= lp[0] and lp[1] <= b:
+            s, e = a + round((lp[0] - a) * k), a + round((lp[1] - a) * k)
+            out[key] = (s, max(s + 1, e), lp[2])
+        else:
+            out[key] = None
+    return np.concatenate([x[:, :a], seg.astype(x.dtype), x[:, b:]], axis=1), out
+
+
+def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
     """One sample edit on frames a..b of `x` (float channels x frames; a copy is changed). `loops` ({key: (start, end,
     pingpong) or None}) follow the audio: trimmed (shifted, clipped, dropped when nothing is left) and mirrored by a
-    reverse of the whole sample. Crossfade: the last `frames` of the loop fade (equal power) into the audio just before
+    reverse of the whole sample. The effects (dsp.py; `params` their settings, `rate` the WAV's) work on the span too:
+    gain (db), lowpass / highpass (hz, slope 12 or 24), eq (hz, db, q), loudness (db: the RMS target), pitch
+    (semitones, the length kept), stretch (percent, the pitch kept) and truncate (silences under db dBFS longer than
+    min_ms shortened to keep_ms); the last two change the length, and the loops move with the audio. Crossfade: the last `frames` of the loop fade (equal power) into the audio just before
     its start, so the wrap is seamless (the synth recipes' crossfade). Returns (x, loops)."""
     import numpy as np
     x, loops, n = x.copy(), dict(loops), x.shape[1]
@@ -617,6 +643,53 @@ def process_wav(x, action, a, b, loops, frames=0):
             raise ValueError("crossfade needs audio before the loop start: move the loop start later")
         t = np.linspace(0, np.pi / 2, xf, endpoint=False, dtype=np.float32)
         x[:, e - xf:e] = x[:, e - xf:e] * np.cos(t) + x[:, s - xf:s] * np.sin(t)
+    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch"):
+        from . import dsp
+        q = params or {}
+
+        def num(k, lo, hi, default=None):
+            try:
+                v = float(q.get(k, default))
+            except (TypeError, ValueError):
+                raise ValueError(f"{action}: {k} must be a number")
+            if not lo <= v <= hi:
+                raise ValueError(f"{action}: {k} is {lo:g} to {hi:g}")
+            return v
+        nyq = rate / 2
+        if action == "gain":
+            y = dsp.gain(seg, num("db", -60, 24))
+        elif action == "lowpass":
+            y = dsp.lowpass(seg, rate, num("hz", 20, nyq), num("slope", 12, 24, 24))
+        elif action == "highpass":
+            y = dsp.highpass(seg, rate, num("hz", 10, nyq), num("slope", 12, 24, 24))
+        elif action == "eq":
+            y = dsp.peak_eq(seg, rate, num("hz", 20, nyq * 0.98), num("db", -24, 24), num("q", 0.1, 20, 1))
+        elif action == "loudness":
+            y = dsp.loudness(seg, num("db", -60, 0, -18))[0]
+        else:
+            y = dsp.pitch_shift(seg, num("semitones", -24, 24))
+        x[:, a:b] = y
+    elif action in ("stretch", "truncate"):
+        from . import dsp
+        q = params or {}
+        if action == "stretch":
+            pct = float(q.get("percent", 100))
+            if not 25 <= pct <= 400:
+                raise ValueError("stretch: 25 to 400 %")
+            new = dsp.stretch(seg, pct / 100)
+        else:
+            runs = dsp.silent_runs(seg, rate, float(q.get("db", -50)), float(q.get("min_ms", 200)))
+            keep = max(0, int(float(q.get("keep_ms", 50)) * rate / 1000))
+            if not runs:
+                raise ValueError("truncate: no silence that long and that quiet in the span")
+            parts, at = [], 0
+            for s, e in runs:
+                parts.append(seg[:, at: s + keep // 2])
+                at = max(s + keep // 2, e - (keep - keep // 2))
+            parts.append(seg[:, at:])
+            new = np.concatenate(parts, axis=1)
+            loops = {k: (lp if lp and (lp[1] <= a or lp[0] >= b) else None) for k, lp in loops.items()}
+        x, loops = _splice(x, a, b, new, loops)
     else:
         raise ValueError(f"unknown sample edit '{action}' (one of {', '.join(SAMPLE_ACTIONS)})")
     if x.shape[1] == 0:
@@ -2007,7 +2080,8 @@ class State:
             n = x.shape[1]
             a = max(0, min(n - 1, int(op.get("a") or 0)))
             b = max(a + 1, min(n, int(op["b"]) if op.get("b") is not None else n))
-            y, loops = process_wav(x, str(op["action"]), a, b, entry_loops(entry, w), op.get("frames") or 0)
+            y, loops = process_wav(x, str(op["action"]), a, b, entry_loops(entry, w), op.get("frames") or 0,
+                                   op.get("params"), w.rate)
             full = 128 if w.out_bits == 8 else 32768
             chans = np.clip(np.round(y * full), -full, full - 1).astype(np.int32).tolist()
             out = self._new_wav(path, str(op["action"]))
@@ -2548,7 +2622,7 @@ class State:
 
     def _new_wav(self, src, action):
         """A path beside the song for an edited copy of `src`: <stem>-<action>.wav, numbered so no file is ever replaced."""
-        stem = re.sub(r"-(trim|fade_in|fade_out|normalize|reverse|dc|crossfade)(-\d+)?$", "", src.stem)
+        stem = re.sub(rf"-({'|'.join(SAMPLE_ACTIONS)})(-\d+)?$", "", src.stem)
         for k in itertools.count(1):
             p = self.base_dir / f"{stem}-{action}{'' if k == 1 else f'-{k}'}.wav"
             if not p.exists():

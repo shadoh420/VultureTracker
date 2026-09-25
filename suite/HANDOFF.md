@@ -534,8 +534,10 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   Pattern tab: rows rendered as they play into a new slot, with a ring-out; SLICE in the Samples tab: onsets by
   spectral flux in `dsp.py` or equal parts, shown on the waveform, written as a WAV and slot per slice plus a kit
   instrument) followed, each checked in Chromium on a scratch song. Phrases (chunk 5) were left out: the other
-  helpers write the same cells, and phrases would need a new song-format feature. Next: 3b (the effects panel), then
-  2a (recording) last, by the owner's word.
+  helpers write the same cells, and phrases would need a new song-format feature. Chunk 3b: the Samples tab's EFFECTS
+  → NEW WAV (gain, low/high-pass, an EQ band, loudness, pitch at the same length, stretch at the same pitch, truncate
+  silence; `dsp.py`, new `sample_process` actions, loops following changes of length), checked in Chromium. Next: 2a
+  (recording with the owner's Scarlett 2i2) last, by the owner's word.
 
 ## Next steps, in order
 

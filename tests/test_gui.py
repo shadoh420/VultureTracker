@@ -1268,6 +1268,49 @@ class TestGui(unittest.TestCase):
         st.undo()
         self.assertNotIn(4, st.song["samples"])
 
+    def test_sample_effects(self):
+        # the EFFECTS row: each writes a new WAV (one undo step); stretch and truncate change the length and the loops
+        # move with the audio
+        import numpy as np
+        from vulturetracker import gui as g
+        rate = 44100
+        t = np.arange(rate) / rate
+        x = np.stack([0.5 * np.sin(2 * np.pi * 440 * t)]).astype(np.float32)
+        loops = {"loop": (22050, 44100, False), "sustain_loop": None}
+
+        def f0(y):
+            s = np.abs(np.fft.rfft(y[0] * np.hanning(y.shape[1])))
+            return np.fft.rfftfreq(y.shape[1], 1 / rate)[np.argmax(s)]
+        y, lp = g.process_wav(x, "gain", 0, rate, loops, params={"db": -6}, rate=rate)
+        self.assertAlmostEqual(float(np.abs(y).max()), 0.5 * 10 ** (-6 / 20), places=3)
+        self.assertEqual(lp, loops)
+        y, _ = g.process_wav(x, "pitch", 0, rate, loops, params={"semitones": 12}, rate=rate)
+        self.assertEqual(y.shape, x.shape)
+        self.assertAlmostEqual(f0(y), 880, delta=2)
+        y, _ = g.process_wav(x, "lowpass", 0, rate, loops, params={"hz": 200}, rate=rate)
+        self.assertLess(float(np.abs(y[:, 2000:-2000]).max()), 0.5 * 0.1)  # 440 Hz is over an octave above: -26 dB
+        y, _ = g.process_wav(x, "loudness", 0, rate, loops, params={"db": -12}, rate=rate)
+        self.assertAlmostEqual(20 * np.log10(np.sqrt((y.astype(float) ** 2).mean())), -12, delta=0.2)
+        y, lp = g.process_wav(x, "stretch", 0, rate, loops, params={"percent": 150}, rate=rate)
+        self.assertEqual(y.shape[1], round(1.5 * rate))
+        self.assertAlmostEqual(f0(y), 440, delta=2)
+        self.assertEqual(lp["loop"], (33075, 66150, False))           # scaled with the audio
+        y, lp = g.process_wav(x, "stretch", 0, 11025, loops, params={"percent": 200}, rate=rate)
+        self.assertEqual((y.shape[1], lp["loop"]), (rate + 11025, (33075, 55125, False)))  # after the span: moved
+        gap = np.concatenate([x[:, :rate // 4], np.zeros((1, rate), np.float32), x[:, :rate // 4]], axis=1)
+        y, _ = g.process_wav(gap, "truncate", 0, gap.shape[1], {"loop": None}, params={"db": -50, "min_ms": 200, "keep_ms": 100}, rate=rate)
+        self.assertAlmostEqual(y.shape[1] / rate, 0.6, delta=0.011)  # the second of silence shortened to 0.1 s
+        for action, params in (("gain", {"db": 99}), ("eq", {"hz": 1000, "db": 6, "q": 0}), ("stretch", {"percent": 10}),
+                               ("truncate", {"db": -90})):
+            with self.assertRaises(ValueError, msg=action):
+                g.process_wav(x, action, 0, rate, loops, params=params, rate=rate)
+        # through the song: a new WAV beside the song, the slot pointed at it, undone in one step
+        st = self.state()
+        st.song_edit([{"op": "sample_process", "num": 1, "action": "stretch", "params": {"percent": 200}}])
+        self.assertEqual(st.song["samples"][1]["file"], "a-stretch.wav")
+        st.undo()
+        self.assertEqual(st.song["samples"][1]["file"], "a.wav")
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT
