@@ -30,6 +30,8 @@ python -m vulturetracker build demo/arena.yaml --render demo/arena.wav # compile
 python -m vulturetracker render demo/arena.it -o demo/arena.wav --repeat 1
 python -m vulturetracker info demo/arena.it                           # what libopenmpt sees
 python -m vulturetracker import some.xm -o some.yaml                  # existing .it/.xm/.s3m/.mod -> song file + WAVs
+python -m vulturetracker index C:/samples samples                      # index WAVs by timbre (the app's MAP tab)
+python -m vulturetracker tryout song.yaml --sample 3 --like kick.wav -k 8 # the 8 sounds nearest kick.wav, in the song
 ```
 
 `pip install -e .` also installs a `vulturetracker` command.
@@ -270,6 +272,24 @@ later). In the Samples tab, AUTO LOOP proposes loop points for a sustained sound
 its steady part, on rising zero crossings where the waveform matches best); CROSSFADE LOOP then smooths the wrap.
 Recording needs `pip install sounddevice` in a source checkout (the exe carries it); `VT_FAKE_AUDIO=1` swaps in a
 simulated two-input interface to try the tab without one.
+
+**Finding sounds: FIND SIMILAR and the MAP tab.** The app keeps an index of the WAVs under a few folders (the MAP
+tab's FOLDERS INDEXED; until others are added, the checkout's `samples/` and `tools/cc0`), in `library.json` beside the
+recent-songs list (`%APPDATA%/VultureTracker`, or `$VT_LIBRARY`). Each WAV is measured once from its first 10 s: its
+timbre (the mean and spread of 12 MFCCs), spectral centroid, flatness, attack (10 % to 90 % of its peak), duration,
+pitch and, when it holds a pitch, the levels of its first eight harmonics; INDEX NOW (or `vulturetracker index`) reads
+only files that are new or changed since (by date and size) and drops files that are gone; folders starting with a dot
+(the app's `.tryout` renders) are left out. In the Tryout tab, ≈ LIKE SLOT adds the sounds nearest the slot's own
+sample (as many as the number beside it) to the slot's candidates, and ≈ FIND SIMILAR TO THIS (under the chosen
+candidate) the sounds nearest that candidate; the slot's sample, the candidates it already has and exact copies are
+passed over, and each found candidate shows its distance and what it was found from (≈ 1.41 from kick; under about 2
+is close). Distances weigh each feature by its spread over the library; the pitch counts for little (half a unit per
+octave), a pitched sound against an unpitched one for more. The MAP tab draws every indexed WAV as a point, placed by
+the first two principal components of the same features (near means alike, though two dimensions cannot keep every
+distance), coloured by folder; rings mark the slot's sample, its candidates, and the sounds nearest the one chosen.
+Click a point to hear it and list its nearest sounds; → CANDIDATE OF SLOT adds it, ≈ ADD ITS NEAREST adds them. The
+wheel zooms, a drag pans, a double-click fits the map; the filter dims what does not match a name or folder. From the
+command line, `tryout --like WAV -k N` adds the N nearest to the candidates given (or renders them alone).
 
 **Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
 tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets

@@ -2653,6 +2653,29 @@ class State:
         take["dest"] = dest
         return take
 
+    def find_similar(self, lib, query, k=8):
+        """The `k` sounds of the library `lib` nearest WAV `query` by timbre (library.Library.nearest, after a scan when
+        the last is over a minute old), added to the slot's candidates; the slot's own WAV and the candidates it already
+        has are passed over. Each is remembered with the query and its distance (meta `found`). Returns {"added",
+        "report"}."""
+        with self.lock:
+            slot, skip = self.slot, [*self.cands(), self.current_file() or ""]
+        lib.fresh()
+        near = lib.nearest(query, max(1, min(50, int(k))), exclude=skip)
+        with self.lock:
+            cands = self.meta["candidates"].setdefault(str(slot), [])
+            found = self.meta.setdefault("found", {})
+            for p, d in near:
+                if p not in cands:
+                    cands.append(p)
+                found[p] = [Path(query).stem, round(d, 2)]
+            self.save_meta()
+        self.queue_all()
+        if not near:
+            return {"added": [], "report": f"nothing like {Path(query).name} in the library ({lib.count()} sounds indexed)"}
+        return {"added": [p for p, _ in near], "report": f"{len(near)} sounds like {Path(query).name} added to slot "
+                f"{slot:02d}'s candidates (distance {near[0][1]:.2f}-{near[-1][1]:.2f})"}
+
     def auto_loop(self, num):
         """Loop points AUTO LOOP proposes for slot `num`: {start, end (exclusive), hz} in the WAV's frames, or an error
         naming why none (the sound does not hold steady, or holds no pitch and no match)."""
@@ -2796,7 +2819,8 @@ class State:
                 cands.append({"id": i, "path": c, "name": Path(c).stem, "src": os.path.relpath(c, self.base_dir).replace(os.sep, "/"),
                               "key": k, "status": r["status"], "error": r.get("error"), "peak": r.get("peak"), "meas": m,
                               "dist": distance(m, ref), "stars": rating.get("stars", 0), "rejected": rating.get("rejected", False),
-                              "note": rating.get("note", ""), "current": c == cur})
+                              "note": rating.get("note", ""), "current": c == cur,
+                              "found": (self.meta.get("found") or {}).get(c)})
             ents = self.song.get("samples") or {}
             slot_meas = {}  # per slot: the three numbers the overview table shows (memoised per WAV)
             for k, v in ents.items():
@@ -2848,6 +2872,7 @@ class Handler(BaseHTTPRequestHandler):
 
     recorder = None      # record.Recorder, made on the RECORD tab's first request
     rec_devices = None   # the input devices, listed once (again on REFRESH)
+    library = None       # library.Library, read on the first FIND SIMILAR or MAP request
 
     @classmethod
     def rec(cls):
@@ -2911,6 +2936,24 @@ class Handler(BaseHTTPRequestHandler):
         except (RecordError, ValueError) as e:
             return {"error": str(e)}
         return {}
+
+    @classmethod
+    def lib(cls):
+        """The sample library's index (library.py), read on first use."""
+        if cls.library is None:
+            from .library import Library, default_index
+            cls.library = Library(default_index())
+        return cls.library
+
+    @classmethod
+    def lib_snapshot(cls):
+        from .library import default_roots
+        lib = cls.library
+        if lib is None:
+            return {"loaded": False}
+        return {"loaded": True, "index": str(lib.path), "roots": lib.data["roots"], "default_roots": default_roots(),
+                "status": lib.status, "count": lib.count(), "generation": lib.generation,
+                "busy": bool(lib.job and lib.job.is_alive())}
 
     @classmethod
     def open_song(cls, path):
@@ -3021,7 +3064,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/icon.png":
             return self._send(200, HTML.with_name("icon.png").read_bytes(), "image/png")
         if path == "/api/state":
-            return self._send(200, st.snapshot() if st else start_snapshot())
+            return self._send(200, {**(st.snapshot() if st else start_snapshot()), "library": self.lib_snapshot()})
+        if path == "/api/library":
+            self.lib()
+            return self._send(200, self.lib_snapshot())
+        if path == "/api/libmap":
+            return self._send(200, self.lib().map())
+        if path == "/api/libnear":  # the nearest sounds of an indexed one, for the map (nothing is added)
+            from urllib.parse import parse_qs
+            q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
+            lib = self.lib()
+            if not lib.has(q.get("path", "")):
+                return self._send(404, {"error": "not in the library"})
+            return self._send(200, {"near": lib.nearest(q["path"], max(1, min(50, int(q.get("k") or 8))))})
+        if path == "/libwav":
+            from urllib.parse import parse_qs
+            f = parse_qs(self.path.partition("?")[2]).get("path", [""])[0]
+            if not self.lib().has(f):  # a sound of the index, nothing else
+                return self._send(404, {"error": "not in the library"})
+            return self._send_file(f, "audio/wav")
         if path == "/api/effects":
             return self._send(200, effect_help())
         if path == "/api/start":
@@ -3127,6 +3188,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": self.browse(wav=True)})
             elif act == "rec":
                 return self._send(200, self.rec_command(body))
+            elif act == "library":  # roots: the folders to index (saved); then a scan, waited for a moment
+                lib = self.lib()
+                if body.get("roots") is not None:
+                    if lib.job and lib.job.is_alive():
+                        raise ValueError("the library is busy: wait for the scan to finish")
+                    lib.set_roots(body["roots"])
+                res = lib.run(lib.scan, 0.5) if body.get("scan", True) else None
+                return self._send(200, {"result": res, **self.lib_snapshot()})
             elif act == "browse":
                 p = self.browse()
                 if p:
@@ -3160,6 +3229,15 @@ class Handler(BaseHTTPRequestHandler):
                     if k in body:
                         r[k] = body[k]
                 st.save_meta()
+            elif act == "similar":  # the slot's WAV, a candidate (id) or any WAV (path): its nearest become candidates
+                q = body.get("path") or (st.cands()[int(body["id"])] if body.get("id") is not None else st.current_file())
+                if not q or not Path(q).exists():
+                    raise ValueError("nothing to compare: the slot has no WAV on disk")
+                lib = self.lib()
+                res = lib.run(lambda: st.find_similar(lib, q, body.get("k") or 8), float(body.get("wait", 20)))
+                if res and res.get("error"):
+                    return self._send(400, res)
+                return self._send(200, res or {"pending": True, "report": lib.status.get("message")})
             elif act == "want":
                 st.set_want(st.cands()[int(body["id"])] if body.get("id") is not None else None)
             elif act == "note":

@@ -570,6 +570,33 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   the app plays no input back (monitoring is the interface's; the owner had no headphones for the Solo, and Windows'
   "Listen to this device" works); 2 s per request to `localhost` from Python's urllib on this machine (IPv6 first):
   scripts should use 127.0.0.1.
+- Cloud session, 2026-09-25 (branch `claude/vigilant-dijkstra-6h9i7f`, from main at 0.4.0): chunk 4, sample discovery.
+  `vulturetracker/library.py`: per WAV (its first 10 s, read with numpy, any PCM or float width) a 37-number vector:
+  mean and spread of MFCCs 1-12 (40 mel bands 30 Hz-11 kHz, the same bands at every rate), centroid, flatness, attack
+  (10 % to 90 % of the peak), duration, pitch (dsp.pitch_of) and, for a pitched sound, harmonics 1-8 in dB under the
+  strongest (a spectrum of the loudest half second, padded to 8 periods per bin). The index is one JSON file
+  (`%APPDATA%/VultureTracker/library.json` or `$VT_LIBRARY`) keyed by path with each file's stamp (mtime_ns, size), so a
+  rescan reads only new and changed files; unreadable files are remembered on their stamp too; dot folders are skipped;
+  a VERSION bump rereads all. Distances: every feature in z-scores over the library, weighted by group (MFCC means 4,
+  spreads 2.5, centroid 1.5, flatness 1, attack 1, duration 0.2, harmonics 5 when both are pitched, 0.5 per octave,
+  1 for pitched against unpitched). Measured on tests/test_library.py's synthetic families (sine, saw, square, noise,
+  kick, hat, pad; six each over four octaves and 0.25-2 s, at 22.05 and 44.1 kHz): of each sound's three nearest, 0.62
+  of the same family with the first weights (duration 1, no harmonics), 0.84 with the harmonics, 0.90 now (kick and
+  saw 1.00, noise 1.00, square 0.83, hat 0.83, pad 0.89, sine 0.72: the highest sines find squares of their own pitch).
+  On the repository's samples/ labelled by name (drum / bass / pad / lead, 57 of 72): 0.70 against 0.29 by chance
+  (drums 0.87, pads 0.82, leads 0.44, bass 0.20 of 5). Timing in the container: 72 files in 1.5 s cold, a rescan with
+  nothing changed 5 ms. The map: PCA of the weighted vectors (SVD), both axes scaled to 0-1. App: ≈ LIKE SLOT (with a
+  count) in the Tryout's candidate panel and ≈ FIND SIMILAR TO THIS under the chosen candidate (POST `similar`: the
+  job scans first when the last scan is over a minute old, waits up to 20 s and else lets the candidates arrive; found
+  candidates carry `found` [query, distance] in the meta and show it); the MAP tab (canvas: points coloured by folder,
+  rings for the slot's sample, its candidates and the chosen sound's nearest; click plays through `/libwav`, which
+  serves indexed files only; wheel zoom, drag pan, a name filter; FOLDERS INDEXED with ADD, ✕ and INDEX NOW; GET
+  `/api/library`, `/api/libmap`, `/api/libnear`). CLI: `index [folders] [--like WAV]`, `tryout --like WAV -k N`.
+  Checked in Chromium on a scratch song (check_map.py in the session's scratchpad: 42 synthetic sounds plus samples/):
+  LIKE SLOT added 5 saws, FIND SIMILAR TO THIS 5 more, the map drew 114 points in 12 folders, a click on kick3 played it
+  and listed kick0/4/5/2 and samples' kick.wav, → CANDIDATE added it, the filter and zoom worked, no page errors.
+  Tests: tests/test_library.py (7: the reader against every format, features, family precision, the stamp cache, a
+  query outside the index, `tryout --like`, the app's endpoints).
 
 ## Next steps, in order
 

@@ -1,4 +1,4 @@
-"""CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,gui} ..."""
+"""CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,gui} ..."""
 import argparse
 import json
 import sys
@@ -56,9 +56,18 @@ def main(argv=None):
     p = sub.add_parser("tryout", help="render part of a song once per candidate sample, to compare sounds in context")
     p.add_argument("song")
     p.add_argument("--sample", type=int, required=True, help="sample slot to swap")
-    p.add_argument("candidates", nargs="+", help="candidate WAVs (globs allowed)")
+    p.add_argument("candidates", nargs="*", help="candidate WAVs (globs allowed)")
+    p.add_argument("--like", metavar="WAV", help="also the sounds of the library nearest this WAV by timbre (see index)")
+    p.add_argument("-k", "--k", type=int, default=8, help="how many --like finds (default 8)")
+    p.add_argument("--index", help="the library index (default: the app's, or $VT_LIBRARY)")
     p.add_argument("--orders", help="order positions to play, e.g. 2-5 (default: the whole song)")
     p.add_argument("-o", "--output", default="tryout.wav")
+    p = sub.add_parser("index", help="index the WAVs under folders by timbre, for tryout --like and the app's MAP tab")
+    p.add_argument("folders", nargs="*", help="folders to index (default: the ones indexed last, else samples/ and "
+                                              "tools/cc0); the list is saved with the index")
+    p.add_argument("--index", help="the index file (default: the app's, or $VT_LIBRARY)")
+    p.add_argument("--like", metavar="WAV", help="then print the sounds nearest this WAV")
+    p.add_argument("-k", "--k", type=int, default=8)
     p = sub.add_parser("gui", help="open the app for a song (its own window with pywebview installed, else the browser)")
     p.add_argument("song", nargs="?", help="song to open (default: the app's open-a-song screen)")
     p.add_argument("--port", type=int, default=0, help="listen port (default: 8723 when free, else any free port)")
@@ -134,6 +143,17 @@ def main(argv=None):
         if args.cmd == "tryout":
             import glob
             files = [f for c in args.candidates for f in (sorted(glob.glob(c)) or [c])]
+            if args.like:
+                from .library import Library, default_index
+                lib = Library(args.index or default_index())
+                lib.scan()
+                near = lib.nearest(args.like, args.k, exclude=files)
+                for f, d in near:
+                    print(f"like {Path(args.like).name}: {d:5.2f}  {f}")
+                files += [f for f, _ in near]
+            if not files:
+                print("error: no candidates (give WAVs, or --like WAV with an index that holds sounds)", file=sys.stderr)
+                return 1
             orders = None
             if args.orders:
                 a, _, b = args.orders.partition("-")
@@ -141,6 +161,23 @@ def main(argv=None):
             for t, f in api.tryout(args.song, args.sample, files, orders, args.output):
                 print(f"{int(t // 60)}:{t % 60:05.2f}  {f}")
             print(f"wrote {args.output}: {len(files)} versions, timestamps above")
+            return 0
+
+        if args.cmd == "index":
+            from .library import Library, default_index
+            lib = Library(args.index or default_index())
+            last = [0]
+
+            def progress(done, total, path):
+                if done == total or done - last[0] >= 100:
+                    last[0] = done
+                    print(f"  {done}/{total}  {path}")
+            res = lib.scan(args.folders or None, progress)
+            print(f"{lib.path}: {res['files']} sounds under {', '.join(lib.roots)} ({res['read']} read, "
+                  f"{res['dropped']} gone, {res['errors']} unreadable)")
+            if args.like:
+                for f, d in lib.nearest(args.like, args.k):
+                    print(f"{d:6.2f}  {f}")
             return 0
 
         if args.cmd == "gui":

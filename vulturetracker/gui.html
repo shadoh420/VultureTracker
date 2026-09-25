@@ -109,6 +109,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab" data-t="ins" onclick="tab('ins')">INSTRUMENTS</div>
   <div class="tab" data-t="smp" onclick="tab('smp')">SAMPLES</div>
   <div class="tab" data-t="rec" onclick="tab('rec')">RECORD</div>
+  <div class="tab" data-t="map" onclick="tab('map')">MAP</div>
   <div class="tab" data-t="spectrum" onclick="tab('spectrum')">SPECTRUM</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
@@ -145,7 +146,9 @@ option.hascand{color:var(--acc);font-weight:700}
       <div style="display:flex;gap:6px;padding:8px 10px">
         <input id="globs" placeholder="add candidate WAVs: a path or glob, relative to the song (e.g. cand/hat_*.wav or C:/kits/**/*.wav)" style="flex:1;padding:5px 8px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')addCands()">
         <span class="btn" onclick="addCands()">ADD</span>
+        <span class="btn" style="margin-left:6px" onclick="findSimilar(null)" title="the sounds of the library (MAP tab: its folders) nearest the slot's own sample by timbre become candidates">≈ LIKE SLOT</span><input id="simk" type="number" min="1" max="50" value="8" style="width:38px;font:11px var(--mono);padding:2px 4px" title="how many sounds FIND SIMILAR adds">
       </div>
+      <div class="mono" id="simmsg" style="display:none;padding:0 10px 6px;font-size:10px;color:var(--amber)"></div>
       <div id="recipe" style="display:none;padding:0 10px 8px">
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><span class="k" title="the sample recipe (SAMPLING.md) in the song's folder that writes this slot's WAV">RECIPE</span><span class="mono" id="rc-what" style="font-size:10px;color:#c3cbcf;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
           <span class="btn sm" onclick="recipeRender()" title="render the entry as written here into a new WAV beside the slot's (never over it) and add it to the candidates">RENDER CANDIDATE</span><span class="btn sm" onclick="twice(this,recipeWrite)" title="write the entry as written here into the recipe file, in place (click twice)">WRITE TO RECIPE</span></div>
@@ -279,6 +282,34 @@ option.hascand{color:var(--acc);font-weight:700}
         </div></div></div>
     <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph"><span class="k">PATTERNS · <span id="song-pn"></span></span><span class="meta">click a name or a row count to change it</span></div><table id="song-pats"></table></div>
     <div class="panel" style="flex:none;max-height:30%;overflow:auto"><div class="ph"><span class="k" title="what the order list never plays: patterns outside it, instruments no played pattern names, samples no used instrument maps">CLEAN-UP</span><span class="btn sm" id="clean-all" onclick="twice(this,cleanAll)" title="remove everything listed, as one undo step (click twice)">REMOVE ALL UNUSED</span></div><div class="pb" id="song-clean" style="font-size:10.5px"></div></div>
+  </div>
+</div>
+
+<div class="main" id="t-map">
+  <div class="panel col" style="flex:1;min-width:0">
+    <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SAMPLE MAP</span><span class="mono" id="map-n" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><input id="map-q" placeholder="filter by name or folder" style="width:180px;padding:3px 6px;font:10.5px var(--mono)" oninput="drawMap()"><span id="map-leg" style="flex:1;min-width:0;display:flex;gap:8px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim);overflow:hidden;max-height:30px"></span><span class="btn sm" onclick="mapReset()" title="the whole map (double-click does the same)">FIT</span></div>
+    <div id="map-box" style="flex:1;min-height:0;position:relative;background:#0b0e0f">
+      <canvas id="map-cv" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair" onmousedown="mapDown(event)" onmousemove="mapHover(event)" onmouseleave="MAP.hover=null;drawMap()" onwheel="mapWheel(event)" ondblclick="mapReset()"></canvas>
+      <div id="map-tip" style="position:absolute;display:none;pointer-events:none;padding:3px 6px;font:10px var(--mono);color:var(--hi);background:#1b2124;box-shadow:inset 0 0 0 1px #2a3135;white-space:nowrap"></div>
+      <div id="map-empty" class="empty" style="position:absolute;inset:0;display:none"></div>
+    </div>
+    <div style="flex:none;padding:5px 10px;font-size:10px;color:var(--dim)">each point is a WAV, placed by timbre (the first two principal components of its features: near means alike) · click to hear it · wheel zooms · drag pans · rings: <span style="color:#fff">○ the slot's sample</span> <span style="color:var(--amber)">○ its candidates</span> <span style="color:#8fb0c4">○ nearest the chosen sound</span></div>
+  </div>
+  <div class="col" style="width:340px;flex:none">
+    <div class="panel" style="flex:none">
+      <div class="ph"><span class="k">LIBRARY</span><span class="state" id="map-state"></span></div>
+      <div class="pb">
+        <div class="k" style="margin-bottom:4px">FOLDERS INDEXED</div>
+        <div id="map-roots" style="font:10px/1.5 var(--mono)"></div>
+        <div style="display:flex;gap:4px;margin-top:6px"><input id="map-root" placeholder="add a folder: e.g. C:/samples" style="flex:1;min-width:0;padding:4px 6px;font:10.5px var(--mono)" onkeydown="if(event.key==='Enter')mapAddRoot()"><span class="btn sm" onclick="mapAddRoot()">ADD</span></div>
+        <div style="display:flex;gap:4px;margin-top:8px;align-items:center"><span class="btn" onclick="mapScan()" title="read new and changed WAVs under the folders (unchanged files are kept from the index)">INDEX NOW</span><span class="mono" id="map-msg" style="flex:1;min-width:0;font-size:10px;color:var(--dim)"></span></div>
+        <div class="src" id="map-index" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto">
+      <div class="ph"><span class="k">SOUND</span><span class="kbd" id="map-slot"></span></div>
+      <div class="pb" id="map-sel"></div>
+    </div>
   </div>
 </div>
 
@@ -422,7 +453,7 @@ async function importModule(pick){const path=$('imppath').value.trim();if(!pick&
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs)}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -482,6 +513,7 @@ function render(){
     <div class="key">${(keyn+1)%10}</div><div class="body">
     <div style="display:flex;align-items:baseline;min-width:0"><span class="name">${esc(c.name)}</span>${c.current?'<span class="tag">CURRENT</span>':''}${best&&best.id===c.id?'<span class="tag">CLOSEST</span>':''}${c.id===sel&&!audio.paused?'<span class="tag acc">● PLAYING</span>':''}<div style="flex:1"></div><span class="rej" onclick="event.stopPropagation();act('remove',{id:${c.id}})" title="remove from list">✕</span></div>
     <div class="src">${esc(c.src)}${m.rate?` · ${m.rate} Hz · ${m.bits}-bit ${m.stereo?'stereo':'mono'}${m.root?' · root '+m.root:''}${m.loop?' · loop':''}`:''}</div>
+    ${c.found?`<div class="src" style="color:var(--blue)" title="found by FIND SIMILAR: its timbre distance to that sound (library z-scores; under about 2 is close)">≈ ${c.found[1].toFixed(2)} from ${esc(c.found[0])}</div>`:''}
     ${m.error?`<div class="fail"><b>UNREADABLE</b>${esc(m.error)}</div>`:''}
     ${st==='failed'?`<div class="fail"><b>RENDER FAILED</b><span style="flex:1">${esc(c.error)}</span><span class="btn" onclick="event.stopPropagation();act('retry',{id:${c.id}})">RETRY</span></div>`:''}
     ${st==='queued'||st==='rendering'?`<div style="margin-top:9px;display:flex;align-items:center;gap:10px"><div class="bar"><i></i></div><span style="font-size:10px;color:var(--dim)">${st==='rendering'?'rendering in the song…':'queued'}</span></div>`:''}
@@ -489,7 +521,8 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();
+  const L=S.library;if(L&&L.busy&&$('simmsg').style.display==='block')$('simmsg').textContent=`indexing the library: ${L.status.done}/${L.status.total}`;
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
 function measRows(m){if(!m||m.error)return '';return [['duration',secs(m.duration)],['detected pitch',m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'],['spectral centroid',hz(m.centroid)],['decay to −40 dB',secs(m.decay)],['attack to peak',m.attack==null?'—':Math.round(m.attack*1000)+' ms'],['flatness (noise)',m.flatness==null?'—':m.flatness.toFixed(2)]].map(([k,v])=>`<div class="row"><span>${k}</span><span>${v}</span></div>`).join('')}
@@ -505,6 +538,7 @@ function renderChosen(){const c=S.candidates.find(x=>x.id===sel);$('selkey').tex
    ${rows.map(([k,a,b,dd])=>`<div style="display:flex;align-items:baseline;padding:4px 0;box-shadow:inset 0 -1px 0 #0a0c0d;font-size:10.5px"><span style="flex:1;color:#a8b1b6">${k}</span><span class="mono" style="width:64px;text-align:right">${a}</span><span class="mono" style="width:64px;text-align:right;color:var(--dim)">${b}</span><span class="mono" style="width:54px;text-align:right;color:var(--blue)">${dd}</span></div>`).join('')}
    <div style="margin-top:12px;display:flex;gap:8px"><div style="flex:1"><div class="k">DECAY CURVE</div><div class="wave" style="margin-top:4px;height:44px"><svg viewBox="0 0 100 20" preserveAspectRatio="none">${curve(r.decay_curve,'#3f525f')}${curve(m.decay_curve,'#7ee787')}</svg></div></div>
    <div style="flex:1"><div class="k">OCTAVE BANDS</div><div class="wave" style="margin-top:4px;height:44px">${bandsvg(m,r)}</div></div></div>
+   <div class="btn" style="margin-top:12px;display:block;text-align:center" onclick="findSimilar(${c.id})" title="the sounds of the library nearest this candidate by timbre join the candidates">≈ FIND SIMILAR TO THIS</div>
    ${c.current?`<div style="margin-top:14px;text-align:center;font-size:10.5px;color:var(--dim)">this is the sample in the song now</div>`:`<div class="btn big" style="margin-top:14px;display:block" onclick="useSel()">USE THIS FOR SLOT ${pad(S.slot)} <span class="kbd">U</span></div><div style="margin-top:6px;text-align:center;font-size:10px;color:var(--dim)">shows the YAML change before anything is written</div>`}`)}
 function renderBuild(){const b=S.build;if(!b){put('buildout','');return}
   if(b.status!=='done'){put('buildout',b.status==='failed'?`<div class="err">${esc(b.error)}</div>`:`<span style="color:var(--amber)">${b.status}…</span>`);return}
@@ -1259,5 +1293,56 @@ document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagNam
   else if(e.key==='n'||e.key==='N')addNote();
   else if((e.key==='x'||e.key==='X')&&sel!=null){const c=S.candidates.find(x=>x.id===sel);act('rate',{id:sel,rejected:!c.rejected})}
   else if(e.key==='?')toggle('keys')});
+// ---- sample discovery: FIND SIMILAR and the MAP tab (library.py on the server)
+async function findSimilar(id,path){const k=+$('simk').value||8,m=$('simmsg');m.style.display='block';m.textContent='searching the library…';
+  const r=await fetch('/api/similar',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id,path,k})}),j=await r.json();
+  m.textContent=j.error?j.error.replace(/^\w+: /,''):j.pending?'indexing the library first ('+(j.report||'')+'): the candidates arrive when it is done':j.report||'';MAP.gen=-1;await refresh();return j}
+const MAP={data:null,gen:-1,view:{cx:.5,cy:.5,span:1.08},sel:null,near:[],hover:null,drag:null,busy:false};const MAPA=new Audio();
+const mapOn=()=>$('t-map').classList.contains('on');
+async function mapOpen(){if(!mapOn())return;const L=await (await fetch('/api/library')).json();S.library=L;renderMapSide();if(L.count===0&&!L.busy&&!MAP.auto){MAP.auto=true;mapScan()}mapLoad()}
+async function mapLoad(){const L=S.library;if(!L||!L.loaded||MAP.busy||MAP.gen===L.generation&&MAP.data)return drawMap();MAP.busy=true;
+  try{const d=await (await fetch('/api/libmap')).json();MAP.data=d;MAP.gen=d.generation;MAP.idx=new Map(d.paths.map((p,i)=>[p,i]));const g=[...new Set(d.groups)].sort();MAP.groups=g;MAP.col=Object.fromEntries(g.map((x,i)=>[x,`hsl(${Math.round(i*360/Math.max(1,g.length)+90)%360},45%,58%)`]))}finally{MAP.busy=false}
+  $('map-leg').innerHTML=MAP.groups.map(g=>`<span style="white-space:nowrap"><i style="display:inline-block;width:7px;height:7px;background:${MAP.col[g]};margin-right:3px"></i>${esc(g)}</span>`).join('');drawMap();renderMapSel()}
+function mapXY(i,W,H){const p=MAP.data.points[i],v=MAP.view,s=Math.min(W,H)/v.span;return [W/2+(p[0]-v.cx)*s,H/2-(p[1]-v.cy)*s]}
+function mapMatch(){const q=($('map-q').value||'').trim().toLowerCase();if(!q)return null;const d=MAP.data;return d.names.map((n,i)=>(n+' '+d.groups[i]).toLowerCase().includes(q))}
+function drawMap(){const cv=$('map-cv');if(!cv||!mapOn())return;const dpr=devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);const g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+  const d=MAP.data,em=$('map-empty');if(!d||!d.paths.length){em.style.display='flex';em.innerHTML=`<div style="font-size:14px;font-weight:600;color:#c3cbcf">${S.library&&S.library.busy?'Indexing…':'No sounds indexed yet'}</div><div style="margin-top:8px;font-size:11px;max-width:380px">${esc(S.library&&S.library.status?S.library.status.message:'')}<br>Add folders of WAVs on the right and INDEX NOW.</div>`;return}em.style.display='none';
+  const m=mapMatch(),cands=new Set((S.candidates||[]).map(c=>c.path));$('map-n').textContent=`${d.paths.length} sounds${m?` · ${m.filter(Boolean).length} match`:''}`;
+  for(let i=0;i<d.paths.length;i++){const [x,y]=mapXY(i,W,H);if(x<-4||y<-4||x>W+4||y>H+4)continue;g.globalAlpha=m&&!m[i]?.15:.9;g.fillStyle=MAP.col[d.groups[i]];g.fillRect(x-2,y-2,4,4)}
+  g.globalAlpha=1;const ring=(i,col,r)=>{if(i==null)return;const [x,y]=mapXY(i,W,H);g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();g.arc(x,y,r,0,7);g.stroke()};
+  MAP.near.forEach(n=>ring(MAP.idx.get(n[0]),'#8fb0c4',6));cands.forEach(p=>ring(MAP.idx.get(p),'#d9a441',5));ring(MAP.idx.get(S.slot_file),'#ffffff',7);
+  if(MAP.sel!=null){const [x,y]=mapXY(MAP.sel,W,H);g.fillStyle='#7ee787';g.fillRect(x-4,y-4,8,8)}
+  const tip=$('map-tip');if(MAP.hover!=null){const [x,y]=mapXY(MAP.hover,W,H);tip.style.display='block';tip.textContent=`${d.names[MAP.hover]} · ${d.groups[MAP.hover]}`;tip.style.left=Math.min(W-tip.offsetWidth-4,x+8)+'px';tip.style.top=Math.max(0,y-24)+'px'}else tip.style.display='none'}
+function mapPick(ev){const d=MAP.data;if(!d)return null;const r=$('map-cv').getBoundingClientRect(),mx=ev.clientX-r.left,my=ev.clientY-r.top,m=mapMatch();let best=null,bd=64;
+  for(let i=0;i<d.paths.length;i++){if(m&&!m[i])continue;const [x,y]=mapXY(i,r.width,r.height),dd=(x-mx)**2+(y-my)**2;if(dd<bd){bd=dd;best=i}}return best}
+function mapHover(ev){if(MAP.drag)return;const i=mapPick(ev);if(i!==MAP.hover){MAP.hover=i;drawMap()}}
+function mapDown(ev){if(ev.button!==0||!MAP.data)return;ev.preventDefault();const x0=ev.clientX,y0=ev.clientY,v0={...MAP.view},r=$('map-cv').getBoundingClientRect(),s=Math.min(r.width,r.height)/v0.span;MAP.drag={moved:false};
+  const mv=e=>{const dx=e.clientX-x0,dy=e.clientY-y0;if(Math.abs(dx)+Math.abs(dy)>3)MAP.drag.moved=true;if(MAP.drag.moved){MAP.view.cx=v0.cx-dx/s;MAP.view.cy=v0.cy+dy/s;drawMap()}};
+  const up=e=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);const moved=MAP.drag.moved;MAP.drag=null;if(!moved){const i=mapPick(e);if(i!=null)mapSelect(i,true)}};addEventListener('mousemove',mv);addEventListener('mouseup',up)}
+function mapWheel(ev){ev.preventDefault();const r=$('map-cv').getBoundingClientRect(),v=MAP.view,s=Math.min(r.width,r.height)/v.span,px=v.cx+(ev.clientX-r.left-r.width/2)/s,py=v.cy-(ev.clientY-r.top-r.height/2)/s,f=ev.deltaY>0?1.25:0.8;
+  v.span=Math.max(0.01,Math.min(3,v.span*f));v.cx=px-(px-v.cx)*f;v.cy=py-(py-v.cy)*f;drawMap()}
+function mapReset(){MAP.view={cx:.5,cy:.5,span:1.08};drawMap()}
+async function mapSelect(i,play){MAP.sel=i;MAP.near=[];const p=MAP.data.paths[i];if(play)mapPlay(p);renderMapSel();drawMap();
+  const j=await (await fetch('/api/libnear?k='+(+$('simk').value||8)+'&path='+encodeURIComponent(p))).json();if(MAP.sel===i&&!j.error){MAP.near=j.near;renderMapSel();drawMap()}}
+function mapPlay(p){MAPA.src='/libwav?path='+encodeURIComponent(p);MAPA.play().catch(()=>{})}
+function mapSend(p){act('add',{globs:p})}
+function renderMapSel(){$('map-slot').textContent=S.slot!=null?`SLOT ${pad(S.slot)}`:'';const d=MAP.data;if(!d||MAP.sel==null||!d.paths[MAP.sel]){put('map-sel','<div style="padding:16px 4px;text-align:center;color:var(--mid);font-size:11px;line-height:1.6">Click a point to hear it. Its nearest sounds are ringed and listed here; send it, or them, to the slot\'s candidates.</div>');return}
+  const i=MAP.sel,p=d.paths[i],m=d.info[i]||{},inC=new Set((S.candidates||[]).map(c=>c.path));
+  put('map-sel',`<div class="name">${esc(d.names[i])}</div><div class="src" style="margin-top:4px">${esc(p)}</div>
+   <div style="margin-top:8px">${[['folder',esc(d.groups[i])],['duration',secs(m.duration)],['pitch',m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'],['centroid',hz(m.centroid)],['flatness (noise)',m.flatness==null?'—':m.flatness.toFixed(3)],['attack',m.attack==null?'—':Math.round(m.attack*1000)+' ms'],['rate',m.rate?m.rate+' Hz':'—']].map(([k,v])=>`<div class="row"><span>${k}</span><span>${v}</span></div>`).join('')}</div>
+   <div style="display:flex;gap:2px;margin-top:10px"><span class="btn" onclick="mapPlay(${attr(p)})">▶ PLAY</span><span class="btn" onclick="MAPA.pause()">■</span><span class="btn" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="mapSend(${attr(p)})">${inC.has(p)?'✓ A CANDIDATE':'→ CANDIDATE OF SLOT '+pad(S.slot)}</span></div>
+   <div class="btn" style="display:block;text-align:center;margin-top:2px" onclick="findSimilar(null,${attr(p)})" title="these nearest sounds join the slot's candidates">≈ ADD ITS ${MAP.near.length||+$('simk').value||8} NEAREST TO THE CANDIDATES</div>
+   <div class="k" style="margin-top:12px">NEAREST BY TIMBRE</div>
+   ${MAP.near.map(([q,dd])=>{const j=MAP.idx.get(q);return `<div class="row" style="cursor:pointer" onclick="mapSelect(${j},true)"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${inC.has(q)?'✓ ':''}${esc(d.names[j]||q)}</span><span>${dd.toFixed(2)}</span></div>`}).join('')||'<div class="src">…</div>'}`)}
+function renderMapSide(){const L=S.library;if(!L||!L.loaded)return;const roots=L.roots&&L.roots.length?L.roots:L.default_roots;
+  put('map-roots',roots.map((r,i)=>`<div style="display:flex;gap:6px;align-items:baseline"><span style="flex:1;min-width:0;word-break:break-all;color:#c3cbcf">${esc(r)}</span>${L.roots&&L.roots.length?`<span class="rej" onclick="mapDelRoot(${i})" title="stop indexing this folder">✕</span>`:''}</div>`).join('')+(L.roots&&L.roots.length?'':'<div class="src">(the defaults: the checkout\'s samples/ and tools/cc0)</div>'));
+  const st=L.status||{};$('map-state').textContent=L.busy?'INDEXING':`${L.count} SOUNDS`;$('map-state').classList.toggle('on',!!L.busy);
+  $('map-msg').textContent=L.busy&&st.total?`${st.done}/${st.total}`:(st.message||'');$('map-index').textContent='index: '+L.index}
+async function mapPost(body){const r=await fetch('/api/library',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}),j=await r.json();if(j.error)alert(j.error.replace(/^\w+: /,''));else S.library=j;renderMapSide();mapLoad()}
+function mapScan(){mapPost({scan:true})}
+function mapAddRoot(){const v=$('map-root').value.trim();if(!v)return;$('map-root').value='';const L=S.library,cur=L.roots&&L.roots.length?L.roots:L.default_roots;mapPost({roots:[...cur,v]})}
+function mapDelRoot(i){const L=S.library;mapPost({roots:L.roots.filter((_,k)=>k!==i),scan:true})}
+function renderMap(){if(!mapOn()||!S.library)return;renderMapSide();if(S.library.loaded&&S.library.generation!==MAP.gen&&!S.library.busy)mapLoad();else drawMap();renderMapSel()}
+addEventListener('resize',()=>{if(mapOn())drawMap()});
 setSpeed(speed);refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
 </script></body></html>
