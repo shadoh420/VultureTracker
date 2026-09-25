@@ -514,10 +514,19 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   share), the image check per sample and rate, parsed patterns per text and position, and cell parses; the app keeps
   the .it bytes of its reload compile (`State.it`), which `facts_of` and the live engine use unless the instrument
   panel edits an instrument (before: the whole song compiled a second time through the dict and YAML). Every demo's
-  .it (text path, dict path, a section, a candidate swapped in) is byte-identical to before. Left for 1b: faders
-  through the engine's channel volume (no reload), the worklet's allocations and synchronous catch-up, the preview copy
-  rendered every quantum, a polyphase 2x decimator (the 2x render is 3-10 times the 1x one), a lighter /api/state,
-  streamed WAV ranges, a cap on the undo history. On Windows: run `python tools/bench.py` for the owner's numbers.
+  .it (text path, dict path, a section, a candidate swapped in) is byte-identical to before. Chunk 1b: the 2x render
+  through a polyphase decimator (`resample.decimate`: only the kept samples, in blocks, from the int16 mix), bit-
+  identical on every demo, vantage 4.1-5.6 s -> 1.2-1.7 s (libopenmpt's own mixing at 88.2 kHz is about 0.5 s of it);
+  VOL and PAN faders reach the engine while they move (chvol / chpan, libopenmpt's interactive channel volume and pan,
+  equal to the header value in a node test; the release swaps in the exact module as before); the worklet allocates
+  nothing per quantum and renders the preview copy only from a preview note to 0.3 s of silence after its key (before:
+  every quantum, the whole song muted, also while the song played); `/api/state` hashes the song text once per text
+  and reads the WAV stamps once per poll (before: once per candidate each); WAVs are served range by range from the
+  file (before: the whole file read per request); undo keeps the newest 200 steps. Left as it was: the meters pass
+  (one soloed render per channel, stopped at the next channel when the mix changes) and the swap's catch-up while
+  stopped (up to 4 s of the song rendered at once, silent). Checked in Chromium (demo2): the fader's moves reach the
+  playing engine, the release swaps, no page errors. On Windows: run `python tools/bench.py` for the owner's numbers,
+  and drag a fader while the Pattern tab plays.
 
 ## Next steps, in order
 

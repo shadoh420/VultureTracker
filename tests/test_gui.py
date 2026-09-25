@@ -634,6 +634,16 @@ class TestGui(unittest.TestCase):
         self.assertEqual((self.dir / "song.yaml").read_bytes().decode("utf-8"), SONG)
 
 
+    def test_undo_keeps_the_newest_steps(self):
+        st = self.state()
+        st.UNDO_LIMIT = 3
+        for v in range(5):
+            st.edit_cells(0, [{"row": 1, "ch": 0, "cell": f"... .. v{v:02d} ..."}])
+        self.assertEqual(st.snapshot()["undo"], 3)
+        for _ in range(3):
+            st.undo()
+        self.assertEqual(st.pattern_rows(0)["rows"][1][0], "... .. v01 ...")  # back three steps, and no further
+
     def test_song_structure_edits(self):
         (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
         st = self.state()

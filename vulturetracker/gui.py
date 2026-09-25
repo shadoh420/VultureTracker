@@ -370,6 +370,15 @@ def sounding_table(mod, facts):
     return table
 
 
+def _stamp(f):
+    """A file's path, modification time and size as text (render cache keys)."""
+    try:
+        st = Path(f).stat()
+        return f"{f}={st.st_mtime}:{st.st_size}"
+    except OSError:
+        return f"{f}=missing"
+
+
 def patch_it(data, silenced=(), mix=None):
     """The compiled module with channels `silenced` disabled (the IT channel-disable bit, which libopenmpt honours) and a
     mix written into its header: channel volumes (header bytes 0x80..) and pans (0x40..), the mix volume (0x31) and per-slot
@@ -743,6 +752,8 @@ class State:
         self._recipe_memo = {}  # (recipe path, mtime, size) -> recipe_outputs, or None for a YAML file that is no recipe
         self.error = None
         self.text = ""
+        self._sha = (None, "")       # (text, its sha1): every poll hashes the text once per candidate otherwise
+        self._stamps = None          # the mix's WAV stamps while a snapshot runs (it asks once per candidate)
         self.mtime = 0.0
         self.facts = None
         self.mod = None       # compiled model of the last good load (pattern view)
@@ -888,18 +899,20 @@ class State:
             self.save_meta()
             self.queue_all()
 
+    def text_sha(self):
+        """sha1 of the song text, computed once per text."""
+        if self._sha[0] is not self.text:
+            self._sha = (self.text, hashlib.sha1(self.text.encode()).hexdigest())
+        return self._sha[1]
+
     def ckey(self, cand=None):
         """Compile key: song text, slot, section, the candidate swapped in (None: the song as it is) and the stamp of every
         WAV in the mix (a sample re-rendered in place under the same path must not serve the old mix)."""
-        def stamp(f):
-            try:
-                st = Path(f).stat()
-                return f"{f}={st.st_mtime}:{st.st_size}"
-            except OSError:
-                return f"{f}=missing"
-        stamps = "|".join(stamp(f) for f in ([cand] if cand else []) + self.files)
+        stamps = self._stamps or "|".join(_stamp(f) for f in self.files)
+        if cand:
+            stamps = f"{_stamp(cand)}|{stamps}"
         inst = json.dumps(self.mix().get("instrument"), sort_keys=True)  # the instrument panel is compiled in, not patched
-        return hashlib.sha1(f"{self.text}|{self.slot}|{self.orders}|{stamps}|{inst}".encode()).hexdigest()[:16]
+        return hashlib.sha1(f"{self.text_sha()}|{self.slot}|{self.orders}|{stamps}|{inst}".encode()).hexdigest()[:16]
 
     def key(self, cand=None):
         """Render cache key: the compile key plus what is patched into the module's header, mutes and the unwritten mix."""
@@ -1219,7 +1232,7 @@ class State:
 
     def version(self):
         """The song text the notes were made against: a short hash of the file and its modification time."""
-        return {"hash": hashlib.sha1(self.text.encode()).hexdigest()[:8],
+        return {"hash": self.text_sha()[:8],
                 "mtime": datetime.datetime.fromtimestamp(self.mtime).isoformat(timespec="seconds")}
 
     def sounding(self, order, row):
@@ -1747,11 +1760,13 @@ class State:
         the (module, warnings) of `new`, when the caller compiled it already."""
         loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
         self.history.append({"text": self.text, "meta": None})
+        del self.history[:-self.UNDO_LIMIT]  # a song text each: a long session of edits on a big song adds up
         self.future.clear()
         self.write_song(new)
         self.reload(archive=False, loaded=loaded)
 
     META_KEYS = ("candidates", "muted", "solo", "mix", "orders", "loop")  # the tryout settings a song write may change
+    UNDO_LIMIT = 200     # undo steps kept (the oldest go first)
 
     def _meta_view(self):
         import copy
@@ -2406,6 +2421,14 @@ class State:
 
     def snapshot(self):
         with self.lock:
+            self._stamps = "|".join(_stamp(f) for f in self.files)  # read once for every key this snapshot takes
+            try:
+                return self._snapshot()
+            finally:
+                self._stamps = None
+
+    def _snapshot(self):
+        with self.lock:
             slot = self.slot
             entry = (self.song.get("samples") or {}).get(slot, {})
             cur = self.current_file()
@@ -2507,10 +2530,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _send_file(self, path, ctype):
         p = Path(path)
-        if not p.exists():
+        try:
+            f = p.open("rb")
+        except OSError:
             return self._send(404, {"error": "not found"})
-        data = p.read_bytes()
-        start, end = 0, len(data) - 1
+        with f:
+            self._send_range(f, os.fstat(f.fileno()).st_size, ctype)
+
+    def _send_range(self, f, size, ctype):
+        """The open file `f`, or the byte range the request names, read and sent in pieces (a render is tens of MB, and
+        the page asks for it range by range as it plays and seeks)."""
+        start, end = 0, size - 1
         rng = self.headers.get("Range")
         code = 200
         if rng and rng.startswith("bytes="):
@@ -2519,14 +2549,14 @@ class Handler(BaseHTTPRequestHandler):
                 if a:
                     start, end = int(a), min(int(b), end) if b else end
                 elif b:  # the last b bytes
-                    start = max(0, len(data) - int(b))
+                    start = max(0, size - int(b))
                 else:
                     raise ValueError
             except ValueError:
                 return self._send(400, {"error": f"bad Range header: {rng}"})
-            if start > end or start >= len(data):
+            if start > end or start >= size:
                 self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{len(data)}")
+                self.send_header("Content-Range", f"bytes */{size}")
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
@@ -2536,9 +2566,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(end - start + 1))
         if code == 206:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
-        self.wfile.write(data[start:end + 1])
+        f.seek(start)
+        left = end - start + 1
+        while left > 0:
+            piece = f.read(min(left, 1 << 20))
+            if not piece:
+                break
+            self.wfile.write(piece)
+            left -= len(piece)
 
     def _foreign(self):
         """A request from another web page (its Origin is not this server's), or one that reached the server under another
