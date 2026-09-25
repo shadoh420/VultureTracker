@@ -129,6 +129,32 @@ class TestTakesInTheSong(unittest.TestCase):
         finally:
             st.close()
 
+    def test_takes_become_one_multisample(self):
+        # three notes recorded one by one (G-4, a sharp D-5, C-6) and a drum hit: the notes become slots tuned to the cent
+        # and one instrument plays each over the keys nearest it; the hit has no note and is left out
+        (self.dir / "ins.yaml").write_text(SONG_INS, newline="\n")
+        st = gui.State(self.dir / "ins.yaml")
+        try:
+            with self.assertRaises(ValueError):
+                st.takes_multisample()  # no takes yet
+            st.save_take(self.take(), RATE, {"name": "g", "dest": "keep"})
+            st.save_take(self.take(cents=700 + 20), RATE, {"name": "d", "dest": "keep"})
+            st.save_take(self.take(cents=1700), RATE, {"name": "c", "dest": "keep"})
+            st.save_take(np.random.default_rng(0).standard_normal((1, RATE // 4)) * np.exp(-np.arange(RATE // 4) / 800), RATE,
+                         {"name": "hit", "dest": "keep"})
+            rep = st.takes_multisample()
+            self.assertEqual(rep, "3 takes in slots 03-05; instrument 03 plays each over the keys nearest its note (G-4, D-5, C-6)")
+            s = st.song["samples"]
+            self.assertAlmostEqual(s[4]["c5_speed"], RATE * 2 ** ((60 - 62) / 12) * 2 ** (-20 / 1200), delta=3)
+            self.assertEqual(st.song["instruments"][3]["keymap"], [{"notes": "C-0..A#4", "sample": 3},
+                                                                  {"notes": "B-4..G-5", "sample": 4},
+                                                                  {"notes": "G#5..B-9", "sample": 5}])
+            self.assertEqual([t["dest"] for t in st.takes], ["keep", "multi", "multi", "multi"])
+            st.undo()
+            self.assertNotIn(3, st.song["instruments"])
+        finally:
+            st.close()
+
     def test_record_routes(self):
         os.environ["VT_FAKE_AUDIO"] = "1"
         gui.Handler.state = self.st

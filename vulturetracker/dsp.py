@@ -192,6 +192,55 @@ def pitch_shift(x, semitones):
     return out[:, :n] if out.shape[-1] >= n else np.pad(out, ((0, 0), (0, n - out.shape[-1])))
 
 
+def _stft(x, size, hop):
+    """Frames of `x` (channels x frames, padded by a window each side) as spectra: channels x frames x bins."""
+    pad = np.pad(np.asarray(x, np.float64), ((0, 0), (size, size + hop)))
+    n = 1 + (pad.shape[-1] - size) // hop
+    idx = np.arange(size)[None, :] + hop * np.arange(n)[:, None]
+    return np.fft.rfft(pad[:, idx] * np.hanning(size + 1)[:size], axis=-1)
+
+
+def _istft(X, size, hop, length):
+    """The inverse of _stft: windowed overlap-add, divided by the summed squared window; `length` frames."""
+    win = np.hanning(size + 1)[:size]
+    frames = np.fft.irfft(X, size, axis=-1) * win
+    n = X.shape[1]
+    out = np.zeros((X.shape[0], (n - 1) * hop + size))
+    norm = np.zeros(out.shape[-1])
+    for t in range(n):
+        out[:, t * hop:t * hop + size] += frames[:, t]
+        norm[t * hop:t * hop + size] += win ** 2
+    out /= np.maximum(norm, 1e-3 * norm.max())
+    return out[:, size:size + length]
+
+
+def denoise(x, rate, noise, reduce_db=12.0, sensitivity=2.0, size=2048):
+    """Spectral noise reduction: the noise's average power per frequency bin is learned from `noise` (channels x frames:
+    a stretch of the same recording where only the noise sounds), then every bin of `x` whose power is not well above it
+    is turned down, by up to `reduce_db`. A bin keeps the share of its power that stands over `sensitivity` times the
+    noise's level (in amplitude: 2 = 6 dB over), and the gains are smoothed over three frames and three bins, so what is
+    left of the noise does not warble. The gain is the same for every channel (the stereo image holds) and the phase is
+    kept. Returns x's shape."""
+    x = np.asarray(x, np.float64)
+    noise = np.asarray(noise, np.float64)
+    hop = size // 4
+    if noise.shape[-1] < size:
+        raise ValueError(f"learn the noise from at least {1000 * size / rate:.0f} ms of it")
+    if not 0 <= float(reduce_db) <= 60:
+        raise ValueError("reduce by 0 to 60 dB")
+    N = _stft(noise, size, hop)[:, 1:-2]                       # the padded edges are not the noise
+    profile = (np.abs(N) ** 2).mean(axis=(0, 1))                # per bin, over channels and frames
+    X = _stft(x, size, hop)
+    power = (np.abs(X) ** 2).mean(axis=0)                       # linked: one gain for all channels
+    g = np.clip(1 - float(sensitivity) ** 2 * profile / np.maximum(power, 1e-20), 0, 1)
+    k = np.ones(3) / 3
+    g = np.apply_along_axis(lambda v: np.convolve(v, k, mode="same"), 0, g)   # over time
+    g = np.apply_along_axis(lambda v: np.convolve(v, k, mode="same"), 1, g)   # over frequency
+    floor = 10 ** (-float(reduce_db) / 20)
+    g = floor + (1 - floor) * g
+    return _istft(X * g[None], size, hop, x.shape[-1])
+
+
 def silent_runs(x, rate, db=-50.0, min_ms=200):
     """Spans (start, end) where every 10 ms block is below `db` dBFS for at least `min_ms`."""
     m = np.abs(np.asarray(x, float)).max(axis=0)

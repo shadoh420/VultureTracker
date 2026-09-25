@@ -147,3 +147,44 @@ def layers(rows, chans, r0, r1, instruments, mode="cycle", default_volume=None):
             if ins != c.instrument:
                 _write(out, r, ch, Cell(c.note, ins, c.volcmd, c.effect, c.param))
     return out
+
+
+def slice_rows(starts, rate, tempo, speed, ch=0, nch=1, max_rows=200):
+    """Where slices that start at frames `starts` (ascending, of a WAV at `rate`) fall in a pattern played at `tempo` and
+    `speed`, so that playing them in order keeps their original timing (Renoise's slices rendered to a phrase): the
+    first on row 0, each on the row its start reaches and delayed by the ticks left over (SDx), rounded to the nearest
+    tick (2.5 / tempo s). A slice that lands on a row already taken goes to the next channel to the right (up to `nch`).
+    Returns (placed: [(slice index, row, ch, delay ticks)], rows the pattern needs, dropped: slice indices that did not
+    fit: past `max_rows` or with every channel taken)."""
+    tick = 2.5 / tempo
+    placed, dropped, taken, last = [], [], {}, 0
+    for k, s in enumerate(starts):
+        t = round((s - starts[0]) / rate / tick)
+        row, delay = divmod(t, speed)
+        c = ch
+        while c < nch and (row, c) in taken:
+            c += 1
+        if row >= max_rows or c >= nch:
+            dropped.append(k)
+            continue
+        taken[(row, c)] = k
+        placed.append((k, row, c, delay))
+        last = max(last, row)
+    return placed, last + 1, dropped
+
+
+def key_splits(notes, lo=0, hi=119):
+    """A keyboard split for sounds recorded at `notes` (note numbers, any order, repeats allowed): each distinct note
+    plays over the keys closer to it than to its neighbours (a key halfway between two goes to the lower), the lowest down
+    to `lo` and the highest up to `hi`. Returns [(index into notes, first key, last key)] from low to high; a repeated
+    note keeps its first index."""
+    first = {}
+    for i, n in enumerate(notes):
+        first.setdefault(int(n), i)
+    ns = sorted(first)
+    out = []
+    for j, n in enumerate(ns):
+        a = lo if j == 0 else (ns[j - 1] + n) // 2 + 1
+        b = hi if j == len(ns) - 1 else (n + ns[j + 1]) // 2
+        out.append((first[n], a, b))
+    return out

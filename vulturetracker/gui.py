@@ -578,7 +578,7 @@ def entry_loops(entry, w):
 
 
 SAMPLE_ACTIONS = ("trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade", "gain", "lowpass", "highpass",
-                  "eq", "loudness", "pitch", "stretch", "truncate")
+                  "eq", "loudness", "pitch", "stretch", "truncate", "denoise")
 
 
 def _splice(x, a, b, seg, loops):
@@ -608,7 +608,8 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
     pingpong) or None}) follow the audio: trimmed (shifted, clipped, dropped when nothing is left) and mirrored by a
     reverse of the whole sample. The effects (dsp.py; `params` their settings, `rate` the WAV's) work on the span too:
     gain (db), lowpass / highpass (hz, slope 12 or 24), eq (hz, db, q), loudness (db: the RMS target), pitch
-    (semitones, the length kept), stretch (percent, the pitch kept) and truncate (silences under db dBFS longer than
+    (semitones, the length kept), stretch (percent, the pitch kept), denoise (the noise learned from frames na..nb of
+    `x`, turned down by up to db, sens its threshold over the noise) and truncate (silences under db dBFS longer than
     min_ms shortened to keep_ms); the last two change the length, and the loops move with the audio. Crossfade: the last `frames` of the loop fade (equal power) into the audio just before
     its start, so the wrap is seamless (the synth recipes' crossfade). Returns (x, loops)."""
     import numpy as np
@@ -644,7 +645,7 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
             raise ValueError("crossfade needs audio before the loop start: move the loop start later")
         t = np.linspace(0, np.pi / 2, xf, endpoint=False, dtype=np.float32)
         x[:, e - xf:e] = x[:, e - xf:e] * np.cos(t) + x[:, s - xf:s] * np.sin(t)
-    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch"):
+    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch", "denoise"):
         from . import dsp
         q = params or {}
 
@@ -667,6 +668,11 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
             y = dsp.peak_eq(seg, rate, num("hz", 20, nyq * 0.98), num("db", -24, 24), num("q", 0.1, 20, 1))
         elif action == "loudness":
             y = dsp.loudness(seg, num("db", -60, 0, -18))[0]
+        elif action == "denoise":
+            na, nb = int(num("na", 0, n)), int(num("nb", 0, n))
+            if nb - na < 2048:
+                raise ValueError("denoise: LEARN NOISE from a selection where only the noise sounds (at least 50 ms)")
+            y = dsp.denoise(seg, rate, x[:, na:nb], num("db", 0, 60, 12), num("sens", 1, 8, 2))
         else:
             y = dsp.pitch_shift(seg, num("semitones", -24, 24))
         x[:, a:b] = y
@@ -2362,11 +2368,20 @@ class State:
     def _slice(self, lines, orders, op, remap):
         """The `sample_slice` op: slot `num`'s WAV cut at `points` (start frames, ascending) up to `end` (default: the
         WAV's end), each slice written as its own WAV beside the song (a 1 ms fade at its end, so the cut does not click)
-        and added as a new slot with the source slot's pitch settings; in a song with instruments, also a new
-        instrument playing slice 1 on C-5, slice 2 on C#5 and so on, each at its own pitch (a drum kit). One undo step."""
+        and added as a new slot. `mode` kit (default): each slot keeps the source slot's pitch settings and, in a song
+        with instruments, a new instrument plays slice 1 on C-5, slice 2 on C#5 and so on, each at its own pitch (a drum
+        kit). `mode` multi: each slice's note is found (dsp.pitch_of; slices without one are left out), its slot tuned
+        to the cent (c5_speed) and a new instrument plays each slice over the keys nearest its note (compose.key_splits),
+        so a set of recorded notes becomes one playable instrument. `pattern`: also a new pattern (not in the order list)
+        whose cells play the slices in order at their original timing at the song's tempo and speed (compose.slice_rows:
+        rows plus SDx delays), from channel `ch`. One undo step."""
         import numpy as np
+        from . import compose, dsp
+        from .notation import format_note
         from .wavload import write_wav
-        num = int(op["num"])
+        num, mode = int(op["num"]), op.get("mode") or "kit"
+        if mode not in ("kit", "multi"):
+            raise ValueError("slices become a kit (one per key from C-5) or a multisample (each around its note)")
         entry, path, w, x = self._sample_wav(num)
         n = x.shape[1]
         end = max(1, min(n, int(op.get("end") or n)))
@@ -2374,38 +2389,109 @@ class State:
         bounds = [(s, e) for s, e in zip(pts, pts[1:] + [end]) if e - s >= 32]
         have = sorted(int(k) for k in (self.song.get("samples") or {}))
         first = max(have, default=0) + 1
+        insts = self.mod.instruments is not None
         if len(bounds) < 1:
             raise ValueError("no slices: give at least one start point before the end")
-        if first + len(bounds) - 1 > 99:
-            raise ValueError(f"{len(bounds)} slices from slot {first} would pass slot 99: slice fewer, or clean up unused slots")
-        if len(bounds) > 120 - 60:
+        if mode == "multi" and not insts:
+            raise ValueError("a multisample is an instrument: this song plays samples directly (no instruments)")
+        notes = [None] * len(bounds)
+        if mode == "multi":
+            for k, (s, e) in enumerate(bounds):
+                hz = dsp.pitch_of(x[:, s:e], w.rate)
+                if hz:
+                    notes[k] = (hz, dsp.note_of(hz)[0])
+            keep_k = [k for k, v in enumerate(notes) if v and 0 <= v[1] < 120]
+            if not keep_k:
+                raise ValueError("no slice holds a note to map (drums? slice them as a kit)")
+        else:
+            keep_k = list(range(len(bounds)))
+        if first + len(keep_k) - 1 > 99:
+            raise ValueError(f"{len(keep_k)} slices from slot {first} would pass slot 99: slice fewer, or clean up unused slots")
+        if mode == "kit" and len(keep_k) > 120 - 60:
             raise ValueError("an instrument maps C-5 upwards: at most 60 slices")
         full = 128 if w.out_bits == 8 else 32768
         fade = min(max(1, w.rate // 1000), 32)
         keep = {k: entry[k] for k in ("base_note", "c5_speed", "volume", "global_volume", "stereo", "bits") if k in entry}
         stem = re.sub(r"-slice\d+(-\d+)?$", "", path.stem)
-        nums = []
-        for k, (s, e) in enumerate(bounds, 1):
+        nums, slot_of = [], {}
+        for k in keep_k:
+            s, e = bounds[k]
             y = x[:, s:e].copy()
             y[:, -fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
-            out = next(p for p in (self.base_dir / f"{stem}-slice{k:02d}{'' if j == 1 else f'-{j}'}.wav" for j in itertools.count(1))
+            out = next(p for p in (self.base_dir / f"{stem}-slice{k + 1:02d}{'' if j == 1 else f'-{j}'}.wav" for j in itertools.count(1))
                        if not p.exists())
+            root = notes[k][1] if mode == "multi" else w.root
             write_wav(out, w.rate, np.clip(np.round(y * full), -full, full - 1).astype(np.int32).tolist(), bits=w.out_bits,
-                      root_note=w.root)
+                      root_note=root)
             self._created.append(out)
-            n_slot = first + k - 1
-            self._song_op(lines, orders, {"op": "sample_new", "num": n_slot, "file": str(out), "keep": keep,
-                                          "name": f"{entry.get('name') or path.stem} {k}"[:25]}, remap)
+            n_slot = first + len(nums)
+            k_keep = dict(keep)
+            name = f"{entry.get('name') or path.stem} {k + 1}"
+            if mode == "multi":  # the note found plays true: C-5 at the rate that makes this slice sound C-5
+                k_keep = {q: v for q, v in keep.items() if q not in ("base_note", "c5_speed")}
+                k_keep["c5_speed"] = max(1, round(w.rate * 440 * 2 ** (-9 / 12) / notes[k][0]))
+                name = f"{entry.get('name') or path.stem} {format_note(notes[k][1])}"
+            self._song_op(lines, orders, {"op": "sample_new", "num": n_slot, "file": str(out), "keep": k_keep,
+                                          "name": name[:25]}, remap)
             nums.append(n_slot)
-        msg = f"slot {num:02d} cut into {len(nums)} slices: slots {nums[0]:02d}-{nums[-1]:02d}"
-        if self.mod.instruments is not None:
+            slot_of[k] = n_slot
+        msg = f"slot {num:02d} cut into {len(bounds)} slices: slots {nums[0]:02d}-{nums[-1]:02d}"
+        ins = None
+        if insts:
             ins = max((int(i) for i in (self.song.get("instruments") or {})), default=0) + 1
-            from .notation import format_note
-            keymap = [{"notes": format_note(60 + k), "sample": s, "play_note": "C-5"} for k, s in enumerate(nums)]
-            self._song_op(lines, orders, {"op": "instrument_new", "num": ins,
-                                          "entry": {"name": f"{entry.get('name') or path.stem} slices"[:25], "keymap": keymap}}, remap)
-            msg += f"; instrument {ins:02d} plays them from C-5 up"
+            if mode == "multi":
+                splits = compose.key_splits([notes[k][1] for k in keep_k])
+                keymap = [{"notes": format_note(a) if a == b else f"{format_note(a)}..{format_note(b)}",
+                           "sample": nums[i]} for i, a, b in splits]
+                label = f"{entry.get('name') or path.stem} multi"
+                msg += (f"; instrument {ins:02d} plays each over the keys nearest its note "
+                        f"({', '.join(format_note(notes[keep_k[i]][1]) for i, _, _ in splits)})")
+                if len(keep_k) < len(bounds):
+                    msg += f"; {len(bounds) - len(keep_k)} without a note left out"
+                if len(splits) < len(keep_k):
+                    msg += f"; {len(keep_k) - len(splits)} repeating a note get a slot but no keys"
+            else:
+                keymap = [{"notes": format_note(60 + i), "sample": s, "play_note": "C-5"} for i, s in enumerate(nums)]
+                label = f"{entry.get('name') or path.stem} slices"
+                msg += f"; instrument {ins:02d} plays them from C-5 up"
+            self._song_op(lines, orders, {"op": "instrument_new", "num": ins, "entry": {"name": label[:25], "keymap": keymap}}, remap)
+        if op.get("pattern"):
+            msg += "; " + self._slice_pattern(lines, orders, remap, [bounds[k][0] for k in keep_k], w.rate, nums,
+                                              [notes[k][1] if mode == "multi" else 60 + i if ins else 60
+                                               for i, k in enumerate(keep_k)],
+                                              ins, int(op.get("ch") or 0), f"{stem}_slices")
         self._report.append(msg)
+
+    def _slice_pattern(self, lines, orders, remap, starts, rate, nums, keys, ins, ch, base):
+        """A new pattern that plays the slices (their start frames `starts` in the source, their slots `nums`, played
+        with instrument `ins` on `keys`, or each slot at C-5 in a song without instruments) in order at their original
+        timing, from channel `ch`; not added to the order list. Returns the report's words."""
+        from . import compose
+        from .model import Cell
+        from .notation import format_cell
+        mod = self.mod
+        nch = len(mod.channels)
+        ch = max(0, min(nch - 1, ch))
+        placed, rows, dropped = compose.slice_rows(starts, rate, mod.tempo, mod.speed, ch, nch)
+        name = re.sub(r"[^\w.-]+", "_", base)
+        name = name if re.match(r"[A-Za-z]", name) else "s" + name
+        names = {k for _, k in self._children(lines, self._top(lines, "patterns"))}
+        name = next(c for c in (name if k == 1 else f"{name}{k}" for k in itertools.count(1)) if c not in names)
+        rows = max(rows, 1)
+        self._song_op(lines, orders, {"op": "pattern_new", "name": name, "rows": rows}, remap)
+        grid = [["... .. ... ..."] * nch for _ in range(rows)]
+        for k, row, c, delay in placed:
+            cell = Cell(note=keys[k], instrument=ins if ins else nums[k], effect=compose.S_EFFECT if delay else 0,
+                        param=0xD0 | delay if delay else 0)
+            grid[row][c] = format_cell(cell)
+        first, _ = self._pattern_block(lines, name)
+        ind = " " * (self._ind(lines[first - 1]) + 2)
+        lines[first:first] = [f"{ind}{r:02d}: {' | '.join(cells)}\n" for r, cells in enumerate(grid)]
+        words = (f"pattern '{name}' plays them at their timing ({rows} rows at tempo {mod.tempo} speed {mod.speed}; "
+                 f"not in the order list: INSERT it in the Song tab)")
+        if dropped:
+            words += f", {len(dropped)} left out (past 200 rows, or every channel taken on their row)"
+        return words
 
     def _compose(self, lines, op):
         """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
@@ -2652,6 +2738,36 @@ class State:
             raise ValueError("a take goes to the slot's candidates, a new slot, or stays in the list")
         take["dest"] = dest
         return take
+
+    def takes_multisample(self, names=None):
+        """This session's takes that hold a note (or those in `names`) made one instrument: a new slot per take, tuned to
+        the cent (its c5_speed plays the note found true), and a new instrument playing each over the keys nearest its
+        note (compose.key_splits; a repeated note gets a slot but no keys). One undo step. Returns the report."""
+        from . import compose
+        from .notation import format_note, parse_note
+        takes = [t for t in reversed(self.takes) if (names is None or t["file"] in names) and t.get("note") and t.get("hz")]
+        if not takes:
+            raise ValueError("no take holds a note: record single notes with FIND THE NOTE on")
+        if not self.song.get("instruments"):
+            raise ValueError("a multisample is an instrument: this song plays samples directly (no instruments)")
+        num = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
+        if num + len(takes) - 1 > 99:
+            raise ValueError(f"{len(takes)} takes from slot {num} would pass slot 99")
+        ins = max(int(i) for i in self.song["instruments"]) + 1
+        ops = []
+        for k, t in enumerate(takes):
+            keep = {"c5_speed": max(1, round(t["rate"] * 440 * 2 ** (-9 / 12) / t["hz"])), **({"stereo": True} if t["channels"] == 2 else {})}
+            ops.append({"op": "sample_new", "num": num + k, "file": t["path"], "name": Path(t["file"]).stem[:25], "keep": keep})
+        splits = compose.key_splits([parse_note(t["note"]) for t in takes])
+        keymap = [{"notes": format_note(a) if a == b else f"{format_note(a)}..{format_note(b)}", "sample": num + i}
+                  for i, a, b in splits]
+        ops.append({"op": "instrument_new", "num": ins, "entry": {"name": "takes multi", "keymap": keymap}})
+        self.song_edit(ops)
+        for k, t in enumerate(takes):
+            t.update(dest="multi", slot=num + k, instrument=ins)
+        rep = (f"{len(takes)} takes in slots {num:02d}-{num + len(takes) - 1:02d}; instrument {ins:02d} plays each over the "
+               f"keys nearest its note ({', '.join(takes[i]['note'] for i, _, _ in splits)})")
+        return rep + (f"; {len(takes) - len(splits)} repeating a note get no keys" if len(splits) < len(takes) else "")
 
     def find_similar(self, lib, query, k=8):
         """The `k` sounds of the library `lib` nearest WAV `query` by timbre (library.Library.nearest, after a scan when
@@ -2927,6 +3043,8 @@ class Handler(BaseHTTPRequestHandler):
                                                                         + ("on" if body.get("on") else "off")}
             elif cmd == "send":
                 return {"take": cls.state.send_take(str(body["file"]), str(body.get("dest") or "candidate"))}
+            elif cmd == "multisample":  # the session's takes with a note as one instrument
+                return {"report": cls.state.takes_multisample(body.get("files"))}
             elif cmd in ("stop", "discard"):
                 x = r.stop()
                 if cmd == "stop" and x is not None:

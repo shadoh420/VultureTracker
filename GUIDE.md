@@ -238,14 +238,27 @@ sample mirrors them); undo points the slot back, and the WAVs stay on disk. EFFE
 selection or the whole sample: GAIN (dB), LOW-PASS and HIGH-PASS (Hz, 12 or 24 dB per octave), EQ (one bell band: Hz,
 dB, Q), LOUDNESS (the RMS of what sounds brought to a dBFS target, never past full scale), PITCH (semitones at the same
 length), STRETCH (percent of the length at the same pitch; loops move with the audio) and TRUNCATE SILENCE (every
-silence under the dBFS level and longer than MIN shortened to KEEP). The filters are zero-phase; PITCH and STRETCH are a
+silence under the dBFS level and longer than MIN shortened to KEEP). LEARN NOISE takes the selection as a stretch where
+only the noise sounds (hiss, hum, the room; at least 50 ms) and DENOISE then turns down every frequency of the selection
+(else the whole sample) that is not well above that noise, by up to REDUCE dB (SENS: how far over the noise a sound must
+be to stay, 2 = 6 dB); the gain is smoothed so what is left does not warble, the same for both channels, and the phase
+is kept. The filters are zero-phase; PITCH and STRETCH are a
 phase vocoder with phase locking, the stereo image kept (steep stretches smear sharp attacks a little: slice a drum
 loop instead). SLICE cuts the WAV (the selection, else all of
 it) AT THE HITS (sensitivity 0–100: higher finds softer hits; each cut 1 ms before its hit, on a zero crossing) or into
 EQUAL PARTS: FIND shows the cuts on the waveform, numbered, and SLICE → SLOTS writes exactly those, each slice its own
-WAV beside the song (`<name>-slice01.wav`, a 1 ms fade at its end) and a new slot keeping the source's base note, volume
-and bits; in a song with instruments a new instrument plays slice 1 on C-5, slice 2 on C#5 and so on, each at its own
-pitch (a kit to play the pieces from the pattern). One step for Ctrl+Z. PROPERTIES: name, base note or c5 speed
+WAV beside the song (`<name>-slice01.wav`, a 1 ms fade at its end) and a new slot. AS KIT (C-5 UP): each slot keeps the
+source's base note, volume and bits, and in a song with instruments a new instrument plays slice 1 on C-5, slice 2 on
+C#5 and so on, each at its own pitch (a kit to play the pieces from the pattern). AS MULTISAMPLE: each slice's note is
+found, its slot tuned to the cent, and a new instrument plays each slice over the keys nearest its note (slices without
+a note are left out; a repeated note gets a slot but no keys), so a recording of single notes becomes one playable
+instrument. + PATTERN also writes a new pattern (`<name>_slices`, not put in the order list: INSERT it in the Song tab)
+whose cells play the slices in order at their original timing: each on the row its start reaches at the song's tempo
+and speed, the ticks left over as a note delay (SDx), from the Pattern tab cursor's channel (two on one row: the next
+channel); the timing is kept to the nearest tick (measured: within 8 ms at tempo 125 speed 6, where a tick is 20 ms).
+What SLICE made is reported in the tab's top line. One step for Ctrl+Z. A hard cut in the recording (a sound that stops
+dead) less than 50 ms before a hit can be taken for the hit (the cut then sits up to that much early): lower the
+sensitivity, or slice a selection that starts at the hit (a selection's start is always a cut). PROPERTIES: name, base note or c5 speed
 (either replaces the other), default volume, global volume (refused while the Tryout mixer holds an unwritten GAIN for
 the slot), default pan, bits, stereo, and the auto-vibrato (type, speed, depth, rate). A value the song format refuses
 is not written and the bar says why.
@@ -267,7 +280,9 @@ seconds from before the click. Each take is written as a 16-bit WAV in `takes/` 
 numbered), its silent edges trimmed (TRIM SILENCE UNDER, keeping 10 ms before the first sound) and its note found (FIND
 THE NOTE: written as the WAV's root note), then goes where THEN says: a CANDIDATE OF THE SLOT in the Tryout (heard in
 the song, rated, written with U like any candidate), a NEW SAMPLE SLOT (tuned to the cent: its c5 speed makes the note
-found play true; in a song with instruments, a new instrument plays it), or KEEP IN THE LIST. TAKES THIS SESSION lists them (▶ plays one; → CANDIDATE and → NEW SLOT send it on
+found play true; in a song with instruments, a new instrument plays it), or KEEP IN THE LIST. TAKES → MULTISAMPLE makes
+every take of the session that holds a note a new slot tuned to the cent and one new instrument that plays each over
+the keys nearest its note: record single notes (a few across the range), then play them as one instrument. TAKES THIS SESSION lists them (▶ plays one; → CANDIDATE and → NEW SLOT send it on
 later). In the Samples tab, AUTO LOOP proposes loop points for a sustained sound (a whole number of its periods late in
 its steady part, on rising zero crossings where the waveform matches best); CROSSFADE LOOP then smooths the wrap.
 Recording needs `pip install sounddevice` in a source checkout (the exe carries it); `VT_FAKE_AUDIO=1` swaps in a

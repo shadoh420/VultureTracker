@@ -12,7 +12,7 @@ from pathlib import Path
 from vulturetracker import gui
 from vulturetracker.wavload import write_wav
 
-from tests.test_gui import RATE, SONG_BLOCK, sine
+from tests.test_gui import RATE, SONG_BLOCK, SONG_INS, sine
 
 try:
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
@@ -147,6 +147,70 @@ class TestPage(unittest.TestCase):
                 gui.Handler.state = None
                 for _ in range(400):
                     if not (st.jobs.qsize() or any(r["status"] in ("queued", "rendering") for r in st.renders.values())):
+                        break
+                    time.sleep(0.05)
+
+    def test_samples_tab_reports_and_resets_its_view(self):
+        # SLICE's report shows in the Samples tab (it used to land in the Pattern tab's line), MULTISAMPLE + PATTERN reach
+        # the server, and an edit that changes the length (STRETCH) shows the whole new WAV instead of the old view
+        if sync_playwright is None:
+            self.skipTest("playwright not installed")
+        import numpy as np
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            hits = np.zeros(int(0.9 * RATE))
+            for k, t0 in enumerate((0.0, 0.3, 0.6)):
+                i = np.arange(int(0.29 * RATE))
+                hits[int(t0 * RATE):int(t0 * RATE) + len(i)] = 0.6 * np.sin(2 * np.pi * 220 * 2 ** (k * 4 / 12) * i / RATE) * np.exp(-i / 2000)
+            write_wav(d / "hits.wav", RATE, [np.round(hits * 32767).astype(int).tolist()])
+            (d / "song.yaml").write_bytes(SONG_INS.replace("  2: {file: b.wav, name: B tone}\n",
+                                                           "  2: {file: b.wav, name: B tone}\n  3: {file: hits.wav, name: Hits}\n").encode())
+            st = gui.Handler.state = gui.State(d / "song.yaml")
+            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            errors = []
+            try:
+                with sync_playwright() as p:
+                    exe = os.environ.get("VT_CHROMIUM")
+                    try:
+                        browser = p.chromium.launch(**({"executable_path": exe} if exe else {}))
+                    except PlaywrightError as e:
+                        self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
+                    page = browser.new_page(viewport={"width": 1400, "height": 900})
+                    page.on("pageerror", lambda e: errors.append(str(e)))
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
+                    page.evaluate("tab('smp');SMP_SEL='3';renderSmp()")
+                    page.wait_for_function("W.data && W.data.num === 3")
+                    page.click("#t-smp span.btn:text-is('FIND')")
+                    page.wait_for_function("W.slices && W.slices.points.length === 3")
+                    page.select_option("#slc-as", "multi")
+                    page.check("#slc-pat")
+                    page.click("#t-smp span.btn:text-is('SLICE → SLOTS')")
+                    page.wait_for_function("SMP_MSG.includes('pattern')", timeout=15000)
+                    page.wait_for_function("!EDQ.n")
+                    self.assertIn("plays each over the keys nearest its note (A-4, C#5, F-5)", page.inner_text("#smp-msg"))
+                    self.assertEqual(page.inner_text("#sel-msg"), "")
+                    self.assertIn("hits_slices", [pt.name for pt in st.mod.patterns])
+                    page.evaluate("SMP_SEL='4';renderSmp()")
+                    page.wait_for_function("W.data && W.data.num === 4")
+                    frames = page.evaluate("W.data.frames")
+                    page.evaluate("smpView(100, 2000)")
+                    page.fill("#fx-stretch", "200")
+                    page.click("#t-smp span.btn:text-is('STRETCH')")
+                    page.wait_for_function(f"W.data && W.data.frames === {2 * frames} && W.a === 0 && W.b === {2 * frames}",
+                                           timeout=20000)
+                    browser.close()
+                self.assertEqual(errors, [])
+            finally:
+                srv.shutdown()
+                srv.server_close()
+                gui.Handler.state = None
+                st.close()
+                for _ in range(400):
+                    if not any(r["status"] in ("queued", "rendering") for r in st.renders.values()):
                         break
                     time.sleep(0.05)
 

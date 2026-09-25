@@ -77,6 +77,23 @@ class TestCompose(unittest.TestCase):
         with self.assertRaises(ValueError):
             compose.layers(rows, [0], 0, 5, [])
 
+    def test_slice_rows_keep_the_timing(self):
+        # tempo 125 speed 6: a tick is 20 ms, a row 120 ms. Slices at 0, 140 ms (row 1 + 1 tick), 245 ms (row 2 + 0: 12.25
+        # ticks round to 12), 250 ms (the same row: the next channel), 30 s (past 200 rows: dropped)
+        r = 44100
+        placed, rows, dropped = compose.slice_rows([1000, 1000 + int(0.14 * r), 1000 + int(0.245 * r),
+                                                    1000 + int(0.25 * r), 1000 + 30 * r], r, 125, 6, ch=1, nch=3)
+        self.assertEqual(placed, [(0, 0, 1, 0), (1, 1, 1, 1), (2, 2, 1, 0), (3, 2, 2, 0)])
+        self.assertEqual((rows, dropped), (3, [4]))
+        placed, _, dropped = compose.slice_rows([0, 10, 20], r, 125, 6, ch=0, nch=2)  # three on one row, two channels
+        self.assertEqual((len(placed), dropped), (2, [2]))
+
+    def test_key_splits(self):
+        # E-4 (52), A-4 (57), D-5 (62), a repeat of A-4, G-5 (67): each note plays the keys nearest it
+        self.assertEqual(compose.key_splits([57, 52, 62, 57, 67]),
+                         [(1, 0, 54), (0, 55, 59), (2, 60, 64), (4, 65, 119)])
+        self.assertEqual(compose.key_splits([60]), [(0, 0, 119)])
+
     def test_cells_round_trip(self):
         self.assertEqual(format_cell(parse_cell("C-5 01 v64 SD2")), "C-5 01 v64 SD2")
 

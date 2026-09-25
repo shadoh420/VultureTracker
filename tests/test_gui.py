@@ -1267,6 +1267,59 @@ class TestGui(unittest.TestCase):
                                                               {"notes": "D-5", "sample": 6, "play_note": "C-5"}])
         st.undo()
         self.assertNotIn(4, st.song["samples"])
+        # MULTISAMPLE: each slice tuned to its note (330, 660 and 990 Hz: E-5, E-6, B-6) and mapped over the keys nearest
+        # it; the pattern plays them at their timing (0, 0.2, 0.4 s at tempo 125 speed 6: ticks 0, 10, 20)
+        r = st.song_edit([{"op": "sample_slice", "num": 3, **pts, "mode": "multi", "pattern": True, "ch": 1}])
+        self.assertIn("instrument 03 plays each over the keys nearest its note (E-5, E-6, B-6)", r["report"])
+        self.assertIn("pattern 'hits_slices' plays them at their timing (4 rows at tempo 125 speed 6", r["report"])
+        s = st.song["samples"]
+        self.assertEqual([s[n]["name"] for n in (4, 5, 6)], ["Hits E-5", "Hits E-6", "Hits B-6"])
+        cents = [1200 * math.log2(s[n]["c5_speed"] / (RATE * 261.6256 / f)) for n, f in ((4, 330), (5, 660), (6, 990))]
+        self.assertTrue(all(abs(c) < 3 for c in cents), cents)  # tuned to the cent from the pitch found
+        self.assertNotIn("base_note", s[4])
+        self.assertEqual(st.song["instruments"][3]["keymap"], [{"notes": "C-0..A#5", "sample": 4},
+                                                              {"notes": "B-5..G-6", "sample": 5},
+                                                              {"notes": "G#6..B-9", "sample": 6}])
+        rows = [[str(c) for c in row] for row in st.pattern_rows(len(st.mod.patterns) - 1)["rows"]]
+        self.assertEqual([row[1] for row in rows], ["E-5 03 ... ...", "E-6 03 ... SD4", "... .. ... ...", "B-6 03 ... SD2"])
+        self.assertNotIn("hits_slices", st.song["orders"])
+        st.undo()
+        # a kit and its pattern in a song without instruments: each slot played at C-5
+        (self.dir / "song.yaml").write_bytes(SONG.replace("  2: {file: b.wav, name: B tone}\n",
+                                                          "  2: {file: b.wav, name: B tone}\n  3: {file: hits.wav, name: Hits}\n").encode("utf-8"))
+        st.reload()
+        r = st.song_edit([{"op": "sample_slice", "num": 3, **pts, "pattern": True}])
+        rows = st.pattern_rows(len(st.mod.patterns) - 1)["rows"]
+        self.assertEqual([row[0] for row in rows], ["C-5 04 ... ...", "C-5 05 ... SD4", "... .. ... ...", "C-5 06 ... SD2"])
+        with self.assertRaises(ValueError):  # a multisample needs instruments
+            st.song_edit([{"op": "sample_slice", "num": 3, **pts, "mode": "multi"}])
+
+    def test_denoise(self):
+        # a 440 Hz tone at -12 dBFS after half a second of white noise at -40 dBFS RMS (which goes on under the tone):
+        # learned from the noise alone and turned down by up to 20 dB
+        import numpy as np
+        from vulturetracker import dsp, gui as g
+        rng = np.random.default_rng(0)
+        t = np.arange(int(1.5 * RATE)) / RATE
+        x = (np.where(t >= 0.5, 0.25 * np.sin(2 * np.pi * 440 * t), 0) + rng.standard_normal(len(t)) * 0.01)[None]
+        y = dsp.denoise(x, RATE, x[:, : RATE // 2], reduce_db=20)
+        db = lambda v: 20 * np.log10(np.sqrt(np.mean(v ** 2)))
+        self.assertLess(db(y[0, 1000:20000]) - db(x[0, 1000:20000]), -18)      # the noise alone: -19.4 dB measured
+        seg = slice(int(0.7 * RATE), int(1.4 * RATE))
+        s0, s1 = (np.abs(np.fft.rfft(v[0, seg] * np.hanning(seg.stop - seg.start))) for v in (x, y))
+        f = np.fft.rfftfreq(seg.stop - seg.start, 1 / RATE)
+        i = int(np.argmax(s0))
+        self.assertLess(abs(20 * np.log10(s1[i] / s0[i])), 0.2)                # the tone kept
+        away = np.abs(f - 440) > 50
+        self.assertLess(10 * np.log10((s1[away] ** 2).sum() / (s0[away] ** 2).sum()), -15)  # the noise under it: -17.9
+        st2 = np.stack([x[0], x[0] * 0.5])
+        y2 = dsp.denoise(st2, RATE, st2[:, : RATE // 2], 20)
+        self.assertTrue(np.allclose(y2[1], y2[0] * 0.5, atol=1e-9))             # one gain for both channels: the image holds
+        y3, _ = g.process_wav(x.astype(np.float32), "denoise", RATE // 2, x.shape[1], {"loop": None},
+                              params={"na": 0, "nb": RATE // 2, "db": 20}, rate=RATE)
+        self.assertTrue(np.array_equal(y3[:, : RATE // 2], x[:, : RATE // 2].astype(np.float32)))  # outside the span: as it was
+        with self.assertRaises(ValueError):
+            g.process_wav(x, "denoise", 0, x.shape[1], {}, params={"na": 0, "nb": 100}, rate=RATE)  # too little noise
 
     def test_sample_effects(self):
         # the EFFECTS row: each writes a new WAV (one undo step); stretch and truncate change the length and the loops

@@ -609,6 +609,30 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   picks the right kind for all 8 hits and follows the level within 1.5 dB (median); variety and reuse widen the
   choice, a seed repeats it; the app's RECIPE box renders an edited resynth entry into `<name>-r1.wav` as a candidate.
   Not heard: the owner's ear decides whether any of it is useful.
+  Then the cleanup pass: (1) SLICE's report shows in the Samples tab's top line (`songEdit(ops, onReport)`; SMP_MSG
+  until the next edit or slot), no longer in the Pattern tab's line. (2) A new WAV of another length for the slot
+  (STRETCH, TRUNCATE SILENCE, TRIM, an undo) shows the whole of it: the page notes the old length when the slot's file
+  changes and resets view, selection, slices and learned noise when the fetched WAV differs. (3) SLICE → PATTERN (+
+  PATTERN): `compose.slice_rows` places each slice on the row its start reaches at the song's tempo and speed with the
+  leftover ticks as SDx (rounded to the tick), a slice on a taken row on the next channel; the pattern `<name>_slices`
+  is added outside the order list. Measured by rendering it with libopenmpt and finding the onsets: six irregular hits
+  (0-0.9 s) came back within -8.4..+2.2 ms at tempo 125 speed 6 (a tick 20 ms). (4) MULTISAMPLE: SLICE AS MULTISAMPLE
+  (`mode: multi`: each slice's pitch_of, its slot's c5_speed = rate x 261.63 / hz, `compose.key_splits` maps each over
+  the keys nearest its note; unpitched slices left out; a repeated note gets a slot but no keys), and TAKES →
+  MULTISAMPLE in the Record tab (`State.takes_multisample`, rec command `multisample`), each one undo step. (5) Noise
+  reduction: LEARN NOISE (a selection of noise alone) + DENOISE (REDUCE dB, SENS) = `dsp.denoise`: the noise's mean power
+  per bin (2048-point STFT, hop 512), a gain 1 - sens^2 x noise / power per bin, smoothed over 3 frames and 3 bins,
+  floored at -REDUCE dB, one gain for all channels, phase kept. Measured: white noise at -40 dBFS under a -12 dBFS
+  440 Hz tone, 20 dB asked: the noise alone -19.4 dB, the tone's peak -0.01 dB, the noise under the tone -17.9 dB.
+  Checked in Chromium on scratch songs (check_smp.py, check_multi.py): MULTISAMPLE + PATTERN on three decaying tones
+  (A-4, C#5, F-5) with the report in the tab; STRETCH 150 % from a 1000-5000 view showed 0-99225 (the new length);
+  DENOISE on a noisy tone -40.5 -> -58.7 dB in its noise-only part; TAKES → MULTISAMPLE with three takes (G-4, D-5,
+  C-6) and the refusal without takes; no page errors. Tried and left out: a stricter onset rule (a level rise of 3 dB
+  in a 10 ms envelope before a flux peak counts, the cut walked back from the peak) fixed the synthetic case of a hard
+  cut 20 ms before a hit, but lost legato notes that change pitch without a level rise (samples/nadir/arp.wav 4 -> 2
+  cuts, seq.wav 10 -> 6 at sensitivity 50) and moved drum cuts 5-47 ms with no ground truth: `onsets` is unchanged, the
+  limit is in GUIDE. Tests: test_compose (slice_rows, key_splits), test_gui (multisample + pattern in both song kinds,
+  denoise), test_record (takes → multisample), test_page (the Samples tab's report and view reset).
 
 ## Next steps, in order
 
