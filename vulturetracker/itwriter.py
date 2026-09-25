@@ -79,14 +79,13 @@ def _sample_header(smp, data_offset) -> bytes:
 def _sample_data(smp) -> bytes:
     # Stereo samples are stored as the full left channel followed by the full right channel.
     out = bytearray()
+    code = "h" if smp.bits == 16 else "b"
     for chan in smp.data:
-        if smp.bits == 16:
-            a = array("h", chan)
-            if sys.byteorder == "big":
-                a.byteswap()
-            out += a.tobytes()
-        else:
-            out += array("b", chan).tobytes()
+        a = chan if isinstance(chan, array) and chan.typecode == code else array(code, chan)
+        if code == "h" and sys.byteorder == "big":
+            a = array("h", a)   # a copy: the compiler's sample memo shares its arrays
+            a.byteswap()
+        out += a.tobytes()
     return bytes(out)
 
 

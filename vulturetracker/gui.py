@@ -35,6 +35,7 @@ import yaml
 
 from . import api
 from .notation import format_cell, format_note
+from .itwriter import write_it
 from .openmpt import LoadedModule
 from .song import SongError, load_song_text
 from .wavload import read_wav
@@ -276,15 +277,14 @@ def song_facts(text, base_dir, name):
     return facts_of(*load_song_text(text, base_dir, name))
 
 
-def facts_of(mod, warnings):
+def facts_of(mod, warnings, it=None):
+    """`it`: the module's .it bytes, when the caller wrote them already."""
     rows_per_bar = mod.row_highlight[1] or 16
     orders = []
     use = []  # per order: per channel: sorted sample numbers triggered
     # order timing comes from libopenmpt, so speed, tempo, break and jump effects count; an order that playback
     # never reaches lasts 0 s
-    from .itwriter import write_it
-    from .openmpt import LoadedModule
-    with LoadedModule(write_it(mod)) as lm:
+    with LoadedModule(it or write_it(mod)) as lm:
         duration = lm.duration()
         starts = {i: lm.order_start(i) for i, o in enumerate(mod.orders) if o < 254}
         for i, t in starts.items():
@@ -746,6 +746,7 @@ class State:
         self.mtime = 0.0
         self.facts = None
         self.mod = None       # compiled model of the last good load (pattern view)
+        self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
         self.reload()
         self.cache_dir.mkdir(exist_ok=True)
         threading.Thread(target=self._worker, daemon=True).start()
@@ -764,11 +765,13 @@ class State:
             self.mtime = self.song_path.stat().st_mtime
             try:
                 self.mod, warnings = loaded or load_song_text(self.text, self.base_dir, str(self.song_path))
-                self.facts = facts_of(self.mod, warnings)
+                self.it = write_it(self.mod)
+                self.facts = facts_of(self.mod, warnings, self.it)
                 self.sound_table = None
                 self.error = None
             except SongError as e:
                 self.error = e.errors
+                self.it = None
             try:
                 self.song = api.from_yaml(self.text)
             except yaml.YAMLError:  # a syntax error: it is in self.error already, and the app opens on it
@@ -961,6 +964,10 @@ class State:
     def compiled_it(self, cand=None, whole=False):
         """The tryout section (`whole`: the whole song) compiled with `cand` in the slot (None: the song as it is), memoised
         per compile key."""
+        with self.lock:
+            inst = self.mix().get("instrument") or {}
+            if whole and not cand and self.it and not any(int(n) in (self.song.get("instruments") or {}) for n in inst):
+                return self.it  # the song as reload compiled it: the same bytes as compiling it again from the dict
         ck = self.ckey(cand) + ("|whole" if whole else "")
         if ck not in self.compiled:
             with self.lock:

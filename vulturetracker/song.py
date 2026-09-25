@@ -1,5 +1,7 @@
 """Song file (YAML) -> Module, with line-referenced validation errors."""
 import re
+import threading
+from array import array
 from pathlib import Path
 
 import yaml
@@ -297,20 +299,50 @@ def _loop(ctx, spec, line, wav, length, where):
     return Loop(start, end, pp)
 
 
-_RESAMPLED = {}  # (path, mtime, size, rate, bits, loops) -> resampled channels: the GUI compiles the same song many times
+# The app compiles the same song on every edit: what a sample costs to read and convert is memoised on its file's stamp
+# (path, mtime, size), as compact arrays that compiled modules share and never change in place.
+_WAVS = {}       # stamp -> the WAV as read (WavData, channels as arrays)
+_RESAMPLED = {}  # (stamp, rate, bits, loops) -> channels resampled to the module's sample_rate
+_DATA = {}       # (stamp, rate, loops, stereo, bits) -> the channels as the module stores them (Sample.source)
+_IMAGES = {}     # (Sample.source, playback rate) -> image_level (None: no image under 20 kHz)
+_UNSEEN = object()
+_PATTERNS = {}   # (name, data text, style, line, rows, channels) -> (rows of cells, line numbers): an edit changes one
+_MEMO_SIZE = 96  # entries per memo (patterns: 8 times as many)
+_MEMO_LOCK = threading.Lock()  # the app compiles on request threads and its render worker at once: reads use .get()
 
 
-def _resampled(path, wav, target, loops, resample_pcm):
-    """`wav.channels` resampled to `target` with its `loops` kept seamless, memoised on the file's stamp (kept as
-    compact arrays: a song's samples add up)."""
-    from array import array
+def _remember(memo, key, value, scale=1):
+    with _MEMO_LOCK:
+        while len(memo) >= scale * _MEMO_SIZE:
+            memo.pop(next(iter(memo)), None)
+        memo[key] = value
+    return value
+
+
+def _pcm(values, bits):
+    return array("h" if bits == 16 else "b", values)
+
+
+def _read_wav(path):
+    """read_wav memoised on the file's stamp; returns (stamp, WavData with array channels)."""
     st = path.stat()
-    k = (str(path), st.st_mtime, st.st_size, target, wav.out_bits, tuple(loops))
-    if k not in _RESAMPLED:
-        while len(_RESAMPLED) >= 64:
-            _RESAMPLED.pop(next(iter(_RESAMPLED)))
-        _RESAMPLED[k] = [array("i", c) for c in resample_pcm(wav.channels, wav.rate, target, wav.out_bits, loops)]
-    return [c.tolist() for c in _RESAMPLED[k]]
+    stamp = (str(path), st.st_mtime_ns, st.st_size)
+    wav = _WAVS.get(stamp)
+    if wav is None:
+        w = read_wav(path)
+        wav = _remember(_WAVS, stamp, WavData(w.rate, w.bits, [_pcm(c, w.out_bits) for c in w.channels], w.out_bits,
+                                              w.loops, w.root))
+    return stamp, wav
+
+
+def _resampled(stamp, wav, target, loops, resample_pcm):
+    """`wav.channels` resampled to `target` with its `loops` kept seamless (memoised)."""
+    k = (stamp, target, wav.out_bits, tuple(loops))
+    chans = _RESAMPLED.get(k)
+    if chans is None:
+        chans = _remember(_RESAMPLED, k, [_pcm(c, wav.out_bits) for c in resample_pcm(wav.channels, wav.rate, target,
+                                                                                       wav.out_bits, loops)])
+    return chans
 
 
 def _sample(ctx, num, spec, line, base_dir):
@@ -328,7 +360,7 @@ def _sample(ctx, num, spec, line, base_dir):
         ctx.error(_line(m, "file"), f"{where}: file not found: {path}")
         raise _Bad
     try:
-        wav = read_wav(path)
+        stamp, wav = _read_wav(path)
     except WavError as e:
         ctx.error(_line(m, "file"), f"{where}: {e}")
         raise _Bad
@@ -349,21 +381,24 @@ def _sample(ctx, num, spec, line, base_dir):
         loops = [(lp.start, lp.end, lp.pingpong) for lp in (loop, sustain_loop) if lp]
         placed = iter(place_loops(loops, wav.rate, target))
         loop, sustain_loop = (lp and Loop(*next(placed)) for lp in (loop, sustain_loop))
-        wav = WavData(target, wav.bits, _resampled(path, wav, target, loops, resample_pcm), wav.out_bits, [], wav.root)
+        wav = WavData(target, wav.bits, _resampled(stamp, wav, target, loops, resample_pcm), wav.out_bits, [], wav.root)
+        stamp = (stamp, target, tuple(loops))
     smp = Sample()
     smp.name = _text(ctx, m, "name", path.stem[:25], 25, where)
     smp.filename = path.name[:12]
     stereo = _bool(ctx, m, "stereo", False, where)
-    chans = wav.channels
-    if len(chans) > 2 or (len(chans) == 2 and not stereo):
-        mix = [round(sum(v) / len(chans)) for v in zip(*chans)]
-        chans = [mix]
-    smp.data = chans
     smp.bits = _enum(ctx, m, "bits", {8: 8, 16: 16}, wav.out_bits, where)
-    if smp.bits == 8 and wav.out_bits == 16:
-        smp.data = [[v >> 8 for v in ch] for ch in smp.data]
-    elif smp.bits == 16 and wav.out_bits == 8:
-        smp.data = [[v << 8 for v in ch] for ch in smp.data]
+    smp.source = (stamp, stereo, smp.bits)
+    smp.data = _DATA.get(smp.source)
+    if smp.data is None:
+        chans = wav.channels
+        if len(chans) > 2 or (len(chans) == 2 and not stereo):
+            chans = [_pcm((round(sum(v) / len(chans)) for v in zip(*chans)), wav.out_bits)]
+        if smp.bits == 8 and wav.out_bits == 16:
+            chans = [_pcm((v >> 8 for v in ch), 8) for ch in chans]
+        elif smp.bits == 16 and wav.out_bits == 8:
+            chans = [_pcm((v << 8 for v in ch), 16) for ch in chans]
+        smp.data = _remember(_DATA, smp.source, chans)
     smp.volume = _int(ctx, m, "volume", 0, 64, 64, where)
     smp.global_volume = _int(ctx, m, "global_volume", 0, 64, 64, where)
     smp.pan = _int(ctx, m, "pan", 0, 64, None, where) if m.get("pan") is not None else None
@@ -557,6 +592,10 @@ def _pattern(ctx, name, spec, line, num_channels):
     if not isinstance(data, LStr):
         ctx.error(line, f"{where}: 'data' must be text")
         raise _Bad
+    key = (str(name), str(data), data.style, data.line, rows, num_channels)
+    hit = _PATTERNS.get(key)
+    if hit is not None:  # parsed before, and it parsed cleanly: the same cells (shared, never changed) and line numbers
+        return Pattern(str(name), hit[0]), hit[1]
     # Row line numbers are exact for literal blocks ('data: |'); other string styles report the data line.
     literal = data.style == "|"
     first_line = data.line + 1
@@ -614,6 +653,7 @@ def _pattern(ctx, name, spec, line, num_channels):
     grid = [c for c, _ in cells_rows] + [[Cell() for _ in range(num_channels)] for _ in range(rows - len(cells_rows))]
     if not ok:
         raise _Bad
+    _remember(_PATTERNS, key, (grid, lines), 8)
     return Pattern(str(name), grid), lines
 
 
@@ -770,7 +810,13 @@ def _check_images(ctx, mod, lowest):
     # ponytail: the lowest note only; slides, vibrato and pitch envelopes that go lower are not checked
     for num, (note, line, at) in sorted(lowest.items()):
         smp = mod.samples[num - 1] if num <= len(mod.samples) else None
-        db = image_level(smp.data, smp.c5_speed * 2 ** ((note - 60) / 12)) if smp and smp.data else None
+        rate = smp.c5_speed * 2 ** ((note - 60) / 12) if smp else 0
+        k = (smp.source, rate) if smp and smp.source else None
+        db = _IMAGES.get(k, _UNSEEN) if k is not None else _UNSEEN
+        if db is _UNSEEN:
+            db = image_level(smp.data, rate) if smp and smp.data else None
+            if k is not None:
+                _remember(_IMAGES, k, db)
         if db is not None and db > IMAGE_LIMIT:
             ctx.warn(line, f"{at}: {notation.format_note(note)} plays sample {num:02d} '{smp.name}' so far below its "
                            f"stored rate that its interpolation images reach {db:.0f} dB under 20 kHz (limit "

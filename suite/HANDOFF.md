@@ -500,6 +500,24 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   and ticks later, at a percent of their volume; song-wide and pan effects not copied), `test_echo` and the page test.
   Tests 108 there (`VT_CHROMIUM` drives `tests/test_page.py`). To check locally in the real window: the RECIPE box with
   a Surge patch (only file recipes could be rendered there), MIDI recording with a keyboard, and the build of the exe.
+- Cloud session, 2026-09-25 (branch `claude/clever-ramanujan-il8dju`): a research pass (speed, features from other
+  projects, recording from the owner's Scarlett 2i2), given as a chat report; its chunks, in order: 0 cloud setup,
+  1 speed, 2 recording through `sounddevice`, 3 render-to-sample / slicing / the effects panel, 4 sample discovery
+  (similarity index, FIND SIMILAR, a sample map), 5 compile-time helpers (groove, generators, chords, phrases, velocity
+  layers), 6 spectral tools, 7 spikes (OpenMPT's built-in DMO effects in the .it, Guitar Pro import, a SuperCollider or
+  Faust recipe source). Built: chunk 0 (`.claude/hooks/session-start.sh`: libopenmpt, PyYAML with libyaml, numpy,
+  Pillow, imageio-ffmpeg, Playwright, `VT_CHROMIUM`) and chunk 1a. `tools/bench.py` times compile, facts, render, an
+  edit and the module the live engine then loads, on the demos (stand-in WAVs for samples kept in samples/local/).
+  Measured in the container, server time from an edit to the engine's module (median of 7): arena 149 -> 35 ms,
+  iron_relay 1141 -> 72, undertow 1624 -> 113, vantage 1327 -> 169; a warm compile of vantage 239-490 -> 44 ms. How:
+  the compiler memoises samples on their file's stamp (read, resampled, converted: compact arrays that compiled modules
+  share), the image check per sample and rate, parsed patterns per text and position, and cell parses; the app keeps
+  the .it bytes of its reload compile (`State.it`), which `facts_of` and the live engine use unless the instrument
+  panel edits an instrument (before: the whole song compiled a second time through the dict and YAML). Every demo's
+  .it (text path, dict path, a section, a candidate swapped in) is byte-identical to before. Left for 1b: faders
+  through the engine's channel volume (no reload), the worklet's allocations and synchronous catch-up, the preview copy
+  rendered every quantum, a polyphase 2x decimator (the 2x render is 3-10 times the 1x one), a lighter /api/state,
+  streamed WAV ranges, a cap on the undo history. On Windows: run `python tools/bench.py` for the owner's numbers.
 
 ## Next steps, in order
 

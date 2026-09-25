@@ -8,6 +8,7 @@ from array import array
 from pathlib import Path
 
 from vulturetracker import api
+from vulturetracker.itwriter import write_it
 from vulturetracker.openmpt import LoadedModule
 from vulturetracker.song import SongError, load_song_text
 from vulturetracker.wavload import read_wav, write_wav
@@ -367,6 +368,46 @@ class TestValidation(Base):
 
         self.assertEqual(c5(""), 22044)
         self.assertEqual(c5(", sample_rate: 44100"), 44088)
+
+
+class TestMemo(Base):
+    """The compiler memoises samples on their file's stamp and patterns on their text: the app compiles on every edit."""
+    SONG = """
+        module: {title: M, channels: 1%s}
+        samples:
+          1: {file: low.wav}
+          2: {file: low.wav, bits: 8}
+        patterns:
+          p: |
+            C-5 01 ... ...
+            C-5 02 ... ...
+        orders: [p]
+    """
+
+    def compile(self, extra=""):
+        return load_song_text(textwrap.dedent(self.SONG % extra), self.dir)[0]
+
+    def test_a_wav_changed_on_disk_is_read_again(self):
+        for extra in ("", ", sample_rate: 22050"):  # as read, and resampled to the module's rate
+            write_wav(self.dir / "low.wav", RATE, [sine(441)])
+            a = self.compile(extra)
+            write_wav(self.dir / "low.wav", RATE, [sine(441, 0.25)])
+            b = self.compile(extra)
+            self.assertAlmostEqual(b.samples[0].length * 2, a.samples[0].length, delta=1, msg=extra)  # resampling rounds
+            self.assertEqual(b.samples[1].length, b.samples[0].length)
+
+    def test_memoised_compiles_are_the_same_and_errors_are_not_memoised(self):
+        a, b = self.compile(), self.compile()
+        self.assertEqual(write_it(a), write_it(b))
+        self.assertIs(a.samples[0].data, b.samples[0].data)  # shared, never changed in place
+        self.assertIs(a.patterns[0].rows, b.patterns[0].rows)
+        self.assertEqual((a.samples[0].bits, a.samples[1].bits), (16, 8))  # one file, two conversions
+        self.assertEqual(list(a.samples[1].data[0][:50]), [v >> 8 for v in a.samples[0].data[0][:50]])
+        bad = textwrap.dedent(self.SONG % "").replace("C-5 02 ... ...", "C-5 02 ... Z0G")
+        for _ in range(2):
+            with self.assertRaises(SongError) as e:
+                load_song_text(bad, self.dir)
+            self.assertIn("row 1, channel 1: unrecognised token 'Z0G'", e.exception.errors[0])
 
 
 class TestWav(Base):

@@ -467,6 +467,7 @@ class TestGui(unittest.TestCase):
         self.assertEqual(st.mix()["instrument"], {"1": {"cutoff": 0, "attack": 4, "random": 25}, "2": {"cutoff": 60}})
         # sweep_to 99 is clamped to 64 and the release is 128: both the song's own values, so no change
         self.assertNotEqual(st.ckey(), k)  # compiled in, so part of the compile key
+        self.assertNotEqual(st.live_it(), gui.patch_it(st.it, (), st.mix()))  # the live engine plays the panel too
         d = st.compiled_it()
         nord = struct.unpack_from("<H", d, 0x20)[0]
         off = struct.unpack_from("<I", d, 0xC0 + nord)[0]  # instrument 1's header
@@ -557,6 +558,9 @@ class TestGui(unittest.TestCase):
         self.assertEqual((d[0x81], d[0x31]), (20, 90))  # the unwritten mix is in the header
         with LoadedModule(d) as lm:
             self.assertEqual(lm.info()["orders"], [0, 1])
+        st.set_mix({})
+        self.assertIs(st.compiled_it(whole=True), st.it)  # the song as reload compiled it, not a second compile
+        self.assertEqual(st.it, api.compile_song(api.tryout_song(st.song, None), self.dir)[0])
         js = gui.worklet_js().decode("utf-8")
         self.assertTrue(js.startswith("const loadGlue = function (libopenmpt, require, __dirname) {"))
         self.assertIn("function openmptEngine(", js)

@@ -9,6 +9,8 @@ MAX_CHANNELS = 64
 
 @dataclass
 class Cell:
+    # A compiled song's cells are shared between compiles (song.py memoises parsed patterns): build new cells, never
+    # change one of a compiled module in place.
     note: int | None = None        # 0..119 (C-0..B-9), NOTE_OFF/CUT/FADE
     instrument: int = 0            # 0 = none, else 1..99
     volcmd: int | None = None      # raw IT volume-column byte
@@ -35,7 +37,7 @@ class Loop:
 @dataclass
 class Sample:
     name: str = ""
-    data: list[list[int]] = field(default_factory=list)   # one list per channel (1 or 2), signed ints
+    data: list = field(default_factory=list)   # one list or array per channel (1 or 2), signed ints; never changed in place
     bits: int = 16                 # 8 or 16
     c5_speed: int = 8363
     volume: int = 64               # 0..64
@@ -48,6 +50,8 @@ class Sample:
     vibrato_depth: int = 0         # 0..64
     vibrato_rate: int = 0          # 0..255 (sweep)
     filename: str = ""
+    source: tuple | None = field(default=None, compare=False, repr=False)  # the memo key of `data` (file stamp and
+    #                                                          conversion) when compiled from a WAV: measurements memoise on it
 
     @property
     def length(self):

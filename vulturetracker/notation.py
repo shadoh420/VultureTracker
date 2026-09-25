@@ -1,4 +1,5 @@
 """Text notation for notes and pattern cells (OpenMPT clipboard style, IT semantics)."""
+import functools
 import re
 
 from .model import Cell, NOTE_CUT, NOTE_FADE, NOTE_OFF
@@ -84,6 +85,13 @@ def format_volcmd(byte: int | None) -> str:
 def parse_cell(text: str) -> Cell:
     """Parse one channel cell. Fields are recognised by shape and must appear in the order
     note, instrument, volume, effect; any may be omitted. '...' and '..' are empty placeholders."""
+    return Cell(*_cell_fields(text))
+
+
+@functools.lru_cache(maxsize=1 << 16)
+def _cell_fields(text: str) -> tuple:
+    """parse_cell's fields, memoised on the cell text: a song repeats its cells, and the app compiles it on every edit
+    (a NotationError is raised again each time: lru_cache keeps only results)."""
     cell = Cell()
     stage = 0  # next field allowed: 0 note, 1 instrument, 2 volume, 3 effect
     for tok in text.split():
@@ -126,7 +134,7 @@ def parse_cell(text: str) -> Cell:
         else:
             cell.effect = ord(tok[0]) - ord("A") + 1
             cell.param = int(tok[1:], 16)
-    return cell
+    return cell.note, cell.instrument, cell.volcmd, cell.effect, cell.param
 
 
 def format_cell(cell: Cell) -> str:
