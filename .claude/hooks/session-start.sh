@@ -13,7 +13,9 @@ if ! ldconfig -p | grep -q libopenmpt.so; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libopenmpt0t64 >/dev/null
 fi
 
-python3 -m pip install -q --disable-pip-version-check pyyaml numpy imageio-ffmpeg Pillow playwright
+# --ignore-installed: Ubuntu's own PyYAML has no libyaml (CSafeLoader); pip's wheel has it, as on Windows
+python3 -m pip install -q --disable-pip-version-check --ignore-installed pyyaml
+python3 -m pip install -q --disable-pip-version-check numpy imageio-ffmpeg Pillow playwright
 
 if [ -n "${CLAUDE_ENV_FILE:-}" ] && [ -x /opt/pw-browsers/chromium ]; then
   echo 'export VT_CHROMIUM=/opt/pw-browsers/chromium' >> "$CLAUDE_ENV_FILE"
