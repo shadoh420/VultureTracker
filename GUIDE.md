@@ -267,7 +267,9 @@ is not written and the bar says why.
 The render
 player and the live engine never play at once. LATENCY LOW measured 8 ms of output latency in WebView2 (the status
 shows base plus output); LATENCY SAFE (40 ms) is there if playback crackles. Render & Export builds the `.it` (and a WAV)
-and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (the newest 60).
+and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (the newest 60). They run one at a time;
+the environment variable `VT_WORKERS=3` renders three at once (the same bytes, measured 15-20 % sooner for a song and six
+candidates, but edits made while they render reach the live engine later).
 
 **The Record tab** records from an audio input (an interface such as a Focusrite Scarlett 2i2, or any input Windows
 lists) into takes beside the song. INPUT lists the devices with their drivers (on Windows WASAPI, MME and DirectSound;

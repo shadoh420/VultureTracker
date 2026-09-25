@@ -50,6 +50,11 @@ REC_SETTINGS = RECENT.with_name("record.json")  # the RECORD tab's ASIO choice, 
 # the page is served from one address every launch when it can be, and the window keeps a WebView2 profile beside the
 # recent list, so what the browser stores per address stays: the page's settings (localStorage) and the MIDI permission
 PORT = 8723
+# render workers: the tryout's renders (the song, each candidate), meters, builds and stems share one queue by priority.
+# VT_WORKERS=3 renders three at once: measured in the cloud (4 cores, tools/bench.py --tryout 6) 15-20 % sooner for the
+# song and six candidates, byte-identical, but an edit made meanwhile reached the live engine 2-4x later (the workers
+# hold the GIL between libopenmpt's calls), so one worker stays the default
+WORKERS = max(1, int(os.environ.get("VT_WORKERS") or 1))
 PROFILE = RECENT.parent / "webview"
 OLD_RECENT = RECENT.parent.with_name("TrackerForge") / "recent.json"  # the app's previous name
 
@@ -892,7 +897,8 @@ class State:
         self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
         self.reload()
         self.cache_dir.mkdir(exist_ok=True)
-        threading.Thread(target=self._worker, daemon=True).start()
+        for _ in range(WORKERS):
+            threading.Thread(target=self._worker, daemon=True).start()
 
     # ---- song
 
@@ -1124,10 +1130,12 @@ class State:
             if cand:
                 api.swap_sample(base, slot, Path(cand).resolve())
             it = api.compile_song(base, self.base_dir)[0]
-            while len(self.compiled) >= 8:
-                self.compiled.pop(next(iter(self.compiled)))
-            self.compiled[ck] = it
-        return self.compiled[ck]
+            with self.lock:  # several workers: the memo changes under the lock only
+                while len(self.compiled) >= 8:
+                    self.compiled.pop(next(iter(self.compiled)))
+                self.compiled[ck] = it
+            return it
+        return self.compiled.get(ck) or self.compiled_it(cand, whole)
 
     def live_it(self):
         """What the live engine plays: the whole song as it is now with the unwritten mix (faders patched into the header,
@@ -1144,7 +1152,8 @@ class State:
         """Another song replaced this one in the app: the worker stops after the job it is on (it would keep rendering
         into this song's cache and prune it against the new state's writes)."""
         self.closed = True
-        self._put(-1, ("close",))
+        for _ in range(WORKERS):
+            self._put(-1, ("close",))
 
     def _worker(self):
         while not self.closed:

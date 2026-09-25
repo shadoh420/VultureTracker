@@ -12,6 +12,9 @@ Stages (median of N runs, milliseconds):
   live_it        State.live_it right after that edit: the module the page's engine loads
   edit->live     edit + live_it: the server's share of an edit's latency
   state          State.snapshot() and its JSON, as each /api/state poll serves it
+  tryout K       (with --tryout K) from opening the song to the song and K candidates of its first slot rendered by the
+                 app's render workers (gui.WORKERS; VT_WORKERS=1 for one at a time), once; the renders' sha1 goes to
+                 --json, so runs with different worker counts can be compared byte for byte
 
 The edit stages run on a copy of the song beside it (so relative sample paths hold), with the render worker stopped, and
 the copy, its meta and its cache files are removed afterwards. A sample file missing here (a render kept in
@@ -73,7 +76,37 @@ def standins(text, base):
     return re.sub(r"(\bfile:\s*)([^,}\n]+?)(?=\s*[,}\n])", sub, text), missing
 
 
-def bench(path, n):
+def tryout(copy, text, k):
+    """Seconds from opening `copy` (the song text with a unique comment, so no cached render serves it) to the song and
+    `k` candidates of its first slot rendered, and {candidate: sha1 of its render}."""
+    import hashlib
+    copy.write_bytes((text + f"\n# bench {time.time()}\n").encode("utf-8"))
+    pool = sorted(str(p) for p in (ROOT / "samples").rglob("*.wav") if "local" not in p.parts)
+    t = time.perf_counter()
+    st = gui.State(copy)
+    try:
+        slot = min(st.song["samples"])
+        st.meta["slot"] = slot
+        cur = st.current_file()
+        cands = [c for c in pool if c != cur][:k]
+        st.add_candidates("\n".join(cands))
+        keys = {c: st.key(c) for c in [None, *cands]}
+        while not all(st.renders.get(key, {}).get("status") in ("ready", "failed") for key in keys.values()):
+            time.sleep(0.005)
+        secs = time.perf_counter() - t
+        out = {}
+        for c, key in keys.items():
+            r = st.renders[key]
+            out[Path(c).name if c else "(song)"] = (hashlib.sha1(Path(r["file"]).read_bytes()).hexdigest()[:16]
+                                                    if r["status"] == "ready" else r["error"])
+        return secs * 1000, out
+    finally:
+        st.close()
+        for f in (copy.with_name(copy.stem + ".tryout.json"),):
+            f.unlink(missing_ok=True)
+
+
+def bench(path, n, k=0):
     path = Path(path).resolve()
     base = path.parent
     text, missing = standins(path.read_text(encoding="utf-8"), base)
@@ -117,6 +150,9 @@ def bench(path, n):
         res["live_it"] = statistics.median(lives)
         res["edit->live"] = statistics.median(a + b for a, b in zip(edits, lives))
         res["state"] = timed(lambda: json.dumps(st.snapshot()), n)
+        if k:
+            res[f"tryout {k}"], res["renders"] = tryout(copy, text, k)
+            res["workers"] = gui.WORKERS
     finally:
         for f in (copy, copy.with_name(copy.stem + ".tryout.json"), copy.with_name(copy.stem + ".notes.json"),
                   copy.with_name(copy.stem + ".notes.md")):
@@ -138,6 +174,7 @@ def main():
     ap.add_argument("songs", nargs="*", default=[str(ROOT / s) for s in DEMOS])
     ap.add_argument("--repeat", type=int, default=5, help="runs per stage (at most 32 edits)")
     ap.add_argument("--json", help="also write the results here")
+    ap.add_argument("--tryout", type=int, default=0, metavar="K", help="also time the song and K candidates rendered")
     a = ap.parse_args()
     a.repeat = max(1, min(32, a.repeat))
     rows = []
@@ -148,12 +185,13 @@ def main():
         except songmod.SongError as e:
             print(f"{s}: skipped, it does not compile here ({e.errors[0]})", file=sys.stderr)
             continue
-        rows.append(bench(s, a.repeat))
-    print(f"{'song':<24}{'KB':>5}" + "".join(f"{c:>14}" for c in COLS))
+        rows.append(bench(s, a.repeat, a.tryout))
+    cols = COLS + ([f"tryout {a.tryout}"] if a.tryout else [])
+    print(f"{'song':<24}{'KB':>5}" + "".join(f"{c:>14}" for c in cols))
     for r in rows:
-        print(f"{Path(r['song']).name:<24}{r['kb']:>5}" + "".join(f"{r[c]:>14.1f}" for c in COLS)
+        print(f"{Path(r['song']).name:<24}{r['kb']:>5}" + "".join(f"{r[c]:>14.1f}" for c in cols)
               + (f"   ({r['standins']} missing samples played by {STANDIN.name})" if r["standins"] else ""))
-    print("(milliseconds, median of", a.repeat, "runs)")
+    print("(milliseconds, median of", a.repeat, "runs" + (f"; tryout once, {gui.WORKERS} render workers)" if a.tryout else ")"))
     if a.json:
         Path(a.json).write_text(json.dumps(rows, indent=1), encoding="utf-8")
 

@@ -706,6 +706,38 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   is not enabled)" to the console; the page ignores it). Tests: test_faust (extraction from a fake package; renders,
   controls, errors, the recipe source with notes and a .dsp file: pitches within 3 cents), test_page's FAUST tab test;
   the cloud hook fetches faustwasm. Not built: polyphony, MIDI, a live (real-time) Faust node; SuperCollider.
+  Chunk 5's phrases, proposed only (the owner asked for the YAML first). A phrase is a short run of one channel's cells,
+  defined once and triggered from a cell; the compiler writes it out into plain IT cells (like the other helpers, so
+  every player plays it and the pattern view shows what it became):
+  ```yaml
+  phrases:
+    roll:                       # the rows of one channel, relative: C-5 means "the note that triggers it"
+      rows: 4
+      data: |
+        00: C-5 .. v48 ...
+        01: C-5 .. v24 ...
+        02: G-5 .. v40 ...      # a fifth over the trigger
+        03: C-5 .. v16 SC2
+      loop: false               # true: repeats until the channel's next note
+  patterns:
+    verse:
+      data: |
+        00: D-4 03 v64 @roll | ...    # the effect column names the phrase: its rows follow from this row on
+  ```
+  The trigger's note transposes the phrase (C-5 = as written), its instrument fills the phrase's empty instrument
+  columns, its volume scales the phrase's volumes (v64 = as written); the phrase stops at the channel's next note or the
+  pattern's end; a phrase cell over a cell the pattern writes itself loses (the pattern wins); `@name` can only stand in
+  the effect column, so a triggering cell has no other effect. Open questions for the owner: whether a phrase may cross
+  into the next pattern (IT cannot hold a cell across a pattern boundary other than by writing it in the next pattern,
+  which then differs per order), and whether a phrase gets its own speed (Renoise's LPB) or always plays at the song's.
+  Speed leftover "renders on a single worker", measured and left as an option: `gui.WORKERS` (env VT_WORKERS) workers
+  share the render queue; `compiled_it`'s memo now changes under the lock. `tools/bench.py --tryout K` times opening the
+  song to it and K candidates of its first slot rendered and hashes the renders. Cloud, 4 cores, K = 6: 1 worker
+  iron_relay 17.2 s, undertow 22.2, vantage 23.1; 3 workers 14.3, 18.2, 19.6 (15-20 % sooner), every render byte-identical;
+  but the edit stage, which in bench.py runs while the opened song renders, went edit -> live 112 -> 224, 88 -> 299,
+  139 -> 570 ms: the workers hold the GIL between libopenmpt's calls (the decimation and the WAV writing are Python and
+  numpy). The default stays 1 worker. For the owner to try on Windows: `set VT_WORKERS=3` before starting the app, and
+  `python tools/bench.py --tryout 6` with and without it.
 
 ## Next steps, in order
 
