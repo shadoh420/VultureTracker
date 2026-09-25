@@ -31,7 +31,7 @@ function openmptEngine(M, memory, table) {
       this.mod = M._openmpt_module_ext_get_module(this.ext);
       const a = iface(this.ext, 'interactive', 16), b = iface(this.ext, 'interactive2', 6);
       this.fn = {tempoFactor: a[2], channelVolume: a[8], mute: a[10], muted: a[11], playNote: a[14], stopNote: a[15],
-                 noteOff: b[0], noteFade: b[1]};
+                 noteOff: b[0], noteFade: b[1], channelPan: b[2]};
       M._openmpt_module_set_render_param(this.mod, 3, 8);  // OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH
       M._openmpt_module_set_repeat_count(this.mod, -1);    // the song loops until stopped
       this.channels = M._openmpt_module_get_num_channels(this.mod);
@@ -61,6 +61,9 @@ function openmptEngine(M, memory, table) {
     noteOff(ch) { return this.fn.noteOff(this.ext, ch) }
     stopNote(ch) { return this.fn.stopNote(this.ext, ch) }
     tempoFactor(f) { return this.fn.tempoFactor(this.ext, f) }
+    // a channel's volume (0-1: the header's channel volume / 64, what Mxx sets) and pan (-1 left .. 1 right), as it plays
+    channelVolume(ch, v) { return this.fn.channelVolume(this.ext, ch, v) }
+    channelPan(ch, p) { return this.fn.channelPan(this.ext, ch, p) }
     free() {
       M._openmpt_module_ext_destroy(this.ext);
       M._free(this.bufL);

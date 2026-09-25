@@ -66,6 +66,26 @@ class TestEngine(unittest.TestCase):
         self.assertGreater(r["level"], 0.05)       # the song sounds after the swap
         self.assertLess(r["diff"], 1e-4)           # and exactly as without one
 
+    def test_a_moving_fader_plays_like_the_header_and_the_preview_sleeps(self):
+        # chvol / chpan while the song plays = the channel's volume and pan written into the header (what the fader's
+        # release then swaps in); the preview copy renders only while a preview note sounds, then sleeps
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.it").write_bytes(api.compile_song(api.from_yaml(SONG), d)[0])
+            (d / "fader.js").write_text(FADER_JS, encoding="utf-8")
+            out = subprocess.run([NODE, str(d / "fader.js"), str(ROOT / "vulturetracker" / "web"), str(d / "song.it")],
+                                 capture_output=True, text=True, timeout=60, check=True)
+        r = json.loads(out.stdout)
+        self.assertGreater(r["level"], 0.05)
+        self.assertLess(r["diff"], 1e-6)                  # a fader moved live = the same value in the header
+        self.assertGreater(r["plain_diff"], 0.01)         # and the values do change the sound
+        self.assertEqual(r["reads_playing"], 0)           # the preview copy is idle while the song plays
+        self.assertEqual(r["reads_idle"], 0)              # and while stopped with no note
+        self.assertGreater(r["preview_level"], 0.01)      # a preview note sounds
+        self.assertTrue(r["asleep"])                      # and some silence after its key is up, the copy sleeps again
+
     def test_loads_report_their_id(self):
         # a module the engine cannot load answers with the load's id (the page's wait for it ends, E1); a swap replaced
         # by a newer one before it took over is covered by the newer one's 'loaded', whose id is higher (E2)
@@ -224,6 +244,54 @@ async function run(swapAt) {
   return rows;
 }
 (async () => { console.log(JSON.stringify({plain: await run(-1), swapped: await run(100)})) })();
+"""
+
+
+FADER_JS = SWAP_JS.split("async function run")[0] + r"""
+function render(p, quanta) {
+  const L = [], R = [];
+  for (let b = 0; b < quanta; b++) {
+    const o = [new Float32Array(128), new Float32Array(128)];
+    p.process([], [o]);
+    L.push(...o[0]); R.push(...o[1]);
+  }
+  return [L, R];
+}
+const maxDiff = (a, b) => a[0].reduce((m, v, i) => Math.max(m, Math.abs(v - b[0][i]), Math.abs(a[1][i] - b[1][i])), 0);
+const peak = a => a[0].reduce((m, v, i) => Math.max(m, Math.abs(v), Math.abs(a[1][i])), 0);
+(async () => {
+  const header = it.slice();
+  header[0x80] = 32;                        // channel 1 at volume 32 of 64
+  header[0x41] = header[0x41] & 0x80;       // channel 2 panned hard left
+  const a = await make();
+  a.command({type: 'load', bytes: header.buffer});
+  a.command({type: 'play', order: 0, row: 0});
+  const want = render(a, 300);
+  const b = await make();
+  b.command({type: 'load', bytes: it.slice().buffer});
+  let reads = 0;
+  const read = b.preview.read.bind(b.preview);
+  b.preview.read = (...x) => { reads++; return read(...x) };
+  b.command({type: 'play', order: 0, row: 0});
+  b.command({type: 'chvol', ch: 0, value: 0.5});
+  b.command({type: 'chpan', ch: 1, value: -1});
+  const got = render(b, 300), readsPlaying = reads;
+  const c = await make();
+  c.command({type: 'load', bytes: it.slice().buffer});
+  c.command({type: 'play', order: 0, row: 0});
+  const plain = render(c, 300);
+  b.command({type: 'stop'});
+  render(b, 20);
+  const readsIdle = reads - readsPlaying;
+  let ch = -1;
+  b.onmsg = m => { if (m.type === 'note') ch = m.ch };
+  b.command({type: 'note', id: 'k', ins: 0, note: 60});
+  const note = render(b, 60);
+  b.command({type: 'noteoff', ch, on: 'preview'});
+  render(b, Math.ceil(2.5 * 48000 / 128));  // the 0.3 s sine's tail, then the quiet time
+  console.log(JSON.stringify({level: peak(want), diff: maxDiff(got, want), plain_diff: maxDiff(plain, want),
+    reads_playing: readsPlaying, reads_idle: readsIdle, preview_level: peak(note), asleep: b.previewQuiet === -1}));
+})();
 """
 
 

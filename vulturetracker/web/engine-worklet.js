@@ -3,8 +3,10 @@
 // port: load (module bytes, optionally at an order/row: an edit swaps the module where it plays), play (from an order/row),
 // stop, mute, loop (a span of [order, row] .. [order, row], module order indices, `to` inclusive; null: the song loops
 // whole), note / noteoff (a preview: on the playing song, or on a copy with every channel muted while stopped), tempo,
-// metro (a click on every beat row while the song plays, higher on the bar's first row: {on, beat, bar} in rows).
-// Every 4 render quanta it posts the position and each channel's VU.
+// metro (a click on every beat row while the song plays, higher on the bar's first row: {on, beat, bar} in rows), chvol /
+// chpan (a fader as it moves: a channel's volume 0-1 or pan -1..1 at once; the swap its release brings makes it exact).
+// Every 4 render quanta it posts the position and each channel's VU. Nothing is allocated on the audio thread once a
+// song is loaded, and the preview copy renders only while a preview note sounds.
 
 // an AudioWorkletGlobalScope has no performance clock (the glue's emscripten_get_now): the audio clock stands in
 if (typeof performance === 'undefined') globalThis.performance = {now: () => currentTime * 1000};
@@ -36,6 +38,7 @@ if (typeof TextDecoder === 'undefined') {
   };
 }
 const PRE = 4;   // seconds a swapped-in song plays silently before it takes over (see load)
+const QUIET = 0.3;  // seconds of silence after its last held note that put the preview copy to sleep
 class VTEngine extends AudioWorkletProcessor {
   constructor(options) {
     super();
@@ -50,6 +53,10 @@ class VTEngine extends AudioWorkletProcessor {
     this.lastRow = null;
     this.pending = null;
     this.factor = 1;
+    this.sL = new Float32Array(4096);  // scratch for renders that are dropped or mixed in
+    this.sR = new Float32Array(4096);
+    this.held = new Set();   // preview channels whose key is down
+    this.previewQuiet = -1;  // frames of silence from the preview since its last held note; -1: asleep
     this.port.onmessage = e => this.command(e.data);
     loadOpenmpt(loadGlue, options.processorOptions.wasm).then(E => {
       this.E = E;
@@ -75,6 +82,8 @@ class VTEngine extends AudioWorkletProcessor {
         if (this.factor !== 1) song.tempoFactor(this.factor);
         if (this.preview) this.preview.free();
         this.preview = preview;
+        this.held.clear();
+        this.previewQuiet = -1;
         if (this.pending) this.pending.song.free();
         this.pending = null;
         if (keep && this.factor === 1) {
@@ -95,8 +104,7 @@ class VTEngine extends AudioWorkletProcessor {
           old.seek(at.order, at.row);
           let skip = Math.max(0, Math.round((at.seconds - old.position().seconds) * sampleRate));
           song.seek(at.order, at.row);
-          const L = new Float32Array(4096), R = new Float32Array(4096);
-          while (skip > 0) { const got = song.read(sampleRate, Math.min(4096, skip), L, R); if (!got) break; skip -= got }
+          while (skip > 0) { const got = song.read(sampleRate, Math.min(4096, skip), this.sL, this.sR); if (!got) break; skip -= got }
           this.take(song);
         } else {
           if (m.order != null) song.seek(m.order, m.row);
@@ -114,6 +122,9 @@ class VTEngine extends AudioWorkletProcessor {
       } else if (m.type === 'mute') {
         this.song.mute(m.ch, m.on);
         if (this.pending) this.pending.song.mute(m.ch, m.on);
+      } else if (m.type === 'chvol' || m.type === 'chpan') {
+        for (const s of [this.song, this.pending && this.pending.song])
+          if (s && m.ch < s.channels) m.type === 'chvol' ? s.channelVolume(m.ch, m.value) : s.channelPan(m.ch, m.value);
       } else if (m.type === 'loop') {
         this.loop = m.span;
       } else if (m.type === 'tempo') {
@@ -122,10 +133,12 @@ class VTEngine extends AudioWorkletProcessor {
         if (this.pending) this.pending.song.tempoFactor(m.factor);
       } else if (m.type === 'note') {
         const on = this.playing ? 'song' : 'preview', ch = this[on].playNote(m.ins, m.note, m.vol == null ? 1 : m.vol, m.pan || 0);
+        if (on === 'preview' && ch >= 0) { this.held.add(ch); this.previewQuiet = 0 }
         this.port.postMessage({type: 'note', id: m.id, ch, on});
       } else if (m.type === 'noteoff') {
         const s = this[m.on];
         if (s && m.ch >= 0) s.noteOff(m.ch);
+        if (m.on === 'preview') this.held.delete(m.ch);
       }
     } catch (err) {  // a failed load names its id, so the page's wait for it ends
       this.port.postMessage({type: 'error', id: m && m.type === 'load' ? m.id : undefined, text: String(err && err.message || err)});
@@ -134,8 +147,8 @@ class VTEngine extends AudioWorkletProcessor {
 
   // the pending song renders (silently) up to `max` frames towards the old song's position; there, it takes over
   catchUp(max) {
-    const P = this.pending, L = new Float32Array(4096), R = new Float32Array(4096);
-    while (P.need > 0 && max > 0) { const got = P.song.read(sampleRate, Math.min(4096, P.need, max), L, R); if (!got) break; P.need -= got; max -= got }
+    const P = this.pending;
+    while (P.need > 0 && max > 0) { const got = P.song.read(sampleRate, Math.min(4096, P.need, max), this.sL, this.sR); if (!got) break; P.need -= got; max -= got }
     if (P.need > 0 && max > 0) P.need = 0;  // the song ended first
     if (P.need === 0) { this.pending = null; this.take(P.song, P.id) }
   }
@@ -193,7 +206,13 @@ class VTEngine extends AudioWorkletProcessor {
       c.at = 0;
       if (c.n >= len) this.click = null;
     }
-    this.preview.read(sampleRate, n, L, R, true);
+    if (this.previewQuiet >= 0) {  // a preview note sounds, or did within QUIET seconds: mix the preview copy in
+      const got = this.preview.read(sampleRate, n, this.sL, this.sR), a = this.sL, b = this.sR;
+      let peak = 0;
+      for (let i = 0; i < got; i++) { L[i] += a[i]; R[i] += b[i]; peak = Math.max(peak, Math.abs(a[i]), Math.abs(b[i])) }
+      this.previewQuiet = this.held.size || peak > 1e-5 ? 0 : this.previewQuiet + n;
+      if (this.previewQuiet > QUIET * sampleRate) this.previewQuiet = -1;
+    }
     if (++this.quanta % 4 === 0) {
       const p = this.song.position();
       this.port.postMessage({type: 'pos', order: p.order, row: p.row, seconds: p.seconds, playing: this.playing, vu: this.song.vu(), frame: currentFrame});

@@ -477,9 +477,12 @@ function meterDb(c,vol,mv){const M=S.meters,f=S.song.facts;if(!M||!M.levels||!M.
   const v0=mm.volume&&mm.volume[c]!=null?mm.volume[c]:f.volume[c],g0=mm.mix_volume!=null?mm.mix_volume:f.mix_volume,v=vol!=null?vol:mixVal('volume',c,f.volume[c]),g=mv!=null?mv:mixVal('mix_volume',null,f.mix_volume);
   return v&&g&&v0&&g0?M.levels[c].active_db+20*Math.log10(v/v0)+20*Math.log10(g/g0):-Infinity}
 const meterW=db=>db==null||db===-Infinity?0:Math.max(0,Math.min(100,(db+60)/60*100)),dbText=db=>db==null?'—':db===-Infinity?'off':db.toFixed(1);
-function liveVol(el,c){lastInput=Date.now();$('mv'+c).textContent=el.value;const db=meterDb(c,+el.value);$('mb'+c).style.width=meterW(db)+'%';$('md'+c).textContent=dbText(db)}
+// a fader as it moves reaches the live engine at once (the channel's volume or pan as it plays); its release writes the mix,
+// and the engine then swaps in the module with it in the header, exact from the start of the song too
+function lvFader(type,ch,value){if(LV.node)LV.node.port.postMessage({type,ch,value})}
+function liveVol(el,c){lastInput=Date.now();lvFader('chvol',c,+el.value/64);$('mv'+c).textContent=el.value;const db=meterDb(c,+el.value);$('mb'+c).style.width=meterW(db)+'%';$('md'+c).textContent=dbText(db)}
 function liveMix(el){lastInput=Date.now();$('mmv').textContent=el.value;S.song.facts.channels.forEach((_,c)=>{const db=meterDb(c,null,+el.value);$('mb'+c).style.width=meterW(db)+'%';$('md'+c).textContent=dbText(db)})}
-function livePan(el,c){lastInput=Date.now();$('mp'+c).textContent=panLabel(+el.value)}
+function livePan(el,c){lastInput=Date.now();lvFader('chpan',c,(+el.value-32)/32);$('mp'+c).textContent=panLabel(+el.value)}
 function liveGain(el,n){lastInput=Date.now();$('sg'+n).textContent=el.value}
 // a fader back at the song's own value is no change; the server keeps the mix in <song>.tryout.json until WRITE MIX
 function setMix(kind,i,v){const f=S.song.facts,ents=S.song.sample_entries,m=JSON.parse(JSON.stringify(S.mix||{}));
