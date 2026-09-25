@@ -34,6 +34,41 @@ def fir_filter(x, h):
     return y[d: d + n]
 
 
+def decimate(x, factor, h):
+    """`fir_filter(x, h)[::factor]` for each column of `x` (frames x channels, any numeric dtype), computed at the output
+    rate: the filter's `factor` phases each run on every `factor`-th input frame (polyphase), by FFT overlap-save in
+    blocks, so no output that decimation would drop is computed and nothing the length of `x` is copied as floats."""
+    x = np.asarray(x)
+    n, nch = x.shape
+    m, d = len(h), (len(h) - 1) // 2
+    n_out = -(-n // factor)
+    # output k = sum over phases r of sum_i h[factor*i + r] * x[factor*(k - i + a_r) + b_r], with d - r = factor*a_r + b_r
+    phases = [(np.asarray(h[r::factor], float), *divmod(d - r, factor)) for r in range(factor)]
+    amax = max(a for _, a, _ in phases)
+    taps = max(amax - a + len(hr) for hr, a, _ in phases)   # each phase's filter, delayed to the latest phase's offset
+    nfft = 1 << max(12, math.ceil(math.log2(16 * taps)))
+    step = nfft - taps + 1
+    spectra = []
+    for hr, a, b in phases:
+        hp = np.zeros(taps)
+        hp[amax - a: amax - a + len(hr)] = hr
+        spectra.append((np.fft.rfft(hp, nfft)[:, None], b))
+    y = np.empty((n_out, nch))
+    seg = np.empty((nfft, nch))
+    for k0 in range(0, n_out, step):
+        kb = min(step, n_out - k0)
+        start = k0 + amax - (taps - 1)                       # the first phase frame this block's outputs reach back to
+        acc = 0
+        for H, b in spectra:
+            lo, hi = max(start, 0), min(start + nfft, (n - b + factor - 1) // factor)
+            seg[:] = 0
+            if hi > lo:
+                seg[lo - start: hi - start] = x[factor * lo + b: factor * (hi - 1) + b + 1: factor]
+            acc = acc + np.fft.rfft(seg, axis=0) * H
+        y[k0: k0 + kb] = np.fft.irfft(acc, nfft, axis=0)[taps - 1: taps - 1 + kb]
+    return y
+
+
 def scale_loop(start, end, pingpong, rate_in, rate_out):
     """Where a loop of the input lands in `resample`'s output: the start rounded, the period kept as close as whole
     frames allow (forward: the loop's length; ping-pong: twice the length less one, since the tracker plays the end
@@ -86,9 +121,9 @@ def resample(x, rate_in, rate_out, taps=64, loops=()):
     ratio = rate_in / rate_out                       # input samples per output sample
     h = taps // 2
     fir = lowpass_fir(0.45 / ratio) if rate_out < rate_in else None
-    xf = fir_filter(x, fir) if fir is not None else x
     if fir is not None and abs(ratio - round(ratio)) < 1e-9 and not loops:
-        return xf[:: int(round(ratio))].copy()
+        return decimate(x[:, None], int(round(ratio)), fir)[:, 0]
+    xf = fir_filter(x, fir) if fir is not None else x
     n_out = int(math.floor((len(x) - 1) / ratio)) + 1
     fits = [(*lp, s, e) for lp, (s, e, _) in zip(loops, place_loops(loops, rate_in, rate_out))]
     size = max([n_out] + [e for *_, e in fits])

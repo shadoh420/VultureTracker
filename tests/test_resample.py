@@ -37,6 +37,18 @@ class ResampleTest(unittest.TestCase):
         self.assertLess(band_db(y[2000:-2000], 44100, 10000, 22050), -60)      # the 30 kHz tone is gone, not at 14.1 kHz
         self.assertGreater(band_db(y[2000:-2000], 44100, 900, 1100), -0.5)      # the 1 kHz tone is all that is left
 
+    def test_polyphase_decimation_is_the_full_rate_filter_decimated(self):
+        from vulturetracker.resample import decimate, fir_filter, lowpass_fir
+        rng = np.random.default_rng(1)
+        for n in (1, 5, 1000, 70001):  # shorter than the filter, and over a block boundary
+            for factor in (2, 3, 4):
+                x = rng.integers(-30000, 30000, (n, 2)).astype(np.int16)
+                h = lowpass_fir(0.45 / factor)
+                want = np.stack([fir_filter(x[:, c].astype(float), h)[::factor] for c in range(2)], axis=1)
+                got = decimate(x, factor, h)
+                self.assertEqual(got.shape, want.shape)
+                self.assertLess(np.abs(got - want).max(), 1e-6, (n, factor))
+
     def test_arbitrary_ratio_keeps_pitch(self):
         from vulturetracker.resample import resample
         x = np.sin(2 * np.pi * 440 * np.arange(16000) / 16000)

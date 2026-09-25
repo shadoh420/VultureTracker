@@ -161,7 +161,7 @@ class LoadedModule:
         interpolation is set to its longest filter (an 8-tap windowed sinc)."""
         try:
             import numpy as np
-            from .resample import resample
+            from .resample import decimate, lowpass_fir
         except ImportError:
             oversample = 1
         _lib.openmpt_module_set_render_param(self._mod, 3, 8)      # OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH
@@ -181,10 +181,12 @@ class LoadedModule:
             n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mix_rate, chunk, buf)
             if n == 0:
                 break
-            out += bytes(buf)[: n * 4]
+            out += memoryview(buf)[: n * 2]
             frames += n
         if mix_rate == rate:
             return bytes(out)
-        x = np.frombuffer(bytes(out), dtype="<i2").reshape(-1, 2).astype(float)
-        y = np.stack([resample(x[:, c], mix_rate, rate) for c in range(2)], axis=1)
-        return np.clip(np.rint(y), -32768, 32767).astype("<i2").tobytes()
+        # what resample(x, mix_rate, rate) does for a whole factor, both channels at once and at the output rate
+        y = decimate(np.frombuffer(out, dtype=np.int16).reshape(-1, 2), mix_rate // rate, lowpass_fir(0.45 * rate / mix_rate))
+        np.rint(y, out=y)
+        np.clip(y, -32768, 32767, out=y)
+        return y.astype("<i2").tobytes()
