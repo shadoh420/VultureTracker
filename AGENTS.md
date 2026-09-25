@@ -37,6 +37,7 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 | `tools/` | `build_exe.py`, `demo_video.py`, fetchers; `tools/cc0`, `tools/surge-xt`, `tools/synths`, `tools/royalty-free` are downloaded and ignored | scripts yes |
 | `scratch/` | local only, never committed: `scratch/ut99-clean/` holds the extracted Unreal Tournament modules (copyright Epic) and the analysis scripts (`analyze.py`, `structure.py`, `compare.py`, `spectrogram.py`, `GROUPS.md`) | no |
 | `vendor/` | libopenmpt DLLs for Windows | yes |
+| `.claude/` | `hooks/session-start.sh`: cloud sessions install libopenmpt (Ubuntu's 0.7.x), numpy, pyyaml, Pillow, imageio-ffmpeg and Playwright and set `VT_CHROMIUM`, so the tests run at once | yes |
 | `test/` | the owner's own folder; leave it alone | no |
 | `docs_ref/`, `build/`, `dist/`, `.tryout/`, `*.tryout.json` | generated or reference material | no |
 
