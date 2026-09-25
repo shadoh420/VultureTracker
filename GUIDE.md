@@ -178,7 +178,11 @@ are copied across so the chord ends whole, and a chord that needs more channels 
 in the SONG tab). LAYERS rewrites the instrument column of each note: CYCLE takes the listed instruments in turn, note
 by note down each channel (round-robin), BY VOLUME picks by the note's volume, the list running quietest to loudest.
 GROOVE and LAYERS work on the selected channels (every channel with no selection), in THIS PATTERN or the WHOLE SONG.
-FIND… (Ctrl+F)
+RENDER → SLOT renders the selected rows and channels (with no selection: the whole pattern, the channels the mixer lets
+through) as they play in the song, with everything before them setting the state and the unwritten mix applied, then
+lets the notes ring on for up to TAIL seconds with nothing new struck (cut at the first silence); the WAV is saved beside
+the song (`render-<song>-<pattern>-<rows>.wav`, stereo when the channels differ) and added as a new sample slot, ready to
+play, slice or edit (resampling). One step for Ctrl+Z. FIND… (Ctrl+F)
 finds cells by note, instrument, volume and effect (`*` any characters, `?` one, an empty field anything; F3 or NEXT
 the next match, in this pattern or the whole song, on the channels on show) and REPLACE ALL writes the given fields
 into every match. Every command is one step for Ctrl+Z, a song-wide replace included.
@@ -227,7 +231,12 @@ full scale), REVERSE and REMOVE DC work on the selection, or on the whole sample
 the end of the loop into the audio just before its start (equal power, the length in ms; it needs that much audio before
 the loop start). Each writes a new WAV beside the song (`<name>-trim.wav`, numbered, never over an existing file, the
 source untouched), points the slot at it and keeps the loops with the audio (a trim moves them, a reverse of the whole
-sample mirrors them); undo points the slot back, and the WAVs stay on disk. PROPERTIES: name, base note or c5 speed
+sample mirrors them); undo points the slot back, and the WAVs stay on disk. SLICE cuts the WAV (the selection, else all of
+it) AT THE HITS (sensitivity 0–100: higher finds softer hits; each cut 1 ms before its hit, on a zero crossing) or into
+EQUAL PARTS: FIND shows the cuts on the waveform, numbered, and SLICE → SLOTS writes exactly those, each slice its own
+WAV beside the song (`<name>-slice01.wav`, a 1 ms fade at its end) and a new slot keeping the source's base note, volume
+and bits; in a song with instruments a new instrument plays slice 1 on C-5, slice 2 on C#5 and so on, each at its own
+pitch (a kit to play the pieces from the pattern). One step for Ctrl+Z. PROPERTIES: name, base note or c5 speed
 (either replaces the other), default volume, global volume (refused while the Tryout mixer holds an unwritten GAIN for
 the slot), default pan, bits, stereo, and the auto-vibrato (type, speed, depth, rate). A value the song format refuses
 is not written and the bar says why.

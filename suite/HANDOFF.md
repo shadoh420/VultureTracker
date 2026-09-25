@@ -525,8 +525,17 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   file (before: the whole file read per request); undo keeps the newest 200 steps. Left as it was: the meters pass
   (one soloed render per channel, stopped at the next channel when the mix changes) and the swap's catch-up while
   stopped (up to 4 s of the song rendered at once, silent). Checked in Chromium (demo2): the fader's moves reach the
-  playing engine, the release swaps, no page errors. On Windows: run `python tools/bench.py` for the owner's numbers,
-  and drag a fader while the Pattern tab plays.
+  playing engine, the release swaps, no page errors. Measured by the owner on Windows (7-run medians): edit -> live
+  arena 93 -> 35 ms, iron_relay 543 -> 70, undertow 913 -> 77, vantage 912 -> 230; warm compile 6-8x faster; 2x render
+  about 2x faster there (undertow 2.53 -> 1.44 s, vantage 2.22 -> 1.14; libopenmpt's own mixing is a larger share on
+  that machine), 1x unchanged; a fader dragged while the Pattern tab plays sent 20/20 chvol and 20/20 chpan to the
+  engine, the release swapped, playback went on, no page or worklet errors; tests OK; the exe rebuilt and smoke-tested.
+  Chunk 5 (Pattern tab COMPOSE: GROOVE, EUCLID, CHORD, LAYERS; `compose.py`) and chunk 3a (RENDER -> SLOT in the
+  Pattern tab: rows rendered as they play into a new slot, with a ring-out; SLICE in the Samples tab: onsets by
+  spectral flux in `dsp.py` or equal parts, shown on the waveform, written as a WAV and slot per slice plus a kit
+  instrument) followed, each checked in Chromium on a scratch song. Phrases (chunk 5) were left out: the other
+  helpers write the same cells, and phrases would need a new song-format feature. Next: 3b (the effects panel), then
+  2a (recording) last, by the owner's word.
 
 ## Next steps, in order
 

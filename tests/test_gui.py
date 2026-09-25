@@ -1209,6 +1209,65 @@ class TestGui(unittest.TestCase):
             st.undo()
         self.assertEqual(read(), SONG_BLOCK)
 
+    def test_render_rows_into_a_new_slot(self):
+        # rows of a pattern rendered as they play, one channel alone, then ringing out: a new slot, one undo step
+        import numpy as np
+        from vulturetracker.wavload import read_wav
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+
+        def pitch(path):
+            w = read_wav(path)
+            x = np.asarray(w.channels[0], float)
+            f = np.fft.rfftfreq(len(x), 1 / w.rate)
+            return f[np.argmax(np.abs(np.fft.rfft(x)))], len(x) / w.rate, len(w.channels)
+        r = st.song_edit([{"op": "render_sample", "order": 0, "r0": 0, "r1": 3, "chans": [0], "tail": 1}])
+        self.assertIn("rows 0-3 of 'p1' (0.48 s, ", r["report"])
+        entry = st.song["samples"][3]
+        self.assertEqual(entry["name"], "p1 0-3")
+        hz, secs, nchan = pitch(self.dir / entry["file"])
+        self.assertAlmostEqual(hz, 440, delta=3)        # A's tone: C-5 plays the file at its own rate
+        self.assertTrue(0.3 < secs < 0.48 + 1)          # the 0.3 s tone rings out, then the silence is cut
+        self.assertEqual(nchan, 1)                       # channel A is centred: a mono render
+        st.song_edit([{"op": "render_sample", "order": 1, "r0": 0, "r1": 0, "chans": [0], "tail": 0}])
+        self.assertAlmostEqual(pitch(self.dir / st.song["samples"][4]["file"])[0], 880, delta=5)  # p2's B tone, row 0
+        st.song_edit([{"op": "render_sample", "order": 0, "r0": 2, "r1": 2, "chans": [1], "tail": 0}])
+        self.assertEqual(pitch(self.dir / st.song["samples"][5]["file"])[2], 2)  # B, panned at 40: a stereo render
+        with self.assertRaises(ValueError):  # channel B is silent on p1's first row (its note comes on row 2)
+            st.song_edit([{"op": "render_sample", "order": 0, "r0": 0, "r1": 0, "chans": [1], "tail": 0}])
+        st.undo()
+        st.undo()
+        st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK)
+
+    def test_slice_a_sample_into_slots_and_a_kit(self):
+        import math
+        from vulturetracker.wavload import read_wav
+        hits = [0] * int(0.6 * RATE)
+        for k, t0 in enumerate((0.0, 0.2, 0.4)):  # three decaying tones, 0.2 s apart
+            for i in range(int(0.19 * RATE)):  # decayed to a few LSB when the next begins: no click between them
+                hits[int(t0 * RATE) + i] = round(20000 * math.sin(2 * math.pi * 330 * (k + 1) * i / RATE) * math.exp(-i / 1000))
+        write_wav(self.dir / "hits.wav", RATE, [hits])
+        (self.dir / "song.yaml").write_bytes(SONG_INS.replace("  2: {file: b.wav, name: B tone}\n",
+                                                              "  2: {file: b.wav, name: B tone}\n  3: {file: hits.wav, name: Hits, base_note: D-5}\n").encode("utf-8"))
+        st = self.state()
+        pts = st.slice_points(3, "onsets", 50)
+        self.assertEqual(len(pts["points"]), 3)
+        for got, want in zip(pts["points"], (0, 0.2, 0.4)):
+            self.assertLess(abs(got / RATE - want), 0.003)
+        self.assertEqual(st.slice_points(3, "equal", 4)["points"], [0, 6615, 13230, 19845])
+        r = st.song_edit([{"op": "sample_slice", "num": 3, **pts}])
+        self.assertEqual(r["report"], "slot 03 cut into 3 slices: slots 04-06; instrument 03 plays them from C-5 up")
+        s = st.song["samples"]
+        self.assertEqual([(s[n]["name"], s[n]["base_note"]) for n in (4, 5, 6)], [("Hits 1", "D-5"), ("Hits 2", "D-5"), ("Hits 3", "D-5")])
+        self.assertEqual([len(read_wav(self.dir / s[n]["file"]).channels[0]) for n in (4, 5, 6)],
+                         [pts["points"][1], pts["points"][2] - pts["points"][1], pts["end"] - pts["points"][2]])
+        self.assertEqual(st.song["instruments"][3]["keymap"], [{"notes": "C-5", "sample": 4, "play_note": "C-5"},
+                                                              {"notes": "C#5", "sample": 5, "play_note": "C-5"},
+                                                              {"notes": "D-5", "sample": 6, "play_note": "C-5"}])
+        st.undo()
+        self.assertNotIn(4, st.song["samples"])
+
     def test_the_page_keeps_its_address(self):
         import socket
         with socket.socket() as s:  # a free port stands in for PORT

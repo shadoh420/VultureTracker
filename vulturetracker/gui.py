@@ -1973,6 +1973,10 @@ class State:
             self._echo(lines, orders, op, remap)
         elif kind in ("groove", "euclid", "chord", "layers"):
             self._compose(lines, op)
+        elif kind == "render_sample":
+            self._render_sample(lines, orders, op, remap)
+        elif kind == "sample_slice":
+            self._slice(lines, orders, op, remap)
         elif kind == "sample_file":  # the slot pointed at another WAV (dropped on it), as the tryout's apply does it
             import copy
             num, f = int(op["num"]), Path(str(op["file"]))
@@ -2060,7 +2064,8 @@ class State:
                     rel = os.path.relpath(f.resolve(), self.base_dir).replace(os.sep, "/")
                 except ValueError:
                     rel = f.resolve().as_posix()
-                entry = {"file": rel, "name": str(op.get("name") or f.stem)[:25]}
+                entry = {"file": rel, "name": str(op.get("name") or f.stem)[:25], **({"stereo": True} if op.get("stereo") else {}),
+                         **(op.get("keep") or {})}  # keep: settings carried over (a slice keeps its source's pitch)
             else:
                 entry = op["entry"]
                 if not isinstance(entry, dict):
@@ -2214,6 +2219,118 @@ class State:
         msg += f", {lost} effects replaced by the tick delay" if lost else ""
         self._report.append(msg)
 
+    def render_rows(self, order, r0, r1, chans=None, tail=2.0):
+        """Rows r0..r1 of the pattern at module order `order` rendered as they play in the song (everything before them
+        sets the state: tempo, volumes, instruments), with the unwritten mix and the instrument panel, `chans` alone
+        audible (None: the channels the mixer lets through), then `tail` seconds of the notes ringing on with nothing
+        new struck; the ring-out ends at the first silence. Returns (int16 stereo PCM bytes, seconds of the rows)."""
+        import numpy as np
+        self._need_compiled()
+        mod = self.mod
+        if not (0 <= order < len(mod.orders) and mod.orders[order] < len(mod.patterns)):
+            raise ValueError(f"order {order} plays no pattern")
+        pat = mod.patterns[mod.orders[order]]
+        r1 = min(int(r1), len(pat.rows) - 1)
+        r0 = max(0, min(int(r0), r1))
+        tail = max(0.0, min(10.0, float(tail)))
+        nch = len(mod.channels)
+        silenced = [c for c in range(nch) if c not in set(chans)] if chans is not None else self.silenced()
+        if len(silenced) >= nch:
+            raise ValueError("no channel to render: every one is muted or left out")
+        with self.lock:
+            base = api.tryout_song(self.song, (0, order + 1))  # the orders up to this one, jumps kept inside them
+            inst, mix = self.mix().get("instrument") or {}, self.mix()
+        for n, edit in inst.items():
+            if int(n) in (base.get("instruments") or {}):
+                base["instruments"][int(n)] = voice_entry(base["instruments"][int(n)], edit)
+        names = set(base["patterns"])
+        rn = next(n for n in (f"render{k}" for k in itertools.count()) if n not in names)
+        base["patterns"][rn] = {"rows": r1 + 1, "data": "\n".join(" | ".join(format_cell(c) for c in row)
+                                                                  for row in pat.rows[:r1 + 1]) + "\n"}
+        base["patterns"][rn + "_tail"] = {"rows": 200, "data": ""}  # 200 rows last 2 s at the fastest speed and tempo
+        base["orders"] = list(base["orders"][:order]) + [rn] + [rn + "_tail"] * (1 + int(tail / 1.9))
+        it = patch_it(api.compile_song(base, self.base_dir)[0], silenced, mix)
+        with LoadedModule(it) as lm:
+            end = lm.order_start(order + 1)
+            start = lm.order_start(order, r0)  # the render starts here: libopenmpt plays the song up to it to get its state
+            pcm = lm.render(RATE, max_seconds=end - start + tail)
+        x = np.frombuffer(pcm, "<i2").reshape(-1, 2)
+        rows_end = min(len(x), round((end - start) * RATE))
+        loud = np.nonzero(np.abs(x[rows_end:]).max(axis=1) > 2)[0]  # the ring-out stops at its last frame above 2 LSB
+        return x[: rows_end + (loud[-1] + 1 if len(loud) else 0)].tobytes(), end - start
+
+    def _render_sample(self, lines, orders, op, remap):
+        """The `render_sample` op: render_rows of op's order, r0, r1, chans and tail, written as a WAV beside the song
+        (stereo when the channels differ) and added as a new sample slot; part of the song edit's one undo step."""
+        import numpy as np
+        from .wavload import write_wav
+        order, r0, r1 = int(op["order"]), int(op.get("r0") or 0), int(op.get("r1") if op.get("r1") is not None else 199)
+        pcm, secs = self.render_rows(order, r0, r1, op.get("chans"), op.get("tail", 2.0))
+        x = np.frombuffer(pcm, "<i2").reshape(-1, 2)
+        if not len(x) or not np.abs(x).max():
+            raise ValueError("the render is silent: nothing plays on those rows and channels")
+        stereo = bool((x[:, 0] != x[:, 1]).any())
+        name = self.mod.patterns[self.mod.orders[order]].name
+        stem = re.sub(r"[^\w.-]+", "_", f"{self.song_path.stem}-{name}-{r0}-{r1}")
+        out = next(p for p in (self.base_dir / f"render-{stem}{'' if k == 1 else f'-{k}'}.wav" for k in itertools.count(1))
+                   if not p.exists())
+        write_wav(out, RATE, [x[:, c].tolist() for c in range(2 if stereo else 1)])
+        self._created.append(out)
+        num = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
+        self._song_op(lines, orders, {"op": "sample_new", "num": num, "file": str(out), "stereo": stereo,
+                                      "name": f"{name} {r0}-{r1}"[:25]}, remap)
+        self._report.append(f"rows {r0}-{min(r1, len(self.mod.patterns[self.mod.orders[order]].rows) - 1)} of "
+                            f"'{name}' ({secs:.2f} s, {len(x) / RATE:.2f} s with the ring-out) rendered into new slot "
+                            f"{num:02d}: {out.name}")
+
+    def _slice(self, lines, orders, op, remap):
+        """The `sample_slice` op: slot `num`'s WAV cut at `points` (start frames, ascending) up to `end` (default: the
+        WAV's end), each slice written as its own WAV beside the song (a 1 ms fade at its end, so the cut does not click)
+        and added as a new slot with the source slot's pitch settings; in a song with instruments, also a new
+        instrument playing slice 1 on C-5, slice 2 on C#5 and so on, each at its own pitch (a drum kit). One undo step."""
+        import numpy as np
+        from .wavload import write_wav
+        num = int(op["num"])
+        entry, path, w, x = self._sample_wav(num)
+        n = x.shape[1]
+        end = max(1, min(n, int(op.get("end") or n)))
+        pts = sorted({int(p) for p in op.get("points") or [] if 0 <= int(p) < end})
+        bounds = [(s, e) for s, e in zip(pts, pts[1:] + [end]) if e - s >= 32]
+        have = sorted(int(k) for k in (self.song.get("samples") or {}))
+        first = max(have, default=0) + 1
+        if len(bounds) < 1:
+            raise ValueError("no slices: give at least one start point before the end")
+        if first + len(bounds) - 1 > 99:
+            raise ValueError(f"{len(bounds)} slices from slot {first} would pass slot 99: slice fewer, or clean up unused slots")
+        if len(bounds) > 120 - 60:
+            raise ValueError("an instrument maps C-5 upwards: at most 60 slices")
+        full = 128 if w.out_bits == 8 else 32768
+        fade = min(max(1, w.rate // 1000), 32)
+        keep = {k: entry[k] for k in ("base_note", "c5_speed", "volume", "global_volume", "stereo", "bits") if k in entry}
+        stem = re.sub(r"-slice\d+(-\d+)?$", "", path.stem)
+        nums = []
+        for k, (s, e) in enumerate(bounds, 1):
+            y = x[:, s:e].copy()
+            y[:, -fade:] *= np.linspace(1, 0, fade, dtype=np.float32)
+            out = next(p for p in (self.base_dir / f"{stem}-slice{k:02d}{'' if j == 1 else f'-{j}'}.wav" for j in itertools.count(1))
+                       if not p.exists())
+            write_wav(out, w.rate, np.clip(np.round(y * full), -full, full - 1).astype(np.int32).tolist(), bits=w.out_bits,
+                      root_note=w.root)
+            self._created.append(out)
+            n_slot = first + k - 1
+            self._song_op(lines, orders, {"op": "sample_new", "num": n_slot, "file": str(out), "keep": keep,
+                                          "name": f"{entry.get('name') or path.stem} {k}"[:25]}, remap)
+            nums.append(n_slot)
+        msg = f"slot {num:02d} cut into {len(nums)} slices: slots {nums[0]:02d}-{nums[-1]:02d}"
+        if self.mod.instruments is not None:
+            ins = max((int(i) for i in (self.song.get("instruments") or {})), default=0) + 1
+            from .notation import format_note
+            keymap = [{"notes": format_note(60 + k), "sample": s, "play_note": "C-5"} for k, s in enumerate(nums)]
+            self._song_op(lines, orders, {"op": "instrument_new", "num": ins,
+                                          "entry": {"name": f"{entry.get('name') or path.stem} slices"[:25], "keymap": keymap}}, remap)
+            msg += f"; instrument {ins:02d} plays them from C-5 up"
+        self._report.append(msg)
+
     def _compose(self, lines, op):
         """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
         delays) and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
@@ -2319,7 +2436,7 @@ class State:
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
         channel_rename, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
         sample_set (the whole entry), sample_file (the slot pointed at another WAV), sample_delete, sample_process (an edit of the slot's audio written as a new WAV beside the song,
-        the slot pointed at it), echo, groove, euclid, chord, layers) to the song text as one undo step. The tryout's
+        the slot pointed at it), echo, groove, euclid, chord, layers, render_sample (rows rendered into a new slot), sample_slice) to the song text as one undo step. The tryout's
         channel mutes and unwritten faders follow a channel that moves or goes; its section and loop are dropped when they
         fall outside a changed order list."""
         with self.lock:
@@ -2389,6 +2506,23 @@ class State:
         path = (self.base_dir / str(entry["file"])).resolve()
         st = path.stat()
         return entry, path, *wav_array(str(path), (st.st_mtime, st.st_size))
+
+    def slice_points(self, num, mode="onsets", value=50, a=None, b=None):
+        """Where SLICE would cut slot `num`'s WAV, frames a..b (default: all of it): at its hits (`onsets`, value the
+        sensitivity 0-100) or into `equal` parts (value the count). {"points": the slices' start frames, "end"}."""
+        from . import dsp
+        with self.lock:
+            _, _, w, x = self._sample_wav(num)
+        n = x.shape[1]
+        a = max(0, min(n - 1, int(a or 0)))
+        b = max(a + 1, min(n, int(b) if b not in (None, "") else n))
+        if mode == "equal":
+            pts = dsp.equal_parts(a, b, int(value))
+        elif mode == "onsets":
+            pts = dsp.onsets(x, w.rate, value, a, b)
+        else:
+            raise ValueError("slices go at the hits (onsets) or in equal parts")
+        return {"points": [int(p) for p in pts], "end": b}
 
     def sample_view(self, num, a=0, b=None, n=1000):
         """The editor's view of slot `num`: the WAV (frames, rate, channels, bits), its loops in the WAV's frames, the
@@ -2669,6 +2803,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, st.pattern_rows(int(path[13:])))
             except (ValueError, IndexError, AttributeError):
                 return self._send(404, {"error": "no such pattern"})
+        if path.startswith("/api/slices/"):
+            from urllib.parse import parse_qs
+            q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
+            try:
+                return self._send(200, st.slice_points(int(path[12:]), q.get("mode", "onsets"), float(q.get("value", 50)),
+                                                       q.get("a"), q.get("b")))
+            except (ValueError, OSError, ImportError) as e:
+                return self._send(404, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/api/wave/"):
             from urllib.parse import parse_qs
             q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
