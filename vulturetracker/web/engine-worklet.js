@@ -58,10 +58,17 @@ class VTEngine extends AudioWorkletProcessor {
     try {
       if (m.type === 'load') {
         const bytes = new Uint8Array(m.bytes), old = this.song, at = m.keep && old ? old.position() : null;
+        // a seek lands on the start of the row: the part of the row already played is rendered again and dropped, so
+        // the swapped-in song goes on from the same frame instead of repeating it (up to a row: 91 ms at tempo 110 speed 4)
+        let skip = 0;
+        if (at) { old.seek(at.order, at.row); skip = Math.max(0, Math.round((at.seconds - old.position().seconds) * sampleRate)) }
         const song = new this.E.Song(bytes), preview = new this.E.Song(bytes);
         for (let c = 0; c < preview.channels; c++) preview.mute(c, true);
-        if (at) song.seek(at.order, at.row);
-        else if (m.order != null) song.seek(m.order, m.row);
+        if (at) {
+          song.seek(at.order, at.row);
+          const L = new Float32Array(4096), R = new Float32Array(4096);
+          while (skip > 0) { const got = song.read(sampleRate, Math.min(4096, skip), L, R); if (!got) break; skip -= got }
+        } else if (m.order != null) song.seek(m.order, m.row);
         for (const c of m.muted || []) song.mute(c, true);
         this.song = song;
         if (old) old.free();

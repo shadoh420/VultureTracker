@@ -37,6 +37,21 @@ class TestEngine(unittest.TestCase):
         for got, want in zip(r["onsets"], expect):
             self.assertLessEqual(abs(got - want), 2)  # the first click sample is sin(0) = 0
 
+    def test_swap_goes_on_from_the_same_frame(self):
+        # a song swapped in while it plays (an edit, a fader) must not replay the part of the row already played: every
+        # row after the swap starts on the frame it starts on without one
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.it").write_bytes(api.compile_song(api.from_yaml(SONG), d)[0])
+            (d / "swap.js").write_text(SWAP_JS, encoding="utf-8")
+            out = subprocess.run([NODE, str(d / "swap.js"), str(ROOT / "vulturetracker" / "web"), str(d / "song.it")],
+                                 capture_output=True, text=True, timeout=60, check=True)
+        r = json.loads(out.stdout)
+        self.assertGreater(len(r["plain"]), 4)
+        self.assertEqual(r["swapped"], r["plain"])
+
     def test_wasm_engine_matches_the_dll(self):
         import numpy as np
         with tempfile.TemporaryDirectory() as tmp:
@@ -101,6 +116,34 @@ function run(p, metro, blocks) {
   for (let i = 0; i < 128 * blocks; i += 32) { s.read(48000, 32, L, R); const p = s.position(), k = p.order * 1024 + p.row; if (k !== last) { last = k; if (p.row % 2 === 0) expect.push(i + 32) } }
   console.log(JSON.stringify({onsets, expect}));
 })();
+"""
+
+
+# the worklet swapping the song in mid-row (load with keep, as the page does after an edit) against one that plays on:
+# the frame (to the 128-frame block) where each row starts, over 300 blocks after the swap
+SWAP_JS = r"""
+const fs = require('fs'), path = require('path'), WEB = process.argv[2], it = new Uint8Array(fs.readFileSync(process.argv[3]));
+const glue = new Function('libopenmpt', 'require', '__dirname', fs.readFileSync(path.join(WEB, 'libopenmpt.js'), 'utf8') + '\nreturn Module;');
+Object.assign(globalThis, {sampleRate: 48000, currentTime: 0, currentFrame: 0, loadGlue: cfg => glue(cfg, require, WEB),
+  loadOpenmpt: require(path.join(WEB, 'engine-core.js')).loadOpenmpt,
+  AudioWorkletProcessor: class { constructor() { this.port = {postMessage: m => this.onmsg && this.onmsg(m)} } },
+  registerProcessor: (n, c) => { globalThis.Proc = c }});
+require(path.join(WEB, 'engine-worklet.js'));
+const make = () => new Promise(ok => { const p = new Proc({processorOptions: {wasm: fs.readFileSync(path.join(WEB, 'libopenmpt.wasm'))}}); p.onmsg = m => m.type === 'ready' && ok(p) });
+async function run(swapAt) {
+  const p = await make(), rows = [];
+  p.command({type: 'load', bytes: it.slice().buffer});
+  p.command({type: 'play', order: 0, row: 0});
+  let last = null;
+  for (let b = 0; b < 400; b++) {
+    if (b === swapAt) p.command({type: 'load', bytes: it.slice().buffer, keep: true});
+    p.process([], [[new Float32Array(128), new Float32Array(128)]]);
+    const q = p.song.position(), k = q.order * 1024 + q.row;
+    if (k !== last) { last = k; if (b > 100) rows.push([b, k]) }
+  }
+  return rows;
+}
+(async () => { console.log(JSON.stringify({plain: await run(-1), swapped: await run(100)})) })();
 """
 
 
