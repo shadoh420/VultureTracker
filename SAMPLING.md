@@ -69,6 +69,10 @@ sample slot `N` swapped, and prints a timestamp per version. `--orders 2-3` pick
 The candidate's root note (from its `smpl` chunk, which `synth` writes) sets the slot's `base_note`.
 Pick by number, then put the winner in the real recipe. That's how demo3's sounds were chosen.
 
+In the app the same loop is one box: when a recipe in the song's folder writes the slot's WAV, the Tryout tab's RECIPE
+box holds that sample's entry as YAML; RENDER CANDIDATE renders the edited entry as a new candidate (`<name>-r1.wav`
+beside the original) and WRITE TO RECIPE puts the entry back into the recipe (GUIDE.md, Tryout).
+
 ## Recipe format
 
 ```yaml

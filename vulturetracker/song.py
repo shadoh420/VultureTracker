@@ -233,6 +233,8 @@ def _module(ctx, m, mod):
             pass
     msg = m.get("message")
     mod.message = str(msg) if msg else ""
+    if len(mod.message.replace("\r\n", "\n")) + 1 > 65535:  # the writer's limit (IT's 16-bit length), one byte a character
+        ctx.error(_line(m, "message"), f"module.message is {len(mod.message)} characters; IT stores at most 65534")
     chans = m.get("channels")
     if chans is None:
         ctx.error(m.line, "module: missing required 'channels' (a number 1..64 or a list)")
@@ -743,9 +745,14 @@ def compile_tree(tree, ctx, base_dir) -> Module:
                 ctx.warn(_line(pats, name), f"pattern '{name}' is not used in the order list")
 
     lowest = {}
+    from .itwriter import PATTERN_BYTES, packed_size
     for pat, lines in zip(mod.patterns, pat_lines):
         _check_pattern_refs(ctx, mod, pat, lines, f"pattern '{pat.name}'",
                             instrument_numbers if mod.instruments is not None else sample_numbers, lowest)
+        size = packed_size(pat, len(mod.channels))
+        if size > PATTERN_BYTES:
+            ctx.error(_line(pats, pat.name), f"pattern '{pat.name}': {size} bytes of cell data; IT holds at most "
+                                             f"{PATTERN_BYTES} per pattern (fewer rows, channels or filled cells)")
     _check_images(ctx, mod, lowest)
     return mod
 

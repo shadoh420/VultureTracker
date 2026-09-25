@@ -33,24 +33,24 @@ def _decompress(data, pos, length, is16, it215):
             raise ITReadError("compressed sample data is truncated")
         block_len = struct.unpack_from("<H", data, pos)[0]
         block = data[pos + 2: pos + 2 + block_len]
+        nbits = 8 * len(block)
+        block += bytes(4)  # reads past the end see zeros
         pos += 2 + block_len
         bitpos = 0
+        from_bytes = int.from_bytes
 
-        def read(n):
+        def read(n):  # n <= 17 bits, least significant first: at most 24 bits from a byte boundary, so 4 bytes hold them
             nonlocal bitpos
-            v = 0
-            for i in range(n):
-                byte = bitpos >> 3
-                if byte < len(block) and block[byte] >> (bitpos & 7) & 1:
-                    v |= 1 << i
-                bitpos += 1
+            byte = bitpos >> 3
+            v = from_bytes(block[byte:byte + 4], "little") >> (bitpos & 7) & ((1 << n) - 1)
+            bitpos += n
             return v
 
         width = full
         d1 = d2 = 0
         todo = min(block_frames, length - len(out))
         while todo:
-            if bitpos > 8 * len(block):
+            if bitpos > nbits:
                 raise ITReadError("compressed sample block overrun")
             v = read(width)
             if width < 7:                              # method 1: 1..6 bits
@@ -288,6 +288,10 @@ def read_it(data: bytes):
             while len(mod.patterns) <= o:
                 mod.patterns.append(Pattern(f"p{len(mod.patterns):02d}", [[Cell() for _ in range(num_ch)] for _ in range(64)]))
     mod.orders = [o for o in orders if o < 200 or o in (ORDER_SKIP, ORDER_END)]
+    from .modreader import _Warn, _split_long  # patterns of 201-1024 rows (libopenmpt plays them; the format allows 200)
+    warn = _Warn()
+    _split_long(mod, warn)
+    warnings += warn.lines()
     _sanitize(mod, warnings)
     return mod, warnings
 
@@ -314,6 +318,21 @@ def _sanitize(mod, warnings):
                     key = f"out-of-range {letter}xx effects (IT ignores them)"
                     dropped[key] = dropped.get(key, 0) + 1
                     cell.effect = cell.param = 0
+                if cell.instrument > 99:  # the song format numbers 1-99, and libopenmpt ignores such a reference
+                    key = "references to instruments or samples above 99"
+                    dropped[key] = dropped.get(key, 0) + 1
+                    cell.instrument = 0
+    for ins in mod.instruments or []:
+        for k, (note, smp) in enumerate(ins.keymap):
+            if smp > 99:
+                key = "keymap entries naming samples above 99"
+                dropped[key] = dropped.get(key, 0) + 1
+                ins.keymap[k] = (note, 0)
+    for attr in ("samples", "instruments"):
+        items = getattr(mod, attr)
+        if items is not None and len(items) > 99:
+            dropped[f"{attr} above 99"] = len(items) - 99
+            del items[99:]
     for what, n in dropped.items():
         warnings.append(f"dropped {n} {what}")
     for i, ins in enumerate(mod.instruments or []):

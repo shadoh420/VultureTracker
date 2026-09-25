@@ -1,6 +1,7 @@
 """Build a standalone vulturetracker.exe (Windows) with PyInstaller: `pip install pyinstaller && python tools/build_exe.py`.
 
-The exe is the whole CLI; `vulturetracker.exe gui song.yaml` opens the tryout app in the default browser.
+The exe is the whole CLI; `vulturetracker.exe gui song.yaml` opens the app in its own window (pywebview), or in the
+default browser without it.
 Bundled: the package, gui.html and the vendored libopenmpt DLLs. Not bundled: Surge XT, Dexed, OB-Xd and the
 sample packs (the `synth`/`audition` verbs still need `tools/` next to a checkout, as SAMPLING.md describes).
 ffmpeg (for the MP3/OGG/FLAC export) is copied beside the exe as dist/ffmpeg.exe from imageio-ffmpeg, not packed into it:

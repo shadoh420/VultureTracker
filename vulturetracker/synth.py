@@ -398,65 +398,113 @@ def expand(recipe):
             yield name, merged
 
 
-def render_recipe(path, only=None, log=print):
-    path = Path(path)
-    recipe = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+def _load_recipe(path):
+    """(recipe dict, sample rate, output directory) of the recipe at `path`, its top level checked."""
+    recipe = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    if not isinstance(recipe, dict):
+        raise RecipeError("a recipe is a mapping with out_dir, sample_rate, defaults and samples")
     unknown = set(recipe) - set(RECIPE_KEYS)
     if unknown:
         raise RecipeError(f"unknown top-level keys {sorted(unknown)} (allowed: {', '.join(RECIPE_KEYS)})")
-    rate = int(recipe.get("sample_rate", 44100))
-    out_dir = (path.parent / recipe.get("out_dir", ".")).resolve()
+    return recipe, int(recipe.get("sample_rate", 44100)), (Path(path).parent / recipe.get("out_dir", ".")).resolve()
+
+
+def _job_root(name, spec):
+    """(output name, sounding root) of one expanded job, without rendering it."""
+    where = f"sample '{name}'"
+    root = _note(spec.get("note", "C-5"), where) if "file" in spec else _events(spec, where)[2]
+    root += int(spec.get("root_offset", 0))  # patches that sound in a different octave than the key played
+    if not 0 <= root < 120:
+        raise RecipeError(f"{where}: root_offset moves the root outside C-0..B-9")
+    if spec.get("_name_by_root"):  # notes: lists become name_c3.wav, name_fs4.wav, ... named by sounding pitch
+        name = f"{name}_{notation.format_note(root).replace('#', 's').replace('-', '').lower()}"
+    return name, root
+
+
+def recipe_outputs(path):
+    """What the recipe at `path` writes, without rendering: [(WAV path, sample name, the key for a `notes:` entry or
+    None)]. RecipeError when the recipe is not valid."""
+    recipe, _, out_dir = _load_recipe(path)
+    out = []
+    for name, spec in expand(recipe):
+        file, _ = _job_root(name, spec)
+        out.append((out_dir / f"{file}.wav", name, spec.get("note") if spec.get("_name_by_root") else None))
+    return out
+
+
+def recipe_entry(path, name):
+    """(the sample entry `name` as the recipe writes it, the recipe's defaults)."""
+    recipe, _, _ = _load_recipe(path)
+    spec = (recipe.get("samples") or {}).get(name)
+    if not isinstance(spec, dict):
+        raise RecipeError(f"the recipe has no sample '{name}'")
+    return spec, recipe.get("defaults") or {}
+
+
+def render_one(path, name, spec=None, note=None, out=None, log=print):
+    """Render one sample of the recipe at `path`: entry `name`, or `spec` in its place (an edited entry, merged over the
+    recipe's defaults like any other); for a `notes:` entry, only the key `note`. Written to `out` (default: where the
+    recipe writes it). Returns (file, root, loop)."""
+    recipe, rate, out_dir = _load_recipe(path)
+    entry = spec if spec is not None else (recipe.get("samples") or {}).get(name)
+    jobs = list(expand({"defaults": recipe.get("defaults"), "samples": {name: entry}}))
+    if note is not None:
+        jobs = [j for j in jobs if str(j[1].get("note")) == str(note)]
+    if len(jobs) != 1:
+        raise RecipeError(f"sample '{name}': {'no key ' + str(note) if note is not None else 'a notes: list'}; give one key")
+    fx_chain(jobs[0][1].get("fx"), f"sample '{name}'")
+    synths = Synths(rate) if "patch" in jobs[0][1] else None
+    return _render_job(Path(path), rate, synths, *jobs[0], out_dir, log, out)
+
+
+def render_recipe(path, only=None, log=print):
+    path = Path(path)
+    recipe, rate, out_dir = _load_recipe(path)
     out_dir.mkdir(parents=True, exist_ok=True)
     jobs = list(expand(recipe))  # validate everything before the slow part
     for name, spec in jobs:
         fx_chain(spec.get("fx"), f"sample '{name}'")
     surge = Synths(rate) if any("patch" in spec for _, spec in jobs) else None
-    written = []
-    for name, spec in jobs:
-        if only and not fnmatch.fnmatch(name, only):
-            continue
-        where = f"sample '{name}'"
-        if "file" in spec:
-            root = _note(spec.get("note", "C-5"), where)
-        else:
-            events, seconds, root = _events(spec, where)
-        root += int(spec.get("root_offset", 0))  # patches that sound in a different octave than the key played
-        if not 0 <= root < 120:
-            raise RecipeError(f"{where}: root_offset moves the root outside C-0..B-9")
-        if spec.get("_name_by_root"):  # notes: lists become name_c3.wav, name_fs4.wav, ... named by sounding pitch
-            name = f"{name}_{notation.format_note(root).replace('#', 's').replace('-', '').lower()}"
-            where = f"sample '{name}'"
-        if "file" in spec:
-            files = spec["file"] if isinstance(spec["file"], list) else [spec["file"]]
-            source = " + ".join(Path(f).name for f in files)
-            audio = load_files([path.parent / f for f in files], rate, where)
-            start = int(float(spec.get("start", 0)) * rate)
-            end = start + int(float(spec["length"]) * rate) if "length" in spec else None
-            audio = audio[:, start:end]  # the fade_out below smooths a cut end
-        else:
-            source = spec["patch"]
-            surge.load(spec["patch"])
-            surge.set_params(spec.get("params"))
-            audio = surge.render(events, seconds)
-        pcm, loop = _post(audio, spec, rate)
-        if not pcm.any():
-            raise RecipeError(f"{where}: '{source}' rendered silence (try a longer hold or another note)")
-        file = out_dir / f"{name}.wav"
-        write_wav(file, rate, [ch.tolist() for ch in pcm], 16, loop=loop, root_note=root)
-        secs = pcm.shape[1] / rate
-        log(f"{file.name:28s} {secs:6.2f} s  {'stereo' if pcm.shape[0] == 2 else 'mono  '}  "
-            f"root {notation.format_note(root)}{'  loop %.2f-%.2f s' % (loop[0] / rate, loop[1] / rate) if loop else ''}"
-            f"  <- {source}")
-        mono = pcm.astype(float).mean(axis=0) / 32768
-        # A file sample without a note: is taken as unpitched (drums); everything else gets its pitch checked.
-        est = None if "file" in spec and "note" not in spec else estimate_pitch(mono[int(0.05 * rate):], rate)
-        if est and est[1] < 0.1:
-            off = 12 * __import__("math").log2(est[0] / (440 * 2 ** ((root - 69) / 12)))
-            if abs(off) > 0.5:
-                log(f"  warning: '{name}' sounds about {off:+.1f} semitones from its root "
-                    f"{notation.format_note(root)}; if the patch is octave-shifted set root_offset: {round(off):+d}")
-        written.append((file, root, loop))
-    return written
+    return [_render_job(path, rate, surge, name, spec, out_dir, log) for name, spec in jobs
+            if not only or fnmatch.fnmatch(name, only)]
+
+
+def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
+    """One expanded sample of the recipe at `path` rendered and written (to `file`, default out_dir/<name>.wav)."""
+    name, root = _job_root(name, spec)
+    where = f"sample '{name}'"
+    if "file" in spec:
+        files = spec["file"] if isinstance(spec["file"], list) else [spec["file"]]
+        source = " + ".join(Path(f).name for f in files)
+        audio = load_files([path.parent / f for f in files], rate, where)
+        start = int(float(spec.get("start", 0)) * rate)
+        end = start + int(float(spec["length"]) * rate) if "length" in spec else None
+        audio = audio[:, start:end]  # the fade_out below smooths a cut end
+    else:
+        events, seconds, _ = _events(spec, where)
+        source = spec["patch"]
+        surge.load(spec["patch"])
+        surge.set_params(spec.get("params"))
+        audio = surge.render(events, seconds)
+    pcm, loop = _post(audio, spec, rate)
+    if not pcm.any():
+        raise RecipeError(f"{where}: '{source}' rendered silence (try a longer hold or another note)")
+    file = Path(file) if file else out_dir / f"{name}.wav"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    write_wav(file, rate, [ch.tolist() for ch in pcm], 16, loop=loop, root_note=root)
+    secs = pcm.shape[1] / rate
+    log(f"{file.name:28s} {secs:6.2f} s  {'stereo' if pcm.shape[0] == 2 else 'mono  '}  "
+        f"root {notation.format_note(root)}{'  loop %.2f-%.2f s' % (loop[0] / rate, loop[1] / rate) if loop else ''}"
+        f"  <- {source}")
+    mono = pcm.astype(float).mean(axis=0) / 32768
+    # A file sample without a note: is taken as unpitched (drums); everything else gets its pitch checked.
+    est = None if "file" in spec and "note" not in spec else estimate_pitch(mono[int(0.05 * rate):], rate)
+    if est and est[1] < 0.1:
+        off = 12 * __import__("math").log2(est[0] / (440 * 2 ** ((root - 69) / 12)))
+        if abs(off) > 0.5:
+            log(f"  warning: '{name}' sounds about {off:+.1f} semitones from its root "
+                f"{notation.format_note(root)}; if the patch is octave-shifted set root_offset: {round(off):+d}")
+    return file, root, loop
 
 
 def audition(pattern, out_wav, note="C-4", hold=1.5, tail=1.0, rate=44100, log=print):

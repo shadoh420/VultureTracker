@@ -146,8 +146,13 @@ class LoadedModule:
             "warnings": list(self.log),
         }
 
-    def render(self, rate=44100, repeat=0, max_seconds=600, dither=0, oversample=2):
+    ENDLESS_SECONDS = 600       # what a render that repeats forever (repeat=-1) stops at
+    SAFETY_SECONDS = 3 * 3600   # the longest render of a song that ends
+
+    def render(self, rate=44100, repeat=0, max_seconds=None, dither=0, oversample=2):
         """Render to interleaved int16 stereo frames (bytes). repeat=0 plays once, N repeats N more times.
+        `max_seconds` caps the render; None renders the whole song: its duration times the passes, plus a margin for
+        the tail, never more than SAFETY_SECONDS; repeat=-1 (forever) stops at ENDLESS_SECONDS.
         dither=0 (none) makes renders bit-identical between runs; libopenmpt's own default (1) adds random dither.
         `oversample` > 1 mixes at that multiple of `rate` and band-limits the result back down (a windowed-sinc
         low-pass at 0.45 of `rate`, then decimation), so whatever the mixer puts above the Nyquist frequency of `rate`
@@ -166,7 +171,11 @@ class LoadedModule:
         chunk = 4096
         buf = (C.c_int16 * (chunk * 2))()
         out = bytearray()
-        limit = mix_rate * max_seconds
+        if max_seconds is None:
+            passes = repeat + 1 if repeat >= 0 else 0
+            dur = _lib.openmpt_module_get_duration_seconds(self._mod)
+            max_seconds = min(self.SAFETY_SECONDS, dur * passes + 10) if passes else self.ENDLESS_SECONDS
+        limit = int(mix_rate * max_seconds)
         frames = 0
         while frames < limit:
             n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mix_rate, chunk, buf)

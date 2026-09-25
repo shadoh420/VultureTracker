@@ -10,11 +10,9 @@ Read this first. It says what this repository is, what it is not, where things l
   `dist/vulturetracker.exe`, the remote is https://github.com/shadoh420/VultureTracker. Any "TrackerForge" you meet in
   paths, notes or old chat is this same project; do not rename the folder (tryout state and recent-song lists hold
   absolute paths).
-- **ArenaPrototype is a different project.** `C:\Users\c\ArenaPrototypeContainer` and the worktrees under `C:\tmp\arena-*`
-  are a Unity game with its own `AGENTS.md`, `CLAUDE.md`, handoffs and rules (NetShift, Unity licensing, checkpoints).
-  A session may be launched from one of those folders and still be asked to work here: then work only in
-  `C:\Users\c\TrackerForge` with absolute paths, and do not apply the Unity project's rules to this one. The music made
-  here is meant for that game eventually, which is the only link.
+- **Other projects.** A session may be launched from another project's folder and still be asked to work here: then
+  work only in `C:\Users\c\TrackerForge` with absolute paths, and apply this repository's rules only, never that
+  project's.
 - **The old remote** https://github.com/shadoh420/TrackerStuff is retired (private). The public history was squashed
   once on 2026-09-21; the pre-squash history lives locally on `backup/pre-squash-20260921`.
 
@@ -32,7 +30,7 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 | Path | What | In git? |
 |---|---|---|
 | `vulturetracker/` | the package: `song.py` + `model.py` + `itwriter.py` (compiler), `itreader.py` + `modreader.py` (import of IT, XM, S3M, MOD), `openmpt.py` (libopenmpt), `gui.py` + `gui.html` (the app), `web/` (the live engine: libopenmpt 0.8.9 as WebAssembly and its AudioWorklet; `tests/test_engine.py` checks it under node), `resample.py`, `synth.py`, `notation.py`, `wavload.py`, `api.py` | yes |
-| `tests/` | `python -m unittest tests.test_gui tests.test_pipeline tests.test_resample tests.test_engine tests.test_modimport` (about 11 s; `test_engine` needs node); `test_synth`/`test_import` need the plugins and fixtures | yes (fixtures ignored) |
+| `tests/` | `python -m unittest tests.test_gui tests.test_pipeline tests.test_resample tests.test_engine tests.test_modimport` (about 11 s; `test_engine` needs node); `test_page` drives the page in Playwright's Chromium (`VT_CHROMIUM` names another); `test_synth`/`test_import` need the plugins and fixtures | yes (fixtures ignored) |
 | `demo/`, `demo2/`, `demo3/`, `demo4/` | the demo songs with their generators; `demo4/vantage.yaml` is the piece the owner likes best | yaml and scripts yes, `.it`/`.wav` ignored |
 | `suite/` | the UT99 tribute suite: `HANDOFF.md` (current state), `NEXT-PROMPT.md` (how the next piece is to be made), `nadir/` (the first piece) | yes, renders ignored |
 | `samples/` | committed samples per demo and piece with an `ATTRIBUTION.md` each; `samples/local/` is scratch and ignored | partly |

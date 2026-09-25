@@ -61,7 +61,15 @@ class VTEngine extends AudioWorkletProcessor {
     try {
       if (m.type === 'load') {
         const bytes = new Uint8Array(m.bytes), old = this.song, keep = m.keep && old;
-        const song = new this.E.Song(bytes), preview = new this.E.Song(bytes);
+        let song = null, preview = null;
+        try {
+          song = new this.E.Song(bytes);
+          preview = new this.E.Song(bytes);
+        } catch (err) {  // the first one is freed when the second fails, or it would stay in the wasm heap
+          if (song) song.free();
+          throw err;
+        }
+        this.loadId = m.id;
         for (let c = 0; c < preview.channels; c++) preview.mute(c, true);
         for (const c of m.muted || []) song.mute(c, true);
         if (this.factor !== 1) song.tempoFactor(this.factor);
@@ -78,7 +86,7 @@ class VTEngine extends AudioWorkletProcessor {
           // seconds does not
           const t = old.position().seconds;
           song.seekSeconds(Math.max(0, t - PRE));
-          this.pending = {song, need: Math.max(0, Math.round((t - song.position().seconds) * sampleRate))};
+          this.pending = {song, id: m.id, need: Math.max(0, Math.round((t - song.position().seconds) * sampleRate))};
           if (!this.playing) this.catchUp(Infinity);
         } else if (keep) {
           // a seek lands on the start of the row: the part of the row already played is rendered again and dropped, so
@@ -95,7 +103,7 @@ class VTEngine extends AudioWorkletProcessor {
           this.take(song);
         }
       } else if (m.type === 'play') {
-        if (this.pending) { const s = this.pending.song; this.pending = null; this.take(s) }
+        if (this.pending) { const {song: s, id} = this.pending; this.pending = null; this.take(s, id) }
         if (m.order != null) this.song.seek(m.order, m.row);
         this.playing = true;
         this.lastRow = null;
@@ -119,8 +127,8 @@ class VTEngine extends AudioWorkletProcessor {
         const s = this[m.on];
         if (s && m.ch >= 0) s.noteOff(m.ch);
       }
-    } catch (err) {
-      this.port.postMessage({type: 'error', text: String(err && err.message || err)});
+    } catch (err) {  // a failed load names its id, so the page's wait for it ends
+      this.port.postMessage({type: 'error', id: m && m.type === 'load' ? m.id : undefined, text: String(err && err.message || err)});
     }
   }
 
@@ -129,13 +137,14 @@ class VTEngine extends AudioWorkletProcessor {
     const P = this.pending, L = new Float32Array(4096), R = new Float32Array(4096);
     while (P.need > 0 && max > 0) { const got = P.song.read(sampleRate, Math.min(4096, P.need, max), L, R); if (!got) break; P.need -= got; max -= got }
     if (P.need > 0 && max > 0) P.need = 0;  // the song ended first
-    if (P.need === 0) { this.pending = null; this.take(P.song) }
+    if (P.need === 0) { this.pending = null; this.take(P.song, P.id) }
   }
 
-  take(song) {
+  // `id`: the load that made the song (the page resolves its wait for that load and every earlier one)
+  take(song, id = this.loadId) {
     if (this.song) this.song.free();
     this.song = song;
-    this.port.postMessage({type: 'loaded', channels: song.channels, at: song.position()});
+    this.port.postMessage({type: 'loaded', id, channels: song.channels, at: song.position()});
   }
 
   process(inputs, outputs) {
@@ -165,10 +174,10 @@ class VTEngine extends AudioWorkletProcessor {
     if (this.pending) {
       const dt = this.song.position().seconds - before;
       if (dt < 0 || dt > 2 * n / sampleRate) {   // the old song jumped (a loop): the new one seeks there instead
-        const p = this.song.position(), s = this.pending.song;
+        const p = this.song.position(), s = this.pending.song, id = this.pending.id;
         this.pending = null;
         s.seek(p.order, p.row);
-        this.take(s);
+        this.take(s, id);
       } else {
         if (this.playing) this.pending.need += n;
         this.catchUp(32 * n);

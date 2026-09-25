@@ -51,7 +51,13 @@ SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes ever
 stars/reject/notes are kept per candidate beside the song (`<song>.tryout.json`), and `U` shows the YAML change before
 writing it; once written, that slot's candidate list is cleared (the choice is made; a file's rating is remembered if it
 is added again). With no candidate picked, SONG plays the song itself. Slots that have candidates are marked in the slot list
-(`24 arp ▸ 5 candidates`); rejected candidates sink to the bottom of the list (their number keys stay). The candidate
+(`24 arp ▸ 5 candidates`); rejected candidates sink to the bottom of the list (their number keys stay). When a sample
+recipe (SAMPLING.md) in the song's folder writes the slot's WAV, a RECIPE box under the candidate input shows that
+sample's entry as YAML: edit it (a hold, a note, `params:`, an `fx:` chain) and RENDER CANDIDATE renders it into a new
+WAV beside the slot's (`<name>-r1.wav`, `-r2`, …, never over the recipe's own file) and adds it to the candidates, in the
+background; WRITE TO RECIPE (click twice) writes the entry as it stands into the recipe file in place (a one-line
+entry stays one line with its comment). A candidate rendered this way remembers its entry, so after `U` the box shows
+it. Rendering needs what `synth` needs (pedalboard and the synths; not in the exe). The candidate
 you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
 and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
 playhead with the slot each plays (a looped tone until its note-off, a one-shot until its sample runs out); click one
@@ -73,7 +79,8 @@ any fader's number, or an instrument-panel value, to type it: Enter applies it t
 song format's range, Escape cancels; a pan takes 0–64, L50, R20, C or S for surround); every
 move re-renders the tryout at once (the section is compiled once and the values are patched into the module's header),
 and the meter next to each channel is that channel soloed, its RMS in dB over the active part of the section (the way
-`scratch/ut99-clean/compare.py` measures a module). Nothing is written until WRITE MIX → SONG, which shows the YAML
+the suite's comparison script measures a module: `compare.py` in `scratch/ut99-clean/`, which is local only and not in
+the repository). Nothing is written until WRITE MIX → SONG, which shows the YAML
 change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place). EXPORT STEMS
 writes one WAV per playing channel to `<song>_stems/`; EXPORT SONG AS writes the whole song beside it as MP3 (192 kbit/s),
 OGG (Vorbis quality 6, about 192 kbit/s; Ogg loops gaplessly, which is what a game engine wants) or FLAC (lossless),
@@ -100,7 +107,9 @@ at once and is written into the song file in place: only that row's cell changes
 comments and every other line stay as they are; rows the pattern leaves implied are written out when a later row is
 edited). Before anything is written the whole song is compiled: a change the song format refuses (an instrument that
 does not exist, say) is not written and the bar says why. Ctrl+Z / Ctrl+Y (↶ ↷) undo and redo the edits of this
-session. Edits are refused while the song file has changed on disk (RELOAD first), so they never overwrite a change
+session. An undo also puts back the tryout settings the step changed: after a channel is removed or moved its mutes and
+unwritten faders are back on the channel they were set on, WRITE MIX undone brings the unwritten mix back, U undone the
+slot's candidate list. Edits are refused while the song file has changed on disk (RELOAD first), so they never overwrite a change
 made elsewhere. While the live engine plays, each edit is swapped in where it plays (about 0.35 s for Nadir) and the
 view stays on the pattern being edited. A song whose patterns are written by a generator loses these edits when the
 generator is rerun. Patterns whose rows are not a literal `data: |` block are shown but cannot be edited here.
@@ -112,8 +121,10 @@ its name next to MIDI and VEL→VOL. Its keys play like the piano
 keys, MIDI note 60 being C-5: a preview through the live engine (the INS instrument; in the Instruments tab the
 instrument on show, in the Samples tab the slot), at the key's loudness with VEL→VOL; releasing the key releases the
 note. In edit mode on the Pattern tab each key also enters its note at the cursor with the INS instrument, and with
-VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. Notes are entered one at a time at
-the cursor (no chords spread over channels, no recording at the play position while the song plays). The app serves its
+VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. While the live engine plays the
+pattern on show, a key records instead: its note goes into the cursor's channel at the row playing when it went down,
+and the cursor follows (the piano keys on the computer keyboard record the same way). Notes are entered one at a time
+(no chords spread over channels). The app serves its
 page from port 8723 when that is free (another app window takes any free port) and keeps the window's browser profile in
 `%APPDATA%\VultureTracker\webview`, so the page's own settings (speed, latency, hex rows, MIDI) and the MIDI permission
 carry over from one launch to the next.
@@ -141,7 +152,17 @@ end of the pattern, e.g. one bar of hats over eight), CLEAR
 (Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
 cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
 from the first selected row to the last, per channel, where both ends carry the same command) and AMPLIFY (the
-volume column by a percentage; a note without a volume gets one, counted from 64, the usual default). FIND… (Ctrl+F)
+volume column by a percentage; a note without a volume gets one, counted from 64, the usual default) and HUMANIZE
+(each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). ECHO is the
+tracker delay: the selected channel's notes (or, with no selection, the cursor's whole channel) are copied into another
+channel ROWS later (and TICKS later on top, as `SDx` on each note), each at the given percent of its volume (its own
+`vNN`, else the sample's default volume where the cell names an instrument, else the channel's last); in THIS PATTERN or
+the channel's notes in every pattern of the WHOLE SONG. The target is a new channel added at the end (`<name> echo`,
+panned LEFT, CENTRE or RIGHT; its fader moves it after) or an existing one, where cells that are not empty are left
+alone. Song-wide effects (speed, tempo, jumps, breaks, global volume, pattern loops and delays) and pan commands are not
+copied, and a copy that would land past its pattern's end is dropped; the bar reports the counts. Run it twice into
+channels panned apart (say 3 rows at 60 % to the left, 6 rows at 35 % to the right) for a stereo echo; one or two ticks
+with no rows doubles a lead instead. Each ECHO is one step for Ctrl+Z, the channel it adds included. FIND… (Ctrl+F)
 finds cells by note, instrument, volume and effect (`*` any characters, `?` one, an empty field anything; F3 or NEXT
 the next match, in this pattern or the whole song, on the channels on show) and REPLACE ALL writes the given fields
 into every match. Every command is one step for Ctrl+Z, a song-wide replace included.
@@ -155,9 +176,11 @@ INSERT or SET a pattern (or a `+++` skip, a `---` end) from the list, NEW PATTER
 selected entry). PATTERNS: click a name to rename it (the order list follows) or its row count to change it (rows past a
 new end are removed); CLONE; DELETE (click twice) only when no order plays it. CHANNELS: click a name to rename it;
 ▲ ▼ move a channel (its cells move in every pattern, and so do its tryout mute and unwritten faders); ✕ (click twice)
-removes it and its cells in every pattern; + CHANNEL adds one at the end. The order list must be written on one line,
-patterns as `name:` with `rows:` and `data: |`, channels one `- {...}` entry per line and the module as a block, which
-is how the songs here are written; anything else is refused with the reason.
+removes it and its cells in every pattern; + CHANNEL adds one at the end. The order list is written in the layout it
+has: on one line (`orders: [a, b]`), or as a block with one `- name` per line, where an entry that stays keeps its
+trailing comment and the comment lines above it (a flow list across several lines becomes one line, and is refused when
+it holds comments). Patterns are to be written as `name:` with `rows:` and `data: |`, channels one `- {...}` entry per
+line and the module as a block, which is how the songs here are written; anything else is refused with the reason.
 
 **The Instruments tab** edits the song's instruments and adds sample slots, each change written into the instrument's
 entry in place (one step for Ctrl+Z in the Pattern tab) and swapped into the live engine, so the piano keys (Z to M, Q to
@@ -335,8 +358,10 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
 - Anti-aliasing. WAV renders are mixed at twice the output rate and band-limited back down with a windowed-sinc
   low-pass (`render --oversample 1` turns it off), so content the mixer produces above the output's Nyquist frequency
   is removed instead of folding into the audible range. Two things still create false frequencies inside a module:
-  playing a sample far above its own pitch (render multisamples with `notes:` and a keymap so no note plays a sample
-  more than about seven semitones up) and low-rate samples interpolated by the player (the module setting
+  playing a sample far above what its content allows (its bandwidth times the transposition ratio should stay under
+  about 18 kHz: a sample 4.5 kHz wide may play two octaves up, one 9 kHz wide one octave; render multisamples with
+  `notes:` and a keymap for the rest), playing a bright sample more than about three semitones below its root (`check`
+  warns when the images of its lowest note come within 60 dB), and low-rate samples interpolated by the player (the module setting
   `sample_rate: 44100` resamples every sample to the playback rate at compile time, band-limited, which removes that
   imaging in every player at the cost of file size). `vulturetracker/resample.py` holds the resampler.
 - `import` keeps patterns, instruments, envelopes and samples. It drops embedded MIDI macros and
@@ -353,8 +378,13 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   that saved them) at a level of its own, so the import renders the original and the converted module and sets the mix
   volume to match. What IT cannot say is dropped and listed at the top of the song file (Amiga filter, finetune and
   invert-loop commands, AdLib instruments, slow XM pan slides rounded); a pan law of its own (MilkyTracker files) and
-  XM vibrato phases a tick apart are not converted. On 7 MODs, 7 S3Ms and 19 XMs from the Mod Archive and elsewhere, the
-  imported songs play within a median 0.3 dB of libopenmpt's level (the worst file 1.3 dB) over their first minute.
+  XM vibrato phases a tick apart are not converted. Measured locally on 7 MODs, 7 S3Ms and 19 XMs from the Mod Archive
+  and elsewhere (those files are not in the repository, so this cannot be re-run from a checkout; `tests/test_modimport.py`
+  is what can), the imported songs play within a median 0.3 dB of libopenmpt's level (the worst file 1.3 dB) over their
+  first minute. IT patterns longer than 200 rows (libopenmpt plays up to 1024) are split the same way, and references
+  to instruments or samples above 99 are dropped with a warning.
+- Renders are as long as the song: its duration times the passes (`render --repeat N`), plus a few seconds for the
+  tail. Only a render that repeats forever stops, at ten minutes.
 - `vulturetracker/api.py` exposes plain functions (`new_song`, `add_sample`, `add_instrument`,
   `set_pattern`, `set_orders`, `check`, `build`, `render`) for tools and agents.
 - The writer follows [ITTECH.TXT](https://github.com/schismtracker/schismtracker/wiki/ITTECH.TXT)

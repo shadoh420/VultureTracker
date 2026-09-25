@@ -8,7 +8,7 @@ the tools and libraries that are only ever installed and run separately.
 
 | Component | Version | License | License text |
 |---|---|---|---|
-| [libopenmpt](https://lib.openmpt.org) by the OpenMPT Project Developers and Contributors, Olivier Lapicque | LIBOPENMPT_VERSION | BSD-3-Clause; parts under the Boost Software License 1.0 | `vendor/LICENSE.txt`, `vendor/Licenses/License.mpt.BSD-3-Clause.txt`, `vendor/Licenses/License.mpt.BSL-1.0.txt` |
+| [libopenmpt](https://lib.openmpt.org) by the OpenMPT Project Developers and Contributors, Olivier Lapicque | 0.8.9 (the DLL 0.8.9+r25651, the WebAssembly build 0.8.9+r25652) | BSD-3-Clause; parts under the Boost Software License 1.0 | `vendor/LICENSE.txt`, `vendor/Licenses/License.mpt.BSD-3-Clause.txt`, `vendor/Licenses/License.mpt.BSL-1.0.txt` |
 | mpg123 (`openmpt-mpg123.dll`, as shipped with libopenmpt) | with libopenmpt | LGPL-2.1 (a separate DLL, so it can be replaced; source at https://www.mpg123.de) | `vendor/Licenses/License.mpg123.txt`, authors in `vendor/Licenses/License.mpg123.Authors.txt` |
 | libogg (`openmpt-ogg.dll`) by Xiph.Org | with libopenmpt | BSD-3-Clause | `vendor/Licenses/License.ogg.txt` |
 | libvorbis (`openmpt-vorbis.dll`) by Xiph.Org | with libopenmpt | BSD-3-Clause | `vendor/Licenses/License.Vorbis.txt` |

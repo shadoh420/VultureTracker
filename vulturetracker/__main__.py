@@ -59,7 +59,7 @@ def main(argv=None):
     p.add_argument("candidates", nargs="+", help="candidate WAVs (globs allowed)")
     p.add_argument("--orders", help="order positions to play, e.g. 2-5 (default: the whole song)")
     p.add_argument("-o", "--output", default="tryout.wav")
-    p = sub.add_parser("gui", help="open the tryout GUI for a song in your browser (choose samples in context)")
+    p = sub.add_parser("gui", help="open the app for a song (its own window with pywebview installed, else the browser)")
     p.add_argument("song", nargs="?", help="song to open (default: the app's open-a-song screen)")
     p.add_argument("--port", type=int, default=0, help="listen port (default: 8723 when free, else any free port)")
     p.add_argument("--browser", action="store_true", help="open in the default browser instead of an app window")

@@ -145,6 +145,12 @@ option.hascand{color:var(--acc);font-weight:700}
         <input id="globs" placeholder="add candidate WAVs: a path or glob, relative to the song (e.g. cand/hat_*.wav or C:/kits/**/*.wav)" style="flex:1;padding:5px 8px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')addCands()">
         <span class="btn" onclick="addCands()">ADD</span>
       </div>
+      <div id="recipe" style="display:none;padding:0 10px 8px">
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><span class="k" title="the sample recipe (SAMPLING.md) in the song's folder that writes this slot's WAV">RECIPE</span><span class="mono" id="rc-what" style="font-size:10px;color:#c3cbcf;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+          <span class="btn sm" onclick="recipeRender()" title="render the entry as written here into a new WAV beside the slot's (never over it) and add it to the candidates">RENDER CANDIDATE</span><span class="btn sm" onclick="twice(this,recipeWrite)" title="write the entry as written here into the recipe file, in place (click twice)">WRITE TO RECIPE</span></div>
+        <textarea id="rc-spec" spellcheck="false" rows="5" style="width:100%;box-sizing:border-box;font:10.5px var(--mono);padding:5px 7px;resize:vertical" title="the sample's entry in the recipe, as YAML: patch or file, note, hold, tail, velocity, params, fx, loop…"></textarea>
+        <div class="mono" id="rc-msg" style="font-size:10px;color:var(--dim);margin-top:3px;white-space:pre-wrap"></div>
+      </div>
     </div>
     <div class="panel" style="flex:1;min-height:0;overflow:auto;background:var(--panel2)" id="cands" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>act('add',{globs:p.join('\n')}))"></div>
   </div>
@@ -192,7 +198,8 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="k" title="drag over cells, or Shift with the arrows; Ctrl+A the pattern, Ctrl+L the channel; without a selection the commands work on the cursor's cell">SELECTION</span><span class="mono" id="selinfo" style="font-size:10px;color:#c3cbcf;min-width:130px"></span>
         <span class="btn sm" onclick="selCopy(false)" title="Ctrl+C (also to the system clipboard, as song rows)">COPY</span><span class="btn sm" onclick="selCopy(true)" title="Ctrl+X">CUT</span><span class="btn sm" id="sel-paste" onclick="selPaste(false)" title="paste at the cursor, overwriting (Ctrl+V)">PASTE</span><span class="btn sm" id="sel-mix" onclick="selPaste(true)" title="paste only into empty fields (Ctrl+Shift+V)">MIX</span><span class="btn sm" id="sel-flood" onclick="selPaste(false,true)" title="paste again and again from the cursor to the end of the pattern (Ctrl+Alt+V)">FLOOD</span><span class="btn sm" onclick="selClear()" title="clear the selected fields (Delete)">CLEAR</span>
         <span class="k" style="margin-left:8px">TRANSPOSE</span><span class="btn sm" onclick="selTranspose(-12)" title="Ctrl+Shift+Down">−12</span><span class="btn sm" onclick="selTranspose(-1)" title="Ctrl+Down">−1</span><span class="btn sm" onclick="selTranspose(1)" title="Ctrl+Up">+1</span><span class="btn sm" onclick="selTranspose(12)" title="Ctrl+Shift+Up">+12</span><label style="display:flex;align-items:center;gap:3px;font-size:9.5px;color:var(--dim)" title="only notes whose cell names the INS instrument"><input type="checkbox" id="sel-ins" style="margin:0">INS ONLY</label>
-        <span class="btn sm" style="margin-left:8px" onclick="selInterpolate()" title="volume column and effect, between the first and last selected rows (Ctrl+I)">INTERPOLATE</span><span class="btn sm" onclick="selAmplify()" title="scale the volume column; a note without one gets one, from 64">AMPLIFY</span><input id="sel-amp" type="number" min="0" max="400" value="100" style="width:42px;font:10px var(--mono);padding:1px 3px"><span class="k">%</span>
+        <span class="btn sm" style="margin-left:8px" onclick="selInterpolate()" title="volume column and effect, between the first and last selected rows (Ctrl+I)">INTERPOLATE</span><span class="btn sm" onclick="selAmplify()" title="scale the volume column; a note without one gets one, from 64">AMPLIFY</span><input id="sel-amp" type="number" min="0" max="400" value="100" style="width:42px;font:10px var(--mono);padding:1px 3px"><span class="k">%</span><span class="btn sm" style="margin-left:4px" onclick="selHumanize()" title="each note's volume moved at random by up to ± this much (a note without a volume starts from 64), within 1–64">HUMANIZE</span><span class="k">±</span><input id="sel-hum" type="number" min="1" max="32" value="6" style="width:36px;font:10px var(--mono);padding:1px 3px">
+        <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:8px"><span class="btn sm" onclick="selEcho()" title="tracker delay: the selected channel's notes (or the cursor's whole channel) copied into another channel, later and quieter; run it twice into channels panned apart for a stereo echo. One undo step">ECHO</span><span class="k">→</span><select id="echo-to" style="font:10px var(--mono);padding:1px 3px" title="where the echo goes: a new channel (added at the end, panned as named; its fader moves it after) or an existing one (cells that are not empty are left alone)"></select><input id="echo-rows" type="number" min="0" max="199" value="3" style="width:36px;font:10px var(--mono);padding:1px 3px" title="rows later"><span class="k">ROWS</span><input id="echo-ticks" type="number" min="0" max="15" value="0" style="width:32px;font:10px var(--mono);padding:1px 3px" title="ticks later on top (SDx on each note; 1-2 ticks with no rows gives a wider, doubled sound instead of an echo)"><span class="k">TICKS</span><input id="echo-lvl" type="number" min="0" max="100" value="60" style="width:38px;font:10px var(--mono);padding:1px 3px" title="the echo's volume, in percent of each note's"><span class="k">%</span><select id="echo-scope" style="font:10px var(--mono);padding:1px 3px" title="the selection's rows in this pattern (or the whole pattern), or the channel in every pattern of the song"><option value="here">THIS PATTERN</option><option value="song">WHOLE SONG</option></select></span>
         <span class="btn sm" style="margin-left:8px" onclick="toggleFind()" title="find and replace (Ctrl+F; F3 finds the next)">FIND…</span><span class="mono" id="sel-msg" style="flex:1;min-width:0;font-size:10px;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
       </div>
       <div id="findbar" style="display:none;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim)" onkeydown="if(event.key==='Enter'){event.preventDefault();findNext()}else if(event.key==='Escape')toggleFind(false)" title="* matches any characters, ? one; an empty field matches anything">
@@ -386,6 +393,17 @@ const audible=c=>S.solo!=null?S.solo===c:!S.muted.includes(c);
 function grid(f,inSel,h){const n=f.orders.length,wide=h>9;let out=`<div class="grid" style="grid-template-columns:${wide?78:34}px repeat(${n},minmax(0,1fr))"><div></div>${f.orders.map((o,i)=>`<div class="rl ${inSel(i)?'sel':''}" style="height:${h}px" onclick="setStart(${i})" title="${esc(o.pattern)}">${i%4?'':i}</div>`).join('')}`;
   f.channels.forEach((ch,c)=>{const off=audible(c)?'':' off',col=famCol(ch);out+=`<div class="cn${off}" style="font-size:${wide?8.5:8}px;line-height:${h}px" title="${esc(ch)}">${esc((wide?ch:ch.slice(0,5)).toUpperCase())}${wide?`<i class="fb" style="height:${h-2}px;background:${col||'transparent'}"></i>`:''}</div>`+f.orders.map((o,i)=>{const u=f.use[i][c];return `<div class="cell ${u.length?'used':''} ${u.includes(S.slot)?'slot':''} ${inSel(i)?'sel':''}${off}" style="height:${h}px${col?';--fam:'+col:''}" onclick="setStart(${i})" title="ord ${i} ${esc(o.pattern)}: samples ${u.join(' ')}"></div>`}).join('')});
   return out+'</div>'}
+// the recipe panel: the slot's recipe entry as YAML, edited in the textarea (refilled only when the slot or its recipe
+// entry changes, so typing is never overwritten), rendered as a new candidate or written back into the recipe
+let RC_KEY=null;
+function renderRecipe(){const r=S.recipe||{},s=r.slot,j=r.job;$('recipe').style.display=s?'block':'none';if(!s){RC_KEY=null;return}
+  const key=`${S.slot}|${s.recipe}|${s.name}|${s.note}|${s.spec}`;if(key!==RC_KEY){RC_KEY=key;$('rc-spec').value=s.spec}
+  $('rc-what').textContent=`${s.recipe_name} · ${s.name}${s.note!=null?' ('+s.note+')':''}`;
+  const busy=j&&(j.status==='queued'||j.status==='rendering');$('rc-msg').style.color=j&&j.status==='failed'?'var(--red)':'var(--dim)';
+  $('rc-msg').textContent=!j?'':busy?'rendering…':j.status==='failed'?j.error:`added ${j.file.replace(/\\/g,'/').split('/').pop()} to the candidates`+(j.log&&j.log.length>1?'\n'+j.log.slice(1).join('\n'):'')}
+function recipeRender(){act('reciperender',{spec:$('rc-spec').value})}
+async function recipeWrite(){const j=await act('recipewrite',{spec:$('rc-spec').value});if(j&&!j.error){$('rc-msg').style.color='var(--dim)';$('rc-msg').textContent='written into the recipe'}}
+const NOTICED=new Set();  // notices the server gave once (a meta or notes file it could not read), shown once
 function render(){
   const f=S.song.facts,name=S.song.path.replace(/\\/g,'/').split('/');
   put('chipname',`<span style="color:var(--dim)">${esc(name.slice(-2,-1)[0])}/</span>${esc(name.slice(-1)[0])}`);
@@ -393,6 +411,8 @@ function render(){
   $('dirty').style.display=S.song.dirty?'flex':'none';
   $('queue').textContent=`render queue ${S.queue} · cache ${S.cache}`;
   $('songerr').textContent=S.song.error?S.song.error.join('\n'):'';
+  renderRecipe();
+  const nw=(S.notices||[]).filter(x=>!NOTICED.has(x));nw.forEach(x=>NOTICED.add(x));if(nw.length)setTimeout(()=>alert(nw.join('\n\n')));
   // slot
   const ents=S.song.sample_entries,cc=S.cand_counts||{},sname=k=>ents[k].name||((f&&f.samples.find(s=>s.num===+k))||{}).name||'';
   put('slotsel',Object.keys(ents).map(k=>`<option value="${k}" class="${cc[k]?'hascand':''}" ${+k===S.slot?'selected':''}>${pad(k)} ${esc(sname(k))}${cc[k]?` ▸ ${cc[k]} candidate${cc[k]>1?'s':''}`:''}</option>`).join(''));
@@ -573,17 +593,21 @@ function lvStart(){if(LV.ready)return LV.ready;
     await new Promise((ok,fail)=>{node.port.onmessage=e=>{if(e.data.type==='ready'){LV.version=e.data.version;ok()}else if(e.data.type==='error')fail(new Error(e.data.text))}});
     node.port.onmessage=e=>lvMsg(e.data);await lvLoad(false)})();
   LV.ready.catch(e=>{LV.err=String(e.message||e);LV.ready=null;renderLiveBar()});return LV.ready}
+// each load carries an id: its 'loaded' ends the wait for it and every earlier load (a pending swap replaced by a newer
+// one never reports), its 'error' ends the wait with the reason; the key then names the failure, so the next change retries
 async function lvLoad(keep){const key=lvKey(),r=await fetch('/api/it');if(!r.ok){LV.err='compile failed: '+((await r.json()).error||r.status);renderLiveBar();return}
-  const bytes=await r.arrayBuffer();LV.sent={};LV.key=key;
-  await new Promise(ok=>{LV.onLoaded=ok;LV.node.port.postMessage({type:'load',bytes,keep},[bytes])});LV.err=null;lvSync()}
+  const bytes=await r.arrayBuffer(),id=LV.loadId=(LV.loadId||0)+1;LV.sent={};LV.key=key;LV.loads=LV.loads||{};
+  try{await new Promise((ok,fail)=>{LV.loads[id]={ok,fail};LV.node.port.postMessage({type:'load',bytes,keep,id},[bytes])})}
+  catch(e){LV.key='failed '+key;LV.err='the module did not load: '+(e.message||e);renderLiveBar();return}
+  LV.err=null;lvSync()}
 function lvMsg(m){if(m.type==='pos'){LV.pos=m;LV.playing=m.playing;LV.oi=S&&S.song.facts?S.song.facts.orders.findIndex(o=>o.order===m.order):-1;
     if($('t-pattern').classList.contains('on'))document.querySelectorAll('.lvu').forEach(e=>{const v=m.playing?m.vu[+e.id.slice(3)]||0:0;e.style.width=Math.min(100,v*100)+'%'})}
-  else if(m.type==='loaded'){if(LV.onLoaded)LV.onLoaded()}
+  else if(m.type==='loaded'){for(const id in LV.loads||{})if(+id<=m.id){LV.loads[id].ok();delete LV.loads[id]}}
   else if(m.type==='note'){const h=LV.held[m.id];if(h&&h.release){LV.node.port.postMessage({type:'noteoff',ch:m.ch,on:m.on});delete LV.held[m.id]}else if(h)LV.held[m.id]=m}
-  else if(m.type==='error'){LV.err=m.text;renderLiveBar()}}
+  else if(m.type==='error'){const w=m.id!=null&&LV.loads&&LV.loads[m.id];if(w){delete LV.loads[m.id];w.fail(new Error(m.text))}else{LV.err=m.text;renderLiveBar()}}}
 // what the engine should be doing, sent only when it changes: mutes (solo = every other channel), the loop, the speed; a changed song or mix swaps the song in
 function lvSync(){if(!LV.node||!S||!S.song.facts){renderLiveBar();return}const f=S.song.facts,P=LV.node.port;
-  if(LV.key&&LV.key!==lvKey()&&!LV.loading){LV.loading=true;lvLoad(true).finally(()=>{LV.loading=false})}
+  if(LV.key&&LV.key!==lvKey()&&LV.key!=='failed '+lvKey()&&!LV.loading){LV.loading=true;lvLoad(true).finally(()=>{LV.loading=false})}
   f.channels.forEach((_,c)=>{const on=!audible(c);if(LV.sent['m'+c]!==on){LV.sent['m'+c]=on;P.postMessage({type:'mute',ch:c,on})}});
   const o=f.orders[CUR.o],L=lvPatLoop&&o?{from:[o.order,0],to:[o.order,o.rows-1]}:S.loop&&f.orders[S.loop.from[0]]&&f.orders[S.loop.to[0]]?{from:[f.orders[S.loop.from[0]].order,S.loop.from[1]],to:[f.orders[S.loop.to[0]].order,S.loop.to[1]]}:null,ls=JSON.stringify(L);
   if(LV.sent.loop!==ls){LV.sent.loop=ls;P.postMessage({type:'loop',span:L})}
@@ -647,7 +671,10 @@ function patShift(down){const rows=PAT.rows,ch=CUR.ch,col=rows.map(r=>r[ch]),out
   patEdit(out.map((c,r)=>({row:r,ch,cell:c})).filter(c=>c.cell!==col[c.row]))}
 // one key in edit mode at the cursor's column; true when it was used
 // a note with the INS instrument (and a volume, from MIDI velocity) into the cell at the cursor, then STEP rows down
-function enterNote(note,vol){const p=cellOf(PAT.rows[CUR.row][CUR.ch]);p.n=noteTxt(note);p.i=pad(insNum());if(vol!=null)p.v='v'+pad(vol);putCell(p,true)}
+// while the live engine plays the pattern on show, the note is recorded at the row playing when the key went down (the
+// cursor follows it there, and STEP does not move it on: the song moves on by itself)
+function enterNote(note,vol){const live=LV.playing&&LV.pos&&LV.oi===PAT.order&&CUR.o===PAT.order;if(live)CUR.row=Math.max(0,Math.min(PAT.rows.length-1,LV.pos.row));
+  const p=cellOf(PAT.rows[CUR.row][CUR.ch]);p.n=noteTxt(note);p.i=pad(insNum());if(vol!=null)p.v='v'+pad(vol);putCell(p,!live)}
 // ---- MIDI input: Web MIDI in the page (no Python side). Note-on previews through the live engine like the piano keys (the
 // instrument on show in INSTRUMENTS, the slot's player in SAMPLES, else INS), at the key's loudness with VEL→VOL; in edit
 // mode on the Pattern tab it also enters the note at the cursor (INS instrument, the velocity as v01-v64). MIDI note 60 =
@@ -866,7 +893,8 @@ function drawScope(){const cv=$('lv-scope');if(!cv||!LV.an||!$('t-pattern').clas
 let ORD_SEL=-1;
 function songEdit(ops){EDQ.n++;renderSongTab();renderIns();renderSmp();
   EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/songedit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ops})})).json();
-      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null}).catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
+      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null;if(j.report)selInfo(j.report);else if($('sel-msg').textContent==='echoing…')selInfo('')})
+    .catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
 const isMark=o=>o==='+++'||o==='---';
 function uniqueName(base){const have=new Set(S.structure.patterns.map(p=>p.name));if(!have.has(base))return base;const m=/^(.*?)(\d*)$/.exec(base);for(let n=+(m[2]||1)+1;;n++){const s=m[1]+String(n).padStart(m[2].length||0,'0');if(!have.has(s))return s}}
 function ordList(){return S.structure.orders.slice()}
@@ -940,8 +968,24 @@ function selInterpolate(){const n=selNorm();if(!n||n.r1-n.r0<2)return selInfo('s
 // amplify the volume column by a percentage: v commands scale; a note without a volume gets one (from 64, the usual default volume)
 function selAmplify(){const pct=Math.max(0,+$('sel-amp').value||100),T=targets(true).filter(t=>t.f.has(2));
   applyCells(p=>{if(p.v[0]==='v')p.v='v'+pad(Math.min(64,Math.round(+p.v.slice(1)*pct/100)));else if(p.v==='...'&&/^[A-G][-#]\d$/.test(p.n))p.v='v'+pad(Math.min(64,Math.round(64*pct/100)))},T)}
+// humanize: every note in the selection (or at the cursor) gets its volume moved by a random amount within ± the given
+// range (from 64 when it has none), clamped to 1-64; a volume that is not a v command (a pan, a slide) is left alone
+function selHumanize(){const r=Math.max(1,Math.min(32,+$('sel-hum').value||6)),T=targets(true).filter(t=>t.f.has(2)||t.f.has(0));
+  selInfo(`humanized ${applyCells(p=>{if(!/^[A-G][-#]\d$/.test(p.n)||(p.v!=='...'&&p.v[0]!=='v'))return;const v0=p.v==='...'?64:+p.v.slice(1);
+    p.v='v'+pad(Math.max(1,Math.min(64,v0+Math.round((Math.random()*2-1)*r))))},T)} cells`)}
+// echo (tracker delay): the server copies the notes (song_edit op echo, one undo step with the new channel it may add)
+function selEcho(){const n=selNorm(),fo=PAT.fo||[];if(PAT.idx==null)return;if(n&&n.i1>n.i0)return selInfo('select one channel to echo');
+  const song=$('echo-scope').value==='song',v=$('echo-to').value,op={op:'echo',ch:n?fo[n.i0]:CUR.ch,rows:Math.max(0,+$('echo-rows').value||0),
+    ticks:Math.max(0,+$('echo-ticks').value||0),level:+$('echo-lvl').value||0,pattern:song?null:PAT.idx};
+  if(!song&&n){op.r0=n.r0;op.r1=n.r1}
+  if(v.startsWith('new:')){op.to=null;op.pan=+v.slice(4)}else op.to=+v;
+  selInfo('echoing…');songEdit([op])}
+// the echo's targets: a new channel panned left, centre or right, or any channel of the song
+function renderEchoTo(){const el=$('echo-to');if(!el||!S||!S.song.facts)return;const ch=S.song.facts.channels,key=JSON.stringify(ch);if(el.dataset.key===key)return;
+  const v=el.value;el.dataset.key=key;el.innerHTML=[['new:16','NEW · LEFT'],['new:32','NEW · CENTRE'],['new:48','NEW · RIGHT']].concat(ch.map((c,i)=>[String(i),`${pad(i+1)} ${c}`])).map(([k,l])=>`<option value="${esc(k)}">${esc(l)}</option>`).join('');
+  if([...el.options].some(o=>o.value===v))el.value=v}
 function selInfo(t){$('sel-msg').textContent=t||''}
-function renderSelBar(){const n=selNorm();if(!$('selinfo'))return;$('selinfo').textContent=n?`rows ${n.r0}–${n.r1} · ${n.i1-n.i0+1} channel${n.i1>n.i0?'s':''}`:'the cursor cell';
+function renderSelBar(){renderEchoTo();const n=selNorm();if(!$('selinfo'))return;$('selinfo').textContent=n?`rows ${n.r0}–${n.r1} · ${n.i1-n.i0+1} channel${n.i1>n.i0?'s':''}`:'the cursor cell';
   $('sel-paste').classList.toggle('dimb',!CLIP);$('sel-flood').classList.toggle('dimb',!CLIP);$('sel-mix').classList.toggle('dimb',!CLIP)}
 // ---- find and replace: each field a pattern (* any characters, ? one; empty: any), in this pattern or the whole song
 const PR={};  // pattern index -> rows, for the song scope (per song version)

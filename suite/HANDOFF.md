@@ -288,13 +288,13 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   renamed the slot to the WAV's stem, so a keymap naming the slot (`sample: Kick`, iron_relay) failed to compile every
   candidate in it; the name now stays when an instrument refers to it. Tests 43 (new: spectrogram, typed-value clamps,
   MP3 export and missing ffmpeg, the loop, the swap name); each feature checked in a real WebView2 window on a scratch
-  copy of demo2/iron_relay.yaml (the owner's recent list restored, no notes on a real song). `docs/TRACKER-GAPS.md`:
-  the gap analysis against OpenMPT, waiting for the owner's choice.
+  copy of demo2/iron_relay.yaml (the owner's recent list restored, no notes on a real song). `docs/TRACKER-GAPS.md`
+  (since retired, every row built): the gap analysis against OpenMPT, waiting for the owner's choice.
   Owner's decisions after it (same day): ffmpeg ships **beside** the exe, not inside (inside = 0.2 s more per launch,
   measured, and 88 MB more in every %TEMP%\_MEI folder a crash leaves; 36 such leftovers, 6.5 GB, were deleted on the
   owner's word): `ffmpeg_exe()` looks beside a frozen exe first, `tools/build_exe.py` copies imageio-ffmpeg's binary to
   `dist/ffmpeg.exe`, AGENTS.md's release recipe uploads both, THIRD_PARTY.md lists it (GPL-3, a separate program).
-  EXPORT SONG AS offers MP3, OGG (Vorbis q6; Unity loops Ogg gaplessly) and FLAC (`ENCODE`, `_encode`). Tests 44.
+  EXPORT SONG AS offers MP3, OGG (Vorbis q6; game engines loop Ogg gaplessly) and FLAC (`ENCODE`, `_encode`). Tests 44.
   The gap order stands as proposed; the live engine is to be libopenmpt compiled to WebAssembly in an AudioWorklet
   (the owner has no language preference), first step a proof that the interactive ext functions (play_note, channel
   mute) are reachable from the official 0.8.9 JS/wasm build; Python + sounddevice is the fallback. Not built yet;
@@ -487,6 +487,19 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
   beat lines on the 128-row pattern; CLEAN-UP "nothing unused", a spare pattern listed and removed by REMOVE ALL UNUSED;
   WAVs built in the page and dropped as files: on slot 01 (dropped_kick.wav, name Kick kept since an instrument names it),
   on the list (slot 16 new_one.wav), on the candidates (cand_drop); 4 undos gave the file back byte for byte. Tests 55 (with the port test below).
+- Cloud session, 2026-09-25 (branch `claude/wonderful-johnson-1decm2`, Linux, libopenmpt 0.7.3, headless Chromium; no
+  Windows window, exe or 0.8.9 DLL there). Every open finding of the September audit fixed with a test each (undo puts
+  the tryout settings back, tryout sections with Bxx, block order lists, whole-song renders, atomic writes and corrupt
+  meta/notes files, BOM, archives' own orders, the `}`-in-a-comment entry, Range, the old worker stopped, IT patterns
+  over 200 rows and numbers over 99, a faster `_decompress`, pattern size and message length in `check`, 0-prefixed
+  numbers, engine load ids), the docs it named corrected; the tracker gaps left built (HUMANIZE, MIDI and piano keys
+  record at the playing row while the engine plays the pattern on show, the Tryout tab's RECIPE box with
+  `synth.render_one`); `docs/AUDIT-2026-09.md` and `docs/TRACKER-GAPS.md` removed; ArenaPrototype no longer named.
+  Then, at the owner's request (a friend heard the leads in a video and suggested tracker delay): ECHO in the Pattern
+  tab's selection bar, song_edit op `echo` (`State._echo`: a channel's notes copied into a new or existing channel, rows
+  and ticks later, at a percent of their volume; song-wide and pan effects not copied), `test_echo` and the page test.
+  Tests 108 there (`VT_CHROMIUM` drives `tests/test_page.py`). To check locally in the real window: the RECIPE box with
+  a Surge patch (only file recipes could be rendered there), MIDI recording with a keyboard, and the build of the exe.
 
 ## Next steps, in order
 
