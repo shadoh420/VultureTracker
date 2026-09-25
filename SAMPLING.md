@@ -21,6 +21,7 @@ python tools/fetch_surge.py          # Windows: portable Surge XT 1.3.4 into too
 python tools/fetch_instruments.py --install-obxd   # Dexed, OB-Xd (runs its installer) and a drum-machine pack
 ```
 
+The exe needs none of this: its RECIPE box (GUIDE.md) downloads Surge XT or Dexed the first time a recipe needs one.
 `fetch_instruments.py` puts Dexed in `tools/synths/` (no installer). OB-Xd's Windows release is an installer
 only: `--install-obxd` downloads and runs it silently (VST3 in Common Files, preset banks in
 `Documents\discoDSP\OB-Xd\Banks`); leave the flag off to install it yourself. It also downloads MusicRadar's

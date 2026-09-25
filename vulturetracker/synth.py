@@ -5,6 +5,7 @@ import fnmatch
 import os
 import re
 import struct
+import sys
 from pathlib import Path
 
 import yaml
@@ -13,7 +14,10 @@ from . import notation
 from .wavload import write_wav
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SURGE = ROOT / "tools" / "surge-xt" / "Surge Synth Team"
+# the synths: tools/ of a checkout; the exe (no checkout) keeps them in %LOCALAPPDATA%/VultureTracker/tools (fetch_synth)
+TOOLS = (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "VultureTracker" / "tools" if getattr(sys, "frozen", False)
+         else ROOT / "tools")
+DEFAULT_SURGE = TOOLS / "surge-xt" / "Surge Synth Team"
 RECIPE_KEYS = ["out_dir", "sample_rate", "defaults", "samples"]
 SAMPLE_KEYS = ["patch", "file", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
                "hold", "tail", "params", "gain", "normalize", "mono", "trim", "loop", "fade_out", "reverse", "root_offset"]
@@ -23,24 +27,65 @@ class RecipeError(ValueError):
     pass
 
 
+class SynthMissing(RecipeError):
+    """A synth the recipe needs is not installed; `kind` is surge, dexed or obxd."""
+
+    def __init__(self, kind, msg):
+        super().__init__(msg)
+        self.kind = kind
+
+
 # ---------------------------------------------------------------- synth host (Surge XT, Dexed, OB-Xd)
 #
 # Patch names: Surge XT 'Category/Name' or '3rdparty/Author/Category/Name'; Dexed (DX7) 'dexed:Cartridge/Voice';
 # OB-Xd 'obxd:Bank/Program'. Every patch loads by handing the plugin its own saved-state format, as a DAW would.
 
-DEXED_VST3 = Path(os.environ.get("DEXED_VST3", ROOT / "tools" / "synths" / "dexed" / "Dexed.vst3"))
+DEXED_VST3 = Path(os.environ.get("DEXED_VST3", TOOLS / "synths" / "dexed" / "Dexed.vst3"))
 OBXD_VST3 = Path(os.environ.get("OBXD_VST3", Path(os.environ.get("COMMONPROGRAMFILES", r"C:\Program Files\Common Files"))
                                 / "VST3" / "OB-Xd.vst3"))
 DEXED_CARTS = [Path(os.environ.get("APPDATA", Path.home())) / "DigitalSuburban" / "Dexed" / "Cartridges",
-               ROOT / "tools" / "synths" / "cartridges"]  # Dexed writes its bundled cartridges to the first on first load
+               TOOLS / "synths" / "cartridges"]  # Dexed writes its bundled cartridges to the first on first load
 OBXD_BANKS = Path.home() / "Documents" / "discoDSP" / "OB-Xd" / "Banks"
 
 
 def surge_dir():
     d = Path(os.environ.get("SURGE_XT_DIR", DEFAULT_SURGE))
     if not (d / "Surge XT.vst3").exists():
-        raise RecipeError(f"Surge XT not found in {d}; run python tools/fetch_surge.py or set SURGE_XT_DIR")
+        raise SynthMissing("surge", f"Surge XT not found in {d}; get it from the app's RECIPE box, run python "
+                                    "tools/fetch_surge.py or set SURGE_XT_DIR")
     return d
+
+
+# the Windows downloads fetch_synth unpacks into TOOLS (tools/fetch_surge.py and fetch_instruments.py do the same for a
+# checkout); OB-Xd has only an installer: https://www.discodsp.com/obxd/
+FETCH = {"surge": ("https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/"
+                   "surge-xt-win64-1.3.4-portable-install.zip", TOOLS / "surge-xt"),
+         "dexed": ("https://github.com/asb2m10/dexed/releases/download/v1.0.1/Dexed-1.0.1-win.zip",
+                   TOOLS / "synths" / "dexed")}
+
+
+def fetch_synth(kind, progress=lambda done, total: None):
+    """Download a synth (FETCH) and unpack it into its folder; the folder appears only once it is whole."""
+    import shutil
+    import tempfile
+    import urllib.request
+    import zipfile
+    url, dest = FETCH[kind]
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
+        z, done = Path(tmp) / "download.zip", 0
+        req = urllib.request.Request(url, headers={"User-Agent": "vulturetracker"})
+        with urllib.request.urlopen(req) as r, open(z, "wb") as f:
+            total = int(r.headers.get("Content-Length") or 0)
+            while chunk := r.read(1 << 20):
+                f.write(chunk)
+                done += len(chunk)
+                progress(done, total)
+        with zipfile.ZipFile(z) as zf:
+            zf.extractall(Path(tmp) / "x")
+        if dest.exists():
+            shutil.rmtree(dest)
+        (Path(tmp) / "x").rename(dest)
 
 
 def _unique(out, key, value):
@@ -165,7 +210,7 @@ class Synths:
         if kind not in self.plugins:
             bundle = surge_dir() / "Surge XT.vst3" if kind == "surge" else DEXED_VST3 if kind == "dexed" else OBXD_VST3
             if not bundle.exists():
-                raise RecipeError(f"{kind} plugin not found at {bundle} (see SAMPLING.md, Setup)")
+                raise SynthMissing(kind, f"{kind} plugin not found at {bundle} (see SAMPLING.md, Setup)")
             self.plugins[kind] = load_plugin(str(bundle / "Contents" / "x86_64-win" / bundle.name)
                                              if os.name == "nt" else str(bundle))
         return self.plugins[kind]
@@ -179,7 +224,15 @@ class Synths:
     def load(self, patch):
         kind, path, program = self.patches.get(patch) or (("surge", Path(patch), 0) if Path(patch).is_file()
                                                           else (None, None, None))
+        want = patch.split(":")[0] if patch.startswith(("dexed:", "obxd:")) else "surge"
+        if kind is None and want == "dexed" and all(k != "dexed" for k, _, _ in self.patches.values()):
+            self._plugin("dexed")  # a fresh Dexed writes its bundled cartridges on its first load
+            self.patches = patch_index()
+            kind, path, program = self.patches.get(patch) or (None, None, None)
         if kind is None:
+            if all(k != want for k, _, _ in self.patches.values()):  # no patch of that synth at all: it is not installed
+                raise SynthMissing(want, f"'{patch}' needs {dict(surge='Surge XT', dexed='Dexed', obxd='OB-Xd')[want]}, "
+                                         "which is not installed (see SAMPLING.md, Setup)")
             close = [k for k in self.patches if patch.split("/")[-1].lower() in k.lower()][:5]
             raise RecipeError(f"unknown patch '{patch}'" + (f"; did you mean: {', '.join(close)}" if close else ""))
         self.plugin = self._plugin(kind)

@@ -57,7 +57,10 @@ sample's entry as YAML: edit it (a hold, a note, `params:`, an `fx:` chain) and 
 WAV beside the slot's (`<name>-r1.wav`, `-r2`, …, never over the recipe's own file) and adds it to the candidates, in the
 background; WRITE TO RECIPE (click twice) writes the entry as it stands into the recipe file in place (a one-line
 entry stays one line with its comment). A candidate rendered this way remembers its entry, so after `U` the box shows
-it. Rendering needs what `synth` needs (pedalboard and the synths; not in the exe). The candidate
+it. Rendering needs what `synth` needs: pedalboard (inside the exe) and the synth. When Surge XT or Dexed is
+missing, the box offers GET SURGE XT (a 300 MB download) or GET DEXED (10 MB): the app unpacks it (the exe into
+`%LOCALAPPDATA%/VultureTracker/tools/`, a checkout into `tools/`) and renders the entry again; OB-Xd is an installer,
+linked from the message. The candidate
 you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
 and the player says so. Under the progress bar (click or drag to seek) SOUNDING lists the channels sounding at the
 playhead with the slot each plays (a looped tone until its note-off, a one-shot until its sample runs out); click one

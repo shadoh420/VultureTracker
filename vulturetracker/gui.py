@@ -738,7 +738,8 @@ class State:
         self.history, self.future = [], []
         self.build = None     # last build/export result
         self.stems = None     # stems export progress
-        self.recipe_job = None  # the recipe panel's render: {"status", "error", "log", "file"}
+        self.recipe_job = None  # the recipe panel's last render, write or synth download: {"status", "error", "log", "file", "need"}
+        self._recipe_retry = None  # the render a missing synth stopped, run again once fetch_synth has it
         self._recipe_memo = {}  # (recipe path, mtime, size) -> recipe_outputs, or None for a YAML file that is no recipe
         self.error = None
         self.text = ""
@@ -1010,6 +1011,9 @@ class State:
             if job[0] == "recipe":
                 self._recipe_render(*job[1])
                 continue
+            if job[0] == "fetch":
+                self._fetch_synth(job[1])
+                continue
             k, cand = job
             with self.lock:
                 if self.renders.get(k, {}).get("status") != "queued":
@@ -1127,9 +1131,9 @@ class State:
         self._put(0, ("recipe", (rec, spec, text, self.slot)))
 
     def _recipe_render(self, rec, spec, text, slot):
-        from .synth import RecipeError, render_one
+        from .synth import RecipeError, SynthMissing, render_one
         with self.lock:
-            self.recipe_job["status"] = "rendering"
+            self.recipe_job.update(status="rendering", error=None, need=None)
         src = Path(rec["wav"])
         stem = re.sub(r"-r\d+$", "", src.stem)
         out = next(q for q in (src.with_name(f"{stem}-r{k}.wav") for k in itertools.count(1)) if not q.exists())
@@ -1137,6 +1141,9 @@ class State:
             render_one(rec["recipe"], rec["name"], spec, rec["note"], out, log=lambda s: self.recipe_job["log"].append(s))
         except ImportError as e:
             return self._recipe_failed(f"rendering needs pedalboard and the synths (SAMPLING.md, Setup): {e}")
+        except SynthMissing as e:  # the page offers the download (fetch_synth) and renders again after it
+            self._recipe_retry = (rec, spec, text, slot)
+            return self._recipe_failed(str(e), need=e.kind)
         except (RecipeError, OSError, ValueError, KeyError, TypeError) as e:
             return self._recipe_failed(f"{type(e).__name__}: {e}")
         with self.lock:
@@ -1148,9 +1155,31 @@ class State:
                 self.save_meta()
             self.recipe_job.update(status="done", file=str(out))
 
-    def _recipe_failed(self, error):
+    def _recipe_failed(self, error, need=None):
         with self.lock:
-            self.recipe_job.update(status="failed", error=error)
+            self.recipe_job.update(status="failed", error=error, need=need)
+
+    def request_fetch_synth(self, kind):
+        from .synth import FETCH
+        if kind not in FETCH:
+            raise ValueError(f"no download for '{kind}'")
+        with self.lock:
+            self.recipe_job = {"status": "fetching", "error": None, "log": [], "file": None, "need": kind, "got": 0, "size": 0}
+        self._put(0, ("fetch", kind))
+
+    def _fetch_synth(self, kind):
+        """Download a synth the recipe panel's last render missed, then render that entry again."""
+        from .synth import fetch_synth
+        try:
+            fetch_synth(kind, lambda got, size: self.recipe_job.update(got=got, size=size))
+        except (OSError, ValueError) as e:  # urllib's errors are OSErrors; a bad zip is a ValueError
+            return self._recipe_failed(f"the download failed: {type(e).__name__}: {e}", need=kind)
+        retry, self._recipe_retry = self._recipe_retry, None
+        if retry:
+            self._recipe_render(*retry)
+        else:
+            with self.lock:
+                self.recipe_job.update(status="fetched")
 
     def recipe_write(self, text):
         """The slot's recipe entry replaced by `text` (YAML) in the recipe file, in place: a one-line entry stays one line
@@ -1177,6 +1206,7 @@ class State:
         with self.lock:
             self.meta.setdefault("recipe_of", {})[self.current_file()] = {k: rec[k] for k in ("recipe", "name", "note")} | {"spec": text}
             self.save_meta()
+            self.recipe_job = {"status": "written", "error": None, "log": [], "file": None}
 
     # ---- listening notes
 
@@ -2671,6 +2701,8 @@ class Handler(BaseHTTPRequestHandler):
                 st.request_recipe_render(body.get("spec"))
             elif act == "recipewrite":
                 st.recipe_write(body.get("spec"))
+            elif act == "fetchsynth":
+                st.request_fetch_synth(body.get("kind"))
             elif act == "reload":
                 st.reload()
             elif act == "build":

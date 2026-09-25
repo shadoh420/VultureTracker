@@ -4,6 +4,10 @@ VultureTracker itself is MIT licensed ([LICENSE](LICENSE)). This lists everythin
 repository or inside `vulturetracker.exe`, with its license and where the license text lives, followed by
 the tools and libraries that are only ever installed and run separately.
 
+`vulturetracker.exe` packs pedalboard (GPL-3.0), so the exe as a whole is distributed under the GPL-3.0
+(https://www.gnu.org/licenses/gpl-3.0.html); its corresponding source is this repository at the release's tag plus the
+upstream sources linked below. The source code in the repository stays MIT.
+
 ## In the repository (`vendor/`) and inside the exe
 
 | Component | Version | License | License text |
@@ -30,9 +34,11 @@ the tools and libraries that are only ever installed and run separately.
 | typing_extensions | 4.15.0 | PSF-2.0 | https://github.com/python/typing_extensions/blob/main/LICENSE |
 | NumPy | 2.5.2 | BSD-3-Clause (with 0BSD, MIT, Zlib and CC0-1.0 parts) | https://github.com/numpy/numpy/blob/main/LICENSE.txt |
 | PyYAML | 6.0.3 | MIT | https://github.com/yaml/pyyaml/blob/main/LICENSE |
+| [pedalboard](https://github.com/spotify/pedalboard) (Spotify), with JUCE compiled in | 0.9.25 | GPL-3.0 | https://github.com/spotify/pedalboard/blob/master/LICENSE (source: the same repository, tag v0.9.25) |
+| mido | 1.3.3 | MIT | https://github.com/mido/mido/blob/main/LICENSE |
 | PyInstaller bootloader | 6.22.3 | GPL-2.0-or-later with the bootloader exception (the packed program keeps its own license) | https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt |
 
-The exe deliberately excludes pedalboard and mido (see below); `synth` and `audition` need a source checkout.
+pedalboard and mido host the synths for the app's RECIPE box; the synths themselves are not packed (below).
 
 ## Beside the exe (`dist/ffmpeg.exe`, shipped as its own file)
 
@@ -46,11 +52,10 @@ In a source checkout the same binary comes from the `imageio-ffmpeg` package (BS
 
 | Component | License | Role |
 |---|---|---|
-| [Surge XT](https://surge-synthesizer.github.io) and its factory patches | GPL-3.0 | synth renderer, fetched into `tools/surge-xt/` by `tools/fetch_surge.py`; demo4's beds, motif chords and choir are renders of factory patches (`demo4/kit.yaml`) |
-| [Dexed](https://github.com/asb2m10/dexed) | GPL-3.0 | DX7 renderer, fetched by `tools/fetch_instruments.py`. It ships the "SynprezFM" DX7 cartridges by Jean-Marc Desprez (credited in Dexed's README, no license statement); demo3's Rhodes lead and string pad are renders of two of those patches |
+| [Surge XT](https://surge-synthesizer.github.io) and its factory patches | GPL-3.0 | synth renderer, fetched into `tools/surge-xt/` by `tools/fetch_surge.py` (the exe's RECIPE box downloads the same build into `%LOCALAPPDATA%/VultureTracker/tools/`); demo4's beds, motif chords and choir are renders of factory patches (`demo4/kit.yaml`) |
+| [Dexed](https://github.com/asb2m10/dexed) | GPL-3.0 | DX7 renderer, fetched by `tools/fetch_instruments.py` (or by the exe's RECIPE box). It ships the "SynprezFM" DX7 cartridges by Jean-Marc Desprez (credited in Dexed's README, no license statement); demo3's Rhodes lead and string pad are renders of two of those patches |
 | [OB-Xd](https://www.discodsp.com/obxd/) (discoDSP) | GPL-3.0 | Oberheim renderer, installed by `tools/fetch_instruments.py --install-obxd` |
-| [pedalboard](https://github.com/spotify/pedalboard) (Spotify) | GPL-3.0 | Python package that hosts the plugins and prints `fx:` chains; optional dependency of the source checkout |
-| mido | MIT | Python package for MIDI note events to the plugins; optional dependency |
+| [pedalboard](https://github.com/spotify/pedalboard) (Spotify) and mido | GPL-3.0, MIT | in a source checkout: optional dependencies (`pip install pedalboard mido`); packed inside the exe (above) |
 | Pillow | MIT-CMU | build-time only: `tools/build_exe.py` regenerates the exe icon from `assets/vulturetracker.png` |
 | Big Rusty Drums by Karoryfer Samples; VSCO2 Community Edition and VCSL by Versilian Studios | CC0-1.0 | recordings fetched by `tools/fetch_cc0.py`; renders used in demo3 and demo4 are credited in `samples/demo3/ATTRIBUTION.md` and `samples/demo4/ATTRIBUTION.md` |
 | MusicRadar SampleRadar drum-machine packs | MusicRadar's royalty-free terms (use in music; no redistribution) | drum hits kept in the gitignored `samples/local/`; never committed |

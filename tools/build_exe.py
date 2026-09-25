@@ -2,8 +2,9 @@
 
 The exe is the whole CLI; `vulturetracker.exe gui song.yaml` opens the app in its own window (pywebview), or in the
 default browser without it.
-Bundled: the package, gui.html and the vendored libopenmpt DLLs. Not bundled: Surge XT, Dexed, OB-Xd and the
-sample packs (the `synth`/`audition` verbs still need `tools/` next to a checkout, as SAMPLING.md describes).
+Bundled: the package, gui.html, the vendored libopenmpt DLLs and pedalboard + mido (the synth host, GPL-3: the exe is
+therefore distributed under GPL-3, THIRD_PARTY.md). Not bundled: Surge XT, Dexed, OB-Xd and the sample packs; the app's
+RECIPE box downloads Surge XT and Dexed into %LOCALAPPDATA%/VultureTracker/tools when a recipe needs them.
 ffmpeg (for the MP3/OGG/FLAC export) is copied beside the exe as dist/ffmpeg.exe from imageio-ffmpeg, not packed into it:
 a packed file is unpacked to %TEMP% on every launch. Ship both files; its build is GPL-3 (THIRD_PARTY.md)."""
 import subprocess
@@ -27,8 +28,7 @@ cmd = [
     "--add-data", f"{ROOT / 'vulturetracker' / 'web'}{sep}vulturetracker/web",  # the live engine (libopenmpt wasm, worklet)
     "--icon", str(ICO),
     "--collect-submodules", "vulturetracker",
-    # synth/audition need the plugins from tools/ anyway; keep pedalboard (GPL-3) and mido out of the exe
-    "--exclude-module", "pedalboard", "--exclude-module", "mido",
+    "--collect-all", "pedalboard", "--hidden-import", "mido",  # the synth host for the RECIPE box (GPL-3)
     # numpy is optional at runtime (measurements degrade without it); bundle it when present so the exe measures.
     "--hidden-import", "numpy",
     "--collect-all", "webview",  # pywebview: native app window (Edge WebView2 on Windows)

@@ -149,7 +149,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><span class="k" title="the sample recipe (SAMPLING.md) in the song's folder that writes this slot's WAV">RECIPE</span><span class="mono" id="rc-what" style="font-size:10px;color:#c3cbcf;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
           <span class="btn sm" onclick="recipeRender()" title="render the entry as written here into a new WAV beside the slot's (never over it) and add it to the candidates">RENDER CANDIDATE</span><span class="btn sm" onclick="twice(this,recipeWrite)" title="write the entry as written here into the recipe file, in place (click twice)">WRITE TO RECIPE</span></div>
         <textarea id="rc-spec" spellcheck="false" rows="5" style="width:100%;box-sizing:border-box;font:10.5px var(--mono);padding:5px 7px;resize:vertical" title="the sample's entry in the recipe, as YAML: patch or file, note, hold, tail, velocity, params, fx, loop…"></textarea>
-        <div class="mono" id="rc-msg" style="font-size:10px;color:var(--dim);margin-top:3px;white-space:pre-wrap"></div>
+        <div class="mono" id="rc-msg" style="font-size:10px;color:var(--dim);margin-top:3px;white-space:pre-wrap"></div><span class="btn sm" id="rc-get" style="display:none;margin-top:4px" onclick="act('fetchsynth',{kind:this.dataset.kind})"></span>
       </div>
     </div>
     <div class="panel" style="flex:1;min-height:0;overflow:auto;background:var(--panel2)" id="cands" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>act('add',{globs:p.join('\n')}))"></div>
@@ -400,9 +400,11 @@ function renderRecipe(){const r=S.recipe||{},s=r.slot,j=r.job;$('recipe').style.
   const key=`${S.slot}|${s.recipe}|${s.name}|${s.note}|${s.spec}`;if(key!==RC_KEY){RC_KEY=key;$('rc-spec').value=s.spec}
   $('rc-what').textContent=`${s.recipe_name} · ${s.name}${s.note!=null?' ('+s.note+')':''}`;
   const busy=j&&(j.status==='queued'||j.status==='rendering');$('rc-msg').style.color=j&&j.status==='failed'?'var(--red)':'var(--dim)';
-  $('rc-msg').textContent=!j?'':busy?'rendering…':j.status==='failed'?j.error:`added ${j.file.replace(/\\/g,'/').split('/').pop()} to the candidates`+(j.log&&j.log.length>1?'\n'+j.log.slice(1).join('\n'):'')}
+  const SY={surge:['Surge XT','300 MB'],dexed:['Dexed','10 MB']},get=j&&j.status==='failed'&&SY[j.need];$('rc-get').style.display=get?'inline-block':'none';
+  if(get){$('rc-get').dataset.kind=j.need;$('rc-get').textContent=`GET ${SY[j.need][0].toUpperCase()} (${SY[j.need][1]} DOWNLOAD, THEN RENDER)`}
+  $('rc-msg').textContent=!j?'':busy?'rendering…':j.status==='fetching'?`downloading ${SY[j.need][0]}… ${(j.got/1e6).toFixed(0)}${j.size?' / '+(j.size/1e6).toFixed(0):''} MB`:j.status==='fetched'?`${SY[j.need][0]} is installed`:j.status==='failed'?j.error+(j.need==='obxd'?'\nOB-Xd comes as an installer: https://www.discodsp.com/obxd/':''):j.status==='written'?'written into the recipe':`added ${j.file.replace(/\\/g,'/').split('/').pop()} to the candidates`+(j.log&&j.log.length>1?'\n'+j.log.slice(1).join('\n'):'')}
 function recipeRender(){act('reciperender',{spec:$('rc-spec').value})}
-async function recipeWrite(){const j=await act('recipewrite',{spec:$('rc-spec').value});if(j&&!j.error){$('rc-msg').style.color='var(--dim)';$('rc-msg').textContent='written into the recipe'}}
+function recipeWrite(){act('recipewrite',{spec:$('rc-spec').value})}
 const NOTICED=new Set();  // notices the server gave once (a meta or notes file it could not read), shown once
 function render(){
   const f=S.song.facts,name=S.song.path.replace(/\\/g,'/').split('/');

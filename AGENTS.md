@@ -96,7 +96,7 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   `gh api repos/shadoh420/VultureTracker/releases/tags/vX --jq .body`.
 - Windows PowerShell 5.1 is the host shell: no `&&`, no `??`; Git Bash is available for POSIX syntax.
 - Python 3.14 at `C:\Python314`; `pyyaml`, `numpy`, `pywebview`, `pywin32`, `Pillow`, `imageio-ffmpeg` (its ffmpeg
-  makes the MP3s), `pedalboard` (sample generators only; excluded from the exe, GPL).
+  makes the MP3s), `pedalboard` + `mido` (the synth host: sample generators and the RECIPE box; packed into the exe, which makes the exe GPL-3, THIRD_PARTY.md).
 
 ## Where to start
 

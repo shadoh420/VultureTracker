@@ -81,8 +81,9 @@ VultureTracker is MIT licensed ([LICENSE](LICENSE)) and stands on other people's
 - The live engine is libopenmpt's official WebAssembly build (BSD-3-Clause and BSL-1.0, with minimp3, miniz and
   stb_vorbis compiled in), in `vulturetracker/web/` with its license texts.
 - The exe bundles Python (PSF), pywebview (BSD-3-Clause) with Microsoft's WebView2 SDK loader, pythonnet (MIT),
-  NumPy (BSD-3-Clause) and PyYAML (MIT), packed by PyInstaller (GPL-2.0 with an exception that leaves the packed
-  program under its own license). [FFmpeg](https://ffmpeg.org) (GPL-3.0) ships beside it as a separate program for the
+  NumPy (BSD-3-Clause), PyYAML (MIT), mido (MIT) and [pedalboard](https://github.com/spotify/pedalboard) (GPL-3.0,
+  the synth host), packed by PyInstaller; because of pedalboard the exe as a whole is distributed under the GPL-3.0,
+  while this repository's code stays MIT ([THIRD_PARTY.md](THIRD_PARTY.md)). [FFmpeg](https://ffmpeg.org) (GPL-3.0) ships beside it as a separate program for the
   encoded exports.
 - The demo samples credit their sources in `samples/demo3/ATTRIBUTION.md` and `samples/demo4/ATTRIBUTION.md`: CC0
   recordings by Karoryfer Samples and Versilian Studios, renders from Surge XT, Dexed and OB-Xd (GPL-3 programs run

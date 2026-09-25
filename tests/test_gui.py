@@ -1112,10 +1112,26 @@ class TestGui(unittest.TestCase):
         st.apply(str(new))  # the slot now plays the render: its entry is the one that made it
         self.assertEqual(st.slot_recipe()["spec"], "file: a.wav\nnote: A-5\ngain: -9\n")
         st.recipe_write("file: a.wav\nnote: A-5\ngain: -9\n")
+        self.assertEqual(st.recipe_job["status"], "written")  # the panel says so until the next render
         self.assertEqual(recipe.read_text(encoding="utf-8"),
                          "# the kit\nout_dir: .\nsamples:\n  tone: {file: a.wav, note: A-5, gain: -9}  # the lead\n  other: {file: b.wav}\n")
         with self.assertRaises(ValueError):
             st.recipe_write("note: A-5\n")  # neither patch nor file
+        # a patch whose synth is not installed: the job names it, the download runs, then the same render again
+        def wait():
+            for _ in range(200):
+                if st.recipe_job["status"] in ("failed", "done"):
+                    return st.recipe_job
+                time.sleep(0.05)
+        with mock.patch.object(synth, "DEFAULT_SURGE", self.dir / "nowhere"), \
+                mock.patch.object(synth, "fetch_synth", side_effect=lambda kind, progress: progress(5, 10)) as fetch:
+            st.request_recipe_render("patch: Pads/Anything\nnote: C-5\n")
+            self.assertEqual((wait()["status"], wait()["need"]), ("failed", "surge"))
+            st.request_fetch_synth("surge")
+            job = wait()  # downloaded, then rendered again (and missed again: the stub installs nothing)
+            self.assertEqual((fetch.call_args[0][0], job["status"], job["need"], job["got"]), ("surge", "failed", "surge", 5))
+        with self.assertRaises(ValueError):
+            st.request_fetch_synth("obxd")  # an installer, not a download
 
     def test_echo(self):
         # tracker delay: a channel's notes copied into another channel, later and quieter, as one undo step with the
