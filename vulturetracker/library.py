@@ -18,10 +18,10 @@ from pathlib import Path
 
 import numpy as np
 
-# the checkout (a frozen exe: one level above its folder, dist/ in a checkout), whose samples/ and tools/cc0 are indexed
-# when no folders were chosen
-ROOT = (Path(sys.executable).resolve().parent.parent if getattr(sys, "frozen", False)
-        else Path(__file__).resolve().parent.parent)
+# the checkout (a frozen exe: its own folder when samples/ is there, the release zip, else one level up, dist/ in a
+# checkout), whose samples/ and tools/cc0 are indexed when no folders were chosen
+ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
+        if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
 VERSION = 2            # bump when the vector changes: every file is read again
 MAX_SECONDS = 10.0     # what is analysed of a longer file (its start)
 N_MFCC, N_MELS = 13, 40

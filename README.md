@@ -52,6 +52,12 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
 
 ## Install
 
+**Windows:** download `vulturetracker-win64.zip` from the [latest release](https://github.com/shadoh420/VultureTracker/releases/latest),
+unzip it anywhere and run `vulturetracker.exe`. The start screen lists two demo songs: open one, press play, then try
+a candidate sound in the Tryout.
+
+**From source** (any platform):
+
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
 cd VultureTracker

@@ -7,7 +7,9 @@ therefore distributed under GPL-3, THIRD_PARTY.md) and sounddevice with its Port
 Not bundled: Surge XT, Dexed, OB-Xd and the sample packs; the app's RECIPE box downloads Surge XT and Dexed into
 %LOCALAPPDATA%/VultureTracker/tools when a recipe needs them.
 ffmpeg (for the MP3/OGG/FLAC export) is copied beside the exe as dist/ffmpeg.exe from imageio-ffmpeg, not packed into it:
-a packed file is unpacked to %TEMP% on every launch. Ship both files; its build is GPL-3 (THIRD_PARTY.md)."""
+a packed file is unpacked to %TEMP% on every launch. Ship both files; its build is GPL-3 (THIRD_PARTY.md).
+dist/vulturetracker-win64.zip is the one-download release: the exe, ffmpeg, LICENSE, THIRD_PARTY.md and the demos whose
+samples are all in git (demo/, demo2/, samples/ and samples/surge/); the app finds them beside the exe."""
 import importlib.util
 import subprocess
 import sys
@@ -57,4 +59,15 @@ try:
     print("copied ffmpeg beside the exe: dist/ffmpeg.exe")
 except (ImportError, RuntimeError, OSError) as e:
     print(f"no ffmpeg beside the exe ({e}): the exe exports MP3/OGG/FLAC only with ffmpeg on PATH")
+if code == 0:
+    import zipfile
+    files = subprocess.run(["git", "ls-files", "demo", "demo2", ":(glob)samples/*.*", "samples/surge", "LICENSE", "THIRD_PARTY.md"],
+                           cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    with zipfile.ZipFile(ROOT / "dist" / "vulturetracker-win64.zip", "w", zipfile.ZIP_DEFLATED) as z:
+        for name in ("vulturetracker.exe", "ffmpeg.exe"):
+            if (ROOT / "dist" / name).exists():
+                z.write(ROOT / "dist" / name, f"VultureTracker/{name}")
+        for f in files:
+            z.write(ROOT / f, f"VultureTracker/{f}")
+    print(f"dist/vulturetracker-win64.zip: the exe, ffmpeg and {len(files)} demo, sample and licence files")
 sys.exit(code)

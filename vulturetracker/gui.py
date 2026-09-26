@@ -44,8 +44,10 @@ from .wavload import read_wav
 HTML = Path(__file__).with_name("gui.html")
 WEB = HTML.with_name("web")  # the live engine: libopenmpt 0.8.9 compiled to WebAssembly (official build) and its AudioWorklet
 RATE = 44100
-# the checkout (for the demo list); a frozen exe looks beside itself and one level up (dist/ in a checkout)
-ROOT = Path(sys.executable).resolve().parent.parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+# the checkout (for the demo list); a frozen exe: its own folder when samples/ is there (the release zip), else one
+# level up (dist/ in a checkout)
+ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
+        if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
 RECENT = Path(os.environ.get("APPDATA", Path.home())) / "VultureTracker" / "recent.json"
 REC_SETTINGS = RECENT.with_name("record.json")  # the RECORD tab's ASIO choice, read before sounddevice loads
 # the page is served from one address every launch when it can be, and the window keeps a WebView2 profile beside the
