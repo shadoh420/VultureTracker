@@ -27,6 +27,7 @@ from pathlib import Path
 import numpy as np
 
 from .dsp import lowpass
+from .resample import resample
 
 QUARTER = 960
 GRIDS = (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48)
@@ -109,7 +110,7 @@ def pluck(freq, seconds=2.0, rate=44100, damping=0.996, bright=0.5, seed=0):
     """A Karplus-Strong plucked string (numpy, block by block of one period): a noise burst low-passed at (2 + 30 x
     `bright`) times `freq` (first order, so the attack is a pluck rather than a hiss), averaged round a delay line of one period; returns float mono."""
     n = int(seconds * rate)
-    period = max(2, int(round(rate / freq)))
+    period = max(2, int(round(rate / freq - 0.5)))  # the average adds half a sample: the loop is period + 0.5
     rng = np.random.default_rng(seed)
     burst = rng.uniform(-1, 1, period)
     spec = np.fft.rfft(burst)  # one period: bin h is the h-th harmonic
@@ -120,7 +121,9 @@ def pluck(freq, seconds=2.0, rate=44100, damping=0.996, bright=0.5, seed=0):
         prev = y[k - period - 1: k]
         seg = damping * 0.5 * (prev[:-1] + prev[1:])
         y[k: k + period] = seg[: len(y[k: k + period])]
-    y = y[1: n + 1] * np.minimum(1, (n - np.arange(n)) / (0.02 * rate))
+    y = resample(y[1: n + 1], freq * (period + 0.5), rate)[:n]  # from the whole-sample pitch to `freq`
+    n = len(y)
+    y = y * np.minimum(1, (n - np.arange(n)) / (0.02 * rate))
     return y / (np.abs(y).max() or 1) * 0.8
 
 

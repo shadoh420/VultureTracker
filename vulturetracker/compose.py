@@ -37,8 +37,9 @@ def groove(rows, chans, r0, r1, ticks, speed):
     groove repeats from the pattern's first row. An SDx already there is replaced (a 0 removes it); a note with another
     effect keeps it and is left undelayed. Returns (cells, skipped)."""
     ticks = [int(t) for t in ticks]
-    if not ticks or not all(0 <= t < speed for t in ticks):
-        raise ValueError(f"a groove is a list of tick delays, each 0-{speed - 1} (at speed {speed} a row has {speed} ticks)")
+    if not ticks or not all(0 <= t < min(speed, 16) for t in ticks):
+        raise ValueError(f"a groove is a list of tick delays, each 0-{min(speed, 16) - 1} (at speed {speed} a row has {speed} "
+                         "ticks; SDx holds at most 15)")
     out, skipped = [], 0
     for r in range(r0, r1 + 1):
         t = ticks[r % len(ticks)]

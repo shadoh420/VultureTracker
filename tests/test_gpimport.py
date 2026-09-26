@@ -89,6 +89,17 @@ class TestTiming(unittest.TestCase):
 
 
 @unittest.skipIf(guitarpro is None, "PyGuitarPro not installed (pip install pyguitarpro)")
+class TestPlaceholders(unittest.TestCase):
+    def test_pluck_pitch(self):
+        import numpy as np
+        for hz in (65.406, 261.626, 2093.005, 4186.009):
+            y = gpimport.pluck(hz, seconds=1.0)
+            s = np.abs(np.fft.rfft(y * np.hanning(len(y)), 1 << 20))
+            f = np.fft.rfftfreq(1 << 20, 1 / 44100)
+            m = (f > hz * 0.9) & (f < hz * 1.1)
+            self.assertLess(abs(1200 * np.log2(f[m][s[m].argmax()] / hz)), 2, hz)  # measured, in cents
+
+
 class TestGpImport(unittest.TestCase):
     def test_a_tab_becomes_a_song(self):
         import numpy as np

@@ -221,7 +221,11 @@ class Recorder:
         if max(MODES[mode][0]) >= self.channels:
             raise RecordError("this device has one input")
         with self.lock:
+            if self.recording:  # a take is one shape: its chunks could not be joined
+                raise RecordError("stop the take before changing INPUTS")
             self.mode = mode
+            self.preroll.clear()  # the pre-roll is the old inputs' shape too
+            self.preroll_frames = 0
 
     def _callback(self, indata, frames, time_info, status):
         if status is not None and getattr(status, "input_overflow", False):

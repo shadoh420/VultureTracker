@@ -255,6 +255,17 @@ class TestGui(unittest.TestCase):
         self.assertEqual((st.stems["status"], st.stems["error"], st.stems["dir"]), ("failed", "MP3 export needs ffmpeg", None))
         self.assertFalse((self.dir / "song.mp3").exists())
 
+    def test_export_never_overwrites_a_sample(self):
+        (self.dir / "a.yaml").write_bytes(SONG.encode("utf-8"))  # a song named like its sample: a.wav is both
+        st = gui.State(self.dir / "a.yaml")
+        self.states.append(st)
+        before = (self.dir / "a.wav").read_bytes()
+        st.request_stems("wav", song=True, stems=False)
+        self.wait_export(st)
+        self.assertEqual(st.stems["status"], "failed", st.stems)
+        self.assertIn("a.wav", st.stems["error"])
+        self.assertEqual((self.dir / "a.wav").read_bytes(), before)
+
     def test_ffmpeg_beside_the_exe_comes_first(self):
         from unittest import mock
         (self.dir / "vulturetracker.exe").write_bytes(b"")
@@ -643,6 +654,32 @@ class TestGui(unittest.TestCase):
         for _ in range(3):
             st.undo()
         self.assertEqual(st.pattern_rows(0)["rows"][1][0], "... .. v01 ...")  # back three steps, and no further
+
+    def test_a_failed_undo_keeps_its_step(self):
+        from unittest import mock
+        st = self.state()
+        st.edit_cells(0, [{"row": 1, "ch": 0, "cell": "... .. v10 ..."}])
+        with mock.patch.object(gui.os, "replace", side_effect=PermissionError("held")), mock.patch.object(gui.time, "sleep"):
+            with self.assertRaises(PermissionError):
+                st.undo()
+        self.assertEqual((len(st.history), len(st.future)), (1, 0))
+        st.undo()
+        self.assertEqual(st.pattern_rows(0)["rows"][1][0], "... .. ... ...")
+
+    def test_a_section_of_the_wrong_shape_is_an_error_not_a_crash(self):
+        st = self.state()
+        (self.dir / "song.yaml").write_bytes(SONG.replace("samples:\n  1: {file: a.wav, name: A tone}\n  2: {file: b.wav, name: B tone}\n",
+                                                          "samples: [1]\n").encode("utf-8"))
+        st.reload()
+        self.assertTrue(st.error)
+        self.assertEqual(st.snapshot()["song"]["mtime"], st.mtime)
+
+    def test_the_whole_song_follows_a_sample_rewritten_in_place(self):
+        st = self.state()
+        it, stamps = st.compiled_it(whole=True), st.snapshot()["song"]["stamps"]
+        write_wav(self.dir / "a.wav", RATE, [sine(220)], root_note=69)  # the live engine's song, not the reload's
+        self.assertNotEqual(st.compiled_it(whole=True), it)
+        self.assertNotEqual(st.snapshot()["song"]["stamps"], stamps)  # the page's live key moves with it
 
     def test_song_structure_edits(self):
         (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))

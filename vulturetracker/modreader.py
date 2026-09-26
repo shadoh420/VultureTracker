@@ -264,7 +264,7 @@ def read_s3m(data: bytes):
             if is16:
                 vals = list(struct.unpack(f"<{len(raw) // 2}h", raw[:len(raw) // 2 * 2]))
                 if ffi == 2:
-                    vals = [(v + 32768) % 65536 - 32768 for v in vals]
+                    vals = [(v & 0xFFFF) - 32768 for v in vals]
             else:
                 vals = [(b - 128) if ffi == 2 else (b - 256 if b > 127 else b) for b in raw]
             chans.append(vals)

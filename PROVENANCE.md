@@ -42,10 +42,12 @@ to be closer and was replaced, and how to keep it that way.
 ## The suite (suite/): pieces inspired by groups of the UT99 soundtrack
 
 The 30 soundtrack modules were extracted and measured locally (`scratch/ut99-clean/`, gitignored: played tempo and
-speed, spectrum, key, onsets, per-channel idioms, form) and sorted into five stylistic groups; each piece of the suite
-is written for one group. What a piece takes is descriptive (grids, layer roles, rhythmic and textural idioms, the
-shape of a form); no audio, no sample data, no measured sample table and no melodic cell is taken from any module,
-and no sound is chosen by matching a specific module's sample.
+speed, spectrum, key, onsets, per-channel idioms, form) and sorted into five stylistic groups; Nadir was written for one
+group. Since Rift 2 (2026-09-26) each piece follows one reference track instead (`suite/NEXT-PROMPT.md`): its frame is
+measured, and every melodic line, the layer set and the section lengths are the piece's own. What a piece takes is
+descriptive (grids, layer roles, rhythmic and textural idioms, the shape of a form); no audio, no sample data, no
+measured sample table and no melodic cell is taken from any module, and no sound is chosen by matching a specific
+module's sample.
 
 - `suite/nadir/` (Nadir, the dark group: Skyward Fire, Seeker, Seeker 2, Enigma, Colossus, Nether Animal, Mechanism
   Eight): a driving 144 BPM grid under a dark mood, a sub drone as the loudest layer, one modal pedal (a held root instead

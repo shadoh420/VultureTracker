@@ -106,6 +106,8 @@ def write_wav(path, rate, channels, bits=16, loop=None, root_note=None):
         body += struct.pack("<6I", i, 1 if pingpong else 0, start, end - 1, 0, 0)  # smpl end is inclusive
     with open(path, "r+b") as f:
         f.seek(0, 2)
+        if f.tell() % 2:  # RIFF chunks start on even offsets: an odd data chunk (8-bit, odd length) takes a pad byte
+            f.write(b"\0")
         f.write(b"smpl" + struct.pack("<I", len(body)) + body)
         size = f.tell()
         f.seek(4)

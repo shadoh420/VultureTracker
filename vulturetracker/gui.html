@@ -347,7 +347,7 @@ option.hascand{color:var(--acc);font-weight:700}
       </div></div>
     <div class="panel" style="flex:none"><div class="ph"><span class="k">SOUND</span><span class="kbd" id="pt-slot"></span></div>
       <div class="pb">
-        <div style="display:flex;gap:2px"><span class="btn" onclick="ptPreview('preview')" title="the picture played as sound: each row a sine at its frequency, brightness its level, colour its pan">▶ PREVIEW</span><span class="btn" onclick="PTA.pause()">■</span><input id="pt-name" value="paint" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: paint-&lt;name&gt;.wav beside the song"></div>
+        <div style="display:flex;gap:2px"><span class="btn" onclick="ptPreview('preview')" title="the picture played as sound: each row a sine at its frequency, brightness its level, colour its pan">▶ PREVIEW</span><span class="btn" onclick="pkStop()">■</span><input id="pt-name" value="paint" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: paint-&lt;name&gt;.wav beside the song"></div>
         <div style="display:flex;gap:2px;margin-top:4px"><span class="btn" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="ptAct('slot')" title="write it beside the song (paint-&lt;name&gt;.wav, the picture as a PNG beside it) as a new slot; in a song with instruments a new instrument plays it; one undo step">→ NEW SLOT</span><span class="btn" style="flex:1;text-align:center" onclick="ptAct('candidate')" title="write it beside the song and add it to the tryout slot's candidates">→ CANDIDATE</span></div>
         <div class="k" style="margin-top:14px">AS A FILTER</div>
         <div style="font-size:10px;color:var(--dim);margin:3px 0 5px">the picture laid over a sample's spectrum: dark turns a frequency down at that moment (the columns spread over the whole sample)</div>
@@ -375,7 +375,7 @@ option.hascand{color:var(--acc);font-weight:700}
     <div class="panel" style="flex:none"><div class="ph"><span class="k">CONTROLS</span><span class="meta">the code's sliders, after COMPILE</span></div><div class="pb" id="fa-ctrls" style="font:10px var(--mono)"></div></div>
     <div class="panel" style="flex:none"><div class="ph"><span class="k">SOUND</span><span class="kbd" id="fa-slot"></span></div>
       <div class="pb">
-        <div style="display:flex;gap:2px"><span class="btn" onclick="faPreview()" title="render the note in this page and play it">▶ PREVIEW</span><span class="btn" onclick="PTA.pause()">■</span><input id="fa-name" value="faust" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: faust-&lt;name&gt;.wav beside the song"></div>
+        <div style="display:flex;gap:2px"><span class="btn" onclick="faPreview()" title="render the note in this page and play it">▶ PREVIEW</span><span class="btn" onclick="pkStop()">■</span><input id="fa-name" value="faust" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: faust-&lt;name&gt;.wav beside the song"></div>
         <div style="display:flex;gap:2px;margin-top:4px"><span class="btn" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="faSave('slot')" title="write it beside the song as a new slot (base note = NOTE; with an instrument in a song with instruments); one undo step">→ NEW SLOT</span><span class="btn" style="flex:1;text-align:center" onclick="faSave('candidate')" title="write it beside the song and add it to the tryout slot's candidates">→ CANDIDATE</span></div>
         <div class="mono" id="fa-msg" style="margin-top:10px;font-size:10px;color:var(--dim);white-space:pre-wrap"></div>
         <div style="margin-top:10px;font-size:10px;color:var(--dim)">Compiled and rendered in this page (the Faust compiler as WebAssembly). A sample recipe can render the same code with <span class="mono">faust:</span> (SAMPLING.md; needs node).</div>
@@ -736,7 +736,7 @@ function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseIn
 // it plays. The worklet reports module order indices; facts.orders[i].order maps them to the order list here.
 const LV={ctx:null,node:null,ready:null,key:'',playing:false,pos:null,oi:-1,sent:{},held:{},err:null,version:''},CUR={o:0,row:0,ch:0,col:0};
 let lvLatency='0',lvPatLoop=false;try{lvLatency=localStorage.lvlatency==='interactive'?'interactive':'0'}catch(e){}
-const lvKey=()=>`${S.song.mtime}|${JSON.stringify(S.mix||{})}`;
+const lvKey=()=>`${S.song.mtime}|${S.song.stamps}|${JSON.stringify(S.mix||{})}`;  // stamps: the WAVs the song plays
 function lvStart(){if(LV.ready)return LV.ready;
   LV.ready=(async()=>{const ctx=LV.ctx=new AudioContext({latencyHint:lvLatency==='0'?0:lvLatency});
     await ctx.audioWorklet.addModule('/engine-worklet.js');const wasm=await (await fetch('/web/libopenmpt.wasm')).arrayBuffer();
@@ -769,7 +769,7 @@ async function lvPlay(oi,row){try{await lvStart()}catch(e){return}const o=S.song
   LV.node.port.postMessage({type:'play',order:o.order,row:Math.min(row,o.rows-1)});LV.playing=true;renderLiveBar()}
 function lvPlayCursor(){if(LV.playing)return lvStop();lvPatLoop=false;lvPlay(CUR.o,CUR.row)}
 function lvLoopPattern(){lvPatLoop=!(lvPatLoop&&LV.playing);if(lvPatLoop)lvPlay(CUR.o,CUR.row);else lvStop()}
-function lvStop(){if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=LV.pos.row}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar()}
+function lvStop(){if(PK.srcs.size)pkStop();if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=LV.pos.row}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar()}
 function lvSetLatency(v){lvLatency=v;try{localStorage.lvlatency=v}catch(e){}if(LV.ctx){lvStop();LV.ctx.close();Object.assign(LV,{ctx:null,node:null,ready:null,key:'',pos:null,oi:-1,sent:{}})}renderLiveBar()}
 function renderLiveBar(){if(!S||!S.song||!S.song.facts)return;const f=S.song.facts,ins=f.instruments&&f.instruments.length?f.instruments.map((n,i)=>[i,`${pad(i+1)} ${n}`]):f.samples.map((s,i)=>[i,`${pad(s.num)} ${s.name}`]);
   put('lv-ins',ins.map(([i,n])=>`<option value="${i}">${esc(n)}</option>`).join(''));$('lv-lat').value=lvLatency;
@@ -1477,16 +1477,24 @@ async function faSave(dest){$('fa-msg').textContent='rendering…';try{const r=a
 const PT={rows:72,cols:128,amp:null,pan:null,tool:'brush',drag:null};const PTA=new Audio();const ptOn=()=>$('t-paint').classList.contains('on');
 // the piano keys on the PAINT and FAUST tabs: the picture (as C-5) or the Faust note (as NOTE), rendered again after any
 // change and played at the key's pitch, one shot per key
-const PK={sig:'',buf:null,root:60,ctx:null};
-async function pkPlay(k){const paint=ptOn(),msg=$(paint?'pt-msg':'fa-msg');
-  try{const body=paint?JSON.stringify(ptBody('preview')):'',sig=paint?body:[$('fa-code').value,JSON.stringify(FA.vals),$('fa-note').value,$('fa-vel').value,$('fa-hold').value,$('fa-tail').value].join('|');
-    PK.ctx=PK.ctx||new AudioContext();PK.ctx.resume();
-    if(sig!==PK.sig){let ab,root=60;if(paint){const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body});
-        if(!(r.headers.get('content-type')||'').startsWith('audio/'))throw new Error(((await r.json()).error||'').replace(/^\w+: /,''));ab=await r.arrayBuffer()}
-      else{const r=await faRender();root=ptNote($('fa-note').value);ab=faWav(r.channels,44100,root).buf}
-      PK.buf=await PK.ctx.decodeAudioData(ab);PK.root=root;PK.sig=sig}
-    const s=PK.ctx.createBufferSource();s.buffer=PK.buf;s.playbackRate.value=2**((12*(+$('lv-oct').value||0)+PIANO.indexOf(k)-PK.root)/12);s.connect(PK.ctx.destination);s.start()}
+const PK={sig:'',buf:null,root:60,ctx:null,job:null,srcs:new Set()};
+const pkSig=paint=>paint?JSON.stringify(ptBody('preview')):[$('fa-code').value,JSON.stringify(FA.vals),$('fa-note').value,$('fa-vel').value,$('fa-hold').value,$('fa-tail').value].join('|');
+// the buffer for the settings as they are: one render however many keys ask while it runs, kept under the settings that
+// made it (Faust reads its controls after compiling, so its signature is taken once the render is done)
+async function pkLoad(paint){const sig=pkSig(paint);if(sig===PK.sig)return;if(PK.job&&PK.job.sig===sig)return PK.job.p;
+  const job={sig};job.p=(async()=>{let ab,root=60,made=sig;
+    if(paint){const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:sig});
+      if(!(r.headers.get('content-type')||'').startsWith('audio/'))throw new Error(((await r.json()).error||'').replace(/^\w+: /,''));ab=await r.arrayBuffer()}
+    else{const r=await faRender();made=pkSig(false);root=ptNote($('fa-note').value);ab=faWav(r.channels,44100,root).buf}
+    const buf=await PK.ctx.decodeAudioData(ab);Object.assign(PK,{buf,root,sig:made})})();
+  PK.job=job;try{await job.p}finally{if(PK.job===job)PK.job=null}}
+async function pkPlay(k){const paint=ptOn(),msg=$(paint?'pt-msg':'fa-msg'),semi=12*(+$('lv-oct').value||0)+PIANO.indexOf(k);  // the pitch at the key press
+  try{PK.ctx=PK.ctx||new AudioContext();PK.ctx.resume();await pkLoad(paint);
+    if(!(paint?ptOn():faOn()))return;  // the tab was left while it rendered
+    const s=PK.ctx.createBufferSource();s.buffer=PK.buf;s.playbackRate.value=2**((semi-PK.root)/12);s.connect(PK.ctx.destination);
+    PK.srcs.add(s);s.onended=()=>PK.srcs.delete(s);s.start()}
   catch(e){msg.textContent=String(e.message||e)}}
+function pkStop(){PTA.pause();for(const s of PK.srcs)s.stop();PK.srcs.clear()}
 function ptKey(){return 'paint|'+(S&&S.song?S.song.path:'')}
 function ptNew(r,c){PT.rows=r;PT.cols=c;PT.amp=new Float32Array(r*c);PT.pan=new Float32Array(r*c)}
 function ptSave(){try{localStorage[ptKey()]=JSON.stringify({rows:PT.rows,cols:PT.cols,amp:Array.from(PT.amp,v=>Math.round(v*1000)),pan:Array.from(PT.pan,v=>Math.round(v*1000)),

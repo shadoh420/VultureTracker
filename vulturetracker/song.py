@@ -59,6 +59,7 @@ def _convert(node, ctx):
         if node.tag == "tag:yaml.org,2002:int" and re.fullmatch(r"0\d+", raw):
             return int(raw, 10)  # '08', '010' are decimal here, not octal
         value = _constructor.construct_object(node)
+        _constructor.constructed_objects.pop(node, None)  # the loader keeps every node it made; this one is done
         if isinstance(value, str):
             value = LStr(value)
             value.line, value.style = line, node.style

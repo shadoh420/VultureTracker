@@ -48,6 +48,22 @@ class TestTakeAnalysis(unittest.TestCase):
 
 
 class TestRecorder(unittest.TestCase):
+    def test_inputs_hold_during_a_take(self):
+        r = fake_recorder()
+        r.open(0, "1", RATE)
+        r.stream.feed(0.3)
+        r.start()
+        r.stream.feed(0.2)
+        with self.assertRaises(record.RecordError):
+            r.set_mode("stereo")                        # mono and stereo chunks could not be joined into one take
+        self.assertEqual(r.stop().shape[0], 1)
+        r.stream.feed(0.3)
+        r.set_mode("stereo")
+        r.stream.feed(0.1)
+        r.start(preroll=0.2)                            # the mono pre-roll went with the change
+        r.stream.feed(0.2)
+        self.assertEqual(r.stop().shape[0], 2)
+
     def test_takes_from_the_simulated_interface(self):
         r = fake_recorder()
         self.assertEqual(r.devices()[0]["inputs"], 2)

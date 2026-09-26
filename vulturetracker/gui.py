@@ -25,6 +25,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import wave
 import webbrowser
 import zlib
@@ -63,10 +64,17 @@ def _atomic(path, data):
     """`data` (bytes) as the file at `path`, written to a temporary file beside it and moved over it, so a crash or a
     power loss mid-write leaves the old file or the new one, never a truncated one."""
     path = Path(path)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")  # the request handlers are threads
     try:
         tmp.write_bytes(data)
-        os.replace(tmp, path)
+        for wait in (0.05, 0.1, 0.2, 0.4, None):
+            try:
+                os.replace(tmp, path)
+                break
+            except PermissionError:  # Windows: a reader (a scanner, the indexer, another thread) holds the file a moment
+                if wait is None:
+                    raise
+                time.sleep(wait)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -894,6 +902,7 @@ class State:
         self.mtime = 0.0
         self.facts = None
         self.mod = None       # compiled model of the last good load (pattern view)
+        self.it_stamps = None
         self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
         self.reload()
         self.cache_dir.mkdir(exist_ok=True)
@@ -927,11 +936,15 @@ class State:
                 self.song = None
             if not isinstance(self.song, dict):
                 self.song = {}
+            for sec in ("module", "samples", "instruments", "patterns"):  # the compiler reports one that is not a map
+                if sec in self.song and not isinstance(self.song[sec], dict):
+                    self.song[sec] = {}
             for sec in ("samples", "instruments"):  # a key written 08: reads as the string "08" here; the compiler reads 8
                 if isinstance(self.song.get(sec), dict):
                     self.song[sec] = {int(k) if isinstance(k, str) and k.isdigit() else k: v for k, v in self.song[sec].items()}
             files = self.files = [str((self.base_dir / v["file"]).resolve()) for v in (self.song.get("samples") or {}).values()
                      if isinstance(v, dict) and v.get("file")]
+            self.it_stamps = "|".join(_stamp(f) for f in files)  # the WAVs self.it was compiled from
             threading.Thread(target=lambda: [self.measured(f) for f in files if Path(f).exists()], daemon=True).start()
             if self.meta["slot"] not in (self.song.get("samples") or {}):
                 self.meta["slot"] = min(self.song.get("samples") or {1: 0})
@@ -1117,7 +1130,7 @@ class State:
         per compile key."""
         with self.lock:
             inst = self.mix().get("instrument") or {}
-            if whole and not cand and self.it and not any(int(n) in (self.song.get("instruments") or {}) for n in inst):
+            if whole and not cand and self.it and self.it_stamps == (self._stamps or "|".join(_stamp(f) for f in self.files)) and not any(int(n) in (self.song.get("instruments") or {}) for n in inst):
                 return self.it  # the song as reload compiled it: the same bytes as compiling it again from the dict
         ck = self.ckey(cand) + ("|whole" if whole else "")
         if ck not in self.compiled:
@@ -1776,6 +1789,10 @@ class State:
             for i in chans:
                 name = re.sub(r"[^\w-]+", "_", f["channels"][i]).strip("_") or "ch"
                 todo.append((out_dir / f"{i + 1:02d}-{name}.{fmt}", [j for j in range(len(f["channels"])) if j != i]))
+            used = {os.path.normcase(Path(p).resolve()) for p in self.files}
+            for path, _ in todo:
+                if os.path.normcase(path.resolve()) in used:
+                    raise ValueError(f"{path.name} is a sample the song plays: exporting would overwrite it (rename one of them)")
             if chans:
                 out_dir.mkdir(exist_ok=True)
             for n, (path, silenced) in enumerate(todo):
@@ -2712,10 +2729,12 @@ class State:
                 return
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first (the undo history is for the song the app wrote)")
-            step = src.pop()
+            step = src[-1]
             meta = step.get("meta")
-            dst.append({"text": self.text, "meta": copy.deepcopy({k: self.meta.get(k) for k in meta}) if meta else None})
-            self.write_song(step["text"])
+            back = {"text": self.text, "meta": copy.deepcopy({k: self.meta.get(k) for k in meta}) if meta else None}
+            self.write_song(step["text"])  # first: a write that fails leaves both stacks as they were
+            src.pop()
+            dst.append(back)
             if meta:
                 self.meta.update(copy.deepcopy(meta))
                 self.save_meta()
@@ -3089,7 +3108,7 @@ class State:
                                   "edit": (self.mix().get("instrument") or {}).get(str(n), {})})
             return {
                 "song": {"path": str(self.song_path), "dir": str(self.base_dir), "dirty": self.dirty(), "error": self.error,
-                         "mtime": self.mtime, "facts": self.facts, "sample_entries": {str(k): v for k, v in ents.items()},
+                         "mtime": self.mtime, "stamps": hashlib.sha1((self._stamps or "").encode()).hexdigest()[:8], "facts": self.facts, "sample_entries": {str(k): v for k, v in ents.items()},
                          "slot_meas": slot_meas},
                 "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref,
                 "orders": list(self.orders) if self.orders else None, "loop": self.meta.get("loop"),

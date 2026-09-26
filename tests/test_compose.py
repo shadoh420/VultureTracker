@@ -39,6 +39,8 @@ class TestCompose(unittest.TestCase):
         self.assertEqual(cells(out), {(3, 0): "F-5 01 ... ..."})
         with self.assertRaises(ValueError):
             compose.groove(rows, [0], 0, 3, [0, 6], speed=6)
+        with self.assertRaises(ValueError):
+            compose.groove(rows, [0], 0, 3, [0, 16], speed=32)  # SDx holds 0-15 (16 would write SD0)
 
     def test_euclid_fills_the_selection_from_its_top_cell(self):
         rows = grid(*(["C-5 03 v48 ..."] + [E] * 6 + ["G-5 01 ... ..."]))

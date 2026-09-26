@@ -288,6 +288,21 @@ class TestValidation(Base):
         """)
         self.assertIn("effect letters are upper case", "\n".join(errs))
 
+    def test_the_loader_keeps_no_nodes(self):
+        from vulturetracker import song as song_mod
+        n = len(song_mod._constructor.constructed_objects)
+        for _ in range(20):
+            with self.assertRaises(SongError):
+                load_song_text("module: {title: x}")
+        self.assertEqual(len(song_mod._constructor.constructed_objects), n)
+
+    def test_odd_8bit_wav_keeps_its_smpl_chunk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "odd.wav"
+            write_wav(p, RATE, [[1, 2, 3, 4, 5]], bits=8, loop=(1, 4, False), root_note=69)  # an odd data chunk: a pad byte
+            w = read_wav(p)
+        self.assertEqual((w.root, len(w.loops)), (69, 1))
+
     def test_schema_errors(self):
         errs = self.errors("""
             module: {channels: 1, tempo: 20, titel: x}

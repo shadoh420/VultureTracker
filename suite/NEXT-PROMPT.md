@@ -18,9 +18,10 @@ was made. One reference track, never several averaged. From it we take the frame
 idioms, balance). Every melodic line, the layer set and the section lengths are our own. My ear decides, in the app,
 one layer at a time.
 
-The reference: <TRACK> (C:\UnrealTournament\Music\<file>.umx, extracted in scratch/ut99-clean/modules/). Everything
-measured from it stays in scratch/ (Epic's copyright, never committed). PROVENANCE.md says "inspired by", never
-"based on". No audio, sample data or melodic cell is copied, and no sample is chosen by matching one of theirs.
+The reference: <TRACK> (C:\UnrealTournament\Music\<file>.umx, extracted in scratch/ut99-clean/modules/). The raw
+measurements (scripts, tables, spectrograms) stay in scratch/ (Epic's copyright, never committed); only the brief's
+plain summary of the frame goes into suite/. PROVENANCE.md says "inspired by", never "based on". No audio, sample data
+or melodic cell is copied, and no sample is chosen by matching one of theirs.
 
 Step 0: measure the frame with scratch/ut99-clean/analyze.py, structure.py and perchannel.py: the played tempo and
 speed (from the T/A commands, not the header), the drum grid, each role's sound character (length, tail, loop,
@@ -29,9 +30,10 @@ per-channel power, and the harmony (roots, how they move). Do not measure its me
 cells, intervals, contour and register stay out of the piece. Write suite/<piece>/BRIEF.md, one page: the frame in
 plain words and numbers, and a proposed layer set with fewer roles than the reference where one can go. Stop.
 
-Step 1: a two-bar loop of the drums and the bass or sub only, on the frame's grid, with three to five candidate
-sounds per role in the tryout (samples/local/, the Big Rusty kit, the TR-8 pack, Surge XT, VSCO, Dexed, OB-Xd; give
-clean synth patches a noise floor the way gen_floor.py does). I pick with the tryout and write the slots with U. Stop.
+Step 1: a two-bar loop of the drums and the bass or sub only, on the frame's grid (the bass holds a root or a pedal
+here; a moving bass is a melodic line and is written in Step 2), with three to five candidate sounds per role in the
+tryout (samples/local/, the Big Rusty kit, the TR-8 pack, Surge XT, VSCO, Dexed, OB-Xd; give clean synth patches a noise
+floor the way gen_floor.py does). I pick with the tryout and write the slots with U. Stop.
 
 Step 2: the melodic lines. For each, write two to four lines from scratch that differ in kind (register, rhythm,
 density, shape), plus the section without the line, and render each as a short MP3 in the song. Stop for my pick.
@@ -39,10 +41,11 @@ Then three to five candidate sounds for the picked line in the tryout; stop for 
 its own single-sample slot. Then the remaining layers the same way, as tryout candidates.
 
 Step 3: only when every line and sound is approved, lay out the full form with our own section lengths (not the
-reference's). Render; the spectrogram (nothing above the drums' ceiling); harmony.py's clash check; the MP3; stop. I
-listen in the app (python -m vulturetracker gui suite/<piece>/<piece>.yaml) and drop notes with N. Act on the notes
-and their sounding lists, one round at a time, and ask nothing the report answers. If I say a passage sounds like the
-reference, rewrite its notes; don't answer with measurements.
+reference's). Render; the spectrogram (nothing above the drums' ceiling); the clash check (suite/nadir/harmony.py knows
+only Nadir's chord voicings and channels: give a copy this piece's chord samples first, or it reads each chord as one
+note); the MP3; stop. I listen in the app (python -m vulturetracker gui suite/<piece>/<piece>.yaml) and drop notes with
+N. Act on the notes and their sounding lists, one round at a time, and ask nothing the report answers. If I say a
+passage sounds like the reference, rewrite its notes; don't answer with measurements.
 
 Standing rules: report measurements, never claim to have heard anything; sounds I approve stay row for row; the
 balance starts at the reference's, the faders are mine; no commits or pushes unless I say so; never git add -A;

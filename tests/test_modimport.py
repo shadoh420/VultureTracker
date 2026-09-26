@@ -106,8 +106,8 @@ def write_mod(samples, patterns, orders, nch=4):
     return bytes(b)
 
 
-def write_s3m(samples, patterns, orders, nch=4, stereo=True, gv=64, mv=0x30, pans=None):
-    """samples: (name, 8-bit data, volume, c2spd, loop (start, end) or None); patterns: 64 rows of nch cells (note byte or
+def write_s3m(samples, patterns, orders, nch=4, stereo=True, gv=64, mv=0x30, pans=None, bits16=False):
+    """samples: (name, 8-bit data (16-bit with `bits16`), volume, c2spd, loop (start, end) or None); patterns: 64 rows of nch cells (note byte or
     None, instrument, volume or None, command 1-26 or 0, info)."""
     nord = len(orders) + (len(orders) & 1)
     head = bytearray(0x60)
@@ -152,11 +152,11 @@ def write_s3m(samples, patterns, orders, nch=4, stereo=True, gv=64, mv=0x30, pan
         body[h + 1:h + 13] = b"smp.raw".ljust(12, b"\0")
         body[h + 13] = seg >> 16
         struct.pack_into("<HIII", body, h + 14, seg & 0xFFFF, len(d), loop[0] if loop else 0, loop[1] if loop else 0)
-        body[h + 0x1C], body[h + 0x1F] = vol, 1 if loop else 0
+        body[h + 0x1C], body[h + 0x1F] = vol, (1 if loop else 0) | (4 if bits16 else 0)
         struct.pack_into("<I", body, h + 0x20, c2spd)
         body[h + 0x30:h + 0x4C] = name.encode().ljust(28, b"\0")
         body[h + 0x4C:h + 0x50] = b"SCRS"
-        body += bytes((v + 128) & 255 for v in d)  # unsigned
+        body += struct.pack(f"<{len(d)}H", *((v + 32768) & 0xFFFF for v in d)) if bits16 else bytes((v + 128) & 255 for v in d)  # unsigned
     struct.pack_into(f"<{len(ptrs)}H", body, ptrs_at, *ptrs)
     return bytes(body)
 
@@ -309,6 +309,8 @@ class TestModImport(unittest.TestCase):
         for name, events, level, cents in S3M_CASES:
             self.check(write_s3m(smp, [grid(events, E_S3M)], [0]), "s3m", name, level, cents)
         two = grid([(0, 0, (C5, 1, None, 0, 0)), (0, 1, (C5 + 16, 1, None, 0, 0))], E_S3M)
+        self.check(write_s3m([("tone", [v * 256 for v in TONE], 64, 8363, (0, 4000))], [grid(S3M_CASES[0][1], E_S3M)], [0], bits16=True),
+                   "s3m", "16-bit unsigned", 0.1, 1)
         for kw in ({"stereo": False}, {"stereo": False, "pans": [2, 13, 7, 8]}, {"pans": [2, 13, 7, 8]}, {"mv": 0x60}):
             self.check(write_s3m(smp, [two], [0], **kw), "s3m", f"mix {kw}", 0.5, None)
 
