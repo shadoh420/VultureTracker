@@ -540,7 +540,7 @@ function grid(f,inSel,h){const n=f.orders.length,wide=h>9;let out=`<div class="g
 // entry changes, so typing is never overwritten), rendered as a new candidate or written back into the recipe
 let RC_KEY=null;
 function renderRecipe(){const r=S.recipe||{},s=r.slot,j=r.job;$('recipe').style.display=s?'block':'none';if(!s){RC_KEY=null;return}
-  const key=`${S.slot}|${s.recipe}|${s.name}|${s.note}|${s.spec}`;if(key!==RC_KEY){RC_KEY=key;$('rc-spec').value=s.spec}
+  const key=`${S.slot}|${s.recipe}|${s.name}|${s.note}|${s.spec}`;if(key!==RC_KEY){RC_KEY=key;$('rc-spec').value=s.spec;$('rc-spec').rows=Math.min(24,Math.max(5,s.spec.split('\n').length))}
   $('rc-what').textContent=`${s.recipe_name} · ${s.name}${s.note!=null?' ('+s.note+')':''}`;
   const busy=j&&(j.status==='queued'||j.status==='rendering');$('rc-msg').style.color=j&&j.status==='failed'?'var(--red)':'var(--dim)';
   const SY={surge:['Surge XT','300 MB'],dexed:['Dexed','10 MB']},get=j&&j.status==='failed'&&SY[j.need];$('rc-get').style.display=get?'inline-block':'none';
@@ -1239,6 +1239,8 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
     if((e.ctrlKey||e.metaKey)&&(k==='z'||k==='y')){e.preventDefault();e.stopImmediatePropagation();patUndo(k==='y'||e.shiftKey);return}
     if(e.key==='Escape'&&W.sel){W.sel=null;drawWave();renderSmpInfo();return}
     if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&k.length===1&&PIANO.includes(k)&&W.data&&W.data.player){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,W.data.player[0])}return}
+  if((ptOn()||faOn())&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){
+    const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)pkPlay(k)}return}
   if($('t-ins').classList.contains('on')&&INS_SEL!=null&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){
     const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,+INS_SEL-1)}return}
   if(!$('t-pattern').classList.contains('on')||!S||!S.song||!S.song.facts)return;
@@ -1473,6 +1475,18 @@ async function faSave(dest){$('fa-msg').textContent='rendering…';try{const r=a
 // ---- the PAINT tab (spectral.py): a picture over frequency (rows, lowest at the bottom) and time (columns); brightness is
 // the level, the colour the pan (red left, yellow centre, green right). Kept in this browser per song (localStorage).
 const PT={rows:72,cols:128,amp:null,pan:null,tool:'brush',drag:null};const PTA=new Audio();const ptOn=()=>$('t-paint').classList.contains('on');
+// the piano keys on the PAINT and FAUST tabs: the picture (as C-5) or the Faust note (as NOTE), rendered again after any
+// change and played at the key's pitch, one shot per key
+const PK={sig:'',buf:null,root:60,ctx:null};
+async function pkPlay(k){const paint=ptOn(),msg=$(paint?'pt-msg':'fa-msg');
+  try{const body=paint?JSON.stringify(ptBody('preview')):'',sig=paint?body:[$('fa-code').value,JSON.stringify(FA.vals),$('fa-note').value,$('fa-vel').value,$('fa-hold').value,$('fa-tail').value].join('|');
+    PK.ctx=PK.ctx||new AudioContext();PK.ctx.resume();
+    if(sig!==PK.sig){let ab,root=60;if(paint){const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body});
+        if(!(r.headers.get('content-type')||'').startsWith('audio/'))throw new Error(((await r.json()).error||'').replace(/^\w+: /,''));ab=await r.arrayBuffer()}
+      else{const r=await faRender();root=ptNote($('fa-note').value);ab=faWav(r.channels,44100,root).buf}
+      PK.buf=await PK.ctx.decodeAudioData(ab);PK.root=root;PK.sig=sig}
+    const s=PK.ctx.createBufferSource();s.buffer=PK.buf;s.playbackRate.value=2**((12*(+$('lv-oct').value||0)+PIANO.indexOf(k)-PK.root)/12);s.connect(PK.ctx.destination);s.start()}
+  catch(e){msg.textContent=String(e.message||e)}}
 function ptKey(){return 'paint|'+(S&&S.song?S.song.path:'')}
 function ptNew(r,c){PT.rows=r;PT.cols=c;PT.amp=new Float32Array(r*c);PT.pan=new Float32Array(r*c)}
 function ptSave(){try{localStorage[ptKey()]=JSON.stringify({rows:PT.rows,cols:PT.cols,amp:Array.from(PT.amp,v=>Math.round(v*1000)),pan:Array.from(PT.pan,v=>Math.round(v*1000)),

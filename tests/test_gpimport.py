@@ -58,6 +58,7 @@ def tab(path):
         beat(m3, 3 + k / 3, 8, [(1, k, N, {})], tuplet=M.Tuplet(3, 2))
     dr = M.Track(song, number=2, name="Drums", isPercussionTrack=True, strings=[M.GuitarString(n, 0) for n in range(1, 7)])
     dr.channel.channel = 9
+    dr.channel.volume, dr.channel.balance = 128, 128  # the mixer's top: 0-16 steps read as 0-128
     dr.measures = [M.Measure(dr, h) for h in hdrs]
     for m in dr.measures:
         for q in range(4):
@@ -104,6 +105,7 @@ class TestGpImport(unittest.TestCase):
             names = [c["name"] for c in m["channels"]]
             self.assertEqual(names, ["Gtr str 1", "Gtr str 2", "Gtr str 3", "Gtr str 4", "Gtr str 5", "Gtr str 6",
                                      "Drums drum 1", "Drums drum 2", "Tempo"])
+            self.assertEqual([(c.get("volume"), c.get("pan")) for c in m["channels"][5:7]], [(52, None), (None, 64)])  # 64 is the default, left out
             cell = {}
             for name, pat in song["patterns"].items():
                 for line in pat["data"].splitlines():

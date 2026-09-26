@@ -106,21 +106,21 @@ def play_order(headers):
 # ---------------------------------------------------------------- placeholder samples
 
 def pluck(freq, seconds=2.0, rate=44100, damping=0.996, bright=0.5, seed=0):
-    """A Karplus-Strong plucked string (numpy, block by block of one period): a noise burst low-passed by `bright`,
-    averaged round a delay line of one period; returns float mono."""
+    """A Karplus-Strong plucked string (numpy, block by block of one period): a noise burst low-passed at (2 + 30 x
+    `bright`) times `freq` (first order, so the attack is a pluck rather than a hiss), averaged round a delay line of one period; returns float mono."""
     n = int(seconds * rate)
     period = max(2, int(round(rate / freq)))
     rng = np.random.default_rng(seed)
     burst = rng.uniform(-1, 1, period)
-    for _ in range(int((1 - bright) * 6)):
-        burst = 0.5 * (burst + np.roll(burst, 1))
-    y = np.zeros(n + period + 1)
-    y[:period] = burst - burst.mean()
-    for k in range(period, n + period, period):
-        prev = y[k - period: k + 1]
+    spec = np.fft.rfft(burst)  # one period: bin h is the h-th harmonic
+    burst = np.fft.irfft(spec / np.sqrt(1 + (np.arange(len(spec)) / (2 + 30 * bright)) ** 2), period)
+    y = np.zeros(n + period + 2)  # y[0] a zero before the burst: y[i] = damping * (y[i - period] + y[i - period - 1]) / 2
+    y[1: period + 1] = burst - burst.mean()
+    for k in range(period + 1, n + period + 1, period):
+        prev = y[k - period - 1: k]
         seg = damping * 0.5 * (prev[:-1] + prev[1:])
         y[k: k + period] = seg[: len(y[k: k + period])]
-    y = y[:n] * np.minimum(1, (n - np.arange(n)) / (0.02 * rate))
+    y = y[1: n + 1] * np.minimum(1, (n - np.arange(n)) / (0.02 * rate))
     return y / (np.abs(y).max() or 1) * 0.8
 
 
@@ -381,8 +381,9 @@ def import_gp(src, song_path, samples_dir):
             evs = sorted(by_lane[key], key=lambda e: e["row"])
             label = f"drum {key[1] + 1}" if drums else f"str {key[1]}"
             ln = Lane(f"{track.name.strip()[:13]} {label}")
-            ln.volume = round(track.channel.volume * 64 / 127)
-            ln.pan = round(track.channel.balance * 64 / 127)
+            # PyGuitarPro gives the mixer's 0-16 steps times 8: 0-128, balance 64 = centre
+            ln.volume = min(64, round(track.channel.volume / 2))
+            ln.pan = min(64, round(track.channel.balance / 2))
             _lane_cells(ln, evs, speed, r, skip)
             lanes.append(ln)
     if tempo_lane.cells:
