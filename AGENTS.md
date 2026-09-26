@@ -55,19 +55,24 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   heard. Sounds are offered as tryout candidates and the owner picks them in the app; levels are the owner's (the
   faders and WRITE MIX), not the agent's. Feedback arrives as listening notes (`<song>.notes.md`): read the words and
   the sounding list of each note, act on them, and do not ask what the report already answers.
-- **Follow the reference (since 2026-09-22; this replaces the old taste list).** Build a piece against **one**
-  reference track (the way Vantage was built against Foregone Destruction), never a synthesis of several;
-  `suite/NEXT-PROMPT.md` is the agreed procedure. The old taste rules (dark and dream-like only; no bells, plucks,
-  squares, flutes or saws; no arpeggios or sequences; one pedal, no colour changes) did not serve the pieces and no
-  longer apply. Nothing is excluded in advance: arpeggios, sequences, saw-like or distorted tones, bells, bass motion
-  and chord colours are all allowed wherever the reference uses them. Every choice starts from what the reference
-  measurably does (`scratch/ut99-clean/melodic.py` and `perchannel.py`: its cells and how often they repeat, the movement
-  on each note, its echoes, its samples as played, its level). The reference's idioms may be followed closely (its echo
-  delays and levels, its colour set, its sequence copies, offsets and gates); the notes, melodic cells and sounds stay
-  our own (see Copyright). The balance starts where the reference's is (for Nether Animal, the tonal layers about 10 dB
-  under the low end); the faders stay the owner's, and the owner's ear decides every sound in the tryout. Drums, sub and
+- **Follow the reference, write our own lines (since 2026-09-26: the way Rift 2 was made).** Build a piece against
+  **one** reference track, never a synthesis of several; `suite/NEXT-PROMPT.md` is the procedure. Taken from the
+  reference, measured (`scratch/ut99-clean/perchannel.py`, never its melodies): its tempo and groove, its sound world, its
+  idioms (echoes, offsets, gates, glides) and its balance (for Nether Animal, the tonal layers about 10 dB under the low
+  end). Nothing is excluded in advance: arpeggios, sequences, saw-like or distorted tones, bells, bass motion and chord
+  colours are all allowed. Ours, always:
+  - **Every melodic line** (sequence, riff, call, lead, a moving bass) is written from scratch, never derived from the
+    reference's measured rhythm, cells, degree or interval mix, contour or register. Rift's first sequence was, and the
+    owner heard "the exact same melody" as Nether's whatever played it. Each line is offered as two to four short
+    rendered versions (MP3s) plus one without it, and the owner picks.
+  - **The layer set.** Fewer roles than the reference where that frees the piece (Rift 2 dropped five of Nether's).
+  - **The section lengths.** Not the reference's (Rift's intro at Nether's length was "a bit too long").
+  When the owner says a passage sounds like the reference, rewrite its notes; never argue similarity away with
+  measurements. The faders stay the owner's, and the owner's ear decides every sound in the tryout. Drums, sub and
   other sounds the owner has approved stay as they are, row for row, unless the owner says otherwise. Every melodic
-  voice sits in its own single-sample slot so the tryout can swap it.
+  voice sits in its own single-sample slot so the tryout can swap it. (This replaces the 2026-09-22 rule, which let the
+  reference's form and melodic shape through: "the musical equivalent of tracing". `suite/METHOD-PROPOSAL.md` is
+  background only.)
 - **No anti-aliasing regressions.** Songs set `module: sample_rate: 44100` and renders are oversampled. A sample may be
   played as far above its root as its content allows: its bandwidth times the transposition ratio stays under about
   18 kHz and under the drums' ceiling (a sample 4.5 kHz wide may play two octaves up, one 9 kHz wide one octave up).
