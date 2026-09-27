@@ -8,6 +8,7 @@ envelope, filter and its sweep, random volume) joins the unwritten mix and is ap
 Ratings, notes, the candidate list, mutes and the unwritten mix live in `<song>.tryout.json` beside the song.
 Listening notes (a tag dropped at the playhead, the channels sounding there, the listener's words) live in
 `<song>.notes.json` and are rendered as `<song>.notes.md`, a report for a collaborator who cannot listen."""
+import copy
 import datetime
 import difflib
 import functools
@@ -35,8 +36,12 @@ from pathlib import Path
 import yaml
 
 from . import api
+from .fileio import atomic_write as _atomic, protect_outputs, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
+from .history import History, digest, json_bytes
+from .project import collect, replace_values, resolve_meta, relative_meta
+from .arrangement import sections_text, occurrence_map, reorder
 from .openmpt import LoadedModule
 from .song import SongError, load_song_text
 from .wavload import read_wav
@@ -60,25 +65,6 @@ PORT = 8723
 WORKERS = max(1, int(os.environ.get("VT_WORKERS") or 1))
 PROFILE = RECENT.parent / "webview"
 OLD_RECENT = RECENT.parent.with_name("TrackerForge") / "recent.json"  # the app's previous name
-
-
-def _atomic(path, data):
-    """`data` (bytes) as the file at `path`, written to a temporary file beside it and moved over it, so a crash or a
-    power loss mid-write leaves the old file or the new one, never a truncated one."""
-    path = Path(path)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")  # the request handlers are threads
-    try:
-        tmp.write_bytes(data)
-        for wait in (0.05, 0.1, 0.2, 0.4, None):
-            try:
-                os.replace(tmp, path)
-                break
-            except PermissionError:  # Windows: a reader (a scanner, the indexer, another thread) holds the file a moment
-                if wait is None:
-                    raise
-                time.sleep(wait)
-    finally:
-        tmp.unlink(missing_ok=True)
 
 
 def _atomic_text(path, text):
@@ -138,7 +124,14 @@ def create_song(path, channels=8, sample=None):
             raise ValueError(f"no such WAV: {wav}")
     else:
         from .wavload import write_wav
-        wav = path.with_name(path.stem + "_tone.wav")
+        for k in itertools.count(1):
+            wav = path.with_name(path.stem + ('_tone' if k == 1 else f'_tone-{k}') + '.wav')
+            try:
+                with wav.open('xb'):
+                    pass
+                break
+            except FileExistsError:
+                continue
         n = RATE
         write_wav(wav, RATE, [[round(12000 * math.sin(2 * math.pi * 261.6256 * i / RATE) * min(1, (n - i) / 2000)) for i in range(n)]], root_note=60)
     try:
@@ -149,10 +142,10 @@ def create_song(path, channels=8, sample=None):
     name = re.sub(r"[^ -~]", "", wav.stem)[:25] or "sample"
     q = State._yname
     chans = "".join(f"    - {{name: Ch {i + 1}}}\n" for i in range(max(1, min(64, int(channels)))))
-    path.write_bytes((f"# {title}: a song made in VultureTracker (the format: SONG_FORMAT.md)\nmodule:\n  title: {q(title)}\n"
-                      f"  tempo: 125\n  speed: 6\n  global_volume: 128\n  mix_volume: 48\n  channels:\n{chans}"
+    _atomic(path, (f"# {title}: a song made in VultureTracker (the format: SONG_FORMAT.md)\nmodule:\n  title: {q(title)}\n"
+                      f"  tempo: 125\n  speed: 6\n  global_volume: 128\n  mix_volume: 48\n  sample_rate: 44100\n  channels:\n{chans}"
                       f"samples:\n  1: {{file: {q(rel)}, name: {q(name)}}}\ninstruments:\n  1: {{name: {q(name)}, sample: 1}}\n"
-                      f"patterns:\n  p00:\n    rows: 64\n    data: |\norders: [p00]\n").encode("utf-8"))
+                      f"patterns:\n  p00:\n    rows: 64\n    data: |\norders: [p00]\n").encode("utf-8"), replace=False)
     return path
 
 
@@ -872,15 +865,19 @@ class State:
         self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
         self.closed = False
         self.notices = []     # what the page should tell once: a meta or notes file that could not be read
+        self.history_store = History(self.song_path, self.notices)
+        self.checkpoints = {}
+        self._history_ready = False
+        self._asset_hashes = {}
         meta = _read_json(self.meta_path, {}, self.notices)
-        self.meta.update(meta if isinstance(meta, dict) else {})
+        self.meta.update(resolve_meta(meta, self.base_dir) if isinstance(meta, dict) else {})
         self.notes_path = self.song_path.with_name(self.song_path.stem + ".notes.json")
         notes = _read_json(self.notes_path, [], self.notices)
         self.notes = notes if isinstance(notes, list) else []
         self.lock = threading.RLock()
         self.jobs = queue.PriorityQueue()  # (priority, sequence, job): what is playing first, then the song, the rest, meters last
         self._seq = itertools.count()
-        self.want = None      # the candidate the page is listening to (None: the song itself), rendered first
+        self.want = self.meta.get("selected_candidate")  # the candidate the page is listening to (None: the song itself), rendered first
         self.sound_table = None  # per order per row: the channels sounding there (sounding_table), rebuilt on reload
         self.renders = {}     # render key -> {"status", "error", "file", "peak"}
         self.compiled = {}    # compile key -> .it bytes of the tryout section (a candidate swapped in), patched per render
@@ -893,6 +890,8 @@ class State:
         self.history, self.future = [], []
         self.takes = []       # this session's recorded takes, newest first (save_take)
         self.build = None     # last build/export result
+        self.export_job = None
+        self.export_result = None
         self.stems = None     # stems export progress
         self.recipe_job = None  # the recipe panel's last render, write or synth download: {"status", "error", "log", "file", "need"}
         self._recipe_retry = None  # the render a missing synth stopped, run again once fetch_synth has it
@@ -907,6 +906,14 @@ class State:
         self.it_stamps = None
         self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
         self.reload()
+        saved = self.history_store.load()
+        if saved:
+            self.checkpoints = saved['checkpoints']
+            if saved['head'] == digest(self._raw):
+                self.history, self.future = saved['undo'], saved['redo']
+            else:
+                self.notices.append('External edits since the last session: undo/redo start fresh; named checkpoints remain available for comparison.')
+        self._history_ready = True
         self.cache_dir.mkdir(exist_ok=True)
         for _ in range(WORKERS):
             threading.Thread(target=self._worker, daemon=True).start()
@@ -919,6 +926,11 @@ class State:
         keeps the notes. `loaded`: the (module, warnings) of this very text, already compiled by the caller."""
         with self.lock:
             raw = self.song_path.read_bytes()
+            if archive and self.text and raw != self._raw:
+                self.history.clear()
+                self.future.clear()
+                self.notices.append('External reload: undo and redo start a new history boundary.')
+            self._raw = raw
             self.crlf = b"\r\n" in raw
             self.bom = raw.startswith(b"\xef\xbb\xbf")  # older Notepad; kept on write, but not in the text the editors read
             self.text = raw[3 if self.bom else 0:].decode("utf-8").replace("\r\n", "\n")
@@ -952,18 +964,23 @@ class State:
                 self.meta["slot"] = min(self.song.get("samples") or {1: 0})
             if archive:
                 self._archive_old_notes()
+                if self._history_ready:
+                    _atomic(self.history_store.path, self.history_store.data(self._raw, self.history, self.future, self.checkpoints))
             if self.notes:
-                self.save_notes()  # the report's header and version labels follow the song text
+                try:
+                    self.save_notes()
+                except OSError as e:
+                    self.notices.append(f'Song loaded; listening-note report could not be refreshed: {e}')
             self.queue_all()
 
     def dirty(self):
         try:
-            return self.song_path.stat().st_mtime != self.mtime
+            return self.song_path.read_bytes() != self._raw
         except OSError:
-            return False
+            return True
 
     def save_meta(self):
-        _atomic_text(self.meta_path, json.dumps(self.meta, indent=1))
+        _atomic_text(self.meta_path, json.dumps(relative_meta(self.meta, self.base_dir), indent=1))
 
     def write_song(self, text):
         """The song file, written with the line endings (and the byte-order mark) it had (write_text would turn every LF into
@@ -977,6 +994,8 @@ class State:
         """The candidate the page is listening to (None: the song): its pending render jumps the queue."""
         with self.lock:
             self.want = cand
+            self.meta["selected_candidate"] = cand
+            self.save_meta()
             k = self.key(cand)
             if self.renders.get(k, {}).get("status") == "queued":
                 self._put(1, (k, cand))
@@ -1137,7 +1156,14 @@ class State:
         ck = self.ckey(cand) + ("|whole" if whole else "")
         if ck not in self.compiled:
             with self.lock:
-                base, slot = api.tryout_song(self.song, None if whole else self.orders), self.slot
+                span = None
+                if not whole and self.orders and self.facts:
+                    a, b = self.orders
+                    playable = self.facts['orders']
+                    if not 0 <= a < b <= len(playable):
+                        raise ValueError('Selected order range is no longer valid')
+                    span = (playable[a]['order'], playable[b-1]['order']+1)
+                base, slot = api.tryout_song(self.song, span), self.slot
                 inst = self.mix().get("instrument") or {}
             for n, edit in inst.items():
                 if int(n) in (base.get("instruments") or {}):
@@ -1175,11 +1201,12 @@ class State:
             job = self.jobs.get()[2]
             if job[0] == "close":
                 return
+            if job[0] == 'export':
+                from .export import run
+                run(job[1], _encode)
+                continue
             if job[0] == "build":
                 self._build(job[1])
-                continue
-            if job[0] == "stems":
-                self._stems(*(job[1] or ()))
                 continue
             if job[0] == "meters":
                 self._meters(job[1])
@@ -1718,13 +1745,12 @@ class State:
                 raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.patched_text(cand)
             loaded = load_song_text(new, self.base_dir, str(self.song_path))  # SongError: nothing is written
-            before = self._meta_view()
-            self.meta["candidates"].pop(str(self.slot), None)  # the choice is made: the slot's list goes (ratings stay, keyed by file)
+            meta = copy.deepcopy(self.meta)
+            meta['candidates'].pop(str(self.slot), None)
+            meta['selected_candidate'] = None
+            self._commit(new, loaded, meta=meta)
             if self.want == cand:
                 self.want = None
-            self.save_meta()
-            self._commit(new, loaded)
-            self._attach_meta(before)
         self._put(0, ("build", False))
 
     def apply_mix(self):
@@ -1733,80 +1759,46 @@ class State:
                 raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.mix_text()
             loaded = load_song_text(new, self.base_dir, str(self.song_path))
-            before = self._meta_view()
-            self.meta["mix"] = {}
-            self.save_meta()
-            self._commit(new, loaded)
-            self._attach_meta(before)
+            self._commit(new, loaded, meta=dict(self.meta, mix={}))
         self._put(0, ("build", False))
 
     # ---- build / export
 
-    def request_build(self, render):
+    def request_export(self, options, target='export_result'):
+        from .export import prepare
         with self.lock:
-            self.build = {"status": "queued", "render": render}
-        self._put(0, ("build", render))
+            if self.export_job and self.export_job['result']['status'] in ('queued', 'rendering', 'publishing'):
+                raise ValueError('An export is active; wait or cancel it first')
+            job = prepare(self, options)
+            self.export_job = job
+            self.export_result = job['result']
+            setattr(self, target, job['result'])
+            self._put(0, ('export', job))
+
+    def cancel_export(self):
+        if self.export_job:
+            self.export_job['cancel'].set()
+
+    def request_build(self, render):
+        # The legacy buttons now use the same immutable snapshot and safe publication as the export panel.
+        try:
+            self.request_export({'fmt': 'wav' if render else 'it', 'include_it': render, 'replace': True}, 'build')
+        except (SongError, OSError, ValueError) as e:
+            self.build = {'status': 'failed', 'error': str(e)}
 
     def _build(self, render):
-        with self.lock:
-            self.build = {"status": "building", "render": render}
-        out_it = self.song_path.with_suffix(".it")
+        from .export import prepare, run
         try:
-            r = api.build(self.song_path, out_it)
-            r["it"] = str(out_it)
-            if render:
-                out_wav = self.song_path.with_suffix(".wav")
-                r["seconds"] = api.render(out_it, out_wav)
-                r["wav"] = str(out_wav)
-            r["status"] = "done"
+            job = prepare(self, {'fmt': 'wav' if render else 'it', 'include_it': render, 'replace': True})
+            self.build = run(job, _encode)
         except (SongError, OSError, ValueError) as e:
-            r = {"status": "failed", "error": "\n".join(getattr(e, "errors", []) or [str(e)])}
-        with self.lock:
-            self.build = r
+            self.build = {'status': 'failed', 'error': str(e)}
 
-    # ---- stems
-
-    def request_stems(self, fmt="wav", song=False, stems=True):
-        with self.lock:
-            self.stems = {"status": "queued", "done": 0, "total": 0, "dir": None, "song": None, "fmt": fmt, "error": None}
-        self._put(0, ("stems", (fmt if fmt in ENCODE else "wav", bool(song), bool(stems))))
-
-    def _stems(self, fmt="wav", song=False, stems=True):
-        """One file per channel that plays anything, rendered with every other channel disabled, in <song>_stems/, and with
-        `song` the whole song as <song>.<fmt> beside it; `fmt` "mp3", "ogg" or "flac" encodes through ffmpeg (ENCODE). The song as
-        written: the unwritten mix is not applied."""
-        with self.lock:
-            f = self.facts
-            out_dir = self.song_path.with_name(self.song_path.stem + "_stems")
-            chans = [i for i in range(len(f["channels"])) if any(u[i] for u in f["use"])] if f and stems else []
-            whole = self.song_path.with_suffix("." + fmt) if song else None
-            self.stems = {"status": "rendering", "done": 0, "total": len(chans) + bool(whole), "dir": str(out_dir) if chans else None,
-                          "song": str(whole) if whole else None, "fmt": fmt, "error": None}
+    def request_stems(self, fmt='wav', song=False, stems=True):
         try:
-            write = (lambda p, pcm: _encode(p, pcm, fmt)) if fmt in ENCODE else _write_pcm
-            if fmt in ENCODE:
-                ffmpeg_exe()  # before anything renders
-            it = api.compile_song(self.song, self.base_dir)[0]
-            todo = [(whole, [])] if whole else []
-            for i in chans:
-                name = re.sub(r"[^\w-]+", "_", f["channels"][i]).strip("_") or "ch"
-                todo.append((out_dir / f"{i + 1:02d}-{name}.{fmt}", [j for j in range(len(f["channels"])) if j != i]))
-            used = {os.path.normcase(Path(p).resolve()) for p in self.files}
-            for path, _ in todo:
-                if os.path.normcase(path.resolve()) in used:
-                    raise ValueError(f"{path.name} is a sample the song plays: exporting would overwrite it (rename one of them)")
-            if chans:
-                out_dir.mkdir(exist_ok=True)
-            for n, (path, silenced) in enumerate(todo):
-                with LoadedModule(patch_it(it, silenced)) as lm:
-                    write(path, lm.render(RATE))
-                with self.lock:
-                    self.stems["done"] = n + 1
-            with self.lock:
-                self.stems["status"] = "done"
+            self.request_export({'fmt': fmt, 'song': song, 'stems': stems, 'replace': True}, 'stems')
         except (SongError, OSError, ValueError) as e:
-            with self.lock:
-                self.stems.update(status="failed", error="\n".join(getattr(e, "errors", []) or [str(e)]))
+            self.stems = {'status': 'failed', 'error': str(e), 'dir': None}
 
     # ---- pattern editing: each edit is a small in-place change of the pattern's `data: |` rows (the other cells of a row,
     # its label, its comment and every other line stay as they are), checked by compiling the whole song before anything is
@@ -1884,13 +1876,13 @@ class State:
             self._commit("".join(lines))  # compiled first (SongError: nothing is written)
 
     def _need_compiled(self):
-        if self.mod is None:
+        if self.mod is None or self.error:
             raise ValueError("the song does not compile (RENDER & EXPORT lists the errors): fix it in the YAML first")
 
-    def _edit_block(self, lines, index, cells, nch=None):
+    def _edit_block(self, lines, index, cells, nch=None, pat=None):
         """`cells` written into pattern `index`'s rows in `lines` (in place). `nch`: the channel count when an edit of the
         same step added channels."""
-        pat = self.mod.patterns[index]
+        pat = pat or self.mod.patterns[index]
         nch, nrows = nch or len(self.mod.channels), len(pat.rows)
         first, end = self._pattern_block(lines, pat.name)
         rows = [i for i in range(first, end) if lines[i].split(";", 1)[0].strip()]
@@ -1917,28 +1909,132 @@ class State:
     MODULE_KEYS = {"title": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
                    "separation": (0, 128)}
 
-    def _commit(self, new, loaded=None):
-        """`new` as the song, if the whole of it compiles (SongError otherwise: nothing written); one undo step. `loaded`:
-        the (module, warnings) of `new`, when the caller compiled it already."""
+    def _encoded(self, text, crlf=None, bom=None):
+        crlf = self.crlf if crlf is None else crlf
+        bom = self.bom if bom is None else bom
+        return (b'\xef\xbb\xbf' if bom else b'') + text.replace('\n', '\r\n' if crlf else '\n').encode('utf-8')
+
+    def _asset_paths(self, text, meta=None):
+        paths = set()
+        doc = api.from_yaml(text)
+        for entry in (doc.get('samples') or {}).values():
+            if not isinstance(entry, dict) or not entry.get('file'):
+                continue
+            paths.add((self.base_dir / str(entry['file'])).resolve())
+        meta = meta or {}
+        for entries in (meta.get('candidates') or {}).values():
+            paths.update((self.base_dir / p).resolve() for p in entries)
+        if meta.get('selected_candidate'):
+            paths.add((self.base_dir / meta['selected_candidate']).resolve())
+        paths.update((self.base_dir / p).resolve() for p in (meta.get('phrase') or {}).get('assets', {}))
+        return paths
+
+    def _assets(self, text, meta=None):
+        assets = {}
+        for path in self._asset_paths(text, meta):
+            if not path.is_file():
+                assets[str(path)] = None  # relinking is allowed; restoring an originally missing asset is refused
+                continue
+            stat = path.stat()
+            key = (str(path), stat.st_mtime_ns, stat.st_size, stat.st_ctime_ns)
+            if key not in self._asset_hashes:
+                self._asset_hashes[key] = digest(path.read_bytes())
+            assets[str(path)] = self._asset_hashes[key]
+        return assets
+
+    def _step(self, meta=None):
+        return {'text': self.text, 'meta': copy.deepcopy(meta), 'assets': self._assets(self.text, meta),
+                'crlf': self.crlf, 'bom': self.bom, 'version': self.version()}
+
+    def _check_assets(self, step):
+        if 'text' in step:
+            required = {str(p) for p in self._asset_paths(step['text'], step.get('meta'))}
+            if not required.issubset(step.get('assets', {})):
+                raise ValueError('Cannot restore: history is missing source asset fingerprints; compare the checkpoint text instead.')
+        for path, expected in step.get('assets', {}).items():
+            asset = self.base_dir / path
+            if expected is None or not asset.is_file() or digest(asset.read_bytes()) != expected:
+                raise ValueError(f'Cannot restore: source asset changed or is missing: {path}. Relink or restore the original asset first.')
+
+    def _write_step(self, new, meta, history, future):
+        if self.dirty():
+            raise ValueError('the song changed on disk: compare and RELOAD first')
+        raw = self._encoded(new)
+        saved = self.history_store.data(raw, history, future, self.checkpoints)
+        self.history_store.write(raw, relative_meta(meta, self.base_dir), saved, lambda: self.write_song(new), self._raw)
+
+    def checkpoint(self, name, action='save'):
+        with self.lock:
+            name = str(name).strip()
+            if not name or len(name) > 80:
+                raise ValueError('Give the checkpoint a name of 1-80 characters')
+            if self.dirty():
+                raise ValueError('Compare and RELOAD external edits first')
+            if action == 'diff':
+                return self._diff(self.checkpoints[name]['text'], False)
+            if action == 'restore':
+                step = self.checkpoints[name]
+                self._check_assets(step)
+                self._commit(step['text'], meta=dict(self.meta, **(step.get('meta') or {})))
+                return {}
+            checkpoints = copy.deepcopy(self.checkpoints)
+            if action == 'delete':
+                del checkpoints[name]
+            elif action == 'save':
+                if name in checkpoints:
+                    raise ValueError('A checkpoint with that name exists; choose another name')
+                if len(checkpoints) >= 32:
+                    raise ValueError('At most 32 checkpoints; delete one before saving another')
+                checkpoints[name] = self._step(self._meta_view())
+            else:
+                raise ValueError('unknown checkpoint action')
+            _atomic(self.history_store.path, self.history_store.data(self._raw, self.history, self.future, checkpoints))
+            self.checkpoints = checkpoints
+            return {}
+
+    def relink(self, num=None, path=None, links=None):
+        with self.lock:
+            updates = []
+            for num, path in (links if links is not None else {num: path}).items():
+                num = int(num)
+                entry = (self.song.get('samples') or {}).get(num)
+                if not isinstance(entry, dict) or not entry.get('file'):
+                    raise ValueError('Select a sample with a file to relink')
+                path = (self.base_dir / str(path)).resolve()
+                read_wav(path)
+                try:
+                    rel = Path(os.path.relpath(path, self.base_dir)).as_posix()
+                except ValueError:
+                    rel = path.as_posix()
+                updates.append((('samples', num, 'file'), rel))
+            if not updates:
+                raise ValueError('Provide replacement paths for the missing samples')
+            self._commit(replace_values(self.text, updates))
+
+    def external_diff(self):
+        raw = self.song_path.read_bytes()
+        text = raw.decode('utf-8-sig').replace('\r\n', '\n')
+        return dict(self._diff(text, False), token=digest(raw))
+
+    def _commit(self, new, loaded=None, meta=None):
+        """Compile, write, then publish one undo step. A failed write consumes no history or settings."""
         loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
-        self.history.append({"text": self.text, "meta": None})
-        del self.history[:-self.UNDO_LIMIT]  # a song text each: a long session of edits on a big song adds up
-        self.future.clear()
-        self.write_song(new)
+        meta = copy.deepcopy(self.meta if meta is None else meta)
+        changed = {k: copy.deepcopy(self.meta.get(k)) for k in self.META_KEYS if self.meta.get(k) != meta.get(k)}
+        back = self._step(changed or None)
+        history = (self.history + [back])[-self.UNDO_LIMIT:]
+        self._write_step(new, meta, history, [])
+        self.history, self.future = history, []
+        self.meta = meta
+        self.want = meta.get("selected_candidate")
         self.reload(archive=False, loaded=loaded)
 
-    META_KEYS = ("candidates", "muted", "solo", "mix", "orders", "loop")  # the tryout settings a song write may change
+    META_KEYS = ("candidates", "muted", "solo", "mix", "orders", "loop", "phrase", "selected_candidate")  # the tryout settings a song write may change
     UNDO_LIMIT = 200     # undo steps kept (the oldest go first)
 
     def _meta_view(self):
         import copy
         return copy.deepcopy({k: self.meta.get(k) for k in self.META_KEYS})
-
-    def _attach_meta(self, before):
-        """The tryout settings the last write changed, as they were, kept with its undo step (see undo)."""
-        changed = {k: v for k, v in before.items() if v != self.meta.get(k)}
-        if changed and self.history:
-            self.history[-1]["meta"] = changed
 
     @staticmethod
     def _ind(line):
@@ -2675,6 +2771,83 @@ class State:
             out[-1] = out[-1][:-1]
         lines[i + 1:end] = out
 
+    def section_edit(self, body):
+        with self.lock:
+            self._need_compiled()
+            name, action = str(body.get('name', '')).strip(), body.get('action', 'save')
+            sections = copy.deepcopy(self.song.get('sections') or {})
+            if action == 'save':
+                sections[name] = [int(body['start']), int(body['end'])]
+                self._commit(sections_text(self.text, sections))
+                return
+            if name not in sections:
+                raise ValueError('Select a named section first')
+            a, b = sections[name]
+            if action == 'delete':
+                del sections[name]
+                self._commit(sections_text(self.text, sections))
+                return
+            meta = copy.deepcopy(self.meta)
+            if action in ('select', 'loop'):
+                playable = [i for i, o in enumerate(self.facts['orders']) if a <= o['order'] < b]
+                if not playable:
+                    raise ValueError('The section has no playable orders')
+                meta['orders'] = [playable[0], playable[-1]+1]
+                if action == 'loop':
+                    meta['loop'] = {'from': [playable[0], 0], 'to': [playable[-1], self.facts['orders'][playable[-1]]['rows']-1]}
+                self._commit(self.text, meta=meta)
+                return
+            before = [str(o) for o in self.song['orders']]
+            at = int(body.get('to', len(before)))
+            if not 0 <= at <= len(before):
+                raise ValueError('Destination is an order boundary from 0 to the order count')
+            lines = self.text.splitlines(keepends=True)
+            clones = {}
+            if action == 'move':
+                if a <= at <= b:
+                    return
+                origins = [i for i in range(len(before)) if not a <= i < b]
+                insert = at if at < a else at - (b-a)
+                origins[insert:insert] = list(range(a, b))
+                after = [before[i] for i in origins]
+            elif action == 'duplicate':
+                insert = at
+                independent = bool(body.get('independent', True))
+                names = set(self.song['patterns'])
+                for src in dict.fromkeys(before[a:b]):
+                    if src in ('+++', '---'):
+                        continue
+                    first, end = self._pattern_block(lines, src)
+                    if not independent and any(a <= int(m.group(1), 16) < b for line in lines[first:end]
+                                              for m in api._JUMP.finditer(line.partition(';')[0])):
+                        raise ValueError('Shared copy has jumps into its section; choose independent patterns to keep those jumps inside the copy')
+                    if independent:
+                        clone = next(n for n in (src + '_copy' + str(i) for i in itertools.count(1)) if n not in names)
+                        names.add(clone)
+                        self._song_op(lines, list(before), {'op': 'pattern_clone', 'src': src, 'name': clone}, [])
+                        clones[src] = clone
+                segment = [clones.get(p, p) for p in before[a:b]]
+                after = before[:at] + segment + before[at:]
+                origins = list(range(at)) + [None] * (b-a) + list(range(at, len(before)))
+            else:
+                raise ValueError('unknown section action')
+            mapping = reorder(self, lines, before, after, origins, meta)
+            if action == 'duplicate':
+                for clone in clones.values():
+                    first, end = self._pattern_block(lines, clone)
+                    inside = {mapping[i]: insert + i-a for i in range(a, b)}
+                    for i in range(first, end):
+                        data, sep, comment = lines[i].partition(';')
+                        lines[i] = api._JUMP.sub(lambda m: f'B{inside.get(int(m.group(1), 16), int(m.group(1), 16)):02X}', data) + sep + comment
+                sections = api.from_yaml(''.join(lines)).get('sections') or {}
+                new_name = str(body.get('new_name') or name + ' copy')
+                if new_name in sections:
+                    new_name = next(f'{new_name} {i}' for i in itertools.count(2) if f'{new_name} {i}' not in sections)
+                sections[new_name] = [insert, insert + b-a]
+                lines = sections_text(''.join(lines), sections).splitlines(keepends=True)
+            self._write_orders(lines, after)
+            self._commit(''.join(lines), meta=meta)
+
     def song_edit(self, ops):
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
         channel_rename, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
@@ -2686,7 +2859,7 @@ class State:
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the edit does not overwrite that change")
             lines = self.text.splitlines(keepends=True)
-            meta_before = self._meta_view()
+            meta = copy.deepcopy(self.meta)
             before = [str(o) for o in (self.song.get("orders") or [])]
             orders, remap = list(before), []
             self._created = []  # WAVs written by sample edits: removed again when the edit is refused
@@ -2695,13 +2868,19 @@ class State:
                 for op in ops:
                     self._song_op(lines, orders, op, remap)
                 if orders != before:
+                    explicit = [op['origins'] for op in ops if op.get('op') == 'orders' and 'origins' in op]
+                    origins = explicit[-1] if explicit else (list(range(len(before))) if all(op.get('op') == 'pattern_rename' for op in ops)
+                                                            else occurrence_map(before, orders))
+                    # A replacement at one position (e.g. Make unique) retains that occurrence's identity.
+                    if len(before) == len(orders):
+                        origins = [i if o is None and i not in origins else o for i, o in enumerate(origins)]
+                    reorder(self, lines, before, orders, origins, meta)
                     self._write_orders(lines, orders)
-                self._commit("".join(lines))
+                loaded = load_song_text("".join(lines), self.base_dir, str(self.song_path))
             except Exception:
                 for f in self._created:
                     f.unlink(missing_ok=True)
                 raise
-            meta = self.meta
             for f in remap:
                 mix = meta.get("mix") or {}
                 for k in ("volume", "pan"):
@@ -2710,14 +2889,17 @@ class State:
                 meta["muted"] = sorted(f(c) for c in meta.get("muted") or [] if f(c) is not None)
                 if meta.get("solo") is not None:
                     meta["solo"] = f(meta["solo"])
-            n = len(self.facts["orders"]) if self.facts else 0
+            n = len(orders)
             if meta.get("orders") and meta["orders"][1] > n:
                 meta["orders"] = None
             if meta.get("loop") and max(meta["loop"]["from"][0], meta["loop"]["to"][0]) >= n:
                 meta["loop"] = None
-            self._attach_meta(meta_before)
-            self.save_meta()
-            self.queue_all()
+            try:
+                self._commit(''.join(lines), loaded, meta=meta)
+            except Exception:
+                for f in self._created:
+                    f.unlink(missing_ok=True)
+                raise
             return {"report": "; ".join(self._report)} if self._report else {}
 
     def undo(self, redo=False):
@@ -2733,14 +2915,18 @@ class State:
                 raise ValueError("the song changed on disk: RELOAD first (the undo history is for the song the app wrote)")
             step = src[-1]
             meta = step.get("meta")
-            back = {"text": self.text, "meta": copy.deepcopy({k: self.meta.get(k) for k in meta}) if meta else None}
-            self.write_song(step["text"])  # first: a write that fails leaves both stacks as they were
-            src.pop()
-            dst.append(back)
+            self._check_assets(step)
+            back = self._step({k: self.meta.get(k) for k in meta} if meta else None)
+            target = copy.deepcopy(self.meta)
             if meta:
-                self.meta.update(copy.deepcopy(meta))
-                self.save_meta()
-            self.reload(archive=False)
+                target.update(copy.deepcopy(meta))
+            loaded = load_song_text(step['text'], self.base_dir, str(self.song_path))
+            history, future = (dst + [back], src[:-1]) if redo else (src[:-1], dst + [back])
+            self._write_step(step['text'], target, history, future)
+            self.history, self.future = history, future
+            self.meta = target
+            self.want = target.get("selected_candidate")
+            self.reload(archive=False, loaded=loaded)
 
     # ---- sample editor
 
@@ -3112,19 +3298,25 @@ class State:
                 "song": {"path": str(self.song_path), "dir": str(self.base_dir), "dirty": self.dirty(), "error": self.error,
                          "mtime": self.mtime, "stamps": hashlib.sha1((self._stamps or "").encode()).hexdigest()[:8], "facts": self.facts, "sample_entries": {str(k): v for k, v in ents.items()},
                          "slot_meas": slot_meas},
-                "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref,
+                "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref, "selected_candidate": self.want,
                 "orders": list(self.orders) if self.orders else None, "loop": self.meta.get("loop"),
                 "muted": sorted(set(self.meta.get("muted") or [])), "solo": self.meta.get("solo"),
                 "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak")},
                 "mix": self.mix(), "meters": self.meters, "voice": voice, "spec": {"db": SPEC_DB, "stops": SPEC_STOPS, "nyquist": RATE / 2},
                 "voice_range": VOICE_RANGE,
-                "candidates": cands, "build": self.build, "stems": self.stems,
+                "candidates": cands, "build": self.build, "stems": self.stems, "export": self.export_result,
                 "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
                 "undo": len(self.history), "redo": len(self.future), "unused": self.unused(),
+                "checkpoints": list(self.checkpoints),
+                "phrase": {k: v for k, v in (self.meta.get("phrase") or {}).items() if k not in ("snapshot", "assets", "source_assets", "original")},
+                "project_settings": self.meta.get('project_settings') or {},
+                "missing": {str(k): v['file'] for k, v in ents.items() if isinstance(v, dict) and v.get('file')
+                            and not (self.base_dir / str(v['file'])).is_file()},
                 "notices": self.notices,
                 "recipe": self._recipe_snapshot(),
                 "instruments": {str(k): v for k, v in (self.song.get("instruments") or {}).items()},
+                "sections": self.song.get("sections") or {},
                 "structure": {"orders": [str(o) for o in self.song.get("orders") or []],
                               "patterns": [{"name": p.name, "rows": len(p.rows), "index": i,
                                             "used": sum(1 for o in self.song.get("orders") or [] if str(o) == p.name)}
@@ -3570,6 +3762,11 @@ class Handler(BaseHTTPRequestHandler):
             elif act == "edit":  # one pattern (pattern, cells) or several in one step (patterns: [{pattern, cells}])
                 st.edit_patterns([(g["pattern"], g["cells"]) for g in body["patterns"]] if "patterns" in body
                                  else [(body["pattern"], body["cells"])])
+            elif act == "phrase":
+                from .phrases import action
+                return self._send(200, action(st, body))
+            elif act == "section":
+                st.section_edit(body)
             elif act == "songedit":
                 return self._send(200, {"ok": True, **(st.song_edit(body["ops"]) or {})})
             elif act in ("undo", "redo"):
@@ -3582,8 +3779,28 @@ class Handler(BaseHTTPRequestHandler):
                 st.recipe_write(body.get("spec"))
             elif act == "fetchsynth":
                 st.request_fetch_synth(body.get("kind"))
+            elif act == "external":
+                return self._send(200, st.external_diff())
+            elif act == "collect":
+                return self._send(200, collect(st, body['destination'], bool(body.get('zip')), body.get('browser')))
+            elif act == "relink":
+                st.relink(body.get('num'), body.get('path'), body.get('links'))
+            elif act == "projectsettings":
+                settings = body.get('settings')
+                if not isinstance(settings, dict) or len(json.dumps(settings)) > 2 * 1024 * 1024:
+                    raise ValueError('Project browser settings must be an object under 2 MiB')
+                st.meta['project_settings'] = settings
+                st.save_meta()
+            elif act == "checkpoint":
+                return self._send(200, st.checkpoint(body.get('name', ''), body.get('action', 'save')))
             elif act == "reload":
+                if body.get('token') and digest(st.song_path.read_bytes()) != body['token']:
+                    raise ValueError('The external file changed again; compare it again before reloading')
                 st.reload()
+            elif act == 'export':
+                st.request_export(body)
+            elif act == 'cancelexport':
+                st.cancel_export()
             elif act == "build":
                 st.request_build(bool(body.get("render")))
             elif act == "stems":

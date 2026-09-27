@@ -53,6 +53,7 @@ Top-level keys (no others are allowed):
 | `instruments` | no | numbered instrument slots `1..99`. **If present, the module uses instrument mode** and pattern cells refer to instruments. If absent, cells refer to samples directly. |
 | `patterns` | yes | named patterns, each a grid of rows × channels |
 | `orders` | yes | playback order: a list of pattern names |
+| `sections` | no | named non-overlapping spans of order entries; editor annotations only |
 
 Unknown keys anywhere are errors, so typos are caught. Numbers are decimal unless stated otherwise
 (effect parameters are hex); a number written with a leading zero (`08`, `0125`) is decimal too, not YAML 1.1's
@@ -329,6 +330,21 @@ orders: [intro, a, b, a, +++, c]
 Pattern names in play order. `+++` is a skip marker and `---` ends the song. At most 255 entries. Without
 a `Bxx` jump, the song loops back to the first order after the last one. Patterns that are defined
 but not in the list produce a warning.
+
+### Named arrangement sections
+
+```yaml
+sections:
+  Intro: [0, 2]       # orders 0 and 1
+  Verse: [2, 6]       # orders 2 through 5
+```
+
+Names are non-empty strings up to 80 characters. Each value is `[first, exclusive_end]` with
+`0 <= first < exclusive_end <= len(orders)`. Spans cannot overlap and count raw order-list entries, including markers.
+Sections do not add IT commands or change playback; old songs need no new keys. The SONG tab edits these annotations
+with the order list, retargets `Bxx` destinations by occurrence, and can clone patterns for independent section copies.
+A duplicate that reuses pattern names shares future cell edits. MAKE THIS OCCURRENCE UNIQUE creates a new pattern name
+for just one order. Phrase tryouts are project sidecar data; accepting a phrase writes ordinary cells, not macro commands.
 
 ## 8. Idioms
 

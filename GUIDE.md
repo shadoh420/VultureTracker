@@ -47,7 +47,7 @@ opens the app in its own window (`pip install pywebview`; without it, or with `-
 default browser instead; either way it is served on localhost and nothing leaves your machine). Run it with
 no song to get the open-a-song screen with recent songs and the demos; its NEW SONG makes a song file at the path
 given (never over an existing file) with the channels asked for, an empty 64-row pattern and one instrument playing a
-one-second tone written beside the song as `<name>_tone.wav`, and opens it in the Pattern tab. Pick a sample slot and
+one-second tone written beside the song as `<name>_tone.wav` (numbered when that name exists), with `sample_rate: 44100`, and opens it in the Pattern tab. Pick a sample slot and
 a section of the song, add candidate WAVs by path or glob, and each candidate is rendered inside the song with
 only that slot swapped. Keys `1`–`0` switch candidates without losing the playback position, `S`/`M` toggle
 SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes every channel that never plays the slot,
@@ -87,11 +87,9 @@ move re-renders the tryout at once (the section is compiled once and the values 
 and the meter next to each channel is that channel soloed, its RMS in dB over the active part of the section (the way
 the suite's comparison script measures a module: `compare.py` in `scratch/ut99-clean/`, which is local only and not in
 the repository). Nothing is written until WRITE MIX → SONG, which shows the YAML
-change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place). EXPORT STEMS
-writes one WAV per playing channel to `<song>_stems/`; EXPORT SONG AS writes the whole song beside it as MP3 (192 kbit/s),
-OGG (Vorbis quality 6, about 192 kbit/s; Ogg loops gaplessly, which is what a game engine wants) or FLAC (lossless),
-with + STEMS also one file per channel in `<song>_stems/`, the song as written, encoded by ffmpeg: `ffmpeg.exe` beside
-the standalone exe (the build copies it to `dist/`), else imageio-ffmpeg's, else one on PATH. The tab also has the arrangement grid and the slot table. The Pattern tab is the
+change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place).
+EXPORT STEMS and EXPORT SONG AS open the unified RENDER & EXPORT panel: choose destination, format, region, mix,
+audition mute/solo behavior and tail before starting. The tab also has the arrangement grid and the slot table. The Pattern tab is the
 pattern view and editor, the whole window wide, following the selected order and the playhead. It has a cursor (click a
 cell; the arrows, Tab, Page Up/Down, Home and End move it through rows, channels and the note, instrument, volume,
 effect letter and effect parameter columns) and the LIVE transport: libopenmpt compiled to WebAssembly plays, in the page's
@@ -113,7 +111,7 @@ at once and is written into the song file in place: only that row's cell changes
 comments and every other line stay as they are; rows the pattern leaves implied are written out when a later row is
 edited). Before anything is written the whole song is compiled: a change the song format refuses (an instrument that
 does not exist, say) is not written and the bar says why. Ctrl+Z / Ctrl+Y (↶ ↷) undo and redo the edits of this
-session. An undo also puts back the tryout settings the step changed: after a channel is removed or moved its mutes and
+session and previous launches (up to 200 steps). An undo also puts back the tryout settings the step changed: after a channel is removed or moved its mutes and
 unwritten faders are back on the channel they were set on, WRITE MIX undone brings the unwritten mix back, U undone the
 slot's candidate list. Edits are refused while the song file has changed on disk (RELOAD first), so they never overwrite a change
 made elsewhere. While the live engine plays, each edit is swapped in where it plays (about 0.35 s for Nadir) and the
@@ -360,6 +358,73 @@ app's own writes keep them, and the report marks their version.
 the whole CLI with libopenmpt bundled: `vulturetracker.exe gui song.yaml`. Double-clicking it opens the app on its
 open-a-song screen; dropping a song file onto it opens that song. Synth rendering (`synth`, `audition`)
 still needs the plugins and packs from `tools/` next to a checkout, as described in SAMPLING.md.
+
+## Finishing and sharing a song
+
+1. **New song.** Open NEW SONG, choose a new YAML filename and channels. The tone gets an unused filename;
+   existing songs and source WAVs are never replaced. Edit notes in PATTERN; every valid edit saves immediately.
+2. **Arrange.** In SONG, name a section with a first order and an exclusive end (0–4 means orders 0 through 3).
+   SELECT and LOOP use the whole section. MOVE inserts before the chosen order boundary. DUPLICATE offers shared
+   pattern references or independent pattern copies. Repeated names share their notes; **MAKE THIS OCCURRENCE
+   UNIQUE** clones just the selected occurrence. Section operations are undoable. `Bxx` jumps follow their original
+   target occurrences; independent section copies retarget internal jumps into the copy. Removing a jump destination,
+   splitting a named section, or sharing a copy whose internal jumps require different destinations is refused with
+   an explanation. Playback loops that cannot remain contiguous are cleared. Historical listening notes keep their
+   original song version, position and sounding list.
+3. **Compare phrases.** Select rows/channels in PATTERN, open PHRASES and capture two to four alternatives. Without
+   a selection, the cursor's channel for the whole pattern is captured. Initially all alternatives contain the same
+   cells: write and name your own lines in the textarea (one row per line, `|` between channels). SAVE validates them.
+   The absent-line version cuts held notes on the first selected row and adds no notes. Every version keeps the same
+   accompaniment, frozen source WAVs, audition mix and mutes; song-wide effects cannot differ. Audition with the
+   buttons, record ratings/notes, then YAML DIFF / ACCEPT. Accepting changes only the selected cells, making that
+   occurrence unique when needed, as one undo step. A changed song, source WAV or audition setting requires a new
+   comparison before acceptance. Changing sounds comes afterwards in TRYOUT. No lines are generated automatically.
+4. **Mix and checkpoint.** Set faders, compare, and WRITE MIX when ready. Failed song or related-settings writes
+   retain the old document, candidates, mixer and history. In PROJECT save a named checkpoint before a substantial
+   change. COMPARE / RESTORE shows its text diff and restores it as one undo step.
+5. **Export.** RENDER & EXPORT offers IT, WAV, MP3 (192 kbit/s), OGG (Vorbis quality 6), FLAC and channel stems.
+   Choose a destination folder and output name, whole song or named section, saved mix/sounds or current audition
+   mix/selected sample, and whether to respect audition mute/solo. Saved channel mute flags always apply. Playback
+   speed and metronome clicks are not exported. Audio can cut at the boundary or keep a fixed ring-out of 0–10 seconds;
+   stems have identical start frames and lengths, including silent padding. Section audio warms up preceding orders
+   for player state. An IT section is an ordinary standalone order slice using the song's initial settings; it does
+   not embed already sounding notes from earlier orders. Tail options affect audio, not IT playback.
+   The job compiles its snapshot when queued, so later edits and faders cannot change it. Every output is prepared
+   before publication; source paths, symlinks and hardlinks are protected. Existing exports require the Replace
+   option. An encoder failure or cancellation preserves previous files. Cancellation is checked while rendering and
+   before the short publication step; it does not interrupt that step halfway. If a filesystem error prevents rollback,
+   the error identifies the folder retaining the previous files. Legacy build and export endpoints use the same guards.
+6. **Collect.** PROJECT → Save Copy / Collect Samples creates a new folder, optionally a ZIP, with relative WAV
+   paths, candidates/ratings, current phrase comparison, notes and their archives, and supported sample recipes with
+   their file inputs and Faust DSP files. Adjacent attribution/provenance/license files are kept in `credits/`, with
+   their asset associations in `project.json`. Duplicate basenames are numbered. Existing destinations are refused. The
+   original stays untouched. The new copy starts a fresh undo/checkpoint history; those records remain with the source.
+   Named synth patches still require their synth and patch library on the receiving computer. No plugin installers,
+   recordings from outside the project references, or sample-library indexes are bundled. Missing samples must be
+   relinked first: supply explicit replacement WAVs in PROJECT, then RELINK (or all missing samples together). This
+   changes only `file:` paths, keeping tuning, loop settings and comments; the complete song must compile.
+
+**Persistence and external files.** The YAML remains the musical source of truth, with comments, BOM and line endings
+retained by app writes. `<song>.tryout.json` holds audition settings, candidates and phrase choices;
+`<song>.history.json` holds at most 200 undo/redo steps and 32 named checkpoints (64 MiB file cap).
+`<song>.recovery.json` is a temporary save journal. On reopening, it only reconciles sidecars when all files match
+that transaction; recovery never writes over the YAML. Malformed or conflicting recovery files are kept under unique
+`.corrupt-N` or `.external-conflict-N` names with a notice. Restoring history/checkpoints validates source WAV content,
+and refuses missing or changed assets rather than silently substituting sounds. History is tied to the song's absolute
+location: moving files manually starts a new history and preserves the old sidecar for inspection.
+
+External edits are detected by file content, including edits retaining the same timestamp. COMPARE / RELOAD shows the
+app's text against the current disk version. Reload uses the disk version and starts a fresh undo/redo boundary;
+named checkpoints remain, and can be explicitly compared/restored. Reopening after an external edit follows the same
+rule. Restores never automatically undo newer external work. Historical notes keep their own version context.
+
+**Browser-held settings.** Display/playback preferences, the Faust draft and the Paint picture normally live in that
+browser's localStorage (per server address; Paint also per song path). PROJECT can save them into the project sidecar,
+and collection includes the current browser's copy. RESTORE PROJECT SETTINGS explicitly applies them in the receiving
+browser and reloads the page. Device/MIDI permissions, interface choices and library folders stay local; they are not
+portable. Phrase captures keep frozen WAVs under `<song>.phrases/`; these are project data, not the disposable `.tryout/`
+render cache. Starting another comparison archives the previous comparison there. Ratings are measurements/notes for
+your decision, not an automated quality judgment.
 
 ## Making samples: synths, recordings, printed effects
 

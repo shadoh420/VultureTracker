@@ -102,6 +102,7 @@ def main(argv=None):
 
         if args.cmd == "build":
             out = args.output or str(Path(args.song).with_suffix(".it"))
+            api.protect_outputs([out] + ([args.render] if args.render else []), api.output_sources(args.song))
             res = api.build(args.song, out)
             for w in res["warnings"]:
                 print(w)
@@ -110,7 +111,7 @@ def main(argv=None):
             for m in res["mismatches"]:
                 print(f"MISMATCH: {m}")
             if args.render:
-                secs = api.render(out, args.render)
+                secs = api.render(out, args.render, sources=api.output_sources(args.song))
                 print(f"rendered {args.render} ({secs:.2f} s)")
             return 1 if res["mismatches"] else 0
 

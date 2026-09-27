@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from .itwriter import write_it
+from .fileio import atomic_write, protect_outputs, wav_bytes
 from .song import SongError, load_song_text
 
 
@@ -148,11 +149,21 @@ def compile_song(song_or_path, base_dir=None):
     return write_it(mod), mod, warnings
 
 
+def output_sources(song_or_path, base_dir=None):
+    text, folder, name = _load(song_or_path, base_dir)
+    doc = from_yaml(text)
+    sources = [folder / str(v['file']) for v in (doc.get('samples') or {}).values()
+               if isinstance(v, dict) and v.get('file')]
+    if name != '<song>':
+        sources.append(Path(name))
+    return sources
+
+
 def build(song_or_path, out_path, base_dir=None) -> dict:
     """Compile to .it, then load it back with libopenmpt and compare structure to the song."""
     from .openmpt import LoadedModule
     data, mod, warnings = compile_song(song_or_path, base_dir)
-    Path(out_path).write_bytes(data)
+    protect_outputs([out_path], output_sources(song_or_path, base_dir))
     expected = summarize(mod)
     with LoadedModule(data) as lm:
         got = lm.info()
@@ -168,26 +179,27 @@ def build(song_or_path, out_path, base_dir=None) -> dict:
         exp_orders.append(o)
     if got["orders"][:len(exp_orders)] != exp_orders:
         mismatches.append(f"orders: song has {exp_orders}, libopenmpt reports {got['orders']}")
+    atomic_write(out_path, data)
     return {"path": str(out_path), "bytes": len(data), "warnings": warnings, "libopenmpt": got, "mismatches": mismatches}
 
 
-def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None, oversample=2) -> float:
+def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None, oversample=2, sources=()) -> float:
     """Render an .it file (or a song file, compiled in memory) to a WAV, mixed at `oversample` times `rate` and
     band-limited down (see LoadedModule.render). Returns seconds rendered."""
     from .openmpt import LoadedModule
     import wave
     p = Path(str(it_or_song))
     if isinstance(it_or_song, (str, Path)) and p.suffix.lower() in (".it", ".mod", ".xm", ".s3m", ".mptm"):
+        protected = [p, *sources]
         data = p.read_bytes()
     else:
+        protected = [*output_sources(it_or_song, base_dir), *sources]
         data = compile_song(it_or_song, base_dir)[0]
+    protect_outputs([wav_path], protected)
     with LoadedModule(data) as lm:
         pcm = lm.render(rate, repeat, oversample=oversample)
-    with wave.open(str(wav_path), "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(pcm)
+    protect_outputs([wav_path], protected)
+    atomic_write(wav_path, wav_bytes(pcm, rate))
     return len(pcm) / 4 / rate
 
 
@@ -196,6 +208,7 @@ def tryout_song(song_or_path, orders=None) -> dict:
     import copy
     base = copy.deepcopy(song_or_path) if isinstance(song_or_path, dict) else load(song_or_path)
     if orders:
+        base.pop('sections', None)  # editor annotations do not affect playback of a slice
         start = orders[0]
         base["orders"] = base["orders"][orders[0]:orders[1]]
         base["patterns"] = {k: _retarget_jumps(v, start, len(base["orders"])) for k, v in base["patterns"].items()

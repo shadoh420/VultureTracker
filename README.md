@@ -46,6 +46,9 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
 - **Import and export.** IT, XM, S3M and MOD files become song files (samples extracted as WAVs, measured against how
   libopenmpt plays the original); Guitar Pro 3-5 tabs become song files with placeholder sounds to swap in the
   Tryout. Songs render to WAV, MP3, OGG and FLAC, whole or as per-channel stems.
+- **Finishing and sharing.** Persistent undo/redo and named checkpoints, external-file comparison, named arrangement
+  sections, user-written phrase comparisons, portable project collection/ZIP, and a unified export panel with
+  explicit mix, region, mute/solo and tail choices. See the [walkthrough](GUIDE.md#finishing-and-sharing-a-song).
 - **Samples by recipe.** `synth` renders samples from free synths (Surge XT, Dexed, OB-Xd) and CC0 recordings by recipe
   ([SAMPLING.md](SAMPLING.md)), Faust code, or a target rebuilt from blocks of other WAVs (`resynth:`), with
   anti-aliased resampling so notes played far from their root stay clean.

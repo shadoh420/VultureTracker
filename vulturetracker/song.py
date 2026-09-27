@@ -700,7 +700,7 @@ def compile_tree(tree, ctx, base_dir) -> Module:
     if not isinstance(tree, LMap):
         ctx.error(1, "the song file must be a mapping with module, samples, instruments, patterns, orders")
         return mod
-    _check_keys(ctx, tree, ["module", "samples", "instruments", "patterns", "orders"], "the song file")
+    _check_keys(ctx, tree, ["module", "samples", "instruments", "patterns", "orders", "sections"], "the song file")
     try:
         _module(ctx, _map(ctx, tree.get("module"), _line(tree, "module"), "module"), mod)
     except _Bad:
@@ -784,6 +784,12 @@ def compile_tree(tree, ctx, base_dir) -> Module:
         for name, idx in pat_index.items():
             if idx not in used:
                 ctx.warn(_line(pats, name), f"pattern '{name}' is not used in the order list")
+
+    from .arrangement import validate_sections
+    try:
+        validate_sections(tree.get('sections'), len(mod.orders))
+    except ValueError as e:
+        ctx.error(_line(tree, 'sections'), str(e))
 
     lowest = {}
     from .itwriter import PATTERN_BYTES, packed_size

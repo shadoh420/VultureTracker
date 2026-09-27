@@ -97,7 +97,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="logo"><i></i><b>VULTURETRACKER</b></div>
   <div class="chip" id="songchip" title="open another song" onclick="renderStart()"><span id="chipname"></span><b>OPEN…</b></div><span class="meta" id="songmeta"></span>
   <div style="flex:1"></div>
-  <div class="dirty" id="dirty" style="display:none" onclick="act('reload')"><i></i>song changed on disk <b>RELOAD</b></div>
+  <div class="dirty" id="dirty" style="display:none" onclick="compareExternal()"><i></i>song changed on disk <b>COMPARE / RELOAD</b></div>
   <span class="meta" id="queue"></span>
   <span class="btn" onclick="toggle('keys')">?</span>
 </div>
@@ -114,6 +114,8 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab" data-t="faust" onclick="tab('faust')">FAUST</div>
   <div class="tab" data-t="spectrum" onclick="tab('spectrum')">SPECTRUM</div>
   <div class="tab" data-t="export" onclick="tab('export')">RENDER &amp; EXPORT</div>
+  <div class="tab" data-t="phrases" onclick="tab('phrases')">PHRASES</div>
+  <div class="tab" data-t="project" onclick="tab('project')">PROJECT</div>
   <div class="tab" data-t="notes" onclick="tab('notes')">NOTES <span id="notesn" style="font-weight:400;letter-spacing:0"></span></div>
 </div>
 
@@ -172,7 +174,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="panel col" style="width:var(--stemsw);flex:none">
     <div class="ph" style="position:static"><span class="k">STEMS · <span id="stemsn"></span></span><span class="state" id="stemstate"></span></div>
     <div id="stemlist" style="flex:1;min-height:0;overflow:auto;padding:4px 6px"></div>
-    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px;margin-bottom:3px"><span class="btn" id="writemix" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="showDiff('/api/mixdiff','WRITE MIX TO SONG',()=>act('applymix'))" title="write the faders into the song file (module.channels volume/pan, mix_volume, sample global_volume); shows the change first">WRITE MIX → SONG</span><span class="btn" onclick="resetMix()" title="drop the unwritten fader values">RESET MIX</span></div><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems')" title="one WAV per playing channel, next to the song (the song as written)">EXPORT STEMS</span><span class="btn" onclick="resetStems()" title="clear mutes and solo">UNMUTE</span></div><div style="display:flex;gap:2px;margin-top:3px;align-items:center"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="act('stems',{fmt:$('expfmt').value,song:true,stems:$('mp3stems').checked})" title="the whole song next to the song file (the song as written), encoded by ffmpeg: MP3 192 kbit/s, Ogg Vorbis q6 (about 192 kbit/s, loops gaplessly), FLAC lossless">EXPORT SONG AS</span><select id="expfmt" style="font:9.5px var(--mono);padding:1px 2px"><option value="mp3">MP3</option><option value="ogg">OGG</option><option value="flac">FLAC</option></select><label style="display:flex;align-items:center;gap:4px;padding:0 6px;font-size:9.5px;letter-spacing:.08em;color:var(--dim);cursor:pointer" title="also one file per playing channel, in the chosen format, in the stems folder"><input type="checkbox" id="mp3stems" style="margin:0">+ STEMS</label></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
+    <div style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d"><div style="display:flex;gap:2px;margin-bottom:3px"><span class="btn" id="writemix" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="showDiff('/api/mixdiff','WRITE MIX TO SONG',()=>act('applymix'))" title="write the faders into the song file (module.channels volume/pan, mix_volume, sample global_volume); shows the change first">WRITE MIX → SONG</span><span class="btn" onclick="resetMix()" title="drop the unwritten fader values">RESET MIX</span></div><div style="display:flex;gap:2px"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="tab('export');$('export-stems').checked=true" title="one WAV per playing channel, next to the song (the song as written)">EXPORT STEMS</span><span class="btn" onclick="resetStems()" title="clear mutes and solo">UNMUTE</span></div><div style="display:flex;gap:2px;margin-top:3px;align-items:center"><span class="btn" style="flex:1;text-align:center;color:#c3cbcf" onclick="tab('export');$('export-format').value=$('expfmt').value;$('export-stems').checked=$('mp3stems').checked" title="the whole song next to the song file (the song as written), encoded by ffmpeg: MP3 192 kbit/s, Ogg Vorbis q6 (about 192 kbit/s, loops gaplessly), FLAC lossless">EXPORT SONG AS</span><select id="expfmt" style="font:9.5px var(--mono);padding:1px 2px"><option value="mp3">MP3</option><option value="ogg">OGG</option><option value="flac">FLAC</option></select><label style="display:flex;align-items:center;gap:4px;padding:0 6px;font-size:9.5px;letter-spacing:.08em;color:var(--dim);cursor:pointer" title="also one file per playing channel, in the chosen format, in the stems folder"><input type="checkbox" id="mp3stems" style="margin:0">+ STEMS</label></div><div id="stemhint" style="margin-top:7px;font:9.5px/1.6 var(--mono);color:var(--dim)"></div></div>
   </div>
   <div class="handle" onmousedown="drag(event,'--stemsw',1,200,420)"><i></i></div>
   <div class="col" style="flex:1;min-width:560px">
@@ -279,10 +281,24 @@ option.hascand{color:var(--acc);font-weight:700}
     <div class="panel" style="flex:none"><div class="ph" style="gap:8px"><span class="k" style="white-space:nowrap">ORDER LIST · <span id="song-on"></span></span><span id="song-msg" class="mono" style="flex:1;min-width:0;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span></div>
       <div class="pb"><div id="song-orders" style="display:flex;flex-wrap:wrap;gap:2px"></div>
         <div style="display:flex;align-items:center;gap:4px;margin-top:10px;flex-wrap:wrap">
-          <span class="k">SELECTED</span><span class="btn sm" onclick="ordMove(-1)" title="move it left">◀</span><span class="btn sm" onclick="ordMove(1)" title="move it right">▶</span><span class="btn sm" onclick="ordRemove()">REMOVE</span><span class="btn sm" onclick="ordInsert(ORD_SEL<0?null:S.structure.orders[ORD_SEL])" title="the same pattern again, after it">DUPLICATE</span><span class="btn sm" onclick="ordClone()" title="a copy of its pattern under a new name, in its place (edit the copy without touching the other orders that use the pattern)">CLONE PATTERN</span><span class="btn sm" onclick="ordEdit()" title="open it in the Pattern tab">EDIT ▸</span>
+          <span class="k">SELECTED</span><span class="btn sm" onclick="ordMove(-1)" title="move it left">◀</span><span class="btn sm" onclick="ordMove(1)" title="move it right">▶</span><span class="btn sm" onclick="ordRemove()">REMOVE</span><span class="btn sm" onclick="ordInsert(ORD_SEL<0?null:S.structure.orders[ORD_SEL])" title="the same pattern again, after it">DUPLICATE</span><span class="btn sm" onclick="ordClone()" title="a copy of its pattern under a new name, in its place (edit the copy without touching the other orders that use the pattern)">MAKE THIS OCCURRENCE UNIQUE</span><span class="btn sm" onclick="ordEdit()" title="open it in the Pattern tab">EDIT ▸</span>
           <span class="k" style="margin-left:10px">PATTERN</span><select id="song-pat" style="font:10px var(--mono);padding:1px 3px;max-width:160px"></select><span class="btn sm" onclick="ordInsert($('song-pat').value)" title="insert it after the selected order">INSERT</span><span class="btn sm" onclick="ordSet($('song-pat').value)" title="the selected order plays this pattern instead">SET</span>
           <span class="btn sm" style="margin-left:10px" onclick="ordNew()" title="a new empty pattern, inserted after the selected order">NEW PATTERN</span><input id="song-rows" type="number" min="1" max="200" value="64" style="width:44px;font:10px var(--mono);padding:1px 3px" title="its rows"><span class="k">ROWS</span>
         </div></div></div>
+    <div class="panel" style="flex:none"><div class="ph"><span class="k">NAMED SECTIONS · ORDER SPANS</span></div><div class="pb">
+      <label>Name <input id="section-name" maxlength="80" placeholder="Verse"></label>
+      <label>First <input id="section-start" type="number" min="0" value="0" style="width:50px"></label>
+      <label>End (exclusive) <input id="section-end" type="number" min="1" value="1" style="width:50px"></label>
+      <button class="btn" onclick="sectionSave()">SAVE NAME / SPAN</button>
+      <p><select id="section-select" aria-label="Named section"></select>
+      <button class="btn" onclick="sectionAction('select')">SELECT</button><button class="btn" onclick="sectionAction('loop')">LOOP</button>
+      <button class="btn" onclick="sectionExport()">EXPORT SECTION</button><button class="btn" onclick="sectionAction('delete')">REMOVE NAME</button></p>
+      <label>Before order <input id="section-to" type="number" min="0" value="0" style="width:50px"></label>
+      <button class="btn" onclick="sectionAction('move')">MOVE SECTION</button>
+      <select id="section-copy" aria-label="Section copy behavior"><option value="independent">Independent pattern copies</option><option value="shared">Shared pattern references</option></select>
+      <button class="btn" onclick="sectionAction('duplicate')">DUPLICATE SECTION</button>
+      <p class="meta">Repeated pattern names share notes. Independent copies can be edited separately. Jumps follow their target occurrences.</p>
+    </div></div>
     <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph"><span class="k">PATTERNS · <span id="song-pn"></span></span><span class="meta">click a name or a row count to change it</span></div><table id="song-pats"></table></div>
     <div class="panel" style="flex:none;max-height:30%;overflow:auto"><div class="ph"><span class="k" title="what the order list never plays: patterns outside it, instruments no played pattern names, samples no used instrument maps">CLEAN-UP</span><span class="btn sm" id="clean-all" onclick="twice(this,cleanAll)" title="remove everything listed, as one undo step (click twice)">REMOVE ALL UNUSED</span></div><div class="pb" id="song-clean" style="font-size:10.5px"></div></div>
   </div>
@@ -430,14 +446,75 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="panel" style="flex:1;overflow:auto">
     <div class="ph"><span class="k">RENDER &amp; EXPORT</span></div>
     <div class="pb">
-      <div style="display:flex;gap:8px"><span class="btn big" onclick="act('build',{render:false})">BUILD .IT</span><span class="btn big" onclick="act('build',{render:true})">BUILD + RENDER WAV</span></div>
-      <div style="margin-top:8px;font-size:10.5px;color:var(--dim)">writes next to the song, then verifies the module with libopenmpt</div>
+      <p><label>Destination folder <input id="export-dest" placeholder="Beside the song" style="width:65%"></label></p>
+      <p><label>Output name <input id="export-name" placeholder="Song filename"></label>
+      <label>Format <select id="export-format"><option value="it">IT</option><option value="wav" selected>WAV</option><option value="mp3">MP3</option><option value="ogg">OGG</option><option value="flac">FLAC</option></select></label>
+      <label>Region <select id="export-region"><option value="">Whole song</option></select></label></p>
+      <p><label>Mix <select id="export-mix"><option value="saved">Saved song mix and sounds</option><option value="current">Current audition mix and selected sample</option></select></label>
+      <label>Mute / solo <select id="export-mutes"><option value="ignore">Ignore audition mute / solo</option><option value="respect">Respect audition mute / solo</option></select></label></p>
+      <p>Saved channel mute flags always apply. Current audition includes unwritten faders and instrument settings. Playback speed and the metronome are not exported.</p>
+      <p><label>Tail <select id="export-tail-mode" onchange="$('export-tail').disabled=this.value==='cut'"><option value="ring">Fixed ring-out</option><option value="cut">Cut at region end</option></select></label>
+      <label>Seconds <input id="export-tail" type="number" min="0" max="10" step=".1" value="2" style="width:65px"></label>
+      <label><input type="checkbox" id="export-song" checked> Song file</label>
+      <label><input type="checkbox" id="export-stems"> Aligned stems (WAV when format is IT)</label></p>
+      <p class="meta">Audio warms up preceding orders for a section. IT is a standalone order slice using initial song settings; tail length applies to audio only. Stems share exact start and end frames.</p>
+      <label><input type="checkbox" id="export-replace"> Replace previous exports safely</label>
+      <p><button class="btn big" id="export-go" onclick="exportStart()">EXPORT</button>
+      <button class="btn" onclick="act('cancelexport')">CANCEL JOB</button></p>
+      <pre id="export-result" style="white-space:pre-wrap"></pre>
       <div id="buildout" style="margin-top:14px" class="mono"></div>
       <div id="songerr" class="err" style="margin-top:14px"></div>
     </div>
   </div>
 </div>
 
+<div class="main" id="t-phrases">
+ <div class="panel" style="flex:1;overflow:auto"><div class="ph"><span class="k">PHRASE TRYOUT · WRITE ORIGINAL LINES, COMPARE IN CONTEXT</span></div><div class="pb">
+ <p>Select rows and channels in the Pattern tab, then capture here. Without a selection, captures the cursor's channel for the whole pattern.</p>
+ <label>Alternatives <input id="phrase-count" type="number" min="2" max="4" value="3" style="width:50px"></label>
+ <button class="btn big" onclick="phraseCapture()">NEW COMPARISON FROM PATTERN SELECTION</button><p id="phrase-context" class="mono"></p>
+ <p>All versions use frozen samples, accompaniment, mutes and mixer settings. Edit the cells yourself; no automatic composition.</p>
+ <div id="phrase-choices"></div><audio id="phrase-audio" controls loop style="width:100%;margin:12px 0"></audio>
+ <label>Alternative <select id="phrase-variant" onchange="phraseLoadEditor(true)"></select></label>
+ <label>Name <input id="phrase-name" maxlength="80"></label>
+ <label>Rating <input id="phrase-stars" type="number" min="0" max="5" value="0" style="width:50px"></label>
+ <textarea id="phrase-data" aria-label="Phrase cells" spellcheck="false" style="width:100%;height:220px;background:var(--panel2);color:var(--ink);font:12px var(--mono);margin-top:10px"></textarea>
+ <p><label>Listening note <input id="phrase-note" style="width:75%" maxlength="8000"></label></p>
+ <button class="btn" onclick="phraseSave()">SAVE ALTERNATIVE / RATING / NOTE</button>
+ <button class="btn" onclick="phraseDiff()">YAML DIFF / ACCEPT</button>
+ <p class="meta">Each line is one row; separate selected channels with |. Song-wide effects must stay unchanged. The absent version cuts held notes on the first selected row.</p>
+ </div></div>
+</div>
+<div class="main" id="t-project">
+  <div class="panel" style="flex:1;overflow:auto"><div class="ph"><span class="k">PROJECT · HISTORY &amp; RECOVERY</span></div><div class="pb">
+    <p>Edits save immediately. Up to 200 undo/redo steps and 32 named checkpoints stay beside the song.</p>
+    <p>External changes require comparison and reload. Reload starts a new undo/redo boundary; checkpoints remain.</p>
+    <button class="btn" onclick="act('undo')">UNDO</button> <button class="btn" onclick="act('redo')">REDO</button>
+    <button class="btn" onclick="compareExternal()">COMPARE EXTERNAL FILE</button> <span id="history-count" class="meta"></span>
+    <p><label>Checkpoint name <input id="checkpoint-name" maxlength="80" placeholder="Before final mix"></label>
+    <button class="btn" onclick="checkpointSave()">SAVE CHECKPOINT</button></p><div id="checkpoint-list"></div>
+    <hr><h3>Save Copy / Collect Samples</h3>
+    <p>Copies the saved song, sounds, candidates, notes and supported editable recipes. The copy starts a new history.</p>
+    <label>New destination folder <input id="collect-dest" style="width:65%" placeholder="C:/Music/My collected song"></label>
+    <label><input type="checkbox" id="collect-zip"> Also export ZIP</label>
+    <p><button class="btn big" onclick="collectProject()">COLLECT SAMPLES &amp; SAVE COPY</button> <span id="collect-result" class="mono"></span></p>
+    <h3>Browser settings and editable sound sources</h3>
+    <p>Collection includes this browser's Faust draft, Paint picture and display/playback preferences. Device permissions and library folders stay on this computer.</p>
+    <button class="btn" onclick="act('projectsettings',{settings:browserSettings()})">SAVE BROWSER SETTINGS IN PROJECT</button>
+    <button class="btn" onclick="restoreBrowserSettings()">RESTORE PROJECT SETTINGS IN THIS BROWSER</button>
+    <h3>Relink a missing sample</h3><div id="missing-samples"></div>
+    <button class="btn" onclick="relinkAll()">RELINK ALL LISTED SAMPLES TOGETHER</button><p></p>
+    <label>Sample slot <input id="relink-slot" type="number" min="1" max="99" value="1" style="width:60px"></label>
+    <label>Replacement WAV <input id="relink-path" style="width:55%"></label>
+    <button class="btn" onclick="act('relink',{num:+$('relink-slot').value,path:$('relink-path').value})">RELINK</button>
+  </div></div>
+</div>
+<div class="modal" id="workflowmodal"><div class="box" style="max-width:900px">
+  <h3 id="workflow-title"></h3><p id="workflow-help"></p>
+  <pre id="workflow-diff" style="max-height:55vh;overflow:auto;white-space:pre-wrap"></pre>
+  <button class="btn big" id="workflow-confirm">CONTINUE</button>
+  <button class="btn" onclick="toggle('workflow',false)">CLOSE</button>
+</div></div>
 <div class="main" id="t-notes">
   <div class="panel" style="flex:1;overflow:auto">
     <div class="ph"><span class="k">LISTENING NOTES · <span id="notecount"></span></span><span class="meta" id="notepaths"></span></div>
@@ -509,6 +586,7 @@ const secs=v=>v==null?'—':v.toFixed(v<1?3:2)+' s', hz=v=>v==null?'—':Math.ro
 function put(id,h){if(shown[id]===h)return;shown[id]=h;const el=$(id),t=el.scrollTop,l=el.scrollLeft;el.innerHTML=h;el.scrollTop=t;el.scrollLeft=l}
 async function act(name,body){const r=await fetch('/api/'+name,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(j.error)alert(j.error);await refresh();return j}
 async function refresh(){const j=await (await fetch('/api/state')).json();const had=!!(S&&S.song);S=j;
+  sel=S.candidates?.find(c=>c.path===S.selected_candidate)?.id??null;
   if(!S.song){if(!$('startmodal').classList.contains('on'))renderStart();return}
   if(!had)toggle('start',false);  // only the no-song → song transition closes the start screen; a routine poll never does
   render()}
@@ -556,7 +634,7 @@ function render(){
   $('dirty').style.display=S.song.dirty?'flex':'none';
   $('queue').textContent=`render queue ${S.queue} · cache ${S.cache}`;
   $('songerr').textContent=S.song.error?S.song.error.join('\n'):'';
-  renderRecipe();
+  renderRecipe();renderProject();renderPhrases();
   const nw=(S.notices||[]).filter(x=>!NOTICED.has(x));nw.forEach(x=>NOTICED.add(x));if(nw.length)setTimeout(()=>alert(nw.join('\n\n')));
   // slot
   const ents=S.song.sample_entries,cc=S.cand_counts||{},sname=k=>ents[k].name||((f&&f.samples.find(s=>s.num===+k))||{}).name||'';
@@ -610,9 +688,9 @@ function renderChosen(){const c=S.candidates.find(x=>x.id===sel);$('selkey').tex
    <div style="flex:1"><div class="k">OCTAVE BANDS</div><div class="wave" style="margin-top:4px;height:44px">${bandsvg(m,r)}</div></div></div>
    <div class="btn" style="margin-top:12px;display:block;text-align:center" onclick="findSimilar(${c.id})" title="the sounds of the library nearest this candidate by timbre join the candidates">≈ FIND SIMILAR TO THIS</div>
    ${c.current?`<div style="margin-top:14px;text-align:center;font-size:10.5px;color:var(--dim)">this is the sample in the song now</div>`:`<div class="btn big" style="margin-top:14px;display:block" onclick="useSel()">USE THIS FOR SLOT ${pad(S.slot)} <span class="kbd">U</span></div><div style="margin-top:6px;text-align:center;font-size:10px;color:var(--dim)">shows the YAML change before anything is written</div>`}`)}
-function renderBuild(){const b=S.build;if(!b){put('buildout','');return}
+function renderBuild(){renderExport();const b=S.build;if(!b){put('buildout','');return}
   if(b.status!=='done'){put('buildout',b.status==='failed'?`<div class="err">${esc(b.error)}</div>`:`<span style="color:var(--amber)">${b.status}…</span>`);return}
-  put('buildout',`<div>wrote ${esc(b.it)} · ${b.bytes.toLocaleString()} bytes</div>${b.wav?`<div>rendered ${esc(b.wav)} · ${fmtT(b.seconds)}</div>`:''}${b.mismatches.length?`<div class="err">${esc(b.mismatches.join('\n'))}</div>`:'<div style="color:var(--acc)">libopenmpt agrees with the song</div>'}${b.warnings.map(w=>`<div style="color:var(--amber)">${esc(w)}</div>`).join('')}`)}
+  put('buildout',`<div>wrote ${esc(b.it)} · ${(b.bytes||0).toLocaleString()} bytes</div>${b.wav?`<div>rendered ${esc(b.wav)} · ${fmtT(b.seconds)}</div>`:''}${(b.mismatches||[]).length?`<div class="err">${esc(b.mismatches.join('\n'))}</div>`:'<div style="color:var(--acc)">libopenmpt loaded the compiled module</div>'}${(b.warnings||[]).map(w=>`<div style="color:var(--amber)">${esc(w)}</div>`).join('')}`)}
 // ---- song overview: stems
 const sName=n=>{const f=S&&S.song&&S.song.facts;return (f&&(f.samples.find(s=>s.num===n)||{}).name)||''};
 const smpList=a=>{const r=[];for(let i=0;i<a.length;){let j=i;while(j+1<a.length&&a[j+1]===a[j]+1)j++;r.push(j-i>=2?pad(a[i])+'–'+pad(a[j]):a.slice(i,j+1).map(pad).join('·'));i=j+1}return r.join('·')};
@@ -1070,14 +1148,14 @@ function songEdit(ops,onReport){EDQ.n++;renderSongTab();renderIns();renderSmp();
 const isMark=o=>o==='+++'||o==='---';
 function uniqueName(base){const have=new Set(S.structure.patterns.map(p=>p.name));if(!have.has(base))return base;const m=/^(.*?)(\d*)$/.exec(base);for(let n=+(m[2]||1)+1;;n++){const s=m[1]+String(n).padStart(m[2].length||0,'0');if(!have.has(s))return s}}
 function ordList(){return S.structure.orders.slice()}
-function ordMove(d){const o=ordList(),i=ORD_SEL,j=i+d;if(i<0||j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];ORD_SEL=j;songEdit([{op:'orders',orders:o}])}
-function ordRemove(){const o=ordList();if(ORD_SEL<0||o.length<2)return;o.splice(ORD_SEL,1);ORD_SEL=Math.min(ORD_SEL,o.length-1);songEdit([{op:'orders',orders:o}])}
-function ordInsert(name){if(!name)return;const o=ordList(),at=ORD_SEL<0?o.length:ORD_SEL+1;o.splice(at,0,name);ORD_SEL=at;songEdit([{op:'orders',orders:o}])}
-function ordSet(name){const o=ordList();if(ORD_SEL<0||!name)return;o[ORD_SEL]=name;songEdit([{op:'orders',orders:o}])}
+function ordMove(d){const o=ordList(),ids=o.map((_,i)=>i),i=ORD_SEL,j=i+d;if(i<0||j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];[ids[i],ids[j]]=[ids[j],ids[i]];ORD_SEL=j;songEdit([{op:'orders',orders:o,origins:ids}])}
+function ordRemove(){const o=ordList(),ids=o.map((_,i)=>i);if(ORD_SEL<0||o.length<2)return;o.splice(ORD_SEL,1);ids.splice(ORD_SEL,1);ORD_SEL=Math.min(ORD_SEL,o.length-1);songEdit([{op:'orders',orders:o,origins:ids}])}
+function ordInsert(name){if(!name)return;const o=ordList(),ids=o.map((_,i)=>i),at=ORD_SEL<0?o.length:ORD_SEL+1;o.splice(at,0,name);ids.splice(at,0,null);ORD_SEL=at;songEdit([{op:'orders',orders:o,origins:ids}])}
+function ordSet(name){const o=ordList();if(ORD_SEL<0||!name)return;o[ORD_SEL]=name;songEdit([{op:'orders',orders:o,origins:o.map((_,i)=>i)}])}
 function ordNew(){const o=ordList(),at=ORD_SEL<0?o.length:ORD_SEL+1,name=uniqueName('p'+String(S.structure.patterns.length).padStart(2,'0'));o.splice(at,0,name);ORD_SEL=at;
   songEdit([{op:'pattern_new',name,rows:Math.max(1,Math.min(200,+$('song-rows').value||64))},{op:'orders',orders:o}])}
 function ordClone(){const o=ordList(),src=o[ORD_SEL];if(ORD_SEL<0||isMark(src))return;const name=uniqueName(src+'b');o[ORD_SEL]=name;
-  songEdit([{op:'pattern_clone',src,name},{op:'orders',orders:o}])}
+  songEdit([{op:'pattern_clone',src,name},{op:'orders',orders:o,origins:o.map((_,i)=>i)}])}
 function ordEdit(){const o=ordList();if(ORD_SEL<0||isMark(o[ORD_SEL]))return;const fi=o.slice(0,ORD_SEL).filter(x=>!isMark(x)).length;SEL=null;CUR.o=fi;CUR.row=0;tab('pattern');showPattern(fi)}
 // a destructive button asks once: the first click arms it for three seconds
 function twice(el,fn){if(el.dataset.armed){delete el.dataset.armed;el.textContent=el.dataset.label;fn();return}el.dataset.armed=1;el.dataset.label=el.textContent;el.textContent='SURE?';
@@ -1549,4 +1627,45 @@ async function ptPreview(action){$('pt-msg').textContent='rendering…';const r=
 async function ptAct(action){$('pt-msg').textContent='writing…';const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ptBody(action))}),j=await r.json();
   $('pt-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'');refresh()}
 setSpeed(speed);refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
+function workflowDiff(title,help,lines,label,action){
+  $('workflow-title').textContent=title;$('workflow-help').textContent=help;
+  $('workflow-diff').textContent=(lines||[]).join('\n')||'No text changes.';
+  $('workflow-confirm').textContent=label;$('workflow-confirm').onclick=async()=>{await action();toggle('workflow',false)};toggle('workflow',true);
+}
+async function compareExternal(){const j=await act('external');if(j.error)return;
+  workflowDiff('External file comparison','Reload keeps the file on disk and clears stale undo/redo. Named checkpoints remain.',j.lines,'RELOAD EXTERNAL FILE',()=>act('reload',{token:j.token}));}
+async function checkpointSave(){const j=await act('checkpoint',{name:$('checkpoint-name').value});if(!j.error)$('checkpoint-name').value='';}
+async function checkpointRestore(name){const j=await act('checkpoint',{name,action:'diff'});if(j.error)return;
+  workflowDiff('Restore checkpoint: '+name,'The restore is one undo step. Source assets must still match their recorded content.',j.lines,'RESTORE CHECKPOINT',()=>act('checkpoint',{name,action:'restore'}));}
+function renderProject(){
+  put('missing-samples',Object.entries(S.missing||{}).map(([n,p])=>`<p>Slot ${esc(n)}: ${esc(p)} <input class="relink-missing" data-slot="${esc(n)}" placeholder="Replacement WAV" style="width:50%"></p>`).join('')||'<p>No missing samples.</p>');
+  const selected=$('section-select').value;put('section-select',Object.entries(S.sections||{}).map(([n,v])=>`<option value="${esc(n)}">${esc(n)} · ${v[0]}–${v[1]-1}</option>`).join(''));if(S.sections?.[selected])$('section-select').value=selected;
+  $('history-count').textContent=`${S.undo} undo · ${S.redo} redo`;
+  put('checkpoint-list',(S.checkpoints||[]).map(n=>`<p><span class="mono">${esc(n)}</span> <button class="btn" onclick="checkpointRestore(${attr(n)})">COMPARE / RESTORE</button> <button class="btn" onclick="act('checkpoint',{name:${attr(n)},action:'delete'})">DELETE CHECKPOINT</button></p>`).join(''));
+}
+const PROJECT_PREFS=['hexrows','speed','voice','lvlatency','midivel','metro','specscale','faustcode'];
+function browserSettings(){const settings={local:{}};try{for(const key of PROJECT_PREFS){const v=localStorage.getItem(key);if(v!==null)settings.local[key]=v}settings.paint=localStorage.getItem(ptKey())}catch(e){}return settings;}
+async function collectProject(){const j=await act('collect',{destination:$('collect-dest').value,zip:$('collect-zip').checked,browser:browserSettings()});if(!j.error)$('collect-result').textContent=j.report+' '+j.path+(j.zip?' · '+j.zip:'');}
+function restoreBrowserSettings(){const settings=S.project_settings||{};try{for(const key of PROJECT_PREFS){if(typeof settings.local?.[key]==='string')localStorage.setItem(key,settings.local[key])}if(settings.paint)localStorage.setItem(ptKey(),settings.paint);location.reload()}catch(e){alert(String(e))}}
+async function sectionSave(){await act('section',{action:'save',name:$('section-name').value,start:+$('section-start').value,end:+$('section-end').value});}
+async function sectionAction(action){await act('section',{action,name:$('section-select').value,to:+$('section-to').value,independent:$('section-copy').value==='independent'});}
+function sectionExport(){tab('export');if($('export-region'))$('export-region').value=$('section-select').value;}
+let phraseEditorKey='';
+async function phraseCapture(){if(!PAT.rows||!S.song.facts)return;const n=selNorm(),fo=PAT.fo||[];
+ const j=await act('phrase',{action:'capture',order:S.song.facts.orders[PAT.order].order,r0:n?n.r0:0,r1:n?n.r1:PAT.rows.length-1,chans:n?fo.slice(n.i0,n.i1+1):[CUR.ch],count:+$('phrase-count').value});if(!j.error)phraseLoadEditor(true);}
+function phraseLoadEditor(force=false){const p=S.phrase;if(!p?.variants)return;const i=+$('phrase-variant').value,v=i<0?(p.absent||{name:'Line absent',stars:0,note:''}):p.variants[i];if(!v)return;
+ const key=p.id+':'+i+':'+JSON.stringify(v);if(!force&&key===phraseEditorKey)return;phraseEditorKey=key;
+ $('phrase-name').value=v.name;$('phrase-stars').value=v.stars||0;$('phrase-note').value=v.note||'';$('phrase-data').value=v.data||'';$('phrase-data').disabled=i<0;$('phrase-name').disabled=i<0;}
+function renderPhrases(){const p=S.phrase;$('phrase-context').textContent=p?.variants?`Captured version ${p.version.hash} · order ${p.order} · rows ${p.r0}–${p.r1} · channels ${p.chans.map(c=>c+1).join(', ')}`:'No comparison captured yet.';
+ if(!p?.variants){put('phrase-choices','');return}const vs=[...p.variants,{name:'Line absent'}];
+ put('phrase-choices',vs.map((v,i)=>`<button class="btn" onclick="phrasePlay(${i===p.variants.length?-1:i})">▶ ${esc(v.name)}</button>`).join(' '));
+ const selected=$('phrase-variant').value;put('phrase-variant',vs.map((v,i)=>`<option value="${i===p.variants.length?-1:i}">${esc(v.name)}</option>`).join(''));if(selected)$('phrase-variant').value=selected;phraseLoadEditor();}
+async function phraseSave(){const i=+$('phrase-variant').value,b={action:'update',variant:i,stars:+$('phrase-stars').value,note:$('phrase-note').value};if(i>=0)Object.assign(b,{name:$('phrase-name').value,data:$('phrase-data').value});await act('phrase',b);}
+async function phrasePlay(variant){const a=$('phrase-audio'),pos=a.currentTime||0,j=await act('phrase',{action:'render',variant});if(j.error)return;audio.pause();lvStop();a.src='/wav/'+j.key;a.onloadedmetadata=()=>{a.currentTime=Math.min(pos,Math.max(0,a.duration-.01));a.play().catch(e=>alert(String(e)))};}
+async function phraseDiff(){const variant=+$('phrase-variant').value,j=await act('phrase',{action:'diff',variant});if(j.error)return;
+ workflowDiff('Accept phrase alternative','Only the selected rows and channels change. A repeated pattern becomes unique here. One undo step.',j.lines,'ACCEPT PHRASE',()=>act('phrase',{action:'accept',variant,token:j.token}));}
+function renderExport(){const selected=$('export-region').value;put('export-region','<option value="">Whole song</option>'+Object.keys(S.sections||{}).map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join(''));if(S.sections?.[selected])$('export-region').value=selected;
+ const j=S.export;$('export-result').textContent=j?`${j.status} · ${j.done}/${j.total} files · snapshot ${j.snapshot}\n${j.error||''}\n${(j.files||[]).join('\n')}`:'';}
+async function exportStart(){await act('export',{destination:$('export-dest').value,name:$('export-name').value,fmt:$('export-format').value,region:$('export-region').value,mix:$('export-mix').value,mutes:$('export-mutes').value,tail:$('export-tail-mode').value==='cut'?0:+$('export-tail').value,song:$('export-song').checked,stems:$('export-stems').checked,replace:$('export-replace').checked});}
+async function relinkAll(){const links={};document.querySelectorAll('.relink-missing').forEach(e=>{if(e.value.trim())links[e.dataset.slot]=e.value});await act('relink',{links});}
 </script></body></html>

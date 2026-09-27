@@ -32,3 +32,8 @@ suite/*/*.it
 suite/*/*.wav
 suite/*/*.mp3
 tools/faustwasm/
+
+# Local application history, crash recovery and frozen phrase audio
+*.history.json*
+*.recovery.json*
+*.phrases/

@@ -149,7 +149,7 @@ class LoadedModule:
     ENDLESS_SECONDS = 600       # what a render that repeats forever (repeat=-1) stops at
     SAFETY_SECONDS = 3 * 3600   # the longest render of a song that ends
 
-    def render(self, rate=44100, repeat=0, max_seconds=None, dither=0, oversample=2):
+    def render(self, rate=44100, repeat=0, max_seconds=None, dither=0, oversample=2, cancel=None):
         """Render to interleaved int16 stereo frames (bytes). repeat=0 plays once, N repeats N more times.
         `max_seconds` caps the render; None renders the whole song: its duration times the passes, plus a margin for
         the tail, never more than SAFETY_SECONDS; repeat=-1 (forever) stops at ENDLESS_SECONDS.
@@ -178,6 +178,8 @@ class LoadedModule:
         limit = int(mix_rate * max_seconds)
         frames = 0
         while frames < limit:
+            if cancel is not None and cancel():
+                raise ValueError('Export cancelled')
             n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mix_rate, chunk, buf)
             if n == 0:
                 break

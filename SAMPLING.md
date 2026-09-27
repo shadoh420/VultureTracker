@@ -74,6 +74,20 @@ In the app the same loop is one box: when a recipe in the song's folder writes t
 box holds that sample's entry as YAML; RENDER CANDIDATE renders the edited entry as a new candidate (`<name>-r1.wav`
 beside the original) and WRITE TO RECIPE puts the entry back into the recipe (GUIDE.md, Tryout).
 
+### Portable editable sound sources
+
+PROJECT → Collect Samples copies supported recipes beside the collected song, rewrites their file inputs to collected
+relative paths, includes referenced Faust `.dsp` files, and keeps candidate-specific edited recipe entries. The rendered
+WAVs are sufficient for playback/rendering without the original location. Re-rendering a named Surge/Dexed/OB-Xd patch
+still needs that synth and patch library; collection does not copy installed plugins. Browser Faust drafts and Paint
+pictures are included as project settings and can be explicitly restored in the receiving browser. Adjacent credit and
+license documents are copied into `credits/` and associated with their assets in `project.json`. Credits and licensing
+still apply to the source material; collection is a local copy, not permission to publish third-party samples.
+
+Choose an original line first with the PHRASES comparison, then choose its sound with TRYOUT. Phrase capture freezes
+WAVs and audition settings for identical accompaniment; it never composes new notes. All audio export still uses the
+existing oversampled renderer. The owner's ear decides sounds and levels.
+
 ## Recipe format
 
 ```yaml
