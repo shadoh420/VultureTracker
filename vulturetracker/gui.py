@@ -32,6 +32,7 @@ import webbrowser
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 import yaml
 
@@ -39,7 +40,7 @@ from . import api
 from .fileio import atomic_write as _atomic, protect_outputs, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
-from .history import History, digest, json_bytes
+from .history import History, digest, json_bytes, pack_step, unpack_step, HISTORY_BYTES
 from .project import collect, replace_values, resolve_meta, relative_meta
 from .arrangement import sections_text, occurrence_map, reorder
 from .openmpt import LoadedModule
@@ -330,7 +331,7 @@ def facts_of(mod, warnings, it=None):
         orders.append({"pattern": pat.name, "index": o, "order": i, "rows": len(pat.rows), "bars": len(pat.rows) / rows_per_bar, "start": start, "seconds": secs})
         use.append([sorted(s) for s in per_ch])
     return {
-        "title": mod.title, "tempo": mod.tempo, "speed": mod.speed, "bpm": round(mod.tempo * 24 / mod.speed / 4),
+        "title": mod.title, "tempo": mod.tempo, "speed": mod.speed, "bpm": round(mod.tempo * 24 / mod.speed / (mod.row_highlight[0] or 4), 2),
         "highlight": [mod.row_highlight[0] or 4, rows_per_bar],
         "channels": [c.name or f"Ch {i + 1}" for i, c in enumerate(mod.channels)],
         "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels], "mix_volume": mod.mix_volume,
@@ -360,6 +361,7 @@ def sounding_table(mod, facts):
         rows = []
         for r, row in enumerate(pat.rows):
             for ch, c in enumerate(row):
+                last_ins[ch] = c.instrument or last_ins[ch]
                 if c.note is None:
                     continue
                 if c.note >= 120:  # note off / cut / fade
@@ -420,19 +422,15 @@ def patch_it(data, silenced=(), mix=None):
 
 
 def channel_levels(data, nch, cancel=None):
-    """Each channel soloed (every other channel's header volume zeroed, the way the suite's local-only
-    scratch/ut99-clean/compare.py measures a module): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
+    """Each channel soloed (every other channel disabled so volume commands cannot unmute it): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
     `cancel()` true between channels abandons the pass (returns None)."""
     import numpy as np
     out = []
     for ch in range(nch):
         if cancel is not None and cancel():
             return None
-        d = bytearray(data)
-        for other in range(nch):
-            if other != ch:
-                d[0x80 + other] = 0
-        with LoadedModule(bytes(d)) as lm:
+        d = patch_it(data, [other for other in range(nch) if other != ch])
+        with LoadedModule(d) as lm:
             x = np.frombuffer(lm.render(RATE, oversample=1), dtype="<i2").astype(np.float32).reshape(-1, 2) / 32768
         e = np.mean(x ** 2, axis=1)
         w = RATE // 2
@@ -562,7 +560,7 @@ def _peak(pcm):
     """Peak of interleaved int16 PCM, 0..1 (1.0: libopenmpt's mixer clipped)."""
     try:
         import numpy as np
-        return round(float(np.abs(np.frombuffer(pcm, "<i2")).max()) / 32768, 3)
+        return round(float(np.abs(np.frombuffer(pcm, "<i2").astype(np.int32)).max()) / 32768, 3)
     except (ImportError, ValueError):
         return None
 
@@ -1628,9 +1626,7 @@ class State:
         if flow:
             lines[i] = f"{indent}{key}{sp}{yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()}{tail}{nl}"
             return 1
-        j = i + 1
-        while j < len(lines) and lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) > len(indent):
-            j += 1
+        j = State._span(lines, i)
         block = [f"{indent}  {b}\n" for b in yaml.safe_dump(entry, default_flow_style=False, width=10 ** 6, sort_keys=False).splitlines()]
         lines[i:j] = [lines[i]] + block
         return 1 + len(block)
@@ -1875,6 +1871,26 @@ class State:
                 self._edit_block(lines, int(index), cells)
             self._commit("".join(lines))  # compiled first (SongError: nothing is written)
 
+    def materialize_pattern(self, index):
+        """Make the compiled cells explicit; one undo restores the original pattern notation."""
+        with self.lock:
+            self._need_compiled()
+            pat = self.mod.patterns[int(index)]
+            lines = self.text.splitlines(keepends=True)
+            data = ''.join(f"{r:02d}: {' | '.join(format_cell(c) for c in row)}\n"
+                           for r, row in enumerate(pat.rows))
+            entry = {'rows': len(pat.rows), 'data': data}
+            top = self._top(lines, 'patterns')
+            if lines[top].split(':', 1)[1].strip().startswith('{'):
+                patterns = dict(self.song['patterns'], **{pat.name: entry})
+                lines[top:self._span(lines, top)] = api.to_yaml({'patterns': patterns}).splitlines(keepends=True)
+            else:
+                at = self._pattern_key(lines, pat.name)
+                indent = ' ' * self._ind(lines[at])
+                block = api.to_yaml({pat.name: entry})
+                lines[at:self._span(lines, at)] = [indent + line + '\n' for line in block.splitlines()]
+            self._commit(''.join(lines))
+
     def _need_compiled(self):
         if self.mod is None or self.error:
             raise ValueError("the song does not compile (RENDER & EXPORT lists the errors): fix it in the YAML first")
@@ -1907,7 +1923,7 @@ class State:
     # per line, module settings as `key: value` lines); a batch of ops is one undo step, compiled before it is written
 
     MODULE_KEYS = {"title": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
-                   "separation": (0, 128)}
+                   "separation": (0, 128), "rows_per_beat": (1, 255), "rows_per_bar": (1, 255)}
 
     def _encoded(self, text, crlf=None, bom=None):
         crlf = self.crlf if crlf is None else crlf
@@ -1943,10 +1959,11 @@ class State:
         return assets
 
     def _step(self, meta=None):
-        return {'text': self.text, 'meta': copy.deepcopy(meta), 'assets': self._assets(self.text, meta),
-                'crlf': self.crlf, 'bom': self.bom, 'version': self.version()}
+        return pack_step({'text': self.text, 'meta': copy.deepcopy(meta), 'assets': self._assets(self.text, meta),
+                          'crlf': self.crlf, 'bom': self.bom, 'version': self.version()})
 
     def _check_assets(self, step):
+        step = unpack_step(step)
         if 'text' in step:
             required = {str(p) for p in self._asset_paths(step['text'], step.get('meta'))}
             if not required.issubset(step.get('assets', {})):
@@ -1960,8 +1977,9 @@ class State:
         if self.dirty():
             raise ValueError('the song changed on disk: compare and RELOAD first')
         raw = self._encoded(new)
-        saved = self.history_store.data(raw, history, future, self.checkpoints)
+        saved, history, future = self.history_store.bounded(raw, history, future, self.checkpoints)
         self.history_store.write(raw, relative_meta(meta, self.base_dir), saved, lambda: self.write_song(new), self._raw)
+        return history, future
 
     def checkpoint(self, name, action='save'):
         with self.lock:
@@ -1971,9 +1989,9 @@ class State:
             if self.dirty():
                 raise ValueError('Compare and RELOAD external edits first')
             if action == 'diff':
-                return self._diff(self.checkpoints[name]['text'], False)
+                return self._diff(unpack_step(self.checkpoints[name])['text'], False)
             if action == 'restore':
-                step = self.checkpoints[name]
+                step = unpack_step(self.checkpoints[name])
                 self._check_assets(step)
                 self._commit(step['text'], meta=dict(self.meta, **(step.get('meta') or {})))
                 return {}
@@ -1988,9 +2006,29 @@ class State:
                 checkpoints[name] = self._step(self._meta_view())
             else:
                 raise ValueError('unknown checkpoint action')
-            _atomic(self.history_store.path, self.history_store.data(self._raw, self.history, self.future, checkpoints))
-            self.checkpoints = checkpoints
+            try:
+                data, history, future = self.history_store.bounded(self._raw, self.history, self.future, checkpoints)
+            except ValueError:
+                if action != 'delete':
+                    raise
+                # Legacy checkpoints may together exceed the new budget. Let each deletion reduce them.
+                data = self.history_store.data(self._raw, self.history, self.future, checkpoints)
+                history, future = self.history, self.future
+            _atomic(self.history_store.path, data)
+            self.history, self.future, self.checkpoints = history, future, checkpoints
             return {}
+
+    def trim_history(self, keep=0):
+        with self.lock:
+            if self.dirty():
+                raise ValueError('Compare and RELOAD external edits first')
+            keep = int(keep)
+            if not 0 <= keep <= self.UNDO_LIMIT:
+                raise ValueError('Keep between 0 and 200 undo steps')
+            history = self.history[-keep:] if keep else []
+            data, history, future = self.history_store.bounded(self._raw, history, [], self.checkpoints)
+            _atomic(self.history_store.path, data)
+            self.history, self.future = history, future
 
     def relink(self, num=None, path=None, links=None):
         with self.lock:
@@ -2023,8 +2061,7 @@ class State:
         changed = {k: copy.deepcopy(self.meta.get(k)) for k in self.META_KEYS if self.meta.get(k) != meta.get(k)}
         back = self._step(changed or None)
         history = (self.history + [back])[-self.UNDO_LIMIT:]
-        self._write_step(new, meta, history, [])
-        self.history, self.future = history, []
+        self.history, self.future = self._write_step(new, meta, history, [])
         self.meta = meta
         self.want = meta.get("selected_candidate")
         self.reload(archive=False, loaded=loaded)
@@ -2116,7 +2153,9 @@ class State:
             for i in range(first, end):
                 if lines[i].split(";", 1)[0].strip():
                     head, parts, tail = self._row(lines[i])
-                    lines[i] = self._rejoin(head, parts, fn([p.strip() for p in parts]), tail)
+                    cells = [p.strip() for p in parts]
+                    cells += ['... .. ... ...'] * (len(self.mod.channels) - len(cells))
+                    lines[i] = self._rejoin(head, parts, fn(cells), tail)
 
     def _channel_lines(self, lines):
         mod = self._top(lines, "module")
@@ -2124,7 +2163,10 @@ class State:
             if k == "channels":
                 if lines[j].split("#")[0].split(":", 1)[1].strip():
                     raise ValueError("module.channels is written on one line: write one '- {name: ...}' per channel to edit channels here")
-                return j, [i for i in range(j + 1, self._span(lines, j)) if lines[i].lstrip().startswith("-")]
+                items = [i for i in range(j + 1, self._span(lines, j)) if lines[i].lstrip().startswith("-")]
+                if any(not (entry := self._entry(lines[i], '-')) or not entry.group(4) for i in items):
+                    raise ValueError("Use one-line '- {name: ..., pan: ..., volume: ...}' channel entries before editing channels here")
+                return j, items
         raise ValueError("module has no 'channels:' list")
 
     def _song_op(self, lines, orders, op, remap):
@@ -2440,8 +2482,8 @@ class State:
                     vol = c.volcmd
                 if r < r0 or c.is_empty():
                     continue
-                e = Cell(c.note, c.instrument, None, 0, 0)
                 note_on = c.note is not None and c.note < 120
+                e = Cell(c.note, last_ins if note_on else c.instrument, None, 0, 0)
                 if c.volcmd is not None and c.volcmd <= 64 or note_on:
                     e.volcmd = max(0, min(64, round(vol * level)))
                 elif c.volcmd is not None and not 128 <= c.volcmd <= 192:  # slides, portamento, vibrato; not pan
@@ -2650,6 +2692,8 @@ class State:
         nch = len(mod.channels)
         ch = max(0, min(nch - 1, ch))
         placed, rows, dropped = compose.slice_rows(starts, rate, mod.tempo, mod.speed, ch, nch)
+        if any(delay > 15 for _, _, _, delay in placed):
+            raise ValueError('Slice timing needs a delay above 15 ticks; choose a song speed of 16 or less before creating a pattern')
         name = re.sub(r"[^\w.-]+", "_", base)
         name = name if re.match(r"[A-Za-z]", name) else "s" + name
         names = {k for _, k in self._children(lines, self._top(lines, "patterns"))}
@@ -2913,7 +2957,7 @@ class State:
                 return
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first (the undo history is for the song the app wrote)")
-            step = src[-1]
+            step = unpack_step(src[-1])
             meta = step.get("meta")
             self._check_assets(step)
             back = self._step({k: self.meta.get(k) for k in meta} if meta else None)
@@ -2922,8 +2966,7 @@ class State:
                 target.update(copy.deepcopy(meta))
             loaded = load_song_text(step['text'], self.base_dir, str(self.song_path))
             history, future = (dst + [back], src[:-1]) if redo else (src[:-1], dst + [back])
-            self._write_step(step['text'], target, history, future)
-            self.history, self.future = history, future
+            self.history, self.future = self._write_step(step['text'], target, history, future)
             self.meta = target
             self.want = target.get("selected_candidate")
             self.reload(archive=False, loaded=loaded)
@@ -3309,6 +3352,8 @@ class State:
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
                 "undo": len(self.history), "redo": len(self.future), "unused": self.unused(),
                 "checkpoints": list(self.checkpoints),
+                "history_bytes": self.history_store.path.stat().st_size if self.history_store.path.exists() else 0,
+                "history_limit": HISTORY_BYTES,
                 "phrase": {k: v for k, v in (self.meta.get("phrase") or {}).items() if k not in ("snapshot", "assets", "source_assets", "original")},
                 "project_settings": self.meta.get('project_settings') or {},
                 "missing": {str(k): v['file'] for k, v in ents.items() if isinstance(v, dict) and v.get('file')
@@ -3321,7 +3366,9 @@ class State:
                               "patterns": [{"name": p.name, "rows": len(p.rows), "index": i,
                                             "used": sum(1 for o in self.song.get("orders") or [] if str(o) == p.name)}
                                            for i, p in enumerate(self.mod.patterns)] if self.mod else [],
-                              "module": {k: getattr(self.mod, k) for k in self.MODULE_KEYS} if self.mod else {}},
+                              "module": {k: (self.mod.row_highlight[0] or 4) if k == 'rows_per_beat' else
+                                               (self.mod.row_highlight[1] or 16) if k == 'rows_per_bar' else
+                                               getattr(self.mod, k) for k in self.MODULE_KEYS} if self.mod else {}},
                 "archives": sorted(p.name for p in self.base_dir.glob(self.song_path.stem + ".notes-*.md")),
                 "queue": sum(1 for r in self.renders.values() if r["status"] in ("queued", "rendering")),
                 "cache": sum(1 for r in self.renders.values() if r["status"] == "ready"),
@@ -3375,7 +3422,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if devices or cls.rec_devices is None:
                 cls.rec_devices = r.devices()
+                cls.rec_outputs = r.outputs()
             out["devices"] = cls.rec_devices
+            out['outputs'] = getattr(cls, 'rec_outputs', [])
         except RecordError as e:
             out.update(available=False, error=str(e), devices=[])
         out["status"] = r.status()
@@ -3399,7 +3448,41 @@ class Handler(BaseHTTPRequestHandler):
             elif cmd == "start":
                 if cls.state is None:
                     raise RecordError("open a song first: takes are saved beside it")
-                r.start(float(body.get("preroll") or 0))
+                if r.recording:
+                    raise RecordError('Stop the current take first')
+                if body.get('backing'):
+                    from .export import snapshot, render
+                    from .resample import resample
+                    import numpy as np
+                    st = cls.state
+                    with st.lock:
+                        st._need_compiled()
+                        if st.dirty():
+                            raise RecordError('Compare and RELOAD external edits before recording')
+                        region = None
+                        if body.get('section'):
+                            a, b = st.song['sections'][body['section']]
+                            playable = [i for i in range(a, b) if st.mod.orders[i] < len(st.mod.patterns)]
+                            if not playable:
+                                raise RecordError('The selected section has no playable orders')
+                            a, b = playable[0], playable[-1]
+                            region = (a, 0, b, len(st.mod.patterns[st.mod.orders[b]].rows)-1)
+                        snap = snapshot(st.song, st.base_dir, region, st.mix(), st.silenced(), tail=0)
+                        bpm = st.facts['bpm']
+                    pcm = np.frombuffer(render(snap), dtype='<i2').astype(np.float32).reshape(-1, 2) / 32768
+                    if r.rate != RATE:
+                        pcm = np.stack([resample(pcm[:, c], RATE, r.rate) for c in range(2)], axis=1)
+                    if cls.state is not st:
+                        raise RecordError('The song changed while preparing playback; start again')
+                    r.start_backing(pcm, body['output'], countin=body.get('countin', 4), bpm=bpm,
+                                    loops=body.get('loops', 1), latency_ms=body.get('latency_ms', 0))
+                else:
+                    r.start(float(body.get("preroll") or 0))
+            elif cmd == 'calibrate':
+                from .record import calibration_signal
+                if not r.rate:
+                    raise RecordError('Open an input first')
+                r.start_backing(calibration_signal(r.rate), body['output'], countin=0, calibration=True)
             elif cmd == "asio":  # takes effect at the next start: sounddevice has loaded its PortAudio already
                 REC_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
                 _atomic_text(REC_SETTINGS, json.dumps({"asio": bool(body.get("on"))}))
@@ -3411,9 +3494,20 @@ class Handler(BaseHTTPRequestHandler):
             elif cmd == "multisample":  # the session's takes with a note as one instrument
                 return {"report": cls.state.takes_multisample(body.get("files"))}
             elif cmd in ("stop", "discard"):
-                x = r.stop()
-                if cmd == "stop" and x is not None:
-                    return {"take": cls.state.save_take(x, r.rate, body)}
+                takes, plan = r.stop_takes()
+                if cmd == 'stop' and takes:
+                    if plan and plan['calibration']:
+                        from .record import measure_latency
+                        return {'latency_ms': measure_latency(plan['pcm'], takes[0], r.rate)}
+                    saved = []
+                    for i, x in enumerate(takes):
+                        opts = dict(body)
+                        if plan:
+                            opts['trim'] = False  # preserve placement against the backing track
+                            if plan['loops'] > 1:
+                                opts['name'] = str(body.get('name') or 'take') + f'-pass{i+1}'
+                        saved.append(cls.state.save_take(x, r.rate, opts))
+                    return {'take': saved[-1], 'takes': saved}
             else:
                 raise RecordError(f"unknown recorder command {cmd!r}")
         except (RecordError, ValueError) as e:
@@ -3440,6 +3534,8 @@ class Handler(BaseHTTPRequestHandler):
 
     @classmethod
     def open_song(cls, path):
+        if cls.recorder is not None and cls.recorder.recording:
+            raise ValueError('Save or discard the recording before opening another song')
         old, cls.state = cls.state, State(path)
         if old is not None:
             old.close()
@@ -3589,7 +3685,7 @@ class Handler(BaseHTTPRequestHandler):
         if st is None:
             return self._send(404, {"error": "no song open"})
         if path.startswith("/take/"):
-            f = st.takes_dir / Path(path[6:]).name  # a file of the song's takes folder, nothing else
+            f = st.takes_dir / Path(unquote(path[6:])).name  # a file of the song's takes folder, nothing else
             return self._send_file(f, "audio/wav")
         if path.startswith("/api/autoloop/"):
             try:
@@ -3791,6 +3887,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Project browser settings must be an object under 2 MiB')
                 st.meta['project_settings'] = settings
                 st.save_meta()
+            elif act == "materialize":
+                st.materialize_pattern(body['pattern'])
+            elif act == "trimhistory":
+                st.trim_history(body.get('keep', 0))
             elif act == "checkpoint":
                 return self._send(200, st.checkpoint(body.get('name', ''), body.get('action', 'save')))
             elif act == "reload":

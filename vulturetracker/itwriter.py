@@ -131,6 +131,8 @@ def _pattern(pat, num_channels) -> bytes:
 
 
 def write_it(mod: Module) -> bytes:
+    if len(mod.patterns) > 254:
+        raise ValueError('IT supports at most 254 addressable patterns')
     orders = list(mod.orders)
     if not orders or orders[-1] != ORDER_END:
         orders.append(ORDER_END)

@@ -74,6 +74,7 @@ class TestGui(unittest.TestCase):
                 if not busy:
                     break
                 time.sleep(0.05)
+            st.close()
         self.tmp.cleanup()
 
     def test_measure(self):
@@ -1199,14 +1200,14 @@ class TestGui(unittest.TestCase):
         self.assertIn("    - {name: A echo, pan: 12}\n", read())
         self.assertEqual(st.facts["channels"], ["A", "B", "A echo"])
         rows = st.pattern_rows(0)["rows"]
-        self.assertEqual([r[2] for r in rows], ["... .. ... ...", "C-5 01 v32 ...", "D-5 .. v20 H44", "... .. ... ..."])
+        self.assertEqual([r[2] for r in rows], ["... .. ... ...", "C-5 01 v32 ...", "D-5 01 v20 H44", "... .. ... ..."])
         self.assertTrue(all(not line.endswith(" \n") for line in read().splitlines(keepends=True)))
         # into the existing echo channel two ticks late: the note there is left alone, the rest delayed with SD2; the
         # E-5's pan command (p10, X20) is not copied, its volume is the channel's last (v40)
         r = st.song_edit([{"op": "echo", "ch": 0, "to": 2, "pattern": 0, "rows": 0, "ticks": 2, "level": 25}])
         self.assertEqual(r["report"], "echo of channel 1 into channel 3: 2 cells, 1 skipped (the cell there was not empty), "
                                       "1 effects replaced by the tick delay")
-        self.assertEqual([r[2] for r in st.pattern_rows(0)["rows"]], ["C-5 01 v16 SD2", "C-5 01 v32 ...", "D-5 .. v20 H44", "E-5 .. v10 SD2"])
+        self.assertEqual([r[2] for r in st.pattern_rows(0)["rows"]], ["C-5 01 v16 SD2", "C-5 01 v32 ...", "D-5 01 v20 H44", "E-5 01 v10 SD2"])
         # the whole song: every pattern, the second echo named apart
         st.song_edit([{"op": "echo", "ch": 1, "to": None, "pattern": None, "rows": 1, "level": 100}])
         self.assertEqual(st.facts["channels"][3], "B echo")

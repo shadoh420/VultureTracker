@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from vulturetracker import gui
 from vulturetracker.wavload import write_wav
@@ -73,6 +74,7 @@ class TestPage(unittest.TestCase):
                     if not (st.jobs.qsize() or any(r["status"] in ("queued", "rendering") for r in st.renders.values())):
                         break
                     time.sleep(0.05)
+                st.close()
 
     def test_pattern_editing_in_the_page(self):
         # T3: the page's editing code in the browser: a note entered at the cursor from the piano keys, a channel
@@ -149,6 +151,7 @@ class TestPage(unittest.TestCase):
                     if not (st.jobs.qsize() or any(r["status"] in ("queued", "rendering") for r in st.renders.values())):
                         break
                     time.sleep(0.05)
+                st.close()
 
     def test_samples_tab_reports_and_resets_its_view(self):
         # SLICE's report shows in the Samples tab (it used to land in the Pattern tab's line), MULTISAMPLE + PATTERN reach
@@ -268,6 +271,7 @@ class TestPage(unittest.TestCase):
                         break
                     time.sleep(0.05)
 
+    @mock.patch.dict(os.environ, {"VT_FAKE_AUDIO": "1"})
     def test_record_tab_controls_hold_between_polls(self):
         # found on a real Scarlett: the tab polls ten times a second, and each poll rebuilt the takes table (a click on ▶
         # was lost between press and release) and put the open rate back into RATE (48000 could not be picked)
@@ -279,7 +283,6 @@ class TestPage(unittest.TestCase):
             write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
             write_wav(d / "b.wav", RATE, [sine(880)])
             (d / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
-            os.environ["VT_FAKE_AUDIO"] = "1"
             st = gui.Handler.state = gui.State(d / "song.yaml")
             srv = gui._Server(("127.0.0.1", 0), gui.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -314,7 +317,6 @@ class TestPage(unittest.TestCase):
                 if gui.Handler.recorder:
                     gui.Handler.recorder.close()
                 gui.Handler.state = gui.Handler.recorder = gui.Handler.rec_devices = None
-                os.environ.pop("VT_FAKE_AUDIO", None)
                 st.close()
 
 

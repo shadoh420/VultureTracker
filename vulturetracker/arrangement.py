@@ -41,7 +41,8 @@ def sections_text(text, sections):
         raw = text[node.start_mark.index:node.end_mark.index]
         if '#' in raw:
             raise ValueError('Expand sections to a block mapping before adding/removing names; its comments must survive')
-        return text[:node.start_mark.index] + json.dumps(sections) + text[node.end_mark.index:]
+        prefix = ' ' if node.start_mark.index and text[node.start_mark.index - 1] == ':' else ''
+        return text[:node.start_mark.index] + prefix + json.dumps(sections) + text[node.end_mark.index:]
     edits = []
     for k, v in node.value:
         if k.value in sections:

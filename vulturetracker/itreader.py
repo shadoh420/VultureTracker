@@ -117,9 +117,9 @@ def _read_samples_data(data, off, length, flags, cvt):
                 ch = list(struct.unpack(("<" if not cvt & 2 else ">") + f"{length}h", raw))
             else:
                 ch = list(struct.unpack(f"{length}b", raw))
-            if not cvt & 1:  # unsigned
+            if not cvt & (1 | 4):  # unsigned PCM; delta values are signed regardless of bit 0
                 half = 32768 if is16 else 128
-                ch = [((v + half) & (2 * half - 1)) - half for v in ch]
+                ch = [(v & (2 * half - 1)) - half for v in ch]
             if cvt & 4:  # delta-encoded PCM
                 acc, lim = 0, (1 << (16 if is16 else 8))
                 for i, v in enumerate(ch):
@@ -284,10 +284,10 @@ def read_it(data: bytes):
     while orders and orders[-1] == ORDER_END:
         orders.pop()
     for o in orders:
-        if o < 200 and o >= len(mod.patterns):
+        if o < ORDER_SKIP and o >= len(mod.patterns):
             while len(mod.patterns) <= o:
                 mod.patterns.append(Pattern(f"p{len(mod.patterns):02d}", [[Cell() for _ in range(num_ch)] for _ in range(64)]))
-    mod.orders = [o for o in orders if o < 200 or o in (ORDER_SKIP, ORDER_END)]
+    mod.orders = orders
     from .modreader import _Warn, _split_long  # patterns of 201-1024 rows (libopenmpt plays them; the format allows 200)
     warn = _Warn()
     _split_long(mod, warn)
@@ -427,6 +427,7 @@ def module_to_song(mod: Module, song_path, samples_dir) -> dict:
     rel = Path(os.path.relpath(samples_dir.resolve(), song_path.resolve().parent))
 
     module = {"title": mod.title, "tempo": mod.tempo, "speed": mod.speed,
+              'rows_per_beat': mod.row_highlight[0] or 4, 'rows_per_bar': mod.row_highlight[1] or 16,
               "global_volume": mod.global_volume, "mix_volume": mod.mix_volume}
     if mod.separation != 128:
         module["separation"] = mod.separation

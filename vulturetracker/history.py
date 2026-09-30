@@ -5,10 +5,13 @@ import itertools
 import json
 from pathlib import Path
 import re
+import zlib
 
 from .fileio import atomic_write
 
 MAX_BYTES = 64 * 1024 * 1024
+HISTORY_BYTES = 16 * 1024 * 1024
+JOURNAL_BYTES = 8 * MAX_BYTES  # six bounded files plus base64 overhead, including legacy history
 
 
 def digest(raw):
@@ -19,11 +22,39 @@ def read_optional(path):
     return path.read_bytes() if path.exists() else None
 
 
-def json_bytes(value):
+def json_bytes(value, limit=MAX_BYTES):
     raw = json.dumps(value, ensure_ascii=False, indent=1).encode('utf-8')
-    if len(raw) > MAX_BYTES:
-        raise ValueError('History exceeds 64 MiB; remove checkpoints or shorten history before saving.')
+    if len(raw) > limit:
+        raise ValueError('Saved data exceeds its size limit; remove checkpoints or trim history in PROJECT.')
     return raw
+
+
+def compressed(raw):
+    return base64.b64encode(zlib.compress(raw, 1)).decode('ascii')
+
+
+def expanded(value):
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(base64.b64decode(value, validate=True), MAX_BYTES + 1)
+    if len(raw) > MAX_BYTES or not decoder.eof or decoder.unused_data:
+        raise ValueError('Invalid or oversized compressed history')
+    return raw
+
+
+def pack_step(step):
+    if 'text' not in step:
+        return step
+    packed = dict(step)
+    packed['text_z'] = compressed(packed.pop('text').encode('utf-8'))
+    return packed
+
+
+def unpack_step(step):
+    if 'text_z' not in step:
+        return step
+    plain = dict(step)
+    plain['text'] = expanded(plain.pop('text_z')).decode('utf-8')
+    return plain
 
 
 def quarantine(path, reason, notices):
@@ -46,6 +77,8 @@ def validate_meta(meta):
 
 
 def validate_step(step):
+    if isinstance(step, dict):
+        step = unpack_step(step)
     if not isinstance(step, dict) or not isinstance(step.get('text'), str):
         raise ValueError('invalid history step')
     validate_meta(step.get('meta'))
@@ -66,13 +99,13 @@ class History:
         self.recover()
 
     def _read(self, path):
-        if path.stat().st_size > MAX_BYTES:
+        if path.stat().st_size > (JOURNAL_BYTES if path == self.journal else MAX_BYTES):
             raise ValueError('recovery file is too large')
         return self._decode(path.read_bytes())
 
     def _decode(self, raw):
         obj = json.loads(raw)
-        if not isinstance(obj, dict) or obj.get('schema') != 1 or obj.get('song') != str(self.song):
+        if not isinstance(obj, dict) or obj.get('schema') not in (1, 2) or obj.get('song') != str(self.song):
             raise ValueError('unsupported schema or different song location')
         return obj
 
@@ -99,14 +132,32 @@ class History:
         try:
             obj = self._read(self.path)
             self._validate(obj)
+            for key in ('undo', 'redo'):
+                obj[key] = [pack_step(step) for step in obj[key]]
+            obj['checkpoints'] = {name: pack_step(step) for name, step in obj['checkpoints'].items()}
             return obj
-        except (ValueError, TypeError, KeyError, UnicodeError):
+        except (ValueError, TypeError, KeyError, UnicodeError, zlib.error):
             quarantine(self.path, 'corrupt', self.notices)
             return None
 
     def data(self, raw, undo, redo, checkpoints):
-        return json_bytes({'schema': 1, 'song': str(self.song), 'head': digest(raw),
-                           'undo': undo, 'redo': redo, 'checkpoints': checkpoints})
+        return json_bytes({'schema': 2, 'song': str(self.song), 'head': digest(raw),
+                           'undo': [pack_step(s) for s in undo], 'redo': [pack_step(s) for s in redo],
+                           'checkpoints': {n: pack_step(s) for n, s in checkpoints.items()}})
+
+    def bounded(self, raw, undo, redo, checkpoints):
+        undo, redo = list(undo), list(redo)
+        while True:
+            try:
+                data = self.data(raw, undo, redo, checkpoints)
+            except ValueError:
+                data = None  # an oversized legacy stack still needs to be pruned
+            if data is not None and len(data) <= HISTORY_BYTES:
+                return data, undo, redo
+            stack = undo if len(undo) >= len(redo) else redo
+            if not stack:
+                raise ValueError('Named checkpoints exceed 16 MiB; delete a checkpoint in PROJECT before saving.')
+            del stack[0]
 
     def recover(self):
         if not self.journal.exists():
@@ -116,7 +167,8 @@ class History:
             pairs = obj['files']
             if not isinstance(pairs, list) or len(pairs) != 3 or any(not isinstance(p, list) or len(p) != 2 for p in pairs):
                 raise ValueError('invalid transaction')
-            pairs = [[None if raw is None else base64.b64decode(raw, validate=True) for raw in pair] for pair in pairs]
+            decode = expanded if obj['schema'] == 2 else lambda raw: base64.b64decode(raw, validate=True)
+            pairs = [[None if raw is None else decode(raw) for raw in pair] for pair in pairs]
             if any(raw is None for raw in pairs[0]) or any(pair[1] is None for pair in pairs):
                 raise ValueError('invalid transaction files')
             # Validate both outcomes before touching any current sidecar.
@@ -141,7 +193,7 @@ class History:
                 self._restore(path, pair[side])
             self.journal.unlink()
             self.notices.append('Recovered an interrupted save; history and settings match the song on disk.')
-        except (ValueError, TypeError, KeyError, UnicodeError):
+        except (ValueError, TypeError, KeyError, UnicodeError, zlib.error):
             quarantine(self.journal, 'corrupt', self.notices)
 
     @staticmethod
@@ -156,9 +208,10 @@ class History:
         if before[0] != expected:
             raise ValueError('The song changed while preparing the save; compare and RELOAD first')
         after = [raw, json_bytes(meta), history]
-        pairs = [[None if x is None else base64.b64encode(x).decode('ascii') for x in pair]
-                 for pair in zip(before, after)]
-        atomic_write(self.journal, json_bytes({'schema': 1, 'song': str(self.song), 'files': pairs}))
+        if any(x is not None and len(x) > MAX_BYTES for x in before + after):
+            raise ValueError('A save file exceeds 64 MiB; trim history in PROJECT before saving.')
+        pairs = [[None if x is None else compressed(x) for x in pair] for pair in zip(before, after)]
+        atomic_write(self.journal, json_bytes({'schema': 2, 'song': str(self.song), 'files': pairs}, JOURNAL_BYTES))
         try:
             if read_optional(self.song) != before[0]:
                 raise ValueError('The song changed while preparing the save; compare and RELOAD first')

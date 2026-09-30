@@ -57,7 +57,7 @@ def resynth(target, corpus, rate, block=0.05, overlap=4, variety=1, reuse=0.0, l
         cf.append(f)
         cl.append(lv)
     cfeat, clevel = np.concatenate(cf), np.concatenate(cl)
-    starts = blocks(np.pad(target, (0, max(0, size - len(target)))), size, hop)
+    starts = list(range(0, max(1, len(target)), hop))  # include the final, zero-padded target blocks
     tpad = np.pad(target, (0, size + hop))
     tfeat, tlevel = block_features(tpad, starts, size, rate)
     scale = cfeat.std(axis=0) + 1e-6

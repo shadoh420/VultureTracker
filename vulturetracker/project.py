@@ -93,12 +93,13 @@ def collect(state, destination, make_zip=False, browser=None):
     zip_temp = None
     files, taken = {}, set()
 
-    def copy_file(source, folder='samples'):
+    def copy_file(source, folder='samples', candidate=False):
         source = Path(source).resolve()
         if source in files:
             return files[source]
         if not source.is_file():
-            raise ValueError(f'Missing project asset: {source}; relink it before collecting')
+            remedy = 'remove it in TRYOUT or restore the file' if candidate else 'relink it'
+            raise ValueError(f'Missing project asset: {source}; {remedy} before collecting')
         data = source.read_bytes()
         name = source.name
         rel = Path(folder) / name if folder else Path(name)
@@ -157,7 +158,7 @@ def collect(state, destination, make_zip=False, browser=None):
         collected = replace_values(text, updates)
         for paths in (meta.get('candidates') or {}).values():
             for path in paths:
-                copy_file(state.base_dir / path)
+                copy_file(state.base_dir / path, candidate=True)
         wanted = set(files)
         recs = {p for p, outs in recipes if any(w.resolve() in wanted for w, _, _ in outs)}
         recs.update(Path(rec['recipe']) for rec in (meta.get('recipe_of') or {}).values() if rec.get('recipe'))

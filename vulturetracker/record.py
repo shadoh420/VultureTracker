@@ -31,9 +31,12 @@ class RecordError(RuntimeError):
 class FakeStream:
     """sounddevice.InputStream's shape (start, stop, close; a callback per block) over a generated signal, in real time."""
 
-    def __init__(self, samplerate, channels, callback, blocksize=512):
+    def __init__(self, samplerate, channels, callback, blocksize=512, duplex=False):
         self.rate, self.channels, self.callback, self.block = int(samplerate), channels, callback, blocksize
         self.frame = 0
+        self.duplex = duplex
+        self.loopback_frames = None
+        self.delayed = np.zeros((0, channels), np.float32)
         self._stop = threading.Event()
         self._thread = None
 
@@ -47,16 +50,31 @@ class FakeStream:
         self.frame += n
         return out.astype(np.float32)
 
+    def deliver(self):
+        x = self.signal(self.block)
+        if not self.duplex:
+            self.callback(x, self.block, None, None)
+            return
+        if self.loopback_frames is not None:
+            if not len(self.delayed):
+                self.delayed = np.zeros((self.loopback_frames, self.channels), np.float32)
+            x = self.delayed[:self.block].copy()
+            self.delayed = self.delayed[self.block:]
+        out = np.zeros((self.block, 2), np.float32)
+        self.callback(x, out, self.block, None, None)
+        if self.loopback_frames is not None:
+            self.delayed = np.concatenate([self.delayed, np.repeat(out[:, :1], self.channels, axis=1)])
+
     def feed(self, seconds):
         """Deliver `seconds` of blocks at once (tests: no waiting on the clock)."""
         for _ in range(int(seconds * self.rate / self.block)):
-            self.callback(self.signal(self.block), self.block, None, None)
+            self.deliver()
 
     def start(self):
         def run():
             next_t = time.monotonic()
             while not self._stop.is_set():
-                self.callback(self.signal(self.block), self.block, None, None)
+                self.deliver()
                 next_t += self.block / self.rate
                 time.sleep(max(0, next_t - time.monotonic()))
         self._thread = threading.Thread(target=run, daemon=True)
@@ -77,6 +95,17 @@ class FakeBackend:
 
     def devices(self):
         return [{"id": 0, "name": "Simulated 2-input interface", "hostapi": "simulated", "inputs": 2, "rate": 44100}]
+
+    def outputs(self):
+        return [{'id': 0, 'name': 'Simulated output', 'hostapi': 'simulated', 'outputs': 2}]
+
+    def open_duplex(self, device, output, channels, rate, callback, exclusive=False, loopback=False):
+        s = FakeStream(rate, channels, callback, duplex=True)
+        if loopback:
+            s.loopback_frames = round(.05 * rate)
+        if self.realtime:
+            s.start()
+        return s
 
     def open(self, device, channels, rate, callback, exclusive=False):
         s = FakeStream(rate, channels, callback)
@@ -116,6 +145,34 @@ class SoundDeviceBackend:
 
     def open(self, device, channels, rate, callback, exclusive=False):
         return OnThread(self.ex, self.ex.submit(self._open, device, channels, rate, callback, exclusive).result())
+
+    def outputs(self):
+        def query():
+            apis = self.sd.query_hostapis()
+            return [{'id': d['index'], 'name': d['name'], 'hostapi': apis[d['hostapi']]['name'],
+                     'outputs': d['max_output_channels']} for d in self.sd.query_devices() if d.get('max_output_channels', 0)]
+        return self.ex.submit(query).result()
+
+    def open_duplex(self, device, output, channels, rate, callback, exclusive=False):
+        return OnThread(self.ex, self.ex.submit(self._open_duplex, device, output, channels, rate, callback, exclusive).result())
+
+    def _open_duplex(self, device, output, channels, rate, callback, exclusive):
+        sd = self.sd
+        inp, out = sd.query_devices(device), sd.query_devices(output)
+        if inp['hostapi'] != out['hostapi']:
+            raise RecordError('Choose input and output devices using the same driver (host API)')
+        api = sd.query_hostapis(inp['hostapi'])['name']
+        extra = (sd.WasapiSettings(exclusive=exclusive, auto_convert=not exclusive),) * 2 if 'WASAPI' in api else None
+        stream = None
+        try:
+            stream = sd.Stream(device=(device, output), channels=(channels, min(2, out['max_output_channels'])),
+                               samplerate=rate, dtype='float32', latency='low', callback=callback, extra_settings=extra)
+            stream.start()
+            return stream
+        except Exception as e:
+            if stream is not None:
+                stream.close()
+            raise RecordError(f'Input/output would not open together at {rate} Hz: {e}; choose matching drivers and device rates') from e
 
     def _devices(self):
         apis = self.sd.query_hostapis()
@@ -172,6 +229,10 @@ class Recorder:
         self.tune = np.zeros(self.TUNER_FRAMES, np.float32)
         self.frames = 0          # frames of the take so far
         self.overflows = 0
+        self.backing = None
+        self.play_frame = 0
+        self.finished = False
+        self.exclusive = False
 
     def _backend(self):
         if self.be is None:
@@ -181,11 +242,15 @@ class Recorder:
     def devices(self):
         return self._backend().devices()
 
+    def outputs(self):
+        return self._backend().outputs()
+
     def open(self, device, mode="1", rate=44100, exclusive=False):
         """Open `device` (a devices() id) for `mode` (MODES) at `rate`; the meters and tuner run from here on."""
         if mode not in MODES:
             raise RecordError(f"inputs are one of {', '.join(MODES)}")
         self.close()
+        self.exclusive = exclusive
         be = self._backend()
         dev = next((d for d in be.devices() if d["id"] == int(device)), None)
         if dev is None:
@@ -214,6 +279,8 @@ class Recorder:
         with self.lock:
             self.recording = False
             self.chunks = []
+            self.backing = None
+            self.finished = False
 
     def set_mode(self, mode):
         if mode not in MODES:
@@ -245,19 +312,95 @@ class Recorder:
             self.tune[-n:] = mono[-n:]
             block = sel.copy()
             if self.recording:
-                self.chunks.append(block)
-                self.frames += len(block)
-            else:
-                self.preroll.append(block)
-                self.preroll_frames += len(block)
-                while self.preroll and self.preroll_frames - len(self.preroll[0]) >= self.preroll_s * self.rate:
-                    self.preroll_frames -= len(self.preroll.popleft())
+                take = block
+                if self.backing is not None:
+                    take = block[:max(0, self.backing['end'] - self.frames)]
+                if len(take):
+                    self.chunks.append(take)
+                    self.frames += len(take)
+                if self.backing is not None and self.frames >= self.backing['end']:
+                    self.finished = True
+            self.preroll.append(block)
+            self.preroll_frames += len(block)
+            while self.preroll and self.preroll_frames - len(self.preroll[0]) >= self.preroll_s * self.rate:
+                self.preroll_frames -= len(self.preroll.popleft())
+
+    def start_backing(self, pcm, output, *, countin=4, bpm=125, loops=1, latency_ms=0, calibration=False):
+        """Play frames x stereo and capture on one duplex clock; retain each pass separately."""
+        if self.stream is None:
+            raise RecordError('Open an input first')
+        if self.recording:
+            raise RecordError('Stop the current take first')
+        pcm = np.asarray(pcm, np.float32)
+        if pcm.ndim != 2 or pcm.shape[1] != 2 or not len(pcm) or not np.isfinite(pcm).all():
+            raise RecordError('Backing audio must contain finite stereo frames')
+        countin, loops, bpm, latency_ms = int(countin), int(loops), float(bpm), float(latency_ms)
+        if not 0 <= countin <= 16 or not 1 <= loops <= 16 or not math.isfinite(bpm) or bpm <= 0 or not 0 <= latency_ms <= 2000:
+            raise RecordError('Use 0-16 count-in beats, 1-16 passes, positive BPM and 0-2000 ms compensation')
+        head = round(countin * 60 / bpm * self.rate)
+        if head > 60 * self.rate:
+            raise RecordError('Count-in exceeds 60 seconds; reduce its beat count')
+        offset = head + round(latency_ms * self.rate / 1000)
+        click = np.zeros((head, 2), np.float32)
+        n = min(round(.025 * self.rate), max(1, round(60 / bpm * self.rate)))
+        pulse = (.2 * np.sin(np.arange(n) * 2 * np.pi * 1200 / self.rate) * np.hanning(n)).astype(np.float32)
+        for beat in range(countin):
+            a = round(beat * 60 / bpm * self.rate)
+            k = min(n, head - a)
+            click[a:a+k] = pulse[:k, None]
+        plan = {'pcm': pcm, 'click': click, 'head': head, 'offset': offset, 'loops': loops,
+                'end': offset + loops * len(pcm), 'calibration': calibration}
+        device, rate = self.device, self.rate
+        self.close()
+        with self.lock:
+            self.backing, self.play_frame, self.frames, self.finished = plan, 0, 0, False
+            self.chunks = []
+            self.recording = True
+        try:
+            be = self._backend()
+            opts = {'loopback': calibration} if isinstance(be, FakeBackend) else {}
+            self.stream = be.open_duplex(device, int(output), self.channels, rate, self._duplex, self.exclusive, **opts)
+        except Exception:
+            self.close()
+            raise
+
+    def _duplex(self, indata, outdata, frames, time_info, status):
+        self._callback(indata, frames, time_info, status)
+        outdata[:] = 0
+        with self.lock:
+            plan = self.backing
+            if not self.recording or plan is None:
+                return
+            positions = self.play_frame + np.arange(frames)
+            out = np.zeros((frames, 2), np.float32)
+            intro = positions < plan['head']
+            out[intro] = plan['click'][positions[intro]]
+            local = positions - plan['head']
+            active = (local >= 0) & (local < len(plan['pcm']) * plan['loops'])
+            out[active] = plan['pcm'][local[active] % len(plan['pcm'])]
+            outdata[:] = out if outdata.shape[1] == 2 else out.mean(axis=1, keepdims=True)
+            self.play_frame += frames
+
+    def stop_takes(self):
+        plan = self.backing
+        x = self.stop()
+        if x is None:
+            return [], plan
+        if plan is None:
+            return [x], None
+        x = x[:, plan['offset']:]
+        n = len(plan['pcm'])
+        return [x[:, i:i+n] for i in range(0, x.shape[1], n)], plan
 
     def start(self, preroll=0.0):
         """Begin a take; the last `preroll` seconds before REC (up to 0.5) open it."""
         if self.stream is None:
             raise RecordError("open an input first")
         with self.lock:
+            if self.recording:
+                raise RecordError('Stop the current take first')
+            self.backing = None
+            self.finished = False
             keep, got = [], 0
             want = int(max(0.0, min(self.preroll_s, float(preroll))) * self.rate)
             for b in reversed(self.preroll):
@@ -278,6 +421,8 @@ class Recorder:
             if not self.recording:
                 return None
             self.recording = False
+            self.backing = None
+            self.finished = False
             chunks, self.chunks = self.chunks, []
             mode = self.mode
         if not chunks:
@@ -295,7 +440,10 @@ class Recorder:
             out = {"open": self.stream is not None, "device": self.device, "mode": self.mode, "rate": self.rate,
                    "inputs": self.channels, "recording": self.recording, "seconds": self.frames / self.rate if self.rate else 0,
                    "peak": [db(v) for v in self.peak[: self.channels]], "hold": [db(v) for v in self.hold[: self.channels]],
-                   "clip": [bool(v) for v in self.clip[: self.channels]], "overflows": self.overflows, "error": self.error}
+                   "clip": [bool(v) for v in self.clip[: self.channels]], "overflows": self.overflows, "error": self.error,
+                   "finished": self.finished, "backing": self.backing is not None,
+                   "calibrating": bool(self.backing and self.backing['calibration']),
+                   "pass": min(self.backing['loops'], max(1, 1 + (self.frames-self.backing['head']) // len(self.backing['pcm']))) if self.backing else 0}
             tune = self.tune.copy()
         out["tuner"] = None
         if out["open"] and np.abs(tune).max() > 0.01:
@@ -304,3 +452,26 @@ class Recorder:
                 note, cents = dsp.note_of(hz)
                 out["tuner"] = {"hz": round(hz, 2), "note": note, "cents": round(cents)}
         return out
+
+
+def calibration_signal(rate):
+    """Quiet broadband pulse with enough following silence for a round-trip measurement."""
+    x = np.zeros((round(2.5 * rate), 2), np.float32)
+    n, a = round(.05 * rate), round(.2 * rate)
+    pulse = np.random.default_rng(0).normal(0, .1, n) * np.hanning(n)
+    x[a:a+n] = pulse[:, None]
+    return x
+
+
+def measure_latency(reference, captured, rate):
+    """Round-trip delay from a physical output-to-input loopback, by normalized correlation."""
+    ref = np.asarray(reference, float).mean(axis=1)
+    got = np.asarray(captured, float).mean(axis=0)
+    n = 1 << (len(ref) + len(got) - 1).bit_length()
+    corr = np.fft.irfft(np.fft.rfft(got, n) * np.conj(np.fft.rfft(ref, n)), n)
+    lag = int(np.argmax(np.abs(corr[:min(len(got), round(2 * rate) + 1)])))
+    aligned = got[lag:lag+len(ref)]
+    confidence = abs(corr[lag]) / max(1e-12, np.linalg.norm(ref[:len(aligned)]) * np.linalg.norm(aligned))
+    if confidence < .5 or np.max(np.abs(got), initial=0) < .005:
+        raise RecordError('No clear loopback pulse detected; connect the selected output to the selected input and retry')
+    return round(1000 * lag / rate, 2)

@@ -39,8 +39,8 @@ def capture(state, body):
     if not 2 <= count <= 4 or not 0 <= a <= b < len(pat.rows) or not chans or not all(0 <= c < len(state.mod.channels) for c in chans):
         raise ValueError('Choose 2-4 alternatives, valid rows, and at least one channel')
     ident = uuid.uuid4().hex
-    folder = state.base_dir / (state.song_path.stem + '.phrases') / ident
-    folder.mkdir(parents=True)
+    folder = state.base_dir / (state.song_path.stem + '.phrases') / 'assets'
+    folder.mkdir(parents=True, exist_ok=True)
     text = state.patched_text(state.want)[0] if state.want else state.text
     doc = api.from_yaml(text)
     updates, assets = [], {}
@@ -49,10 +49,15 @@ def capture(state, body):
             continue
         src = (state.base_dir / entry['file']).resolve()
         raw = src.read_bytes()
-        dst = folder / f'{num:02d}.wav'
-        dst.write_bytes(raw)
+        sha = digest(raw)
+        dst = folder / f'{sha}.wav'
+        if dst.exists():
+            if digest(dst.read_bytes()) != sha:
+                raise ValueError(f'Frozen phrase sample changed: {dst}; restore it before capturing')
+        else:
+            atomic_write(dst, raw, replace=False)
         rel = dst.relative_to(state.base_dir).as_posix()
-        assets[rel] = digest(raw)
+        assets[rel] = sha
         updates.append((('samples', num, 'file'), rel))
     text = replace_values(text, updates)
     # Only this order occurrence changes, even when earlier orders use the same pattern.

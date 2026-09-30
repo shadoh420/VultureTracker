@@ -116,7 +116,9 @@ unwritten faders are back on the channel they were set on, WRITE MIX undone brin
 slot's candidate list. Edits are refused while the song file has changed on disk (RELOAD first), so they never overwrite a change
 made elsewhere. While the live engine plays, each edit is swapped in where it plays (about 0.35 s for Nadir) and the
 view stays on the pattern being edited. A song whose patterns are written by a generator loses these edits when the
-generator is rerun. Patterns whose rows are not a literal `data: |` block are shown but cannot be edited here.
+generator is rerun. For quoted or compact patterns, click MAKE EDITABLE to write their compiled cells as a
+literal `data: |` block. This is one undo step; undo restores the original notation. Conversion replaces that
+pattern's notation and its internal comments; a flow-style `patterns: {...}` mapping is expanded as a whole.
 
 **MIDI input.** Click MIDI in the live bar to switch MIDI input on: the first time, the window asks whether the page
 may use MIDI devices (Allow; the answer is kept, and MIDI stays on at the next launch until it is clicked off). A MIDI
@@ -127,8 +129,10 @@ instrument on show, in the Samples tab the slot), at the key's loudness with VEL
 note. In edit mode on the Pattern tab each key also enters its note at the cursor with the INS instrument, and with
 VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. While the live engine plays the
 pattern on show, a key records instead: its note goes into the cursor's channel at the row playing when it went down,
-and the cursor follows (the piano keys on the computer keyboard record the same way). Notes are entered one at a time
-(no chords spread over channels). The app serves its
+and the cursor follows (the piano keys on the computer keyboard record the same way). With CHORD checked,
+notes arriving within 50 ms are captured together, lowest first, across consecutive channels starting at the
+cursor. The chord is one undo step and advances STEP only once. If it needs more channels than remain, nothing
+is written and the selection bar explains why. Uncheck CHORD for one-note-at-a-time entry. The app serves its
 page from port 8723 when that is free (another app window takes any free port) and keeps the window's browser profile in
 `%APPDATA%\VultureTracker\webview`, so the page's own settings (speed, latency, hex rows, MIDI) and the MIDI permission
 carry over from one launch to the next.
@@ -136,7 +140,9 @@ carry over from one launch to the next.
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
 stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
 plays, higher on the first row of each bar, by the song's row highlight (rows per beat and per bar, which also draw the
-pattern's row lines); the click is mixed in the engine, so it lands within a millisecond of the row. The small scope
+pattern's row lines). Set rows per beat and rows per bar in SONG (1-255 each); the displayed BPM uses that
+beat spacing, and these values round-trip through IT imports and exports. They change the grid and metronome,
+not playback speed. The click is mixed in the engine, so it lands within a millisecond of the row. The small scope
 beside it shows the engine's output. The Pattern tab's hint line says what the volume command and the effect under the
 cursor do (from this file's tables in SONG_FORMAT.md). The Song tab's CLEAN-UP lists what the order list never plays:
 patterns outside it, instruments no played pattern names, samples no used instrument maps; ✕ removes one (refused, and
@@ -255,7 +261,9 @@ instrument. + PATTERN also writes a new pattern (`<name>_slices`, not put in the
 whose cells play the slices in order at their original timing: each on the row its start reaches at the song's tempo
 and speed, the ticks left over as a note delay (SDx), from the Pattern tab cursor's channel (two on one row: the next
 channel); the timing is kept to the nearest tick (measured: within 8 ms at tempo 125 speed 6, where a tick is 20 ms).
-What SLICE made is reported in the tab's top line. One step for Ctrl+Z. A hard cut in the recording (a sound that stops
+IT note delays hold at most 15 ticks. If the chosen timing needs more, pattern creation is refused with a
+request to use speed 16 or less; it never wraps a delay to an earlier tick. What SLICE made is reported in the
+tab's top line. One step for Ctrl+Z. A hard cut in the recording (a sound that stops
 dead) less than 50 ms before a hit can be taken for the hit (the cut then sits up to that much early): lower the
 sensitivity, or slice a selection that starts at the hit (a selection's start is always a cut). PROPERTIES: name, base note or c5 speed
 (either replaces the other), default volume, global volume (refused while the Tryout mixer holds an unwritten GAIN for
@@ -275,7 +283,7 @@ tick ASIO to list ASIO drivers too, such as a Scarlett's Focusrite USB ASIO, the
 app next starts), INPUTS picks what a take keeps (input 1, input 2, both as stereo, or both mixed to mono), RATE the
 sample rate, EXCLUSIVE WASAPI's exclusive mode (the app alone on the device, at its own rate). OPEN starts the meters
 (peak per input with a held peak, amber from -6 dBFS, CLIP when a sample reached full scale) and the TUNER (the note the
-chosen inputs hold, in cents, green within 5); nothing is played back: monitor through the interface itself (a
+chosen inputs hold, in cents, green within 5); the input is not played back: monitor through the interface itself (a
 Scarlett's DIRECT MONITOR switch), so there is no delay to hear. ● REC and ■ STOP make a take, with up to PRE-ROLL
 seconds from before the click. Each take is written as a 16-bit WAV in `takes/` beside the song (`<name>-01.wav`,
 numbered), its silent edges trimmed (TRIM SILENCE UNDER, keeping 10 ms before the first sound) and its note found (FIND
@@ -286,6 +294,20 @@ every take of the session that holds a note a new slot tuned to the cent and one
 the keys nearest its note: record single notes (a few across the range), then play them as one instrument. TAKES THIS SESSION lists them (▶ plays one; → CANDIDATE and → NEW SLOT send it on
 later). In the Samples tab, AUTO LOOP proposes loop points for a sustained sound (a whole number of its periods late in
 its steady part, on rising zero crossings where the waveform matches best); CROSSFADE LOOP then smooths the wrap.
+**PLAY ALONG** plays the saved song with the current mixer and mutes through the selected OUTPUT while
+recording. Choose the whole song or a named section, 0-16 count-in beats and 1-16 passes. Input and output
+must use the same driver/host API and a supported rate. A single duplex stream times playback and capture;
+each pass becomes a separate take. PRE-ROLL and silence trimming are disabled in this mode so take starts
+retain their placement. At the end, click SAVE TAKES; STOP early keeps the recorded part of the final pass.
+The count-in uses the song's initial BPM.
+
+LATENCY MS removes the measured round-trip delay from recorded starts. For CALIBRATE LOOPBACK, connect the
+selected output to the selected input, click the button, then MEASURE LATENCY after the pulse finishes. A
+clear correlated signal is required; silence is refused. Calibration does not create a take. Disconnect the
+loopback to record an instrument, and recalibrate after changing devices, drivers, rate or buffer settings.
+The fake-audio backend tests frame alignment and calibration; physical interface latency still needs a
+hardware check.
+
 Recording needs `pip install sounddevice` in a source checkout (the exe carries it); `VT_FAKE_AUDIO=1` swaps in a
 simulated two-input interface to try the tab without one.
 
@@ -401,12 +423,18 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    original stays untouched. The new copy starts a fresh undo/checkpoint history; those records remain with the source.
    Named synth patches still require their synth and patch library on the receiving computer. No plugin installers,
    recordings from outside the project references, or sample-library indexes are bundled. Missing samples must be
-   relinked first: supply explicit replacement WAVs in PROJECT, then RELINK (or all missing samples together). This
+   relinked first (a missing tryout candidate must instead be removed in TRYOUT or restored): supply explicit
+   replacement WAVs in PROJECT, then RELINK (or all missing samples together). This
    changes only `file:` paths, keeping tuning, loop settings and comments; the complete song must compile.
 
 **Persistence and external files.** The YAML remains the musical source of truth, with comments, BOM and line endings
 retained by app writes. `<song>.tryout.json` holds audition settings, candidates and phrase choices;
-`<song>.history.json` holds at most 200 undo/redo steps and 32 named checkpoints (64 MiB file cap).
+`<song>.history.json` holds at most 200 compressed undo/redo steps and 32 named checkpoints within a 16 MiB
+storage budget. The oldest available undo/redo steps are pruned to fit; named checkpoints are never
+automatically deleted. If checkpoints alone fill the budget, delete one in PROJECT. PROJECT displays storage
+usage and offers TRIM HISTORY (keep the latest N undo steps, clear redo) and CLEAR UNDO / REDO (keep
+checkpoints). Version 0.6 history is read and migrated on the next write; the compressed format requires 0.7.0
+or later.
 `<song>.recovery.json` is a temporary save journal. On reopening, it only reconciles sidecars when all files match
 that transaction; recovery never writes over the YAML. Malformed or conflicting recovery files are kept under unique
 `.corrupt-N` or `.external-conflict-N` names with a notice. Restoring history/checkpoints validates source WAV content,
@@ -422,7 +450,9 @@ rule. Restores never automatically undo newer external work. Historical notes ke
 browser's localStorage (per server address; Paint also per song path). PROJECT can save them into the project sidecar,
 and collection includes the current browser's copy. RESTORE PROJECT SETTINGS explicitly applies them in the receiving
 browser and reloads the page. Device/MIDI permissions, interface choices and library folders stay local; they are not
-portable. Phrase captures keep frozen WAVs under `<song>.phrases/`; these are project data, not the disposable `.tryout/`
+portable. New phrase captures share frozen WAVs by content hash under `<song>.phrases/assets/`; unchanged
+samples are stored once across captures and slots. Earlier per-capture folders remain readable. Frozen files
+are retained for archived comparisons and checkpoints; they are project data, not the disposable `.tryout/`
 render cache. Starting another comparison archives the previous comparison there. Ratings are measurements/notes for
 your decision, not an automated quality judgment.
 

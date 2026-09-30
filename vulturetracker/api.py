@@ -55,6 +55,7 @@ def _int(loader, node):
 
 
 _Loader.add_constructor("tag:yaml.org,2002:int", _int)
+_Loader.add_implicit_resolver('tag:yaml.org,2002:int', re.compile(r'[-+]?0[0-9]+$'), list('-+0123456789'))
 
 
 def from_yaml(text: str) -> dict:
@@ -245,12 +246,14 @@ def swap_sample(song: dict, slot, cand, name_from_file=True) -> dict:
     the slot entry."""
     from .notation import format_note
     from .wavload import read_wav
-    old = song["samples"][slot].get("name")
+    old = song["samples"][slot].get("name", Path(song["samples"][slot]["file"]).stem[:25])
     refs = [ins.get("sample") for ins in (song.get("instruments") or {}).values() if isinstance(ins, dict)]
     refs += [k.get("sample") for ins in (song.get("instruments") or {}).values() if isinstance(ins, dict)
              for k in ins.get("keymap") or [] if isinstance(k, dict)]
     entry = song["samples"][slot] = {"file": str(cand), **{k: v for k, v in song["samples"][slot].items() if k != "file"}}
-    if name_from_file and not (old and old in refs):
+    if old in refs:
+        entry["name"] = old
+    elif name_from_file:
         entry["name"] = Path(cand).stem[:25]
     w = read_wav(cand)
     if w.root is not None and 0 <= w.root < 120 and "c5_speed" not in entry:  # a smpl unity note above B-9 is no note
@@ -274,7 +277,9 @@ def tryout_render(base: dict, slot, cand, base_dir, rate=44100) -> bytes:
 def tryout(song_path, slot, candidates, orders=None, out_wav="tryout.wav", gap=0.6, rate=44100):
     """Render part of a song once per candidate WAV in sample slot `slot`, back to back into one WAV, so sounds
     can be compared in context. `orders` is a slice of the order list, e.g. (2, 6). Returns [(seconds, file)]."""
-    import wave
+    candidates = list(candidates)
+    sources = [*output_sources(song_path), *candidates]
+    protect_outputs([out_wav], sources)
     base = tryout_song(song_path, orders)
     pcm, index, t = bytearray(), [], 0.0
     for cand in candidates:
@@ -282,11 +287,8 @@ def tryout(song_path, slot, candidates, orders=None, out_wav="tryout.wav", gap=0
         index.append((t, str(cand)))
         pcm += part + bytes(int(gap * rate) * 4)
         t += len(part) / 4 / rate + gap
-    with wave.open(str(out_wav), "wb") as f:
-        f.setnchannels(2)
-        f.setsampwidth(2)
-        f.setframerate(rate)
-        f.writeframes(bytes(pcm))
+    protect_outputs([out_wav], sources)
+    atomic_write(out_wav, wav_bytes(bytes(pcm), rate))
     return index
 
 

@@ -71,6 +71,8 @@ a letter.
 | `title` | ≤25 ASCII chars | `""` | song title |
 | `tempo` | 32–255 | 125 | initial tempo (IT "T") |
 | `speed` | 1–255 | 6 | initial ticks per row (IT "A") |
+| `rows_per_beat` | 1-255 | 4 | grid/metronome beat spacing; displayed BPM = tempo * 24 / speed / rows_per_beat |
+| `rows_per_bar` | 1-255 | 16 | grid/metronome bar spacing; stored with beat spacing in the IT row-highlight header |
 | `global_volume` | 0–128 | 128 | initial global volume (the `V` effect changes it) |
 | `mix_volume` | 0–128 | 48 | output gain. Raise it if the render is quiet, lower it if it clips. |
 | `separation` | 0–128 | 128 | stereo separation |
@@ -361,7 +363,7 @@ for just one order. Phrase tryouts are project sidecar data; accepting a phrase 
 
 ## 9. Limits and validation
 
-At most 64 channels, 99 samples, 99 instruments, 200 rows per pattern, 255 orders and 25 envelope nodes.
+At most 64 channels, 99 samples, 99 instruments, 200 rows per pattern, 254 patterns (indexes 254/255 are skip/end markers), 255 orders and 25 envelope nodes.
 `check` reports all errors at once as `file:line: error: ...`, plus warnings (unused patterns,
 notes that map to no sample, samples played so far below their stored rate that interpolation images reach
 the audible band). Common mistakes it catches:

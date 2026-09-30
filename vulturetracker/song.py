@@ -56,7 +56,7 @@ def _convert(node, ctx):
     line = node.start_mark.line + 1
     if isinstance(node, yaml.ScalarNode):
         raw = node.value
-        if node.tag == "tag:yaml.org,2002:int" and re.fullmatch(r"0\d+", raw):
+        if node.tag == "tag:yaml.org,2002:int" and re.fullmatch(r"[-+]?0\d+", raw):
             return int(raw, 10)  # '08', '010' are decimal here, not octal
         value = _constructor.construct_object(node)
         _constructor.constructed_objects.pop(node, None)  # the loader keeps every node it made; this one is done
@@ -211,7 +211,7 @@ def _numbered(ctx, m, where):
 # ---------------------------------------------------------------- sections
 
 MODULE_KEYS = ["title", "tempo", "speed", "global_volume", "mix_volume", "separation", "linear_slides",
-               "old_effects", "compatible_gxx", "channels", "message", "sample_rate"]
+               "old_effects", "compatible_gxx", "channels", "message", "sample_rate", "rows_per_beat", "rows_per_bar"]
 CHANNEL_KEYS = ["name", "pan", "volume", "muted"]
 
 
@@ -234,6 +234,9 @@ def _module(ctx, m, mod):
             setattr(mod, key, fn())
         except _Bad:
             pass
+    beat = _soft(lambda: _int(ctx, m, 'rows_per_beat', 1, 255, 4, where), 4)
+    bar = _soft(lambda: _int(ctx, m, 'rows_per_bar', 1, 255, 16, where), 16)
+    mod.row_highlight = (beat, bar)
     msg = m.get("message")
     mod.message = str(msg) if msg else ""
     if len(mod.message.replace("\r\n", "\n")) + 1 > 65535:  # the writer's limit (IT's 16-bit length), one byte a character
@@ -754,6 +757,8 @@ def compile_tree(tree, ctx, base_dir) -> Module:
         pats = LMap()
     if not pats:
         ctx.error(_line(tree, "patterns") or 1, "no patterns defined")
+    if len(pats) > ORDER_SKIP:
+        ctx.error(_line(tree, 'patterns'), 'at most 254 patterns; order values 254 and 255 are reserved')
     for name, spec in pats.items():
         try:
             pat, lines = _pattern(ctx, str(name), spec, _line(pats, name), num_channels)
@@ -832,7 +837,11 @@ def _check_images(ctx, mod, lowest):
 
 
 # libyaml's parser when PyYAML has it (about ten times faster; the same nodes, marks and styles, so the same module)
-_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+class _LOADER(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+    pass
+
+
+_LOADER.add_implicit_resolver('tag:yaml.org,2002:int', re.compile(r'[-+]?0[0-9]+$'), list('-+0123456789'))
 
 
 def load_song_text(text, base_dir=".", filename="<song>"):

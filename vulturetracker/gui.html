@@ -198,7 +198,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="btn sm" id="lv-cur" onclick="lvPlayCursor()" title="play from the cursor (Space, F7; Space again stops)">▶ FROM CURSOR</span><span class="btn sm" onclick="lvPlay(0,0)" title="play the song from its start">▶ SONG</span><span class="btn sm" id="lv-pat" onclick="lvLoopPattern()" title="loop the pattern at the cursor (F6)">↻ PATTERN</span><span class="btn sm" onclick="lvStop()" title="stop (F8)">■</span>
         <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
         <span class="k" style="margin-left:8px">INS</span><select id="lv-ins" style="font:10px var(--mono);padding:1px 3px;max-width:190px" title="the instrument the piano keys play (preview) and enter (edit mode): Z to M and Q to U, two octaves from OCT"></select><span class="k">OCT</span><input id="lv-oct" type="number" min="0" max="8" value="5" style="width:36px;font:10px var(--mono);padding:1px 3px">
-        <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
         <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
         <span class="mono" id="lv-status" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right"></span>
       </div>
@@ -436,6 +436,16 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="k">THEN</span><select id="rec-dest" style="font:10.5px var(--mono);padding:1px 3px"><option value="candidate">CANDIDATE OF THE SLOT</option><option value="slot">NEW SAMPLE SLOT</option><option value="keep">KEEP IN THE LIST</option></select>
         <span class="btn sm" onclick="recCmd({cmd:'discard'})" title="stop without saving">DISCARD</span>
       </div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:12px">
+        <label><input type="checkbox" id="rec-backing"> PLAY ALONG</label>
+        <label>OUTPUT <select id="rec-output"></select></label>
+        <label>REGION <select id="rec-section"><option value="">WHOLE SONG</option></select></label>
+        <label>COUNT-IN BEATS <input id="rec-countin" type="number" min="0" max="16" value="4" style="width:48px"></label>
+        <label>PASSES <input id="rec-loops" type="number" min="1" max="16" value="1" style="width:48px"></label>
+        <label>LATENCY MS <input id="rec-latency" type="number" min="0" max="2000" step="0.1" value="0" style="width:65px"></label>
+        <button class="btn" onclick="recCalibrate()">CALIBRATE LOOPBACK</button>
+      </div>
+      <p class="meta">Play along uses the current mixer and mutes. Each pass becomes a separate take; silence trimming and pre-roll are disabled to keep alignment. Connect output to input for calibration, then press STOP when the pulse finishes.</p>
       <div style="margin-top:8px;font-size:10.5px;color:var(--dim)">Monitor through the interface (a Scarlett's DIRECT MONITOR switch): the app does not play the input back. Takes are saved in <span class="mono">takes/</span> beside the song as 16-bit WAVs; a candidate is written into the slot with U in the TRYOUT tab, as any candidate.</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:18px"><span class="k">TAKES THIS SESSION</span><span class="btn sm" onclick="recMulti()" title="every take that holds a note becomes a new slot tuned to the cent, and one new instrument plays each over the keys nearest its note: record single notes, then play them as one instrument (one undo step)">TAKES → MULTISAMPLE</span><span class="mono" id="rec-multi" style="font-size:10px;color:var(--acc)"></span></div><div id="rec-takes" style="margin-top:6px"></div>
     </div>
@@ -487,10 +497,11 @@ option.hascand{color:var(--acc);font-weight:700}
 </div>
 <div class="main" id="t-project">
   <div class="panel" style="flex:1;overflow:auto"><div class="ph"><span class="k">PROJECT · HISTORY &amp; RECOVERY</span></div><div class="pb">
-    <p>Edits save immediately. Up to 200 undo/redo steps and 32 named checkpoints stay beside the song.</p>
+    <p>Edits save immediately. Up to 200 compressed undo/redo steps and 32 named checkpoints stay beside the song, within 16 MiB. Oldest undo steps expire first; checkpoints are kept.</p>
     <p>External changes require comparison and reload. Reload starts a new undo/redo boundary; checkpoints remain.</p>
     <button class="btn" onclick="act('undo')">UNDO</button> <button class="btn" onclick="act('redo')">REDO</button>
     <button class="btn" onclick="compareExternal()">COMPARE EXTERNAL FILE</button> <span id="history-count" class="meta"></span>
+    <p><label>Keep recent undo steps <input id="history-keep" type="number" min="0" max="200" value="20" style="width:65px"></label> <button class="btn" onclick="act('trimhistory',{keep:+$('history-keep').value})">TRIM HISTORY</button> <button class="btn" onclick="act('trimhistory',{keep:0})">CLEAR UNDO / REDO</button> Checkpoints stay.</p>
     <p><label>Checkpoint name <input id="checkpoint-name" maxlength="80" placeholder="Before final mix"></label>
     <button class="btn" onclick="checkpointSave()">SAVE CHECKPOINT</button></p><div id="checkpoint-list"></div>
     <hr><h3>Save Copy / Collect Samples</h3>
@@ -594,8 +605,8 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
   $('recentlist').innerHTML=(j.recent||[]).length?`<div class="k" style="margin-bottom:6px">RECENT</div>`+j.recent.map(p=>li(p)).join(''):'';
   $('demolist').innerHTML=(j.demos||[]).length?`<div class="k" style="margin-bottom:6px">DEMOS</div>`+j.demos.map(p=>li(p,'demo')).join(''):'';
   $('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
-function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src')}
-async function openSong(p){if(!p)return;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
+function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
+async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
 async function newSong(){const p=$('newpath').value.trim();if(!p)return;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
@@ -915,8 +926,18 @@ async function midiStart(){if(MIDI.access)return;if(!navigator.requestMIDIAccess
 function midiBind(){MIDI.access.inputs.forEach(i=>{i.onmidimessage=e=>midiMsg(e.data)});renderMidi()}
 function midiMsg(d){if(!MIDI.on||!S||!S.song||!S.song.facts)return;const t=d[0]&0xf0;
   if(t===0x90&&d[2]>0)midiNoteOn(d[1],d[2]);else if(t===0x80||t===0x90)lvNoteOff('m'+d[1])}
+function flushMidiChord(){clearTimeout(MIDI.timer);const b=MIDI.pending;MIDI.pending=null;if(!b)return;
+  if(b.song!==S.song.path||b.idx!==PAT.idx||b.order!==PAT.order||!PAT.rows)return;
+  const notes=[...b.notes].sort((a,b)=>a[0]-b[0]);if(b.ch+notes.length>S.song.facts.channels.length){selInfo('Chord needs '+notes.length+' channels from the cursor; nothing written');return}
+  const changes=notes.map(([n,v],i)=>{const p=cellOf(PAT.rows[b.row][b.ch+i]);p.n=noteTxt(n);p.i=pad(b.ins);if(v!=null)p.v='v'+pad(v);return {row:b.row,ch:b.ch+i,cell:cellText(p)}});
+  patEdit(changes);if(!b.live){CUR.row=b.row;patMove(Math.max(0,+$('lv-step').value||0))}}
+function captureMidiChord(n,vol){const live=!!(LV.playing&&LV.pos&&LV.oi===PAT.order),row=live?Math.min(PAT.rows.length-1,LV.pos.row):CUR.row;
+  if(MIDI.pending&&(MIDI.pending.row!==row||MIDI.pending.idx!==PAT.idx))flushMidiChord();
+  if(!MIDI.pending){MIDI.pending={song:S.song.path,idx:PAT.idx,order:PAT.order,row,ch:CUR.ch,ins:insNum(),live,notes:new Map()};MIDI.timer=setTimeout(flushMidiChord,50)}
+  MIDI.pending.notes.set(n,vol)}
+async function materializePattern(){if(PAT.idx==null||EDQ.n)return;const j=await act('materialize',{pattern:PAT.idx});if(!j.error){PAT.key=null;await refresh();setEdit(true)}}
 function midiNoteOn(n,vel){if(n>119)return;
-  if($('t-pattern').classList.contains('on')&&EDIT&&PAT.rows&&!document.querySelector('.modal.on')){if(CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}enterNote(n,MIDI.vel?Math.max(1,Math.round(vel*64/127)):null)}
+  if($('t-pattern').classList.contains('on')&&EDIT&&PAT.rows&&!document.querySelector('.modal.on')){if(CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}const vol=MIDI.vel?Math.max(1,Math.round(vel*64/127)):null;if($('midi-chord').checked)captureMidiChord(n,vol);else enterNote(n,vol)}
   const ins=$('t-ins').classList.contains('on')&&INS_SEL!=null?+INS_SEL-1:$('t-smp').classList.contains('on')&&W.data&&W.data.player?W.data.player[0]:null;
   lvNoteOn('m'+n,ins,n,MIDI.vel?vel/127:1)}
 function midiToggle(){MIDI.on=!MIDI.on;try{localStorage.midi=MIDI.on?'1':'0'}catch(e){}if(MIDI.on)midiStart();renderMidi()}
@@ -1169,7 +1190,7 @@ function cleanAll(){const u=S.unused||{};const ops=[...(u.patterns||[]).map(name
 function renderSongTab(){const st=S.structure;if(!st||!S.song.facts)return;renderClean();const f=S.song.facts,m=st.module,busy=EDQ.n>0;
   $('song-msg').style.color=EDQ.err?'var(--red)':'var(--dim)';$('song-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:busy?'writing…':'each change is written into the song file in place · Ctrl+Z in the Pattern tab (or ↶ there) undoes it';
   const val=(k,lab,lo,hi,txt)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,${lo},${hi},v=>songEdit([{op:'module',key:'${k}',value:v}]),${attr(String(m[k]))}${txt?',s=>s':''})" title="click to type${txt?'':` ${lo}–${hi}`}">${esc(m[k])}</span></div>`;
-  put('song-mod',val('title','title',0,0,1)+val('tempo','tempo',32,255)+val('speed','speed (ticks per row)',1,255)+val('global_volume','global volume',0,128)+val('mix_volume','mix volume',0,128)+val('separation','stereo separation',0,128)+`<div class="row"><span>BPM (4 rows per beat)</span><span>${f.bpm}</span></div>`);
+  put('song-mod',val('title','title',0,0,1)+val('tempo','tempo',32,255)+val('speed','speed (ticks per row)',1,255)+val('global_volume','global volume',0,128)+val('mix_volume','mix volume',0,128)+val('separation','stereo separation',0,128)+val('rows_per_beat','rows per beat',1,255)+val('rows_per_bar','rows per bar',1,255)+`<div class="row"><span>BPM (${f.highlight[0]} rows per beat)</span><span>${f.bpm}</span></div>`);
   $('song-on').textContent=`${st.orders.length} ENTRIES`;if(ORD_SEL>=st.orders.length)ORD_SEL=st.orders.length-1;
   put('song-orders',st.orders.map((o,i)=>`<span class="chipc ${i===ORD_SEL?'on':''}" style="${isMark(o)?'color:var(--amber)':''}" onclick="ORD_SEL=${i};renderSongTab()" ondblclick="ORD_SEL=${i};ordEdit()" title="${isMark(o)?(o==='+++'?'skip marker':'end of song'):'double-click to edit it'}">${pad(i)} ${esc(o)}</span>`).join(''));
   put('song-pat',[...st.patterns.map(p=>p.name),'+++','---'].map(n=>`<option value="${esc(n)}">${esc(n)}${n==='+++'?' (skip)':n==='---'?' (end)':''}</option>`).join(''));
@@ -1256,6 +1277,7 @@ async function recPoll(devices){if(REC.busy)return;REC.busy=true;if(devices)REC.
   clearTimeout(REC.timer);if(recOn()||(REC.st&&REC.st.status.recording))REC.timer=setTimeout(()=>recPoll(false),100)}
 async function recCmd(body){const r=await (await fetch('/api/rec',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json();
   $('rec-msg').textContent=r.error||'';if(r.take){const t=r.take;$('rec-msg').textContent=`saved ${t.file} · ${t.seconds.toFixed(2)} s`+(t.note?` · ${t.note} ${t.cents>=0?'+':''}${t.cents} cents`:'')+(t.clipped?' · CLIPPED':'')+(t.dest==='candidate'?` · a candidate of slot ${pad(t.slot)}`:t.dest==='slot'?` · new slot ${pad(t.slot)}`:'');refresh()}
+  if(r.latency_ms!=null){$('rec-latency').value=r.latency_ms;$('rec-msg').textContent='Measured round-trip latency: '+r.latency_ms+' ms'}
   recPoll(false);return r}
 function recOpenCmd(){return recCmd({cmd:'open',device:+$('rec-dev').value,mode:$('rec-mode').value,rate:+$('rec-rate').value,exclusive:$('rec-excl').checked})}
 function recOpen(){const st=REC.st&&REC.st.status;if(st&&st.open)return recCmd({cmd:'close'});recOpenCmd()}
@@ -1263,16 +1285,19 @@ function recReopen(){const st=REC.st&&REC.st.status;if(st&&st.open&&!st.recordin
 function recMode(){const st=REC.st&&REC.st.status;if(st&&st.open)recCmd({cmd:'mode',mode:$('rec-mode').value})}
 function recGo(){const st=REC.st&&REC.st.status;if(!st||!st.open)return $('rec-msg').textContent='OPEN an input first';
   if(st.recording)recCmd({cmd:'stop',name:$('rec-name').value||'take',trim:$('rec-trim').checked,trim_db:+$('rec-tdb').value,root:$('rec-root').checked,dest:$('rec-dest').value});
-  else recCmd({cmd:'start',preroll:+$('rec-pre').value||0})}
+  else {audio.pause();lvStop();recCmd({cmd:'start',preroll:+$('rec-pre').value||0,backing:$('rec-backing').checked,output:+$('rec-output').value,section:$('rec-section').value,countin:+$('rec-countin').value,loops:+$('rec-loops').value,latency_ms:+$('rec-latency').value})}}
+function recCalibrate(){audio.pause();lvStop();recCmd({cmd:'calibrate',output:+$('rec-output').value})}
 function recPlay(f){if(REC.audio)REC.audio.pause();REC.audio=new Audio('/take/'+encodeURIComponent(f));REC.audio.play()}
 function renderRec(){const j=REC.st;if(!j)return;const st=j.status,sel=(id,opts,v)=>{const el=$(id),key=JSON.stringify(opts);if(el.dataset.key!==key){el.dataset.key=key;el.innerHTML=opts.map(([k,l])=>`<option value="${esc(k)}">${esc(l)}</option>`).join('')}if(v!=null&&document.activeElement!==el)el.value=v};
   if(!j.available)$('rec-msg').textContent=j.error;
   sel('rec-dev',(j.devices||[]).map(d=>[String(d.id),`${d.name} · ${d.hostapi} · ${d.inputs} in`]),st.open?String(st.device):null);
+  sel('rec-output',(j.outputs||[]).map(d=>[String(d.id),`${d.name} · ${d.hostapi}`]),null);
+  sel('rec-section',[['','WHOLE SONG'],...Object.keys(S?.sections||{}).map(n=>[n,n])],null);
   sel('rec-mode',Object.entries(j.modes||{}),st.open?st.mode:null);if(st.open)$('rec-rate').value=String(st.rate);
   if(document.activeElement!==$('rec-asio'))$('rec-asio').checked=!!j.asio_saved;
   $('rec-open').textContent=st.open?'CLOSE':'OPEN';$('rec-open').classList.toggle('on',st.open);
-  const go=$('rec-go');go.textContent=st.recording?'■ STOP':'● REC';go.style.background=st.recording?'var(--red)':'';go.style.color=st.recording?'#0b0e0f':'';
-  $('rec-time').textContent=fmtT(st.seconds||0);
+  const go=$('rec-go');go.textContent=st.finished?(st.calibrating?'MEASURE LATENCY':'SAVE TAKES'):st.recording?'■ STOP':'● REC';go.style.background=st.recording?'var(--red)':'';go.style.color=st.recording?'#0b0e0f':'';
+  $('rec-time').textContent=fmtT(st.seconds||0)+(st.backing?' · pass '+st.pass:'');
   const bar=(i)=>{const p=st.peak[i],h=st.hold[i],w=v=>v==null?0:Math.max(0,Math.min(100,(v+60)/60*100)),c=st.clip[i];
     return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span class="k" style="width:52px">INPUT ${i+1}</span><div style="position:relative;flex:1;height:12px;background:#0b0e0f;border:1px solid #242a2e">
       <div style="position:absolute;left:0;top:0;bottom:0;width:${w(p)}%;background:${p!=null&&p>-6?'var(--amber)':'#7ee787'}"></div><div style="position:absolute;top:0;bottom:0;left:${w(h)}%;width:2px;background:#c3cbcf"></div></div>
@@ -1640,7 +1665,7 @@ async function checkpointRestore(name){const j=await act('checkpoint',{name,acti
 function renderProject(){
   put('missing-samples',Object.entries(S.missing||{}).map(([n,p])=>`<p>Slot ${esc(n)}: ${esc(p)} <input class="relink-missing" data-slot="${esc(n)}" placeholder="Replacement WAV" style="width:50%"></p>`).join('')||'<p>No missing samples.</p>');
   const selected=$('section-select').value;put('section-select',Object.entries(S.sections||{}).map(([n,v])=>`<option value="${esc(n)}">${esc(n)} · ${v[0]}–${v[1]-1}</option>`).join(''));if(S.sections?.[selected])$('section-select').value=selected;
-  $('history-count').textContent=`${S.undo} undo · ${S.redo} redo`;
+  $('history-count').textContent=`${S.undo} undo · ${S.redo} redo · ${(S.history_bytes/1048576).toFixed(2)} / ${(S.history_limit/1048576).toFixed(0)} MiB`;
   put('checkpoint-list',(S.checkpoints||[]).map(n=>`<p><span class="mono">${esc(n)}</span> <button class="btn" onclick="checkpointRestore(${attr(n)})">COMPARE / RESTORE</button> <button class="btn" onclick="act('checkpoint',{name:${attr(n)},action:'delete'})">DELETE CHECKPOINT</button></p>`).join(''));
 }
 const PROJECT_PREFS=['hexrows','speed','voice','lvlatency','midivel','metro','specscale','faustcode'];

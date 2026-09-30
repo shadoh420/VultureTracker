@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 
@@ -96,6 +97,9 @@ class TestRecorder(unittest.TestCase):
 
 class TestTakesInTheSong(unittest.TestCase):
     def setUp(self):
+        audio_env = mock.patch.dict(os.environ, {"VT_FAKE_AUDIO": "1"})
+        audio_env.start()
+        self.addCleanup(audio_env.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         write_wav(self.dir / "a.wav", RATE, [sine(440)], root_note=69)
@@ -106,9 +110,10 @@ class TestTakesInTheSong(unittest.TestCase):
     def tearDown(self):
         self.st.close()
         gui.Handler.state = None
+        if gui.Handler.recorder:
+            gui.Handler.recorder.close()
         gui.Handler.recorder = None
         gui.Handler.rec_devices = None
-        os.environ.pop("VT_FAKE_AUDIO", None)
         self.tmp.cleanup()
 
     def take(self, cents=0.0, seconds=1.0):
@@ -172,7 +177,6 @@ class TestTakesInTheSong(unittest.TestCase):
             st.close()
 
     def test_record_routes(self):
-        os.environ["VT_FAKE_AUDIO"] = "1"
         gui.Handler.state = self.st
         H = gui.Handler
         snap = H.rec_snapshot(devices=True)
