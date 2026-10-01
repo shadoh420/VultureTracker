@@ -18,11 +18,25 @@ cd VultureTracker
 pip install -e ".[all]"
 ```
 
-Python 3.10+; `pip install -e .` alone (PyYAML) compiles songs, and README's Install names what each extra adds. On
-Windows x64, libopenmpt (used to verify and render) is included in `vendor/`. Elsewhere, install libopenmpt (e.g.
-`apt install libopenmpt0t64`) or set `LIBOPENMPT` to its path. README's Platforms says what is Windows-only and where
-the app keeps its files on Linux and macOS (the `%APPDATA%` and `%LOCALAPPDATA%` folders below are Windows').
-`vulturetracker --version` prints the version; the window title and the start screen show it too.
+Python 3.10+. `pip install -e .` alone installs PyYAML, all that compiling songs needs. The extras add the rest: `gui`
+(pywebview, the app in its own window, else it opens in the browser; numpy for measurements, the spectrogram, the
+sample editor and resampling; imageio-ffmpeg, the ffmpeg the MP3 / OGG / FLAC export and the FLAC, AIFF, OGG and MP3
+samples run), `record` (sounddevice, the RECORD tab), `synth` (pedalboard and mido: `synth` and the app's RECIPE box,
+SAMPLING.md), `gp` (PyGuitarPro, the Guitar Pro import), `midi` (mido, the MIDI import), `all` (every one) and `test`
+(what the tests need). node runs `faust:` recipes on the command line. On Windows x64, libopenmpt (used to verify and
+render) is included in `vendor/`. Elsewhere, install libopenmpt (e.g. `apt install libopenmpt0t64`) or set
+`LIBOPENMPT` to its path. `pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with
+`dist/ffmpeg.exe` beside it. `vulturetracker --version` prints the version; the window title and the start screen show
+it too.
+
+**Platforms.** The Windows exe (Windows 10 and 11, x64) is the product. Linux runs from source and is tested on every
+push (Ubuntu 24.04, its libopenmpt 0.7; pywebview there needs GTK or Qt, see its docs). macOS is untested. Windows
+only: the exe, the RECIPE box's download of Surge XT and Dexed (elsewhere install them: the app finds them in the
+platform's VST3 folder and Surge's patches where its installer puts them, or set `SURGE_XT_DIR`, `DEXED_VST3`,
+`OBXD_VST3`) and the RECORD tab's ASIO. The app keeps its recent list, library index, window profile and log in
+`%APPDATA%\VultureTracker` (macOS `~/Library/Application Support/VultureTracker`, Linux `~/.config/VultureTracker`) and
+the downloads in `%LOCALAPPDATA%\VultureTracker` (Linux `~/.local/share/VultureTracker`); the `%APPDATA%` and
+`%LOCALAPPDATA%` folders named below are Windows'.
 
 **When something fails.** The app writes what fails unexpectedly, with its traceback, to
 `%APPDATA%\VultureTracker\vulturetracker.log` (at most two files of 256 KB; the first line of each start names the

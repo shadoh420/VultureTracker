@@ -3,108 +3,64 @@
 <img src="assets/vulturetracker.png" width="88" align="right" alt="">
 
 Tracker music as text, with a tracker built on it. A song is a readable YAML file that compiles to an Impulse Tracker
-module (`.it`), verified by libopenmpt, which plays in OpenMPT, Schism Tracker or anything built on libopenmpt. The app
-edits that same file: every note, sample, envelope and effect you change in it is a small in-place change to the text,
-checked by compiling the whole song before it is written, and undoable. People, scripts and AIs edit songs the same way.
+module (`.it`), checked by libopenmpt and playable in OpenMPT, Schism Tracker or anything built on libopenmpt. The app
+edits that same file in place: every change is checked by compiling the whole song before it is written, and can be
+undone. People, scripts and AIs edit songs the same way.
 
 ```
 song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .ogg / .flac
 ```
 
-<p align="center"><img src="assets/screenshot-pattern.png" width="900" alt="Pattern tab: the pattern editor playing live, with the transport, edit mode, MIDI, metronome and scope in the live bar"></p>
-<p align="center"><img src="assets/screenshot-tryout.png" width="900" alt="Tryout tab: candidate WAVs rendered inside the song and measured against the current sample"></p>
-<p align="center"><img src="assets/screenshot-samples.png" width="900" alt="Samples tab: a zoomable waveform with its loop, the edits that write new WAVs, and the sample's properties"></p>
+<p align="center"><img src="assets/screenshot-pattern.png" width="900" alt="Pattern tab: the pattern editor with the live bar, the edit tools and the composition helpers"></p>
+<p align="center"><img src="assets/screenshot-tryout.png" width="900" alt="Tryout tab: candidate sounds rendered inside the song and measured against the current sample"></p>
+<p align="center"><img src="assets/screenshot-samples.png" width="900" alt="Samples tab: a waveform with its loop and a selection, the edits and effects that write new WAVs, and the sample's properties"></p>
 
 ## What it does
 
-- **Songs as text.** The song format ([SONG_FORMAT.md](SONG_FORMAT.md)) covers IT's module settings, channels, samples,
-  instruments with envelopes and keymaps, patterns in OpenMPT's cell notation and the order list. `check` reports errors
-  by file and line; the compiler writes IT 2.14 and has libopenmpt load and verify every build.
-- **A live engine.** libopenmpt 0.8.9 compiled to WebAssembly plays in the page's audio thread: play from any row, loop a
-  pattern or a span, live mutes and solo, note preview, per-channel VU, a metronome, a scope, and every edit swapped in
-  where it plays.
-- **Editors.** Pattern editing with a cell cursor, keyboard and MIDI note entry, selections, copy / paste / mix-paste /
-  flood, transpose, interpolate, amplify, find and replace. The order list, patterns, channels and song settings. Every
-  instrument field, with envelopes as draggable graphs and a keymap editor. A sample editor with a zoomable waveform,
-  loop and sustain-loop points, and trim / fade / normalize / reverse / DC removal / crossfaded loops written as new WAVs
-  beside the song (never over a source file), with effects (gain, filters, EQ, loudness, pitch, stretch, truncate
-  silence, noise reduction), slicing at the hits into slots, a kit, a multisample or a pattern at the slices' timing,
-  and auto loop points. Composition helpers in the Pattern tab (groove, Euclidean rhythms, chords over channels,
-  round-robin and velocity layers) and rows rendered into a new slot.
-- **Making sounds in the app.** The Paint tab turns a picture over frequency and time into sound, or lays it over a
-  sample as a filter. The Faust tab compiles [Faust](https://faust.grame.fr) code in the page and renders notes into
-  slots or candidates (the compiler is downloaded on first use).
-- **Recording.** The Record tab records from an audio interface (WASAPI or ASIO) with meters and a tuner; takes are
-  trimmed, their note found, and sent to the Tryout as candidates, into new slots tuned to the cent, or into one
-  multisample.
-- **Choosing sounds in context.** The Tryout tab renders candidate samples inside the song, measures them against the
-  current one and writes the choice with one key; a mixer with channel and sample faders; listening notes dropped at the
-  playhead with the channels sounding there, kept as a report for a collaborator who cannot listen; a spectrogram.
-- **Finding sounds.** Your sample folders are indexed by timbre: FIND SIMILAR fills the Tryout with the library's
-  nearest sounds to the slot's sample or a candidate, and the Map tab lays the whole library out by likeness, to click
-  and hear.
-- **Import and export.** IT, XM, S3M and MOD files become song files (samples extracted as WAVs, measured against how
-  libopenmpt plays the original); Guitar Pro 3-5 tabs and MIDI files become song files with placeholder sounds to swap
-  in the Tryout. Songs render to WAV, MP3, OGG and FLAC, whole or as per-channel stems.
-- **Finishing and sharing.** Persistent undo/redo and named checkpoints, external-file comparison, named arrangement
-  sections, user-written phrase comparisons, portable project collection/ZIP, and a unified export panel with
-  explicit mix, region, mute/solo and tail choices. See the [walkthrough](GUIDE.md#finishing-and-sharing-a-song).
-- **Samples by recipe.** `synth` renders samples from free synths (Surge XT, Dexed, OB-Xd) and CC0 recordings by recipe
-  ([SAMPLING.md](SAMPLING.md)), Faust code, or a target rebuilt from blocks of other WAVs (`resynth:`), with
-  anti-aliased resampling so notes played far from their root stay clean.
+- **A tracker on a text file:** patterns, instruments with envelopes, samples and the order list, with OpenMPT's keys,
+  MIDI input and a live engine (libopenmpt in the page) that plays every edit where it is.
+- **Choosing sounds in context:** the Tryout renders candidate samples inside the song and measures them; a mixer,
+  listening notes, and a sample library searched by timbre.
+- **Making sounds:** a sample editor with effects and slicing, recording from an audio interface, Faust code, pictures
+  painted into sound, and sample recipes rendered from free synths ([SAMPLING.md](SAMPLING.md)).
+- **In and out:** imports IT, XM, S3M, MOD, Guitar Pro 3-5 and MIDI files and WAV, FLAC, AIFF, OGG and MP3 samples;
+  exports WAV, MP3, OGG and FLAC, stems and game loops.
+- **Files that stay right:** undo history and checkpoints kept with the song, every song from 0.6 on opening unchanged
+  in every 1.x ([SONG_FORMAT.md](SONG_FORMAT.md)), and a command line that does what the app does.
 
 ## Install
 
 **Windows:** download `vulturetracker-win64.zip` from the [latest release](https://github.com/shadoh420/VultureTracker/releases/latest),
-unzip it anywhere and run `vulturetracker.exe`. The start screen lists two demo songs: open one, press play, then try
-a candidate sound in the Tryout.
+unzip it anywhere and run `vulturetracker.exe`. The start screen lists two demo songs.
 
-**From source** (Python 3.10+):
+**From source** (Python 3.10+; Linux is tested on every push, macOS is untested; outside Windows install libopenmpt,
+e.g. `apt install libopenmpt0t64`):
 
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
 cd VultureTracker
 pip install -e ".[all]"
+python -m vulturetracker gui demo2/iron_relay.yaml
 ```
 
-`pip install -e .` alone installs PyYAML, all that compiling songs needs. The extras add the rest: `gui` (pywebview, the
-app in its own window, else it opens in the browser; numpy for measurements, the spectrogram, the sample editor and
-resampling; imageio-ffmpeg, the ffmpeg the MP3 / OGG / FLAC export and the FLAC, AIFF, OGG and MP3 samples run),
-`record` (sounddevice, the RECORD tab), `synth` (pedalboard and mido: `synth` and the app's RECIPE box, SAMPLING.md),
-`gp` (PyGuitarPro, the Guitar Pro import), `midi` (mido, the MIDI import), `all` (every one) and `test` (what the
-tests need). node runs `faust:` recipes on the command line.
-Windows x64 has libopenmpt in `vendor/`; elsewhere install libopenmpt or point `LIBOPENMPT` at it.
-`pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
-
-**Platforms.** The Windows exe (Windows 10 and 11, x64) is the product. Linux runs from source and is tested on every
-push (Ubuntu 24.04, its libopenmpt 0.7: `apt install libopenmpt0t64`; pywebview there needs GTK or Qt, see its docs).
-macOS is untested. Windows only: the exe, the RECIPE box's download of Surge XT and Dexed (elsewhere install them: the
-app finds them in the platform's VST3 folder and Surge's patches where its installer puts them, or set `SURGE_XT_DIR`,
-`DEXED_VST3`, `OBXD_VST3`) and the RECORD tab's ASIO. The app keeps its recent list, library index, window profile and
-log in `%APPDATA%\VultureTracker` (macOS `~/Library/Application Support/VultureTracker`, Linux
-`~/.config/VultureTracker`) and the downloads in `%LOCALAPPDATA%\VultureTracker` (Linux `~/.local/share/VultureTracker`).
+[GUIDE.md](GUIDE.md#setup) says what each extra adds and what stays Windows-only.
 
 ## Use
 
 ```
-python -m vulturetracker gui demo2/iron_relay.yaml         # the app (no song: the start screen: open, new song, import)
+python -m vulturetracker gui song.yaml                     # the app (no song: open, new song, import)
 python -m vulturetracker check song.yaml                   # validate; errors show file:line
 python -m vulturetracker build song.yaml --render song.wav # compile, verify with libopenmpt, render
-python -m vulturetracker import some.xm -o some.yaml       # an .it, .xm, .s3m or .mod -> song file + WAVs
-python -m vulturetracker synth recipe.yaml                 # render samples from free synths or recordings
-python -m vulturetracker index ~/samples --like kick.wav   # index sample folders; the nearest sounds to a WAV
-python -m vulturetracker export song.yaml -f ogg --loop    # the app's RENDER & EXPORT: formats, sections, stems, game loops
-python -m vulturetracker undo song.yaml                    # the app's undo; also redo, trim-history, sections, checkpoint, phrase
+python -m vulturetracker import some.xm -o some.yaml       # a module, a Guitar Pro tab or a MIDI file -> song file
 python -m vulturetracker --help                            # every command
 ```
 
-Tests: `python -m unittest discover tests` (the live-engine checks need node; the page checks need Playwright's Chromium).
-
 ## Docs
 
-- [GUIDE.md](GUIDE.md): the app tab by tab, the demos and the suite, samples, tests, notes
+- [GUIDE.md](GUIDE.md): the app tab by tab, the command line, the demos, samples, tests
 - [SONG_FORMAT.md](SONG_FORMAT.md): the complete song format
-- [SAMPLING.md](SAMPLING.md): making samples with Surge XT, Dexed, OB-Xd and CC0 recordings
+- [SAMPLING.md](SAMPLING.md): making samples with Surge XT, Dexed, OB-Xd, Faust and CC0 recordings
+- [CHANGELOG.md](CHANGELOG.md): what changed in each release
 - [PROVENANCE.md](PROVENANCE.md): what the demos derive from reference material
 - [AGENTS.md](AGENTS.md): orientation for people and AI agents working on the repository
 
