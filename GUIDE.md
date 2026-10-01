@@ -160,8 +160,9 @@ name (the page cannot see where it came from; an identical copy already there is
 block the way trackers do: the first channel from the column the selection starts in, the last up to the column it
 ends in, the channels between whole. Ctrl+A selects the pattern (the channels on show), Ctrl+L the cursor's channel; a
 plain move or click drops the selection. The SELECTION bar (and its keys) works on the selection, or on the cursor's
-cell when there is none: COPY (Ctrl+C; also puts the rows on the system clipboard in the song's cell notation), CUT
-(Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overwrite), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
+cell when there is none: COPY (Ctrl+C; also puts the rows on the system clipboard in OpenMPT's format, so OpenMPT
+pastes them), CUT (Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overwrite; rows copied in OpenMPT from an IT
+or MPTM module paste too, the first pattern of several, values this notation lacks left empty and counted), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
 end of the pattern, e.g. one bar of hats over eight), CLEAR
 (Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
 cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
