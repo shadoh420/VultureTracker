@@ -1246,16 +1246,14 @@ function fromModPlug(text){const h=/^ModPlug Tracker +(\w+)\r?\n/.exec(text||'')
     rows.push(l.slice(1).split('|').map(s=>{const c={};[[0,3],[3,5],[5,8],[8,11]].forEach(([a,b],x)=>{let f=s.slice(a,b).padEnd(b-a);if(f[0]===' ')return;
       if(x===3&&f[0]!=='.')f=f[0]+f.slice(1).replace(/\./g,'0');if(!ok[x].test(f)){bad++;f=EMP[FK[x]]}c[FK[x]]=f});return c}))}
   return {rows,bad}}
-// Ctrl+V: the browser's paste event that follows the key brings the system clipboard (where no paste event comes, as
-// for Ctrl+Shift+V in Chromium on Linux, the page reads it); OpenMPT rows there become the clipboard, anything else
-// pastes the app's own
+// Ctrl+V: the browser's paste event that follows the key brings the system clipboard; OpenMPT rows there become the
+// clipboard, anything else pastes the app's own (also when no paste event comes)
 let PASTEKEY=null;
 function pasteKey(e){e.stopImmediatePropagation();clearTimeout(PASTEKEY&&PASTEKEY.t);const p={mix:e.shiftKey,flood:e.altKey};
-  p.t=setTimeout(async()=>{if(PASTEKEY!==p)return;PASTEKEY=null;let t=null;try{t=await navigator.clipboard.readText()}catch(err){}pasteText(t,p)},300);PASTEKEY=p}
-function pasteText(t,p){const c=fromModPlug(t);if(c&&c.error)return selInfo(c.error);if(c)CLIP=c;
-  selPaste(p.mix,p.flood);if(c&&c.bad)selInfo(`${c.bad} value${c.bad>1?'s':''} the IT notation here lacks left empty`)}
+  p.t=setTimeout(()=>{if(PASTEKEY===p){PASTEKEY=null;selPaste(p.mix,p.flood)}},300);PASTEKEY=p}
 document.addEventListener('paste',e=>{const p=PASTEKEY;if(!p)return;clearTimeout(p.t);PASTEKEY=null;e.preventDefault();
-  pasteText(e.clipboardData&&e.clipboardData.getData('text/plain'),p)});
+  const c=fromModPlug(e.clipboardData&&e.clipboardData.getData('text/plain'));if(c&&c.error)return selInfo(c.error);if(c)CLIP=c;
+  selPaste(p.mix,p.flood);if(c&&c.bad)selInfo(`${c.bad} value${c.bad>1?'s':''} the IT notation here lacks left empty`)});
 // paste at the cursor: the copied fields overwrite (mix: fill only fields that are empty); rows and channels past the pattern are dropped
 // flood: the clipboard again and again from the cursor down to the end of the pattern (a bar of hats over eight bars)
 function selPaste(mix,flood){if(!CLIP)return;const fo=PAT.fo||[],i0=fo.indexOf(CUR.ch),L=[],h=CLIP.rows.length||1;

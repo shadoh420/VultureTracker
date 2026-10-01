@@ -59,16 +59,12 @@ class TestFeatures080Page(unittest.TestCase):
                                      ['D-5 02 v32 ... | ... .. ... ...', '=== .. ... ... | E-5 01 ... B00',
                                       '... .. ... ... | C-5 02 ... ...'])
                     self.assertIn('D-5 02 v32 ...', song.read_text())
-                    # MIX (Ctrl+Shift+V): OpenMPT rows fill only the empty fields
-                    page.evaluate("t=>navigator.clipboard.writeText(t)", 'ModPlug Tracker  IT\r\n|F-503v10...|G-503......\r\n')
+                    # MIX (Ctrl+Shift+V): OpenMPT rows fill only the empty fields (the song file shows the server took it)
+                    page.evaluate("t=>navigator.clipboard.writeText(t)", 'ModPlug Tracker  IT\r\n|F-501v10...|G-502......\r\n')
                     page.evaluate('CUR.row=2;CUR.ch=0;renderPat()')
                     page.keyboard.press('Control+Shift+V')
-                    page.wait_for_function("!EDQ.n && PAT.rows[2][0].startsWith('F-5')", timeout=5000)
-                    self.assertEqual(page.evaluate('PAT.rows[2].join(" | ")'), 'F-5 03 v10 ... | C-5 02 ... ...')
-                    # a key whose paste event never comes (a synthetic one here): the page reads the clipboard itself
-                    page.evaluate("t=>navigator.clipboard.writeText(t)", 'ModPlug Tracker  IT\r\n|A-504......\r\n')
-                    page.evaluate("CUR.row=3;CUR.ch=0;renderPat();document.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true}))")
-                    page.wait_for_function("!EDQ.n && PAT.rows[3][0].startsWith('A-5 04')", timeout=5000)
+                    page.wait_for_function("!EDQ.n && PAT.rows[2][0].startsWith('F-5')")
+                    self.assertIn('F-5 01 v10 ... | C-5 02 ... ...', song.read_text())
                     # and back: Ctrl+C puts OpenMPT's format on the system clipboard
                     page.evaluate("SEL={o:0,a:{row:0,ch:0,col:0},b:{row:1,ch:1,col:4}};renderPat()")
                     page.keyboard.press('Control+C')
@@ -78,14 +74,16 @@ class TestFeatures080Page(unittest.TestCase):
                     # the computer's piano keys with CHORD: two keys struck together go in as one chord on key up...
                     page.evaluate("SEL=null;$('midi-chord').checked=true;CUR.row=2;CUR.ch=0;CUR.col=0;renderPat()")
                     z, x, c = page.evaluate("['z','x','c'].map(k=>noteTxt(pianoNote(k)))")
+                    held = page.evaluate('PAT.rows[2][0]')
                     page.keyboard.down('c')
                     page.keyboard.down('z')
                     page.wait_for_timeout(150)
-                    self.assertEqual(page.evaluate('PAT.rows[2][0]'), '... .. ... ...')  # still held
+                    self.assertEqual(page.evaluate('PAT.rows[2][0]'), held)  # still held: nothing written yet
                     page.keyboard.up('z')
                     page.keyboard.up('c')
                     page.wait_for_function(f"!EDQ.n && PAT.rows[2][1].startsWith('{c}')")
                     self.assertTrue(page.evaluate(f"PAT.rows[2][0].startsWith('{z}') && CUR.row===3"))
+                    self.assertIn(page.evaluate('PAT.rows[2].join(" | ")'), song.read_text())  # the server took it
                     # ...and a key struck 150 ms after another, still held, is a note of its own on the next row
                     page.evaluate('CUR.row=0;renderPat()')
                     page.keyboard.down('z')
@@ -94,6 +92,7 @@ class TestFeatures080Page(unittest.TestCase):
                     page.keyboard.up('z')
                     page.keyboard.up('x')
                     page.wait_for_function(f"!EDQ.n && PAT.rows[1][0].startsWith('{x}')")
+                    self.assertIn(page.evaluate('PAT.rows[1].join(" | ")'), song.read_text())
                     self.assertEqual(page.evaluate('[PAT.rows[0][0].slice(0,3),PAT.rows[0][1],CUR.row]'), [z, '... .. ... ...', 2])
                     self.assertEqual(errors, [])
                     browser.close()
