@@ -10,6 +10,7 @@ synth = ["pedalboard>=0.9", "mido>=1.3", "numpy"]
 gui = ["pywebview>=5", "numpy", "imageio-ffmpeg"]
 record = ["sounddevice>=0.4.6", "numpy"]
 gp = ["pyguitarpro>=0.9", "numpy"]
+midi = ["mido>=1.3", "numpy"]
 
 [project.scripts]
 vulturetracker = "vulturetracker.__main__:main"

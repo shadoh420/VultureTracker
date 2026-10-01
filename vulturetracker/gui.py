@@ -173,7 +173,8 @@ def effect_help():
 
 
 def import_beside(src):
-    """A module (.it, .xm, .s3m, .mod) or a Guitar Pro tab (.gp3, .gp4, .gp5: gpimport, placeholder sounds) imported as
+    """A module (.it, .xm, .s3m, .mod), a Guitar Pro tab (.gp3, .gp4, .gp5: gpimport) or a MIDI file (.mid, .midi:
+    midiimport; both with placeholder sounds) imported as
     <stem>.yaml beside it with its samples in <stem>_samples/ (numbered <stem>-2 and so on when either exists: nothing
     is replaced). Returns (song path, warnings)."""
     from .itreader import import_it
@@ -188,10 +189,14 @@ def import_beside(src):
     if src.suffix.lower() in GP_SUFFIXES:
         from .gpimport import import_gp
         return out, import_gp(src, out, sdir)[1]
+    if src.suffix.lower() in MIDI_SUFFIXES:
+        from .midiimport import import_midi
+        return out, import_midi(src, out, sdir)[1]
     return out, import_it(src, out, sdir)[1]
 
 
 GP_SUFFIXES = (".gp3", ".gp4", ".gp5")
+MIDI_SUFFIXES = (".mid", ".midi")
 
 
 def start_snapshot():
@@ -3567,7 +3572,7 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def browse(cls, wav=False, module=False):
         """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module) path or None."""
-        kind, pat = ("WAV files", "*.wav") if wav else ("Modules and tabs", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5") if module else ("Song files", "*.yaml;*.yml")
+        kind, pat = ("WAV files", "*.wav") if wav else ("Modules, tabs and MIDI", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("Song files", "*.yaml;*.yml")
         if cls.window is not None:
             import webview
             r = cls.window.create_file_dialog(webview.OPEN_DIALOG, file_types=(f"{kind} ({pat})", "All files (*.*)"))

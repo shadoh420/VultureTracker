@@ -44,8 +44,8 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
   nearest sounds to the slot's sample or a candidate, and the Map tab lays the whole library out by likeness, to click
   and hear.
 - **Import and export.** IT, XM, S3M and MOD files become song files (samples extracted as WAVs, measured against how
-  libopenmpt plays the original); Guitar Pro 3-5 tabs become song files with placeholder sounds to swap in the
-  Tryout. Songs render to WAV, MP3, OGG and FLAC, whole or as per-channel stems.
+  libopenmpt plays the original); Guitar Pro 3-5 tabs and MIDI files become song files with placeholder sounds to swap
+  in the Tryout. Songs render to WAV, MP3, OGG and FLAC, whole or as per-channel stems.
 - **Finishing and sharing.** Persistent undo/redo and named checkpoints, external-file comparison, named arrangement
   sections, user-written phrase comparisons, portable project collection/ZIP, and a unified export panel with
   explicit mix, region, mute/solo and tail choices. See the [walkthrough](GUIDE.md#finishing-and-sharing-a-song).
@@ -70,7 +70,7 @@ pip install pyyaml pywebview numpy imageio-ffmpeg sounddevice
 Python 3.10+. Only PyYAML is required to compile songs. pywebview opens the app in its own window (without it, the app
 opens in the browser); numpy is needed for measurements, the spectrogram, the sample editor and resampling;
 imageio-ffmpeg provides the ffmpeg that the MP3 / OGG / FLAC export runs; sounddevice is the RECORD tab's audio input.
-Optional: `pip install pyguitarpro` for the Guitar Pro import; node for `faust:` recipes on the command line.
+Optional: `pip install pyguitarpro` for the Guitar Pro import, `pip install mido` for the MIDI import; node for `faust:` recipes on the command line.
 Windows x64 has libopenmpt in `vendor/`; elsewhere install libopenmpt or point `LIBOPENMPT` at it.
 `pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
 

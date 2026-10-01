@@ -21,7 +21,7 @@ sound can be swapped in the tryout.
 Left out (counted in the warnings): grace notes, trills, tremolo picking, mix-table volume and pan changes, the
 triplet feel, lyrics."""
 import math
-from fractions import Fraction
+import os
 from pathlib import Path
 
 import numpy as np
@@ -53,10 +53,11 @@ def _hex(v):
 
 # ---------------------------------------------------------------- timing
 
-def grid_for(times):
-    """Rows per quarter note: the smallest of GRIDS on which every tick position in `times` falls (48 when none does)."""
+def grid_for(times, quarter=QUARTER):
+    """Rows per quarter note: the smallest of GRIDS on which every tick position in `times` (`quarter` ticks a quarter
+    note) falls (48 when none does)."""
     for r in GRIDS:
-        if all((t * r) % QUARTER == 0 for t in times):
+        if all((t * r) % quarter == 0 for t in times):
             return r
     return GRIDS[-1]
 
@@ -158,6 +159,94 @@ def _write(path, x, rate=44100, root=None):
     write_wav(path, rate, [np.clip(np.round(x * 32767), -32768, 32767).astype(int).tolist()], root_note=root)
 
 
+class Placeholders:
+    """An import's placeholder sounds, written as WAVs into `samples_dir`, and their sample and instrument entries."""
+
+    def __init__(self, samples_dir, song_path):
+        self.dir = Path(samples_dir)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.rel = os.path.relpath(self.dir.resolve(), Path(song_path).resolve().parent).replace(os.sep, "/")
+        self.samples, self.instruments, self.made = {}, {}, {}
+
+    def add_sample(self, name, x, root=None):
+        num = len(self.samples) + 1
+        f = self.dir / f"{name}.wav"
+        _write(f, x, root=root)
+        self.samples[num] = {"file": f"{self.rel}/{f.name}", "name": name[:25], **({"base_note": note_name(root)} if root is not None else {})}
+        return num
+
+    def instrument(self, kind):
+        """The instrument number of `kind`, made the first time: "drums" the kit on the General MIDI keys, any other a
+        pitched multisample (a pluck every octave, roots C-2..C-8, 9 kHz wide, each over the keys 2 under to 9 over its
+        root: the anti-aliasing rule), "bass" a darker, longer one."""
+        if kind in self.made:
+            return self.made[kind]
+        if kind == "drums":
+            nums = {k: self.add_sample(f"kit_{k}", drum(k)) for k in KIT}
+            keymap = [{"notes": "C-0..B-9", "sample": nums["snare"], "play_note": "C-5"}]  # a key the kit lacks: snare
+            keymap += [{"notes": note_name(key), "sample": nums[piece], "play_note": "C-5"} for key, piece in sorted(GM_DRUMS.items())]
+            entry = {"name": "drums (placeholder)", "keymap": keymap}
+        else:
+            keymap = []
+            for oc in range(2, 9):
+                root = 12 * oc
+                x = pluck(440 * 2 ** ((root - 69) / 12), 2.5 if kind == "bass" else 2.0,
+                          damping=0.998 if kind == "bass" else 0.996, bright=0.2 if kind == "bass" else 0.6, seed=oc)
+                x = lowpass(x[None], 44100, 9000)[0]  # 9 kHz wide: nine semitones up stays under 18 kHz
+                n = self.add_sample(f"{kind}_{note_name(root).replace('-', '').lower()}", x, root)
+                lo, hi = (0 if oc == 2 else root - 2), (119 if oc == 8 else root + 9)
+                keymap.append({"notes": f"{note_name(lo)}..{note_name(hi)}", "sample": n})
+            entry = {"name": f"{kind} (placeholder)", "keymap": keymap, "fadeout": 64}
+        num = len(self.instruments) + 1
+        self.instruments[num] = entry
+        self.made[kind] = num
+        return num
+
+
+def write_song(song_path, title, lanes, bars, ph, r, speed, tempo, ts, warnings, head):
+    """Write an import's song file and return it: `lanes` (cells on absolute rows; 64 at most are kept) cut into a
+    pattern per bar (`bars`: (name, first row, rows) in play order; identical bars share a pattern), the placeholders
+    `ph`, `r` rows a quarter note played at `speed` and `tempo`, a beat and a bar from the time signature `ts` =
+    (numerator, denominator); `head`: the comment lines on top, the warnings after them."""
+    from .api import to_yaml
+    if len(lanes) > 64:
+        warnings.append(f"{len(lanes)} channels: IT has 64, the rest are left out")
+        lanes = lanes[:64]
+    patterns, orders, seen = {}, [], {}
+    for pos, (name, a, n) in enumerate(bars):
+        if n > 200:
+            warnings.append(f"bar {name} is {n} rows at {r} rows a quarter: IT holds 200, cut there")
+            n = 200
+        data = "".join(f"{i:02d}: " + " | ".join(" ".join(ln.cells.get(a + i, ["...", "..", "...", "..."])) for ln in lanes) + "\n"
+                       for i in range(n))
+        got = seen.get(data)
+        if got is None:
+            got = name if name not in patterns else f"{name}_{pos}"
+            patterns[got] = {"rows": n, "data": data}
+            seen[data] = got
+        orders.append(got)
+    if any(ord(c) > 127 for c in title + "".join(ln.name for ln in lanes)):
+        warnings.append('Non-ASCII title or track name characters replaced with ? for the IT song format')
+    chans = []
+    for ln in lanes:
+        c = {"name": it_text(ln.name, 20)}
+        if getattr(ln, "volume", 64) != 64:
+            c["volume"] = ln.volume
+        if getattr(ln, "pan", 32) != 32:
+            c["pan"] = ln.pan
+        chans.append(c)
+    beat = r * 4 / ts[1]  # a beat is the denominator's note, a bar the numerator of them
+    beat, bar = (int(beat), int(beat) * ts[0]) if beat == int(beat) else (r, 4 * r)
+    song = {
+        "module": {"title": it_text(title, 25), "tempo": tempo, "speed": speed, "global_volume": 128,
+                   "mix_volume": 48, "sample_rate": 44100, "rows_per_beat": min(255, beat), "rows_per_bar": min(255, bar), "channels": chans},
+        "samples": ph.samples, "instruments": ph.instruments, "patterns": patterns, "orders": orders,
+    }
+    head += "".join(f"# import warning: {w}\n" for w in warnings)
+    Path(song_path).write_bytes((head + to_yaml(song)).encode("utf-8"))
+    return song
+
+
 # ---------------------------------------------------------------- notes to cells
 
 class Lane:
@@ -252,12 +341,10 @@ def _lane_cells(ln, events, speed, rows_per_quarter, skip):
 def import_gp(src, song_path, samples_dir):
     """A Guitar Pro file (.gp3, .gp4, .gp5) as a song YAML plus placeholder WAVs in `samples_dir`. Returns (song dict,
     warnings)."""
-    import os
     try:
         import guitarpro
     except ImportError:
         raise ValueError("Guitar Pro import needs PyGuitarPro: pip install pyguitarpro (LGPL-3)")
-    from .api import to_yaml
     try:
         gp = guitarpro.parse(str(src))
     except Exception as e:  # noqa: BLE001 - PyGuitarPro raises what its reader hits (GPException, struct.error, ...)
@@ -293,49 +380,12 @@ def import_gp(src, song_path, samples_dir):
         starts.append(starts[-1] + n)
     total = starts[-1]
 
-    sdir = Path(samples_dir)
-    sdir.mkdir(parents=True, exist_ok=True)
-    rel = os.path.relpath(sdir.resolve(), Path(song_path).resolve().parent).replace(os.sep, "/")
-    samples, instruments, made = {}, {}, {}
-
-    def add_sample(name, x, root=None):
-        num = len(samples) + 1
-        f = sdir / f"{name}.wav"
-        _write(f, x, root=root)
-        samples[num] = {"file": f"{rel}/{f.name}", "name": name[:25], **({"base_note": note_name(root)} if root is not None else {})}
-        return num
-
-    def instrument(kind):
-        """A pitched multisample (a pluck every octave, roots C-2..C-8, 9 kHz wide, each over the keys 2 under to 9 over its
-        root: the anti-aliasing rule) or the drum kit on the General MIDI keys."""
-        if kind in made:
-            return made[kind]
-        if kind == "drums":
-            nums = {k: add_sample(f"kit_{k}", drum(k)) for k in KIT}
-            keymap = [{"notes": "C-0..B-9", "sample": nums["snare"], "play_note": "C-5"}]  # a key the kit lacks: snare
-            keymap += [{"notes": note_name(key), "sample": nums[piece], "play_note": "C-5"} for key, piece in sorted(GM_DRUMS.items())]
-            entry = {"name": "drums (placeholder)", "keymap": keymap}
-        else:
-            keymap = []
-            for oc in range(2, 9):
-                root = 12 * oc
-                x = pluck(440 * 2 ** ((root - 69) / 12), 2.5 if kind == "bass" else 2.0,
-                          damping=0.998 if kind == "bass" else 0.996, bright=0.2 if kind == "bass" else 0.6, seed=oc)
-                x = lowpass(x[None], 44100, 9000)[0]  # 9 kHz wide: nine semitones up stays under 18 kHz
-                n = add_sample(f"{kind}_{note_name(root).replace('-', '').lower()}", x, root)
-                lo, hi = (0 if oc == 2 else root - 2), (119 if oc == 8 else root + 9)
-                keymap.append({"notes": f"{note_name(lo)}..{note_name(hi)}", "sample": n})
-            entry = {"name": f"{kind} (placeholder)", "keymap": keymap, "fadeout": 64}
-        num = len(instruments) + 1
-        instruments[num] = entry
-        made[kind] = num
-        return num
-
+    ph = Placeholders(samples_dir, song_path)
     lanes, tempo_lane = [], Lane("Tempo")
     for track in tracks:
         drums = track.isPercussionTrack
         program = track.channel.instrument
-        ins = instrument("drums" if drums else "bass" if 32 <= program <= 39 else "guitar")
+        ins = ph.instrument("drums" if drums else "bass" if 32 <= program <= 39 else "guitar")
         by_lane = {}
         for pos, mi in enumerate(order):
             m = track.measures[mi]
@@ -397,46 +447,12 @@ def import_gp(src, song_path, samples_dir):
         lanes.append(tempo_lane)
     if not lanes:
         raise ValueError("the tab has no notes")
-    if len(lanes) > 64:
-        warnings.append(f"{len(lanes)} channels: IT has 64, the rest are left out")
-        lanes = lanes[:64]
-    patterns, orders, seen = {}, [], {}
-    for pos, mi in enumerate(order):
-        a, n = starts[pos], mrows[pos]
-        if n > 200:
-            warnings.append(f"measure {mi + 1} is {n} rows at {r} rows a quarter: IT holds 200, cut there")
-            n = 200
-        data = "".join(f"{i:02d}: " + " | ".join(" ".join(ln.cells.get(a + i, ["...", "..", "...", "..."])) for ln in lanes) + "\n"
-                       for i in range(n))
-        name = seen.get(data)
-        if name is None:
-            name = f"m{mi + 1}" if f"m{mi + 1}" not in patterns else f"m{mi + 1}_{pos}"
-            patterns[name] = {"rows": n, "data": data}
-            seen[data] = name
-        orders.append(name)
     for what, count in skipped.items():
         warnings.append(f"{count} {what} left out")
-    if any(ord(c) > 127 for c in (gp.title or Path(src).stem) + "".join(ln.name for ln in lanes)):
-        warnings.append('Non-ASCII title or track name characters replaced with ? for the IT song format')
-    chans = []
-    for ln in lanes:
-        c = {"name": it_text(ln.name, 20)}
-        if getattr(ln, "volume", 64) != 64:
-            c["volume"] = ln.volume
-        if getattr(ln, "pan", 32) != 32:
-            c["pan"] = ln.pan
-        chans.append(c)
-    ts = headers[0].timeSignature  # the first measure's: a beat is its denominator's note, a bar its numerator of them
-    beat = r * 4 / ts.denominator.value
-    beat, bar = (int(beat), int(beat) * ts.numerator) if beat == int(beat) else (r, 4 * r)
-    song = {
-        "module": {"title": it_text(gp.title or Path(src).stem, 25), "tempo": tempo, "speed": speed, "global_volume": 128,
-                   "mix_volume": 48, "sample_rate": 44100, "rows_per_beat": min(255, beat), "rows_per_bar": min(255, bar), "channels": chans},
-        "samples": samples, "instruments": instruments, "patterns": patterns, "orders": orders,
-    }
+    ts = headers[0].timeSignature  # the first measure's
+    bars = [(f"m{mi + 1}", starts[pos], mrows[pos]) for pos, mi in enumerate(order)]
     head = (f"# Imported from {Path(src).name} by vulturetracker import (Guitar Pro: placeholder sounds, swap them in the tryout)\n"
             f"# {gp.tempo} BPM, {r} rows a quarter note: speed {speed}, tempo {tempo}\n")
-    for w in warnings:
-        head += f"# import warning: {w}\n"
-    Path(song_path).write_bytes((head + to_yaml(song)).encode("utf-8"))
+    song = write_song(song_path, gp.title or Path(src).stem, lanes, bars, ph, r, speed, tempo,
+                      (ts.numerator, ts.denominator.value), warnings, head)
     return song, warnings

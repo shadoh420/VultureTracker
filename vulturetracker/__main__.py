@@ -42,7 +42,8 @@ def main(argv=None):
     p.add_argument("module")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("import", help="convert an existing .it, .xm, .s3m or .mod into a song file (samples extracted as "
-                                      "WAVs), or a Guitar Pro tab (.gp3, .gp4, .gp5; needs pyguitarpro) with placeholder sounds")
+                                      "WAVs), or a Guitar Pro tab (.gp3, .gp4, .gp5; needs pyguitarpro) or a MIDI file "
+                                      "(.mid, .midi; needs mido) with placeholder sounds")
     p.add_argument("module")
     p.add_argument("-o", "--output", required=True, help="output song .yaml")
     p.add_argument("--samples-dir", help="where to write WAVs (default: <output stem>_samples next to the song)")
@@ -250,6 +251,9 @@ def main(argv=None):
             if Path(args.module).suffix.lower() in (".gp3", ".gp4", ".gp5"):
                 from .gpimport import import_gp
                 song, warnings = import_gp(args.module, out, sdir)
+            elif Path(args.module).suffix.lower() in (".mid", ".midi"):
+                from .midiimport import import_midi
+                song, warnings = import_midi(args.module, out, sdir)
             else:
                 song, warnings = import_it(args.module, out, sdir)
             for w in warnings:

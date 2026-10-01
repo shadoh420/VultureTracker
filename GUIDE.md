@@ -31,6 +31,7 @@ python -m vulturetracker render demo/arena.it -o demo/arena.wav --repeat 1
 python -m vulturetracker info demo/arena.it                           # what libopenmpt sees
 python -m vulturetracker import some.xm -o some.yaml                  # existing .it/.xm/.s3m/.mod -> song file + WAVs
 python -m vulturetracker import riff.gp5 -o riff.yaml                 # a Guitar Pro tab, with placeholder sounds
+python -m vulturetracker import song.mid -o song.yaml                  # a MIDI file, with placeholder sounds
 python -m vulturetracker index C:/samples samples                      # index WAVs by timbre (the app's MAP tab)
 python -m vulturetracker tryout song.yaml --sample 3 --like kick.wav -k 8 # the 8 sounds nearest kick.wav, in the song
 python -m vulturetracker export song.yaml -f ogg --section Loop --loop --stems # RENDER & EXPORT without the app
@@ -598,6 +599,15 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   the first note (a legato slide's target not struck again), hammer-ons and pull-offs a GFF on the next note, vibrato
   H, natural harmonics their pitch. Grace notes, trills, tremolo picking and mix-table volume and pan are left out and
   counted in the warnings.
+- `import` also reads MIDI files (.mid, .midi, type 0 and 1; `pip install mido`; the app's import takes them too) with
+  the same placeholder sounds (`vulturetracker/midiimport.py`; basses, programs 33-40, get the darker one, drums on MIDI
+  channel 10 the kit). Each MIDI channel of a track gets as many channels as it sounds notes at once, drums a channel per
+  key, a tempo change a channel of its own. A quantised file gets the coarsest grid that holds every note start and bar
+  line (up to 12 rows a quarter); a played-in one gets sixteenths at speed 6 with each note delayed (SDx) to the nearest
+  of 24 ticks a quarter. Bars (from the time signatures, 4/4 without one) become patterns, identical ones shared; a note
+  ends with a note-off at the row nearest its end; velocity goes to the volume column, a channel's volume and pan
+  before its first note to the channel. Past 64 channels the least used are left out. Pitch bends, later controller
+  changes and the sustain pedal are left out and counted in the warnings.
 - `import` keeps patterns, instruments, envelopes and samples. It drops embedded MIDI macros and
   OpenMPT-only extensions (with a warning). It also reads XM, S3M and 31-sample MOD files (`vulturetracker/modreader.py`,
   told apart by their headers; the app's start screen has IMPORT A MODULE, which writes `name.yaml` and `name_samples/`
