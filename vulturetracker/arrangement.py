@@ -43,7 +43,7 @@ def sections_text(text, sections):
             raise ValueError('Expand sections to a block mapping before adding/removing names; its comments must survive')
         prefix = ' ' if node.start_mark.index and text[node.start_mark.index - 1] == ':' else ''
         return text[:node.start_mark.index] + prefix + json.dumps(sections) + text[node.end_mark.index:]
-    edits = []
+    edits, ind = [], ' ' * node.value[0][0].start_mark.column
     for k, v in node.value:
         if k.value in sections:
             for item, number in zip(v.value, sections[k.value]):
@@ -51,9 +51,9 @@ def sections_text(text, sections):
         else:
             # Preserve comments inside the numeric span too; the trailing comment remains outside this edit.
             comments = re.findall(r'#[^\n]*', text[v.start_mark.index:v.end_mark.index])
-            edits.append((k.start_mark.index, v.end_mark.index, '\n  '.join(comments) + ('\n  ' if comments else '')))
+            edits.append((k.start_mark.index, v.end_mark.index, ('\n' + ind).join(comments) + ('\n' + ind if comments else '')))
     end = node.end_mark.index
-    added = ''.join(f'  {json.dumps(n)}: {json.dumps(v)}\n' for n, v in sections.items() if n not in old)
+    added = ''.join(f'{ind}{json.dumps(n)}: {json.dumps(v)}\n' for n, v in sections.items() if n not in old)
     if added:
         edits.append((end, end, ('\n' if end and text[end-1] != '\n' else '') + added))
     for a, b, value in sorted(edits, reverse=True):

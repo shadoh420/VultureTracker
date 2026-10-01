@@ -10,7 +10,7 @@ from .export import snapshot, render
 from .fileio import atomic_write, wav_bytes
 from .history import digest, json_bytes
 from .notation import format_cell, parse_cell
-from .project import replace_values, relative_meta
+from .project import file_updates, replace_values, relative_meta
 from .song import load_song_text
 
 
@@ -43,7 +43,7 @@ def capture(state, body):
     folder.mkdir(parents=True, exist_ok=True)
     text = state.patched_text(state.want)[0] if state.want else state.text
     doc = api.from_yaml(text)
-    updates, assets = [], {}
+    frozen, assets = {}, {}
     for num, entry in doc['samples'].items():
         if not isinstance(entry, dict) or not entry.get('file'):
             continue
@@ -58,8 +58,8 @@ def capture(state, body):
             atomic_write(dst, raw, replace=False)
         rel = dst.relative_to(state.base_dir).as_posix()
         assets[rel] = sha
-        updates.append((('samples', num, 'file'), rel))
-    text = replace_values(text, updates)
+        frozen[num] = rel
+    text = replace_values(text, file_updates(doc, frozen))
     # Only this order occurrence changes, even when earlier orders use the same pattern.
     lines = text.splitlines(keepends=True)
     name = next(n for n in (pat.name + '_tryout' + str(i) for i in itertools.count(1)) if n not in doc['patterns'])
@@ -169,7 +169,8 @@ def action(state, body):
             return {}
         if kind == 'render':
             text = edited_text(state, phrase, index)
-            key = digest(json_bytes([text, phrase['mix'], phrase['muted']]))[:24]
+            key = digest(json_bytes([api.RENDER_VERSION, text, phrase['mix'], phrase['muted'], phrase['order'], phrase['r0'],
+                                     phrase['r1']]))[:24]
             out = state.cache_dir / f'{key}.wav'
             if not out.exists():
                 snap = snapshot(api.from_yaml(text), state.base_dir,

@@ -22,7 +22,7 @@ import numpy as np
 # checkout), whose samples/ and tools/cc0 are indexed when no folders were chosen
 ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
         if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
-VERSION = 2            # bump when the vector changes: every file is read again
+VERSION = 3            # bump when the vector changes: every file is read again (3: pitch read to 4.2 kHz)
 MAX_SECONDS = 10.0     # what is analysed of a longer file (its start)
 N_MFCC, N_MELS = 13, 40
 # the vector's layout: name -> slice; the groups' weights sum the squared distance a group can add (in library z-scores)
@@ -65,7 +65,7 @@ def read_audio(path, max_seconds=None):
                 f.seek(size + (size & 1), 1)
             elif cid == b"smpl" and size >= 16:
                 body = f.read(size)
-                root = struct.unpack_from("<I", body, 12)[0]
+                root = struct.unpack_from("<I", body, 12)[0] if len(body) >= 16 else None
                 f.seek(size & 1, 1)
             else:
                 f.seek(size + (size & 1), 1)
@@ -365,9 +365,12 @@ class Library:
             if not e or e.get("stamp") != s:
                 todo.append((p, s))
         with self.lock:
-            gone = [p for p in files if p not in set(paths)]
+            listed = set(paths)
+            gone = [p for p in files if p not in listed]
             for p in gone:
                 del files[p]
+            if gone:
+                self.generation += 1  # the map and searches never offer a file that is gone
             self.status.update(total=len(todo), message=f"reading {len(todo)} of {len(paths)} files")
         errors = 0
         for i, (p, s) in enumerate(todo):
@@ -376,7 +379,7 @@ class Library:
             try:
                 vec, info = file_features(p)
                 entry = {"stamp": s, "vec": [None if math.isnan(v) else round(float(v), 5) for v in vec], "info": info}
-            except (OSError, ValueError, MemoryError) as e:
+            except Exception as e:  # noqa: BLE001 - one unreadable file is counted, never stops the scan
                 entry = {"stamp": s, "error": str(e)[:200]}
                 errors += 1
             with self.lock:
@@ -425,7 +428,8 @@ class Library:
             return sum(1 for e in self.data["files"].values() if "vec" in e)
 
     def model(self):
-        """(paths, vecs, centre, scale, xy) of the indexed sounds, rebuilt when the index changed."""
+        """(paths, vecs, centre, scale, xy, infos) of the indexed sounds, rebuilt when the index changed; a scan that
+        replaces entries meanwhile leaves this snapshot whole."""
         with self.lock:
             if self._model and self._model[0] == self.generation:
                 return self._model[1:]
@@ -434,7 +438,7 @@ class Library:
             vecs = np.array([[np.nan if v is None else v for v in e["vec"]] for _, e in items], float).reshape(-1, SIZE)
             centre, scale = weights(vecs)
             xy = pca2(vecs, centre, scale)
-            self._model = (self.generation, paths, vecs, centre, scale, xy)
+            self._model = (self.generation, paths, vecs, centre, scale, xy, [e["info"] for _, e in items])
             return self._model[1:]
 
     def features_of(self, path):
@@ -452,7 +456,7 @@ class Library:
     def nearest(self, query, k=8, exclude=()):
         """The `k` indexed sounds nearest `query` (a WAV path) by timbre: [(path, distance)], nearest first; the query
         itself, paths in `exclude` and exact copies of the query (distance 0 and the same duration) left out."""
-        paths, vecs, centre, scale, _ = self.model()
+        paths, vecs, centre, scale, _, infos = self.model()
         if not paths:
             return []
         q, info = self.features_of(query)
@@ -463,7 +467,7 @@ class Library:
             p = paths[i]
             if p in skip:
                 continue
-            if d[i] < 0.01 and self.data["files"][p]["info"].get("duration") == info.get("duration"):
+            if d[i] < 0.01 and infos[i].get("duration") == info.get("duration"):
                 continue
             out.append((p, float(d[i])))
             if len(out) >= k:
@@ -473,7 +477,7 @@ class Library:
     def map(self):
         """The map for the page: {"points": [[x, y], ...] (0..1), "paths", "names", "groups" (the folder under its root),
         "info"}; memoised with the model."""
-        paths, _, _, _, xy = self.model()
+        paths, _, _, _, xy, infos = self.model()
         roots = sorted(self.roots, key=len, reverse=True)
 
         def group(p):
@@ -483,7 +487,7 @@ class Library:
                     return f"{Path(r).name}/{rel[0]}" if len(rel) > 1 else Path(r).name
             return Path(p).parent.name
         return {"points": np.round(xy, 4).tolist(), "paths": paths, "names": [Path(p).stem for p in paths],
-                "groups": [group(p) for p in paths], "info": [self.data["files"][p]["info"] for p in paths],
+                "groups": [group(p) for p in paths], "info": infos,
                 "generation": self.generation}
 
     def has(self, path):

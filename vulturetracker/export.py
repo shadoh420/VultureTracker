@@ -9,6 +9,7 @@ import tempfile
 import threading
 
 from . import api
+from .model import ORDER_END
 from .notation import format_cell
 from .openmpt import LoadedModule
 from .fileio import atomic_write, link_new, protect_outputs, wav_bytes
@@ -30,6 +31,41 @@ def map_jumps(spec, target):
     return ''.join(rows)
 
 
+def _ring_out(base, folder, mod, region, muted, mix, tail):
+    """(standalone IT, audio IT, seconds, seek) of `region`: the audio plays the orders before it for the player's state,
+    then the region, then empty patterns through which what still sounds rings out."""
+    from .gui import patch_it
+    a, r0, b, r1 = map(int, region)
+    if not 0 <= a <= b < len(mod.orders) or any(mod.orders[o] >= len(mod.patterns) for o in (a, b)):
+        raise ValueError('Region endpoints must be playable orders')
+    endpat = mod.patterns[mod.orders[b]]
+    if not 0 <= r0 < len(mod.patterns[mod.orders[a]].rows) or not 0 <= r1 < len(endpat.rows) or (a == b and r0 > r1):
+        raise ValueError('Invalid row range')
+    # IT export is a standalone order slice; audio warms up all preceding orders to recover player state.
+    standalone = copy.deepcopy(base)
+    standalone['orders'] = list(base['orders'][a:b+1]) + ['---']
+    standalone['patterns'] = {k: map_jumps(v, lambda t: t-a if a <= t <= b else b-a+1)
+                              for k, v in base['patterns'].items() if k in base['orders'][a:b+1]}
+    it = patch_it(api.compile_song(standalone, folder)[0], muted, mix)
+    base = copy.deepcopy(base)
+    base['patterns'] = {k: map_jumps(v, lambda t: t if t <= b else b+1) for k, v in base['patterns'].items()}
+    base['orders'] = list(base['orders'][:b+1])
+    name = next(n for n in (f'vt_end_{i}' for i in itertools.count()) if n not in base['patterns'])
+    base['patterns'][name] = {'rows': r1+1, 'data': '\n'.join(' | '.join(format_cell(c) for c in row) for row in endpat.rows[:r1+1]) + '\n'}
+    base['patterns'][name] = map_jumps(base['patterns'][name], lambda t: b+1)  # a jump out of it (a loop back too) ends the section
+    # A break out of the last included pattern starts the empty tail at row zero.
+    base['patterns'][name]['data'] = re.sub(r'(?<![^\s|])C[0-9A-F]{2}(?![^\s|])', 'C00', base['patterns'][name]['data'])
+    base['patterns'][name+'_tail'] = {'rows': 200, 'data': ''}
+    base['orders'] = base['orders'][:b] + [name] + [name+'_tail'] * (1 + int(tail / 1.9))
+    render_it = patch_it(api.compile_song(base, folder)[0], muted, mix)
+    with LoadedModule(render_it) as lm:
+        end = lm.order_start(b+1)
+        start = lm.order_start(a, r0)
+    if end <= start:
+        raise ValueError('The selected region does not have a forward playback span; adjust its jumps before exporting')
+    return it, render_it, end-start, (a, r0)
+
+
 def snapshot(song, folder, region=None, mix=None, muted=(), tail=2.0):
     from .gui import patch_it, voice_entry
     base = copy.deepcopy(song)
@@ -48,37 +84,20 @@ def snapshot(song, folder, region=None, mix=None, muted=(), tail=2.0):
     if not 0 <= tail <= 10:
         raise ValueError('Tail must be between 0 and 10 seconds')
     if region:
-        a, r0, b, r1 = map(int, region)
-        if not 0 <= a <= b < len(mod.orders) or any(mod.orders[o] >= len(mod.patterns) for o in (a, b)):
-            raise ValueError('Region endpoints must be playable orders')
-        endpat = mod.patterns[mod.orders[b]]
-        if not 0 <= r0 < len(mod.patterns[mod.orders[a]].rows) or not 0 <= r1 < len(endpat.rows) or (a == b and r0 > r1):
-            raise ValueError('Invalid row range')
-        # IT export is a standalone order slice; audio warms up all preceding orders to recover player state.
-        standalone = copy.deepcopy(base)
-        standalone['orders'] = list(base['orders'][a:b+1]) + ['---']
-        standalone['patterns'] = {k: map_jumps(v, lambda t: t-a if a <= t <= b else b-a+1)
-                                  for k, v in base['patterns'].items() if k in base['orders'][a:b+1]}
-        it = patch_it(api.compile_song(standalone, folder)[0], muted, mix)
-        base = copy.deepcopy(base)
-        base['patterns'] = {k: map_jumps(v, lambda t: t if t <= b else b+1) for k, v in base['patterns'].items()}
-        base['orders'] = list(base['orders'][:b+1])
-        name = next(n for n in (f'vt_end_{i}' for i in itertools.count()) if n not in base['patterns'])
-        base['patterns'][name] = {'rows': r1+1, 'data': '\n'.join(' | '.join(format_cell(c) for c in row) for row in endpat.rows[:r1+1]) + '\n'}
-        base['patterns'][name] = map_jumps(base['patterns'][name], lambda t: t if t <= b else b+1)
-        # A break out of the last included pattern starts the empty tail at row zero.
-        base['patterns'][name]['data'] = re.sub(r'(?<![^\s|])C[0-9A-F]{2}(?![^\s|])', 'C00', base['patterns'][name]['data'])
-        base['patterns'][name+'_tail'] = {'rows': 200, 'data': ''}
-        base['orders'] = base['orders'][:b] + [name] + [name+'_tail'] * (1 + int(tail / 1.9))
-        render_it = patch_it(api.compile_song(base, folder)[0], muted, mix)
-        with LoadedModule(render_it) as lm:
-            end = lm.order_start(b+1)
-            start = lm.order_start(a, r0)
-        if end <= start:
-            raise ValueError('The selected region does not have a forward playback span; adjust its jumps before exporting')
-        duration, seek = end-start, (a, r0)
+        it, render_it, duration, seek = _ring_out(base, folder, mod, region, muted, mix, tail)
     else:
         render_it = it
+        # The whole song rings out like a section when it ends on its last order (a loop back there included); when a
+        # jump elsewhere ends it, the tail stays silence.
+        stop = mod.orders.index(ORDER_END) if ORDER_END in mod.orders else len(mod.orders)
+        last = max((i for i in range(stop) if mod.orders[i] < len(mod.patterns)), default=None)
+        if tail and last is not None:
+            try:
+                ring = _ring_out(base, folder, mod, (0, 0, last, len(mod.patterns[mod.orders[last]].rows) - 1), muted, mix, tail)
+                if abs(ring[2] - duration) < 1e-3:
+                    render_it = ring[1]
+            except ValueError:
+                pass
     if any(not p.is_file() or digest(p.read_bytes()) != sha for p, sha in assets.items()):
         raise ValueError('A source asset changed while compiling the export snapshot; retry after it is saved')
     return {'it': it, 'render_it': render_it, 'seek': seek, 'seconds': duration,
@@ -126,7 +145,7 @@ def prepare(state, options):
         silenced = state.silenced() if mutes == 'respect' else []
         base = api.from_yaml(state.patched_text(state.want)[0]) if mode == 'current' and state.want else state.song
         snap = snapshot(base, state.base_dir, region, mix, silenced, options.get('tail', 2))
-        folder = Path(options.get('destination') or state.base_dir).expanduser().resolve()
+        folder = (state.base_dir / Path(options.get('destination') or '.').expanduser()).resolve()  # relative: beside the song
         name = str(options.get('name') or state.song_path.stem)
         if name in ('.', '..') or not name.strip() or re.search(r'[\\/:*?"<>|]', name):
             raise ValueError('Output name must be a filename without directories or reserved characters')

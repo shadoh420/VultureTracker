@@ -96,7 +96,8 @@ effect letter and effect parameter columns) and the LIVE transport: libopenmpt c
 own audio thread, the whole song as it is now with the unwritten mix. ▶ FROM CURSOR (Space, F7; Space again stops,
 and the cursor stays where it stopped; a double-click on a row plays from there), ▶ SONG from the start, ↻ PATTERN
 (F6) loops the pattern at the cursor, ■ (F8) stops. The view follows what plays, the channel headers show each
-channel's level, SOUNDING lists what sounds, N drops a note at the live position. Mutes and solo from the stems rail,
+channel's level, SOUNDING lists what sounds, NOTE… drops a note at the live position (N in the other tabs). Mutes and
+solo from the stems rail,
 the playback loop (LOOP FROM / TO) and SPEED act on it at once, without a render; a fader, the instrument panel or a
 change to the song file recompiles the song and swaps it in where it plays. The piano keys (Z to M and Q to U, two
 octaves from OCT) preview the PREVIEW instrument: on the song while it plays, alone while stopped; in the Pattern tab
@@ -406,8 +407,10 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    change. COMPARE / RESTORE shows its text diff and restores it as one undo step.
 5. **Export.** RENDER & EXPORT offers IT, WAV, MP3 (192 kbit/s), OGG (Vorbis quality 6), FLAC and channel stems.
    Choose a destination folder and output name, whole song or named section, saved mix/sounds or current audition
-   mix/selected sample, and whether to respect audition mute/solo. Saved channel mute flags always apply. Playback
-   speed and metronome clicks are not exported. Audio can cut at the boundary or keep a fixed ring-out of 0–10 seconds;
+   mix/selected sample, and whether to respect audition mute/solo. A relative destination is taken from the song's
+   folder (empty: beside the song). Saved channel mute flags always apply. Playback
+   speed and metronome clicks are not exported. Audio can cut at the boundary or keep a fixed ring-out of 0–10 seconds
+   (for the whole song when it ends on its last order, a loop back there included; a jump elsewhere ends it in silence);
    stems have identical start frames and lengths, including silent padding. Section audio warms up preceding orders
    for player state. An IT section is an ordinary standalone order slice using the song's initial settings; it does
    not embed already sounding notes from earlier orders. Tail options affect audio, not IT playback.
@@ -416,7 +419,8 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    option. An encoder failure or cancellation preserves previous files. Cancellation is checked while rendering and
    before the short publication step; it does not interrupt that step halfway. If a filesystem error prevents rollback,
    the error identifies the folder retaining the previous files. Legacy build and export endpoints use the same guards.
-6. **Collect.** PROJECT → Save Copy / Collect Samples creates a new folder, optionally a ZIP, with relative WAV
+6. **Collect.** PROJECT → Save Copy / Collect Samples creates a new folder (a relative path is taken from the song's
+   folder, so `../My copy` lands beside it), optionally `<folder name>.zip` next to it, with relative WAV
    paths, candidates/ratings, current phrase comparison, notes and their archives, and supported sample recipes with
    their file inputs and Faust DSP files. Adjacent attribution/provenance/license files are kept in `credits/`, with
    their asset associations in `project.json`. Duplicate basenames are numbered. Existing destinations are refused. The
@@ -425,7 +429,8 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    recordings from outside the project references, or sample-library indexes are bundled. Missing samples must be
    relinked first (a missing tryout candidate must instead be removed in TRYOUT or restored): supply explicit
    replacement WAVs in PROJECT, then RELINK (or all missing samples together). This
-   changes only `file:` paths, keeping tuning, loop settings and comments; the complete song must compile.
+   changes only `file:` paths, keeping tuning, loop settings and comments (a slot named after its file gets that
+   name written as `name:`, so instruments that refer to it still find it); the complete song must compile.
 
 **Persistence and external files.** The YAML remains the musical source of truth, with comments, BOM and line endings
 retained by app writes. `<song>.tryout.json` holds audition settings, candidates and phrase choices;

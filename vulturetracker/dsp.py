@@ -41,16 +41,20 @@ def onsets(x, rate, sensitivity=50, a=0, b=None, min_gap=0.05):
     m = _mono(seg)
     if len(m) < 64:
         return [a]
-    size = 1024
-    flux, hop = novelty(seg, rate, size=size)
+    size, hop = 1024, 256
+    skip = max(0, len(m) - size) % hop  # the frames end where the selection does, so a hit in its last hop is seen
+    flux, hop = novelty(seg[..., skip:], rate, hop, size)
     flux = flux / (flux.max() or 1)
-    w = max(1, int(0.1 * rate / hop))  # the local level the threshold rides on: a 0.2 s moving median
-    pad = np.pad(flux, w, mode="edge")
+    # the local level the threshold rides on: a 0.2 s moving median, reflected at the end (a hit in the last frame is
+    # not its own level)
+    w = max(1, int(0.1 * rate / hop))
+    pad = np.pad(np.pad(flux, (w, 0), mode="edge"), (0, w), mode="reflect")
     local = np.median(np.lib.stride_tricks.sliding_window_view(pad, 2 * w + 1), axis=1)[: len(flux)]
     delta = 0.06 + 0.44 * (1 - max(0, min(100, sensitivity)) / 100) ** 2
     gap = max(1, int(min_gap * rate / hop))
-    peaks = [i for i in range(1, len(flux) - 1)
-             if flux[i] >= flux[i - 1] and flux[i] > flux[i + 1] and flux[i] > local[i] + delta]
+    after = np.append(flux[1:], -1)  # nothing follows the last frame
+    peaks = [i for i in range(1, len(flux))
+             if flux[i] >= flux[i - 1] and flux[i] > after[i] and flux[i] > local[i] + delta]
     out, last = [a], -gap
     ms = max(1, rate // 1000)
     env = np.sqrt(np.convolve(m * m, np.ones(ms) / ms, mode="same"))  # a 1 ms RMS envelope
@@ -58,7 +62,8 @@ def onsets(x, rate, sensitivity=50, a=0, b=None, min_gap=0.05):
         if i - last < gap:
             continue
         last = i
-        lo, hi = max(0, i * hop - size // 2), min(len(m), i * hop + size + hop)  # where the window saw the rise
+        # where the window saw the rise
+        lo, hi = max(0, skip + i * hop - size // 2), min(len(m), skip + i * hop + size + hop)
         rise = np.nonzero(env[lo:hi] >= 0.2 * env[lo:hi].max())[0]
         at = max(0, lo + (int(rise[0]) if len(rise) else size // 2) - ms)  # 1 ms before the hit reaches a fifth of its level
         at = zero_crossing(m, at, 2 * ms)
@@ -142,38 +147,36 @@ def stretch(x, ratio, size=2048):
     if not 0.25 <= ratio <= 4:
         raise ValueError("a stretch is 25-400 %")
     n = x.shape[-1]
-    ha = size // 4
+    # the synthesis hop hs stays near size / 4: four windows overlap at any ratio, no dips in their sum at the joins
+    ha = size // 4 if ratio <= 1 else max(1, round(size / (4 * ratio)))
     hs = ha * ratio
     win = np.hanning(size + 1)[:size]
     pad = np.pad(x, ((0, 0), (size, size + ha)))
     frames = 1 + (pad.shape[-1] - size) // ha
-    idx = np.arange(size)[None, :] + ha * np.arange(frames)[:, None]
-    X = np.fft.rfft(pad[:, idx] * win, axis=-1)          # channels x frames x bins
-    mid = X.mean(axis=0)
-    mag, ph = np.abs(mid), np.angle(mid)
-    bins = np.arange(X.shape[-1])
+    bins = np.arange(size // 2 + 1)
     omega = 2 * np.pi * bins * ha / size
-    syn = np.empty_like(ph)
-    syn[0] = ph[0]
-    for t in range(1, frames):
-        d = ph[t] - ph[t - 1] - omega
-        d -= 2 * np.pi * np.round(d / (2 * np.pi))
-        adv = (omega + d) * (hs / ha)
-        m = mag[t]
-        peaks = np.nonzero((m[1:-1] > m[:-2]) & (m[1:-1] >= m[2:]))[0] + 1
-        if len(peaks):                                   # identity phase locking around each peak
-            nearest = peaks[np.clip(np.searchsorted((peaks[1:] + peaks[:-1]) / 2, bins), 0, len(peaks) - 1)]
-            syn[t] = syn[t - 1][nearest] + adv[nearest] + ph[t] - ph[t][nearest]
-        else:
-            syn[t] = syn[t - 1] + adv
-    Y = np.abs(X) * np.exp(1j * (syn[None] + np.angle(X) - ph[None]))
     out_len = int(round((frames - 1) * hs)) + size
     y = np.zeros((x.shape[0], out_len))
     norm = np.zeros(out_len)
-    frames_y = np.fft.irfft(Y, size, axis=-1) * win
-    for t in range(frames):
+    for t in range(frames):                              # a frame at a time: the memory is the output's, at any ratio
+        X = np.fft.rfft(pad[:, t * ha: t * ha + size] * win, axis=-1)     # channels x bins
+        mid = X.mean(axis=0)
+        m, ph = np.abs(mid), np.angle(mid)
+        if t == 0:
+            syn = ph
+        else:
+            d = ph - prev - omega
+            d -= 2 * np.pi * np.round(d / (2 * np.pi))
+            adv = (omega + d) * (hs / ha)
+            peaks = np.nonzero((m[1:-1] > m[:-2]) & (m[1:-1] >= m[2:]))[0] + 1
+            if len(peaks):                               # identity phase locking around each peak
+                nearest = peaks[np.clip(np.searchsorted((peaks[1:] + peaks[:-1]) / 2, bins), 0, len(peaks) - 1)]
+                syn = syn[nearest] + adv[nearest] + ph - ph[nearest]
+            else:
+                syn = syn + adv
+        prev = ph
         at = int(round(t * hs))
-        y[:, at:at + size] += frames_y[:, t]
+        y[:, at:at + size] += np.fft.irfft(np.abs(X) * np.exp(1j * (syn + np.angle(X) - ph)), size, axis=-1) * win
         norm[at:at + size] += win ** 2
     y /= np.maximum(norm, 1e-3 * norm.max())
     start = int(round(size * ratio))
@@ -228,7 +231,7 @@ def denoise(x, rate, noise, reduce_db=12.0, sensitivity=2.0, size=2048):
         raise ValueError(f"learn the noise from at least {1000 * size / rate:.0f} ms of it")
     if not 0 <= float(reduce_db) <= 60:
         raise ValueError("reduce by 0 to 60 dB")
-    N = _stft(noise, size, hop)[:, 1:-2]                       # the padded edges are not the noise
+    N = _stft(noise, size, hop)[:, size // hop: noise.shape[-1] // hop + 1]   # the frames clear of _stft's padding
     profile = (np.abs(N) ** 2).mean(axis=(0, 1))                # per bin, over channels and frames
     X = _stft(x, size, hop)
     power = (np.abs(X) ** 2).mean(axis=0)                       # linked: one gain for all channels
@@ -260,14 +263,14 @@ def silent_runs(x, rate, db=-50.0, min_ms=200):
 
 # ---------------------------------------------------------------- recorded takes: pitch, edges, loop points
 
-def yin(x, rate, fmin=40.0, fmax=2000.0, threshold=0.15):
+def yin(x, rate, fmin=40.0, fmax=4200.0, threshold=0.15):
     """The pitch of `x` (a short stretch: at least two periods of `fmin`) by YIN: the cumulative-mean-normalised
     difference function's first dip under `threshold`, refined by a parabola. Returns (hz, confidence 0-1) or
-    (None, 0) for silence or noise."""
+    (None, 0) for silence, a constant or noise."""
     m = _mono(x)
     tmax, tmin = int(rate / fmin), max(2, int(rate / fmax))
     w = len(m) - tmax
-    if w < tmax // 2 or not np.any(m):
+    if w < tmax // 2 or not np.ptp(m):
         return None, 0.0
     m = m - m.mean()
     size = 1 << int(np.ceil(np.log2(len(m) + w)))
@@ -303,10 +306,13 @@ def note_of(hz):
     return n, float(100 * (exact - n))
 
 
-def pitch_of(x, rate, fmin=40.0, fmax=2000.0):
-    """The pitch a take holds: the median of YIN over 50 ms frames of its louder half that YIN is sure of. Returns hz
-    or None (a drum, noise, silence)."""
+def pitch_of(x, rate, fmin=27.5, fmax=4200.0):
+    """The pitch a take holds (27.5 Hz to 4.2 kHz by default: the piano's A-1 to C-9): the median of YIN over frames of
+    its louder half that YIN is sure of, each 2.5 periods of `fmin` long. Returns hz or None (a drum, noise,
+    silence)."""
     m = _mono(x)
+    # a take under 2.5 periods of fmin: from the lowest pitch it holds 2.5 periods of (40 Hz when shorter, as before)
+    fmin = max(fmin, min(40.0, 2.5 * rate / max(1, len(m))))
     size = max(int(rate * 0.05), int(2.5 * rate / fmin))
     if len(m) < size:
         return None

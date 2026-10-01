@@ -87,26 +87,32 @@ def place_loops(loops, rate_in, rate_out):
     return [(ends.get(lp[0], s), ends.get(lp[0], s) + e - s, pp) for lp, (s, e, pp) in zip(loops, fits)]
 
 
-def _sinc(xp, p, h, off):
+def _sinc(xp, p, h, off, cut=1.0):
     """`xp` interpolated at the positions `p` (counted from `xp[off]`, at least `h` frames in from either end) with a
-    2h-point Blackman-windowed sinc."""
+    2h-point Blackman-windowed sinc cut at `cut` times `xp`'s Nyquist frequency. Raising a rate takes h = 64 and cut
+    0.95: flat within 0.002 dB to 0.9 of that frequency and 75 dB down from it up, so nothing images."""
     j = np.arange(-h + 1, h + 1)
     y = np.empty(len(p))
     block = 1 << 15
     for i in range(0, len(p), block):
         q = p[i: i + block]
         k0 = np.floor(q).astype(int)
-        t = q[:, None] - (k0[:, None] + j[None, :])          # distance from each tap to the output position
-        w = np.sinc(t) * (0.42 + 0.5 * np.cos(np.pi * t / h) + 0.08 * np.cos(2 * np.pi * t / h))
+        # a rate change repeats a few phases (22050 -> 44100 two, 32000 -> 44100 441): one kernel per phase, rounded
+        # so float error does not split them
+        frac, inv = np.unique(np.round(q - k0, 9), return_inverse=True)
+        t = frac[:, None] - j[None, :]                        # distance from each tap to the output position
+        w = np.sinc(cut * t) * (0.42 + 0.5 * np.cos(np.pi * t / h) + 0.08 * np.cos(2 * np.pi * t / h))
         w /= w.sum(axis=1, keepdims=True)
-        y[i: i + len(q)] = (xp[k0[:, None] + j[None, :] + off] * w).sum(axis=1)
+        y[i: i + len(q)] = np.einsum("ij,ij->i", xp[k0[:, None] + j[None, :] + off], w[inv])
     return y
 
 
-def resample(x, rate_in, rate_out, taps=64, loops=()):
+def resample(x, rate_in, rate_out, taps=None, loops=()):
     """`x` (a 1-D float array at `rate_in`) resampled to `rate_out`, band-limited: when the rate goes down the signal is
     first low-passed at 0.45 of the new rate (so nothing folds), then every output sample is a `taps`-point
-    windowed-sinc interpolation of the input (so nothing images). Integer decimation takes the fast path.
+    windowed-sinc interpolation of the input (so nothing images: 128 taps cut under the old Nyquist frequency when the
+    rate goes up; 64 at it when it goes down, the low-pass having left nothing near it). Integer decimation takes the
+    fast path.
 
     `loops` lists (start, end, pingpong) in input frames. A loop's output frames are interpolated from the loop as it
     plays, wrapped (forward) or reflected (ping-pong) at both ends, instead of from its neighbours in the file, and
@@ -119,7 +125,8 @@ def resample(x, rate_in, rate_out, taps=64, loops=()):
     if rate_in == rate_out or len(x) == 0:
         return x.copy()
     ratio = rate_in / rate_out                       # input samples per output sample
-    h = taps // 2
+    up = rate_out > rate_in
+    h, cut = (taps or (128 if up else 64)) // 2, 0.95 if up else 1.0
     fir = lowpass_fir(0.45 / ratio) if rate_out < rate_in else None
     if fir is not None and abs(ratio - round(ratio)) < 1e-9 and not loops:
         return decimate(x[:, None], int(round(ratio)), fir)[:, 0]
@@ -136,7 +143,7 @@ def resample(x, rate_in, rate_out, taps=64, loops=()):
         p = p + np.interp(np.arange(size), [k for k, _ in knots], [d for _, d in knots])
     lead = h + 2 * math.ceil(ratio) + 2              # the time map moves a frame by less than two output frames
     y = np.zeros(size)
-    y[:n_out] = _sinc(np.concatenate([np.zeros(lead), xf, np.zeros(lead + 1)]), p[:n_out], h, lead)
+    y[:n_out] = _sinc(np.concatenate([np.zeros(lead), xf, np.zeros(lead + 1)]), p[:n_out], h, lead, cut)
     pad = h + 2 + (len(fir) // 2 if fir is not None else 0)
     for start, end, pingpong, s, e in sorted(fits, key=lambda f: f[0] - f[1]):   # the longest first
         n = end - start
@@ -145,7 +152,7 @@ def resample(x, rate_in, rate_out, taps=64, loops=()):
         seg = x[start + np.where(m < n, m, period - m)]
         if fir is not None:
             seg = fir_filter(seg, fir)
-        y[s:e] = _sinc(seg, p[s:e] - start, h, pad)
+        y[s:e] = _sinc(seg, p[s:e] - start, h, pad, cut)
     return y
 
 

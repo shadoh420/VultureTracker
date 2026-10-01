@@ -28,6 +28,7 @@ import numpy as np
 
 from .dsp import lowpass
 from .resample import resample
+from .song import it_text
 
 QUARTER = 960
 GRIDS = (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48)
@@ -257,7 +258,10 @@ def import_gp(src, song_path, samples_dir):
     except ImportError:
         raise ValueError("Guitar Pro import needs PyGuitarPro: pip install pyguitarpro (LGPL-3)")
     from .api import to_yaml
-    gp = guitarpro.parse(str(src))
+    try:
+        gp = guitarpro.parse(str(src))
+    except Exception as e:  # noqa: BLE001 - PyGuitarPro raises what its reader hits (GPException, struct.error, ...)
+        raise ValueError(f"{src}: not a readable Guitar Pro 3-5 file ({type(e).__name__}: {e})") from e
     warnings, skipped = [], {}
 
     def skip(what):
@@ -412,19 +416,22 @@ def import_gp(src, song_path, samples_dir):
         orders.append(name)
     for what, count in skipped.items():
         warnings.append(f"{count} {what} left out")
-    if any(ord(c) > 127 for c in (gp.title or Path(src).stem)):
-        warnings.append('Non-ASCII title characters replaced with ? for the IT song format')
+    if any(ord(c) > 127 for c in (gp.title or Path(src).stem) + "".join(ln.name for ln in lanes)):
+        warnings.append('Non-ASCII title or track name characters replaced with ? for the IT song format')
     chans = []
     for ln in lanes:
-        c = {"name": ln.name[:20]}
+        c = {"name": it_text(ln.name, 20)}
         if getattr(ln, "volume", 64) != 64:
             c["volume"] = ln.volume
         if getattr(ln, "pan", 32) != 32:
             c["pan"] = ln.pan
         chans.append(c)
+    ts = headers[0].timeSignature  # the first measure's: a beat is its denominator's note, a bar its numerator of them
+    beat = r * 4 / ts.denominator.value
+    beat, bar = (int(beat), int(beat) * ts.numerator) if beat == int(beat) else (r, 4 * r)
     song = {
-        "module": {"title": (gp.title or Path(src).stem).encode('ascii', 'replace').decode()[:25], "tempo": tempo, "speed": speed, "global_volume": 128,
-                   "mix_volume": 48, "sample_rate": 44100, "rows_per_beat": r, "rows_per_bar": min(255, 4 * r), "channels": chans},
+        "module": {"title": it_text(gp.title or Path(src).stem, 25), "tempo": tempo, "speed": speed, "global_volume": 128,
+                   "mix_volume": 48, "sample_rate": 44100, "rows_per_beat": min(255, beat), "rows_per_bar": min(255, bar), "channels": chans},
         "samples": samples, "instruments": instruments, "patterns": patterns, "orders": orders,
     }
     head = (f"# Imported from {Path(src).name} by vulturetracker import (Guitar Pro: placeholder sounds, swap them in the tryout)\n"

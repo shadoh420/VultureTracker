@@ -350,18 +350,21 @@ class Recorder:
             click[a:a+k] = pulse[:k, None]
         plan = {'pcm': pcm, 'click': click, 'head': head, 'offset': offset, 'loops': loops,
                 'end': offset + loops * len(pcm), 'calibration': calibration}
-        device, rate = self.device, self.rate
+        device, rate, be = self.device, self.rate, self._backend()
         self.close()
         with self.lock:
             self.backing, self.play_frame, self.frames, self.finished = plan, 0, 0, False
             self.chunks = []
             self.recording = True
         try:
-            be = self._backend()
             opts = {'loopback': calibration} if isinstance(be, FakeBackend) else {}
             self.stream = be.open_duplex(device, int(output), self.channels, rate, self._duplex, self.exclusive, **opts)
         except Exception:
             self.close()
+            try:  # back to the plain input the take started from: the meters and REC keep working
+                self.stream = be.open(device, self.channels, rate, self._callback, self.exclusive)
+            except Exception:  # noqa: BLE001 - the duplex error is the one to report
+                pass
             raise
 
     def _duplex(self, indata, outdata, frames, time_info, status):

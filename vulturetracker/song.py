@@ -19,6 +19,11 @@ MAX_ROWS = 200
 MAX_NUMBER = 99
 
 
+def it_text(s, n):
+    """`s` as IT stores a name: ASCII (other characters become '?', as imports write them), at most `n` characters."""
+    return str(s).encode("ascii", "replace").decode()[:n]
+
+
 class SongError(Exception):
     def __init__(self, errors, warnings=()):
         self.errors = list(errors)
@@ -160,8 +165,8 @@ def _enum(ctx, m, key, choices, default, where):
     v = m.get(key, default)
     if isinstance(v, bool):  # YAML 1.1 reads bare off/on/no/yes as booleans
         v = "on" if v else "off"
-    if v not in choices:
-        ctx.error(_line(m, key), f"{where}: '{key}' must be one of {', '.join(choices)}, got {v!r}")
+    if isinstance(v, (list, dict)) or v not in choices:
+        ctx.error(_line(m, key), f"{where}: '{key}' must be one of {', '.join(map(str, choices))}, got {v!r}")
         raise _Bad
     return choices[v]
 
@@ -239,6 +244,8 @@ def _module(ctx, m, mod):
     mod.row_highlight = (beat, bar)
     msg = m.get("message")
     mod.message = str(msg) if msg else ""
+    if any(ord(c) > 255 for c in mod.message):
+        ctx.warn(_line(m, "message"), "module.message: characters outside Latin-1 are stored as ?")
     if len(mod.message.replace("\r\n", "\n")) + 1 > 65535:  # the writer's limit (IT's 16-bit length), one byte a character
         ctx.error(_line(m, "message"), f"module.message is {len(mod.message)} characters; IT stores at most 65534")
     chans = m.get("channels")
@@ -388,7 +395,7 @@ def _sample(ctx, num, spec, line, base_dir):
         wav = WavData(target, wav.bits, _resampled(stamp, wav, target, loops, resample_pcm), wav.out_bits, [], wav.root)
         stamp = (stamp, target, tuple(loops))
     smp = Sample()
-    smp.name = _text(ctx, m, "name", path.stem[:25], 25, where)
+    smp.name = _text(ctx, m, "name", it_text(path.stem, 25), 25, where)
     smp.filename = path.name[:12]
     stereo = _bool(ctx, m, "stereo", False, where)
     smp.bits = _enum(ctx, m, "bits", {8: 8, 16: 16}, wav.out_bits, where)
@@ -760,6 +767,11 @@ def compile_tree(tree, ctx, base_dir) -> Module:
     if len(pats) > ORDER_SKIP:
         ctx.error(_line(tree, 'patterns'), 'at most 254 patterns; order values 254 and 255 are reserved')
     for name, spec in pats.items():
+        if str(name) in pat_index:
+            first = next(k for k in pats if str(k) == str(name))
+            ctx.error(_line(pats, name), f"pattern {name!r} has the same name as pattern {first!r} (line "
+                                        f"{_line(pats, first)}): rename one")
+            continue
         try:
             pat, lines = _pattern(ctx, str(name), spec, _line(pats, name), num_channels)
         except _Bad:
@@ -851,8 +863,14 @@ def load_song_text(text, base_dir=".", filename="<song>"):
         node = yaml.compose(text, Loader=_LOADER)
         tree = _convert(node, ctx) if node is not None else None
     except yaml.YAMLError as e:
-        mark = getattr(e, "problem_mark", None)
-        line = mark.line + 1 if mark else 1
+        mark, pos = getattr(e, "problem_mark", None), getattr(e, "position", None)
+        if mark:
+            line = mark.line + 1
+        elif isinstance(pos, int):  # a ReaderError (a control character): libyaml counts UTF-8 bytes, PyYAML characters
+            src = text.encode("utf-8") if getattr(e, "encoding", None) == "?" else text
+            line = src[:pos].count(b"\n" if isinstance(src, bytes) else "\n") + 1
+        else:
+            line = 1
         raise SongError([f"{filename}:{line}: error: YAML syntax: {getattr(e, 'problem', e)}"])
     except RecursionError:
         raise SongError([f"{filename}:1: error: the YAML nests too deeply, or an alias refers to its own anchor"])
@@ -864,6 +882,16 @@ def load_song_text(text, base_dir=".", filename="<song>"):
     return mod, ctx.warnings
 
 
+def read_song_text(path):
+    """The song file's text; bytes that are not UTF-8 are a SongError at their line."""
+    raw = Path(path).read_bytes()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        line = raw.count(b"\n", 0, e.start) + 1
+        raise SongError([f"{path}:{line}: error: not UTF-8 text (byte 0x{raw[e.start]:02x}): save the file as UTF-8"])
+
+
 def load_song(path):
     path = Path(path)
-    return load_song_text(path.read_text(encoding="utf-8"), path.parent, str(path))
+    return load_song_text(read_song_text(path), path.parent, str(path))

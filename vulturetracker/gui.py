@@ -41,10 +41,10 @@ from .fileio import atomic_write as _atomic, protect_outputs, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
 from .history import History, digest, json_bytes, pack_step, unpack_step, HISTORY_BYTES
-from .project import collect, replace_values, resolve_meta, relative_meta
+from .project import collect, file_updates, replace_values, resolve_meta, relative_meta
 from .arrangement import sections_text, occurrence_map, reorder
 from .openmpt import LoadedModule
-from .song import SongError, load_song_text
+from .song import SongError, it_text, load_song_text
 from .wavload import read_wav
 
 HTML = Path(__file__).with_name("gui.html")
@@ -1082,7 +1082,7 @@ class State:
         if cand:
             stamps = f"{_stamp(cand)}|{stamps}"
         inst = json.dumps(self.mix().get("instrument"), sort_keys=True)  # the instrument panel is compiled in, not patched
-        return hashlib.sha1(f"{self.text_sha()}|{self.slot}|{self.orders}|{stamps}|{inst}".encode()).hexdigest()[:16]
+        return hashlib.sha1(f"{api.RENDER_VERSION}|{self.text_sha()}|{self.slot}|{self.orders}|{stamps}|{inst}".encode()).hexdigest()[:16]
 
     def key(self, cand=None):
         """Render cache key: the compile key plus what is patched into the module's header, mutes and the unwritten mix."""
@@ -1882,7 +1882,9 @@ class State:
             entry = {'rows': len(pat.rows), 'data': data}
             top = self._top(lines, 'patterns')
             if lines[top].split(':', 1)[1].strip().startswith('{'):
-                patterns = dict(self.song['patterns'], **{pat.name: entry})
+                key = next(k for k in self.song['patterns'] if str(k) == pat.name)  # `1:` is the int 1, compiled as '1'
+                patterns = dict(self.song['patterns'])
+                patterns[key] = entry
                 lines[top:self._span(lines, top)] = api.to_yaml({'patterns': patterns}).splitlines(keepends=True)
             else:
                 at = self._pattern_key(lines, pat.name)
@@ -2032,7 +2034,7 @@ class State:
 
     def relink(self, num=None, path=None, links=None):
         with self.lock:
-            updates = []
+            moved = {}
             for num, path in (links if links is not None else {num: path}).items():
                 num = int(num)
                 entry = (self.song.get('samples') or {}).get(num)
@@ -2044,10 +2046,10 @@ class State:
                     rel = Path(os.path.relpath(path, self.base_dir)).as_posix()
                 except ValueError:
                     rel = path.as_posix()
-                updates.append((('samples', num, 'file'), rel))
-            if not updates:
+                moved[num] = rel
+            if not moved:
                 raise ValueError('Provide replacement paths for the missing samples')
-            self._commit(replace_values(self.text, updates))
+            self._commit(replace_values(self.text, file_updates(self.song, moved)))
 
     def external_diff(self):
         raw = self.song_path.read_bytes()
@@ -2310,6 +2312,10 @@ class State:
             y, loops = process_wav(x, str(op["action"]), a, b, entry_loops(entry, w), op.get("frames") or 0,
                                    op.get("params"), w.rate)
             full = 128 if w.out_bits == 8 else 32768
+            peak = float(np.abs(y).max()) if y.size else 0.0
+            if peak > 1:  # STRETCH, PITCH or a boost past full scale: scaled under it, never clipped
+                y = y / peak
+                self._report.append(f"{20 * math.log10(peak):.1f} dB down to stay under full scale")
             chans = np.clip(np.round(y * full), -full, full - 1).astype(np.int32).tolist()
             out = self._new_wav(path, str(op["action"]))
             write_wav(out, w.rate, chans, bits=w.out_bits, loop=loops.get("loop") or loops.get("sustain_loop"), root_note=w.root)
@@ -2365,7 +2371,7 @@ class State:
                     rel = os.path.relpath(f.resolve(), self.base_dir).replace(os.sep, "/")
                 except ValueError:
                     rel = f.resolve().as_posix()
-                entry = {"file": rel, "name": str(op.get("name") or f.stem)[:25], **({"stereo": True} if op.get("stereo") else {}),
+                entry = {"file": rel, "name": it_text(op.get("name") or f.stem, 25), **({"stereo": True} if op.get("stereo") else {}),
                          **(op.get("keep") or {})}  # keep: settings carried over (a slice keeps its source's pitch)
             else:
                 entry = op["entry"]
@@ -2464,6 +2470,22 @@ class State:
                 smp = ins
             return mod.samples[smp - 1].volume if 0 < smp <= len(mod.samples) else None
 
+        def carry(c, vol, ins):  # the source channel's volume and instrument after cell c
+            if c.instrument:
+                ins, dv = c.instrument, default_volume(c.instrument, c.note)
+                vol = dv if dv is not None else vol
+            if c.volcmd is not None and c.volcmd <= 64:
+                vol = c.volcmd
+            return vol, ins
+
+        # a pattern starts with the volume and instrument the channel has where it first plays (orders in turn, as the
+        # sounding list reads them): a note there without an instrument plays the one carried over
+        entry, vol, last_ins = {}, 64, 0
+        for o in mod.orders:
+            if o < len(mod.patterns):
+                entry.setdefault(o, (vol, last_ins))
+                for row in mod.patterns[o].rows:
+                    vol, last_ins = carry(row[src], vol, last_ins)
         written = past = skipped = lost = 0
         idxs = [int(op["pattern"])] if op.get("pattern") is not None else range(len(mod.patterns))
         for idx in idxs:
@@ -2471,15 +2493,10 @@ class State:
             n = len(pat.rows)
             r0 = max(0, int(op.get("r0") or 0)) if op.get("pattern") is not None else 0
             r1 = min(n - 1, int(op["r1"])) if op.get("pattern") is not None and op.get("r1") is not None else n - 1
-            vol, last_ins, cells = 64, 0, []
+            (vol, last_ins), cells = entry.get(idx, (64, 0)), []
             for r in range(0, r1 + 1):  # rows before r0 only set the channel's volume and instrument
                 c = pat.rows[r][src]
-                if c.instrument:
-                    last_ins = c.instrument
-                    dv = default_volume(c.instrument, c.note)
-                    vol = dv if dv is not None else vol
-                if c.volcmd is not None and c.volcmd <= 64:
-                    vol = c.volcmd
+                vol, last_ins = carry(c, vol, last_ins)
                 if r < r0 or c.is_empty():
                     continue
                 note_on = c.note is not None and c.note < 120
@@ -2673,7 +2690,7 @@ class State:
                 keymap = [{"notes": format_note(60 + i), "sample": s, "play_note": "C-5"} for i, s in enumerate(nums)]
                 label = f"{entry.get('name') or path.stem} slices"
                 msg += f"; instrument {ins:02d} plays them from C-5 up"
-            self._song_op(lines, orders, {"op": "instrument_new", "num": ins, "entry": {"name": label[:25], "keymap": keymap}}, remap)
+            self._song_op(lines, orders, {"op": "instrument_new", "num": ins, "entry": {"name": it_text(label, 25), "keymap": keymap}}, remap)
         if op.get("pattern"):
             msg += "; " + self._slice_pattern(lines, orders, remap, [bounds[k][0] for k in keep_k], w.rate, nums,
                                               [notes[k][1] if mode == "multi" else 60 + i if ins else 60
@@ -3043,7 +3060,7 @@ class State:
             ops = [{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "keep": keep}]
             if self.song.get("instruments"):  # cells play instruments: one that plays the slot, else it cannot be heard
                 take["instrument"] = max(int(i) for i in self.song["instruments"]) + 1
-                ops.append({"op": "instrument_new", "num": take["instrument"], "entry": {"name": out.stem[:25], "sample": num}})
+                ops.append({"op": "instrument_new", "num": take["instrument"], "entry": {"name": it_text(out.stem, 25), "sample": num}})
             self.song_edit(ops)
             take["slot"] = num
         elif dest != "keep":
@@ -3146,7 +3163,7 @@ class State:
         ops = [{"op": "sample_new", "num": num, "file": str(out), "name": out.stem[:25], "stereo": stereo, "keep": keep}]
         if self.song.get("instruments"):
             ops.append({"op": "instrument_new", "num": max(int(i) for i in self.song["instruments"]) + 1,
-                        "entry": {"name": out.stem[:25], "sample": num}})
+                        "entry": {"name": it_text(out.stem, 25), "sample": num}})
         self.song_edit(ops)
         return f"in new slot {num:02d}" + (f", played by instrument {ops[1]['num']:02d}" if len(ops) > 1 else "")
 
@@ -3369,7 +3386,7 @@ class State:
                               "module": {k: (self.mod.row_highlight[0] or 4) if k == 'rows_per_beat' else
                                                (self.mod.row_highlight[1] or 16) if k == 'rows_per_bar' else
                                                getattr(self.mod, k) for k in self.MODULE_KEYS} if self.mod else {}},
-                "archives": sorted(p.name for p in self.base_dir.glob(self.song_path.stem + ".notes-*.md")),
+                "archives": sorted(p.name for p in self.base_dir.glob(glob.escape(self.song_path.stem) + ".notes-*.md")),
                 "queue": sum(1 for r in self.renders.values() if r["status"] in ("queued", "rendering")),
                 "cache": sum(1 for r in self.renders.values() if r["status"] == "ready"),
             }
@@ -3629,6 +3646,24 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return origin is not None and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
 
+    def _guarded(fn):
+        """An unexpected error is printed and answered with a 500 and its message: the page is never left without one."""
+        @functools.wraps(fn)
+        def run(self):
+            try:
+                return fn(self)
+            except ConnectionError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                import traceback
+                traceback.print_exc()
+                try:
+                    self._send(500, {"error": f"{type(e).__name__}: {e}"})
+                except OSError:
+                    pass
+        return run
+
+    @_guarded
     def do_GET(self):
         if self._foreign():
             return self._send(403, {"error": "not this app's page"})
@@ -3749,6 +3784,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"error": "\n".join(getattr(e, "errors", []) or [str(e)])})
         self._send(404, {"error": "not found"})
 
+    @_guarded
     def do_POST(self):
         if self._foreign():
             return self._send(403, {"error": "not this app's page"})

@@ -141,7 +141,7 @@ def write_it(mod: Module) -> bytes:
     instruments = mod.instruments or []
     ins_blobs = [_instrument(i) for i in instruments]
     pat_blobs = [_pattern(p, len(mod.channels)) for p in mod.patterns]
-    message = mod.message.replace("\r\n", "\n").replace("\n", "\r").encode("ascii", "replace") + b"\0" if mod.message else b""
+    message = mod.message.replace("\r\n", "\n").replace("\n", "\r").encode("latin-1", "replace") + b"\0" if mod.message else b""
     if len(message) > 65535:
         raise ValueError(f"the module message is {len(message)} bytes; IT stores at most 65535")
 
@@ -169,7 +169,7 @@ def write_it(mod: Module) -> bytes:
 
     flags = 1 | (4 if mod.instruments is not None else 0) | (8 if mod.linear_slides else 0) \
         | (0x10 if mod.old_effects else 0) | (0x20 if mod.compatible_gxx else 0)
-    special = 1 if message else 0
+    special = (1 if message else 0) | (4 if all(mod.row_highlight) else 0)  # 4: the highlight bytes are set
     chnpan = bytearray([32 | 0x80] * 64)
     chnvol = bytearray([64] * 64)
     for i, ch in enumerate(mod.channels):

@@ -6,6 +6,7 @@ no equivalent, and what cannot be said dropped with a warning. The mapping is ch
 libopenmpt and the imported song compiled to IT (tests/test_modimport.py)."""
 import math
 import struct
+from dataclasses import replace
 
 from .itreader import ITReadError, _cstr, _sanitize
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
@@ -168,24 +169,23 @@ def read_mod(data: bytes):
         heads.append((name, 2 * length, fine, min(vol, 64), 2 * lstart, 2 * llen))
     songlen = data[950]
     table = data[952:1080]
-    npat = max(table) + 1
+    flt8 = data[1080:1084] == b"FLT8"  # StarTrekker: pattern n stored as two 4-channel halves, 2n and 2n + 1
+    npat = max(table) + 1 + flt8  # FLT8: libopenmpt reads one stored pattern more
     pos = 1084
     for p in range(npat):
-        rows = []
+        if not flt8 or p % 2 == 0:
+            rows = [[Cell() for _ in range(nch)] for _ in range(64)]
+            mod.patterns.append(Pattern(f"p{len(mod.patterns):02d}", rows))
         for r in range(64):
-            row = []
-            for c in range(nch):
+            for c in range(4 * (p % 2), 4 * (p % 2) + 4) if flt8 else range(nch):
                 b0, b1, b2, b3 = data[pos:pos + 4] if pos + 4 <= len(data) else (0, 0, 0, 0)
                 pos += 4
-                cell = Cell()
+                cell = rows[r][c]
                 period = ((b0 & 15) << 8) | b1
                 cell.instrument = (b0 & 0xF0) | (b2 >> 4)
                 if period:
                     cell.note = max(0, min(119, 48 + round(12 * math.log2(PT_PERIOD_C1 / period))))
                 _pt_effect(cell, b2 & 15, b3, warn, "mod")
-                row.append(cell)
-            rows.append(row)
-        mod.patterns.append(Pattern(f"p{p:02d}", rows))
     for name, length, fine, vol, lstart, llen in heads:
         smp = Sample(name=name[:25], bits=8, volume=vol, c5_speed=round(AMIGA_C5 * 2 ** (fine / 96)))
         raw = data[pos:pos + length]
@@ -197,7 +197,7 @@ def read_mod(data: bytes):
         mod.samples.append(smp)
     if pos > len(data) + 2:
         warn("the file ends inside the sample data (samples cut short)")
-    _orders(mod, table[:songlen], npat)
+    _orders(mod, [o // 2 for o in table[:songlen]] if flt8 else table[:songlen], len(mod.patterns))
     return _finish(mod, warn)
 
 
@@ -364,7 +364,7 @@ def read_xm(data: bytes):
     if ver < 0x0104:
         raise ModReadError(f"XM version {ver >> 8}.{ver & 255:02d}: only 1.04 files (FastTracker 2.0x on) are read")
     hsize = struct.unpack_from("<I", data, 60)[0]
-    slen, _restart, nch, npat, nins, flags, speed, bpm = struct.unpack_from("<8H", data, 64)
+    slen, restart, nch, npat, nins, flags, speed, bpm = struct.unpack_from("<8H", data, 64)
     mod = _module(_cstr(data[17:37]), max(1, min(64, nch)), "xm")
     mod.linear_slides = bool(flags & 1)
     mod.old_effects = True  # IT's old effects play FT2's vibrato and tremolo (measured, as for MOD)
@@ -462,26 +462,46 @@ def read_xm(data: bytes):
         if ptype & 1 and np_:
             ins.panning_envelope = _xm_env(penv, np_, ptype, psus, pls, ple, -32)
     _orders(mod, table, npat)
+    if 0 < restart < len(mod.orders) and mod.orders[-1] < ORDER_SKIP:
+        _restart(mod, restart, warn)
     _xm_keyoffs(mod, warn)
     _split_long(mod, warn)
     _compact(mod, warn)
     return _finish(mod, warn)
 
 
+def _restart(mod, restart, warn):
+    """XM's restart position (the order the song goes on at after its end, where IT goes to the first) as a jump on the
+    last row of the last order's pattern, a copy of it when other orders play it too."""
+    o = mod.orders[-1]
+    last = mod.patterns[o].rows[-1]
+    if any(c.effect == fx("B") for c in last):
+        return  # the song never ends there
+    k = next((k for k, c in enumerate(last) if not c.effect), None)
+    if k is None:
+        warn("the restart position dropped (no free effect slot on the song's last row)")
+        return
+    if mod.orders.count(o) > 1:
+        mod.patterns.append(Pattern(f"p{len(mod.patterns):02d}", [[replace(c) for c in row] for row in mod.patterns[o].rows]))
+        o = mod.orders[-1] = len(mod.patterns) - 1
+    cell = mod.patterns[o].rows[-1][k]
+    cell.effect, cell.param = fx("B"), restart
+
+
 def _split_long(mod, warn, size=192):
     """Patterns longer than IT's 200 rows as parts of `size` rows (a multiple of 16, so bars stay whole), played one after
     the other: the order list follows, a jump (Bxx) goes to where its order now starts, and a break (Cxx) that leaves a
     part early or lands past a part's end becomes a jump to the right part plus a break to the row in it (in a free effect
-    slot of the row)."""
+    slot of the row). A part ends early where its cut would fall inside a pattern loop (_cuts)."""
     if all(len(p.rows) <= 200 for p in mod.patterns):
         return
-    parts, pats = {}, []
+    parts, pats, cuts = {}, [], {}
     for i, p in enumerate(mod.patterns):
-        n = len(p.rows) if len(p.rows) <= 200 else size
+        cuts[i] = _cuts(p.rows, size, warn)
         parts[i] = []
-        for k in range(0, len(p.rows), n):
+        for k, a in enumerate(cuts[i]):
             parts[i].append(len(pats))
-            pats.append(Pattern(p.name if n == len(p.rows) else f"{p.name}{chr(97 + k // n)}", p.rows[k:k + n]))
+            pats.append(Pattern(p.name if len(cuts[i]) == 1 else f"{p.name}{chr(97 + k)}", p.rows[a:(cuts[i] + [None])[k + 1]]))
     orders, start = [], []
     for o in mod.orders:
         start.append(len(orders))
@@ -492,20 +512,20 @@ def _split_long(mod, warn, size=192):
     for i in range(len(mod.patterns)):
         for k, pi in enumerate(parts[i]):
             for row in pats[pi].rows:
-                for cell in row:
+                for cell in [c for c in row if c.effect in (fx("B"), fx("C"))]:  # not the breaks written below
                     if cell.effect == fx("B") and cell.param < len(start):
                         cell.param = start[cell.param]
                     elif cell.effect == fx("C"):
                         pos = where.get(i, [])
                         nxt = (pos[0] + 1) % len(mod.orders) if len(pos) == 1 else None
-                        long_next = nxt is not None and mod.orders[nxt] < ORDER_SKIP and len(parts[mod.orders[nxt]]) > 1
-                        if k == len(parts[i]) - 1 and not (long_next and cell.param >= size):
+                        nc = cuts[mod.orders[nxt]] if nxt is not None and mod.orders[nxt] < ORDER_SKIP else [0]
+                        into = sum(c <= cell.param for c in nc[1:])  # the part of the next pattern it lands in
+                        if k == len(parts[i]) - 1 and not into:
                             continue
                         if nxt is None:
                             warn("a break in a split pattern played at several order positions kept as it is")
                             continue
-                        into = cell.param // size if long_next else 0
-                        target, r = start[nxt] + into, cell.param - into * size
+                        target, r = start[nxt] + into, cell.param - nc[into]
                         cell.effect, cell.param = fx("B"), target
                         if r:
                             free = next((c for c in row if not c.effect), None)
@@ -515,6 +535,33 @@ def _split_long(mod, warn, size=192):
                                 free.effect, free.param = fx("C"), r
     warn(f"{sum(len(v) > 1 for v in parts.values())} patterns longer than 200 rows split into parts of {size}")
     mod.patterns, mod.orders = pats, orders
+
+
+def _cuts(rows, size, warn):
+    """The rows a pattern's parts start at: every `size` rows, or earlier at the start of a pattern loop (SB0 ... SBx in a
+    channel) that a cut would fall inside, so the loop starts its part; a loop that cannot start one (it has no SB0, or
+    is too long) is cut with a warning."""
+    if len(rows) <= 200:
+        return [0]
+    loops = []
+    for col in zip(*rows):
+        s = 0  # no SB0 yet: the loop starts at the pattern's first row or before it
+        for r, cell in enumerate(col):
+            if cell.effect == fx("S") and cell.param >> 4 == 0xB:
+                if cell.param & 15:
+                    loops.append((s, r))
+                else:
+                    s = r
+    cuts = [0]
+    while len(rows) - cuts[-1] > 200:
+        cut = cuts[-1] + size
+        while any(s < cut <= e for s, e in loops):
+            cut = min(s for s, e in loops if s < cut <= e)
+        if cut <= cuts[-1]:
+            warn("a pattern loop across the split of a long pattern cut (it plays differently)")
+            cut = cuts[-1] + size
+        cuts.append(cut)
+    return cuts
 
 
 def _compact(mod, warn):
@@ -619,21 +666,26 @@ def _xm_cell(cell, note, ins, vol, eff, par, warn):
             cell.volcmd = vol - 0x10
     elif vol >= 0x60:
         kind, v = vol >> 4, vol & 15
-        free = not cell.effect
+        free, keep = not cell.effect, cell.volcmd is not None  # keep: a Cxx holds the volume column
         if kind in (6, 7, 8, 9):  # slide down, up, fine down, fine up
-            if free and v > 9:
+            if keep and not v and kind > 7:  # its memory (EAx/EBx) has no IT effect: DF0 and D0F are coarse slides
+                warn("XM volume-column fine slides reusing their memory beside Cxx dropped")
+            elif free and (v > 9 or keep):
                 cell.effect, cell.param = fx("D"), {6: v, 7: v << 4, 8: 0xF0 | v, 9: (v << 4) | 0xF}[kind]
             else:
                 cell.volcmd = {6: VOL_D, 7: VOL_C, 8: VOL_B, 9: VOL_A}[kind] + min(9, v)
         elif kind == 0xA:
             warn("XM volume-column vibrato speed dropped")
         elif kind == 0xB:
-            if free and v > 9:
+            if free and (v > 9 or keep):
                 cell.effect, cell.param = fx("H"), v
             else:
                 cell.volcmd = VOL_H + min(9, v)
-        elif kind == 0xC:
-            cell.volcmd = VOL_P + 4 * v  # FT2 sets the pan to x * 16 of 256
+        elif kind == 0xC:  # FT2 sets the pan to x * 16 of 256
+            if keep:
+                cell.effect, cell.param = fx("X"), v << 4
+            else:
+                cell.volcmd = VOL_P + 4 * v
         elif kind in (0xD, 0xE):
             if free:
                 cell.effect, cell.param = fx("P"), (_pan4(v, warn) << 4) if kind == 0xD else _pan4(v, warn)

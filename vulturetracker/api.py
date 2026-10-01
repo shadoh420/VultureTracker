@@ -1,6 +1,7 @@
 """Plain functions over the song document (a dict mirroring the YAML), shaped so each can later
 become an MCP tool. The YAML text stays the source of truth: every edit goes through a dict that
 is saved back as YAML, and validation always re-parses that YAML so errors carry line numbers."""
+import os
 import re
 from pathlib import Path
 
@@ -8,7 +9,7 @@ import yaml
 
 from .itwriter import write_it
 from .fileio import atomic_write, protect_outputs, wav_bytes
-from .song import SongError, load_song_text
+from .song import SongError, it_text, load_song_text, read_song_text
 
 
 # ---------------------------------------------------------------- YAML round-trip
@@ -115,14 +116,15 @@ def _load(song_or_path, base_dir=None):
     if isinstance(song_or_path, dict):
         return to_yaml(song_or_path), Path(base_dir or "."), "<song>"
     p = Path(song_or_path)
-    if "\n" not in str(song_or_path) and p.suffix.lower() in (".yaml", ".yml"):
-        return p.read_text(encoding="utf-8"), Path(base_dir) if base_dir else p.parent, str(p)
+    if isinstance(song_or_path, Path) or "\n" not in str(song_or_path) and (p.suffix.lower() in (".yaml", ".yml")
+                                                                            or os.path.isfile(p)):
+        return read_song_text(p), Path(base_dir) if base_dir else p.parent, str(p)
     return str(song_or_path), Path(base_dir or "."), "<song>"
 
 
 def check(song_or_path, base_dir=None) -> dict:
-    text, bdir, name = _load(song_or_path, base_dir)
     try:
+        text, bdir, name = _load(song_or_path, base_dir)
         mod, warnings = load_song_text(text, bdir, name)
     except SongError as e:
         return {"ok": False, "errors": e.errors, "warnings": e.warnings}
@@ -170,7 +172,10 @@ def build(song_or_path, out_path, base_dir=None) -> dict:
         got = lm.info()
     mismatches = []
     for key in ("instruments", "samples", "patterns", "pattern_rows", "instrument_names", "sample_names"):
-        if expected[key] != got[key]:
+        e, g = expected[key], got[key]
+        if key.endswith("_names"):  # libopenmpt drops a name's trailing spaces
+            e, g = [n.rstrip() for n in e], [n.rstrip() for n in g]
+        if e != g:
             mismatches.append(f"{key}: song has {expected[key]}, libopenmpt reports {got[key]}")
     # libopenmpt shows the order list up to the end marker; skips (+++ = 254) are listed, '---' ends it.
     exp_orders = []
@@ -217,6 +222,7 @@ def tryout_song(song_or_path, orders=None) -> dict:
     return base
 
 
+RENDER_VERSION = 2  # in cached renders' keys: bump when compiling or rendering changes how a song sounds (0.8: resampler)
 _JUMP = re.compile(r"(?<![^\s|])B([0-9A-F]{2})(?![^\s|])")
 
 
@@ -246,7 +252,7 @@ def swap_sample(song: dict, slot, cand, name_from_file=True) -> dict:
     the slot entry."""
     from .notation import format_note
     from .wavload import read_wav
-    old = song["samples"][slot].get("name", Path(song["samples"][slot]["file"]).stem[:25])
+    old = song["samples"][slot].get("name", it_text(Path(song["samples"][slot]["file"]).stem, 25))
     refs = [ins.get("sample") for ins in (song.get("instruments") or {}).values() if isinstance(ins, dict)]
     refs += [k.get("sample") for ins in (song.get("instruments") or {}).values() if isinstance(ins, dict)
              for k in ins.get("keymap") or [] if isinstance(k, dict)]
@@ -254,7 +260,7 @@ def swap_sample(song: dict, slot, cand, name_from_file=True) -> dict:
     if old in refs:
         entry["name"] = old
     elif name_from_file:
-        entry["name"] = Path(cand).stem[:25]
+        entry["name"] = it_text(Path(cand).stem, 25)
     w = read_wav(cand)
     if w.root is not None and 0 <= w.root < 120 and "c5_speed" not in entry:  # a smpl unity note above B-9 is no note
         entry["base_note"] = format_note(w.root)

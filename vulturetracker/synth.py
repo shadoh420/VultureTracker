@@ -11,6 +11,7 @@ from pathlib import Path
 import yaml
 
 from . import notation
+from .fileio import protect_outputs
 from .wavload import write_wav
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -312,25 +313,13 @@ def _events(spec, where):
     return [(n, vel, 0.0, hold)], hold + tail, n
 
 
-def estimate_pitch(x, rate, fmin=30.0, fmax=2000.0):
-    """YIN pitch estimate on a mono float array. Returns (Hz, aperiodicity 0..1); None if too short.
+def estimate_pitch(x, rate, fmin=30.0, fmax=4200.0):
+    """YIN pitch estimate (dsp.yin, to C-9) on the first three periods of `fmin` of a mono float array. Returns (Hz,
+    aperiodicity 0..1); None if too short, silent or without a pitch.
     ponytail: single-frame YIN, octave errors possible on sub-oscillator-heavy patches; treat as a hint."""
-    import numpy as np
-    tmax, tmin = int(rate / fmin), int(rate / fmax)
-    w = 2 * tmax
-    if len(x) < w + tmax:
-        return None
-    x = x[: w + tmax]
-    d = np.array([np.sum((x[:w] - x[t:t + w]) ** 2) for t in range(tmax + 1)])
-    cm = np.ones_like(d)
-    cm[1:] = d[1:] * np.arange(1, len(d)) / np.maximum(np.cumsum(d[1:]), 1e-12)
-    for t in range(tmin, tmax):
-        if cm[t] < 0.12:
-            while t + 1 < tmax and cm[t + 1] < cm[t]:
-                t += 1
-            return rate / t, float(cm[t])
-    t = tmin + int(np.argmin(cm[tmin:tmax]))
-    return rate / t, float(cm[t])
+    from .dsp import yin
+    hz, conf = yin(x[: 3 * int(rate / fmin)], rate, fmin, fmax, threshold=0.12)
+    return (hz, 1 - conf) if hz else None
 
 
 def load_files(files, rate, where):
@@ -453,6 +442,11 @@ def expand(recipe):
             bad = set(rs) - set(RESYNTH_KEYS)
             if bad:
                 raise RecipeError(f"{where}: resynth: unknown keys {sorted(bad)} (allowed: {', '.join(RESYNTH_KEYS)})")
+        lp = merged.get("loop")
+        if lp and (not isinstance(lp, dict) or not {"start", "end"} <= set(lp) <= {"start", "end", "crossfade", "type"}
+                   or lp.get("type", "forward") not in ("forward", "pingpong")):
+            raise RecipeError(f"{where}: loop is {{start, end, crossfade, type}} (seconds; type forward or pingpong), "
+                              f"got {lp}")
         if "file" in spec or "resynth" in spec:
             if "notes" in spec or "chord" in spec or "phrase" in spec:
                 raise RecipeError(f"{where}: 'file' and 'resynth' samples take 'note' (the recorded pitch), not "
@@ -615,7 +609,8 @@ def _wavs(base, items, where):
     out = []
     for item in [items] if isinstance(items, str) else items:
         p = Path(base, str(item))
-        found = walk([p]) if p.is_dir() else sorted(f for f in _glob.glob(str(p), recursive=True)
+        pattern = os.path.join(_glob.escape(str(base)), str(item))  # the recipe's folder is a path, not a pattern
+        found = walk([p]) if p.is_dir() else sorted(f for f in _glob.glob(pattern, recursive=True)
                                                     if f.lower().endswith(".wav")) or ([str(p)] if p.is_file() else [])
         if not found:
             raise RecipeError(f"{where}: resynth: nothing matches {item}")
@@ -676,6 +671,7 @@ def audition(pattern, out_wav, note="C-4", hold=1.5, tail=1.0, rate=44100, log=p
     import numpy as np
     files = sorted(f for f in glob.glob(pattern, recursive=True)
                    if Path(f).suffix.lower() in (".wav", ".flac", ".aif", ".aiff", ".ogg", ".mp3"))
+    protect_outputs([out_wav], files)  # the glob may match the output: never render over a source
     surge = None if files else Synths(rate)
     names = files or sorted(k for k in surge.patches if fnmatch.fnmatch(k, pattern))
     if not names:

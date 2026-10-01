@@ -136,8 +136,9 @@ def read_it(data: bytes):
         raise ITReadError("not an Impulse Tracker module (missing IMPM header)")
     mod = Module()
     mod.title = _cstr(data[4:30])[:25]
-    mod.row_highlight = (data[0x1E], data[0x1F])
     ordnum, insnum, smpnum, patnum, cwtv, cmwt, flags, special = struct.unpack_from("<8H", data, 0x20)
+    if special & 4:  # the highlight bytes count only with this bit, as in OpenMPT, Schism and libopenmpt
+        mod.row_highlight = (data[0x1E], data[0x1F])
     gv, mv, speed, tempo, sep, _pwd, msglen, msgoff = struct.unpack_from("<6BHI", data, 0x30)
     if flags & 4 and cmwt < 0x200:
         raise ITReadError("old (pre-IT 2.00) instrument format is not supported")
@@ -186,9 +187,10 @@ def read_it(data: bytes):
             except (ITReadError, struct.error) as e:
                 warnings.append(f"sample {len(mod.samples) + 1} '{smp.name}': {e}; left empty")
                 smp.data = []
-            if sflags & 0x10 and lb < le <= length:
+            le, se = min(le, length), min(se, length)  # an end past the sample is clamped, as libopenmpt does
+            if sflags & 0x10 and lb < le:
                 smp.loop = Loop(lb, le, bool(sflags & 0x40))
-            if sflags & 0x20 and sb < se <= length:
+            if sflags & 0x20 and sb < se:
                 smp.sustain_loop = Loop(sb, se, bool(sflags & 0x80))
         mod.samples.append(smp)
 
@@ -299,6 +301,9 @@ def read_it(data: bytes):
 def _sanitize(mod, warnings):
     """Drop what the song format can't express, with a warning for each kind."""
     dropped = {}
+    if len(mod.orders) > 255:
+        dropped["orders above 255"] = len(mod.orders) - 255
+        del mod.orders[255:]
     for pat in mod.patterns:
         for row in pat.rows:
             for cell in row:
@@ -336,10 +341,14 @@ def _sanitize(mod, warnings):
     for what, n in dropped.items():
         warnings.append(f"dropped {n} {what}")
     for i, ins in enumerate(mod.instruments or []):
-        for env in (ins.volume_envelope, ins.panning_envelope, ins.pitch_envelope):
+        for env, (lo, hi) in ((ins.volume_envelope, (0, 64)), (ins.panning_envelope, (-32, 32)), (ins.pitch_envelope, (-32, 32))):
             if env is None:
                 continue
             fixed = False
+            for j, (t, v) in enumerate(env.nodes):
+                if not (t <= 9999 and lo <= v <= hi):
+                    env.nodes[j] = (min(t, 9999), max(lo, min(hi, v)))
+                    fixed = True
             for j in range(1, len(env.nodes)):
                 if env.nodes[j][0] <= env.nodes[j - 1][0]:
                     env.nodes[j] = (env.nodes[j - 1][0] + 1, env.nodes[j][1])
@@ -347,6 +356,8 @@ def _sanitize(mod, warnings):
             if env.nodes and env.nodes[0][0] != 0:
                 env.nodes[0] = (0, env.nodes[0][1])
                 fixed = True
+            while len(env.nodes) > 1 and env.nodes[-1][0] > 9999:  # ticks pushed past the format's 9999: cut there
+                env.nodes.pop()
             n = len(env.nodes)
             for attr in ("loop", "sustain"):
                 v = getattr(env, attr)
@@ -354,7 +365,7 @@ def _sanitize(mod, warnings):
                     setattr(env, attr, None)
                     fixed = True
             if fixed:
-                warnings.append(f"instrument {i + 1} '{ins.name}': repaired an envelope (non-increasing ticks or bad loop points)")
+                warnings.append(f"instrument {i + 1} '{ins.name}': repaired an envelope (ticks or values out of range, non-increasing ticks or bad loop points)")
 
 
 # ---------------------------------------------------------------- Module -> song dict

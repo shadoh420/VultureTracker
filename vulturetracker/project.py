@@ -14,29 +14,58 @@ import yaml
 from . import api
 from .fileio import atomic_write, link_new, protect_outputs
 from .history import digest, json_bytes
+from .song import it_text
+
+
+def _same_key(node, key):
+    """Whether YAML key `node` is `key` as the compiler reads it (`01:` is sample 1)."""
+    return node.value == str(key) or (isinstance(key, int) and node.tag.endswith(':int') and api.from_yaml(node.value) == key)
 
 
 def replace_values(text, replacements):
-    """Replace only selected YAML node spans; comments, whitespace and other values survive."""
+    """Replace only selected YAML node spans; comments, whitespace and other values survive. A missing last key is
+    added in front of its mapping's first key, in that mapping's layout."""
     root = yaml.compose(text, Loader=api._Loader)
-    edits = {}
+    edits, inserts = {}, {}
     for keys, value in replacements:
         node = root
-        for key in keys:
+        encoded = json.dumps(value, ensure_ascii=False)  # JSON is valid flow YAML, with unambiguous quoting
+        for i, key in enumerate(keys):
             if isinstance(node, yaml.MappingNode):
-                node = next(v for k, v in node.value if k.value == str(key))
+                found = next((v for k, v in node.value if _same_key(k, key)), None)
+                if found is None and i == len(keys) - 1 and node.value:
+                    first = node.value[0][0]
+                    sep = ', ' if node.flow_style else '\n' + ' ' * first.start_mark.column
+                    inserts[first.start_mark.index] = inserts.get(first.start_mark.index, '') + f'{key}: {encoded}{sep}'
+                    break
+                if found is None:
+                    raise ValueError(f'{keys}: not in the song file')
+                node = found
             elif isinstance(node, yaml.SequenceNode):
                 node = node.value[int(key)]
             else:
                 raise ValueError(f'{keys}: not a YAML mapping or sequence')
-        encoded = json.dumps(value, ensure_ascii=False)  # JSON is valid flow YAML, with unambiguous quoting
-        span = node.start_mark.index, node.end_mark.index
-        if span in edits and edits[span] != encoded:
-            raise ValueError('Shared YAML alias needs different values; expand that alias before editing')
-        edits[span] = encoded
-    for (a, b), encoded in sorted(edits.items(), reverse=True):
+        else:
+            span = node.start_mark.index, node.end_mark.index
+            if span in edits and edits[span] != encoded:
+                raise ValueError('Shared YAML alias needs different values; expand that alias before editing')
+            edits[span] = encoded
+    for (a, b), encoded in sorted([*edits.items(), *(((a, a), t) for a, t in inserts.items())], reverse=True):
         text = text[:a] + encoded + text[b:]
     return text
+
+
+def file_updates(doc, files):
+    """replace_values() pairs pointing sample slots ({num: file}) at new files. A slot named after its file (no `name:`)
+    keeps that name, so instruments that refer to it still resolve and the module shows the same name."""
+    out = []
+    for num, new in files.items():
+        entry = doc['samples'][num]
+        out.append((('samples', num, 'file'), new))
+        old = it_text(Path(str(entry['file'])).stem, 25)
+        if 'name' not in entry and it_text(Path(str(new)).stem, 25) != old:
+            out.append((('samples', num, 'name'), old))
+    return out
 
 
 def map_meta(meta, convert):
@@ -74,12 +103,12 @@ def relative_meta(meta, folder):
 
 def collect(state, destination, make_zip=False, browser=None):
     """Build in a sibling temporary directory; publish only a verified, independent project."""
-    destination = Path(destination).expanduser().resolve()
+    destination = (state.base_dir / Path(destination).expanduser()).resolve()  # relative: from the song's folder
     if destination.exists():
         raise ValueError('Choose a new destination folder; existing folders and files are never merged or replaced')
     if destination == state.base_dir or state.base_dir in destination.parents:
         raise ValueError('Choose a destination outside the original project folder')
-    archive = destination.with_suffix('.zip')
+    archive = destination.with_name(destination.name + '.zip')  # not with_suffix: "v1.5" would lose ".5"
     if make_zip and archive.exists():
         raise ValueError(f'{archive} already exists')
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -88,7 +117,7 @@ def collect(state, destination, make_zip=False, browser=None):
             raise ValueError('Compare and RELOAD external edits before collecting')
         text, meta, raw = state.text, copy.deepcopy(state.meta), state._raw
         recipes = state.recipes()
-        notes = {p.name: p.read_bytes() for p in state.base_dir.glob(state.song_path.stem + '.notes*') if p.is_file()}
+        notes = {p.name: p.read_bytes() for p in state.base_dir.glob(glob.escape(state.song_path.stem) + '.notes*') if p.is_file()}
     temp = Path(tempfile.mkdtemp(prefix='.vt-collect-', dir=destination.parent))
     zip_temp = None
     files, taken = {}, set()
@@ -128,7 +157,11 @@ def collect(state, destination, make_zip=False, browser=None):
                         paths = []
                         for pat in patterns:
                             src = source.parent / str(pat)
-                            matches = sorted(src.rglob('*.wav')) if src.is_dir() else [Path(p) for p in sorted(glob.glob(str(src), recursive=True))]
+                            if src.is_dir():
+                                matches = sorted(src.rglob('*.wav'))
+                            else:  # the recipe's folder is a path, not a pattern; a file named like a pattern is that file
+                                found = glob.glob(os.path.join(glob.escape(str(source.parent)), str(pat)), recursive=True)
+                                matches = [Path(p) for p in sorted(found)] or ([src] if src.is_file() else [])
                             if not matches:
                                 raise ValueError(f'Missing recipe input: {src}')
                             paths.extend(copy_file(p, 'sources') for p in matches if p.is_file())
@@ -151,11 +184,11 @@ def collect(state, destination, make_zip=False, browser=None):
     try:
         # Reserve the song name before copying recipes or assets with the same basename.
         taken.add(state.song_path.name.casefold())
-        updates = []
-        for num, entry in (api.from_yaml(text).get('samples') or {}).items():
+        doc, moved = api.from_yaml(text), {}
+        for num, entry in (doc.get('samples') or {}).items():
             if isinstance(entry, dict) and entry.get('file'):
-                updates.append((('samples', num, 'file'), copy_file(state.base_dir / str(entry['file']))))
-        collected = replace_values(text, updates)
+                moved[num] = copy_file(state.base_dir / str(entry['file']))
+        collected = replace_values(text, file_updates(doc, moved))
         for paths in (meta.get('candidates') or {}).values():
             for path in paths:
                 copy_file(state.base_dir / path, candidate=True)

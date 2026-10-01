@@ -15,7 +15,8 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .meta{font-size:11px;color:var(--dim);font-variant-numeric:tabular-nums}
 .dirty{display:flex;align-items:center;gap:7px;padding:3px 8px;cursor:pointer;background:#1d1a12;box-shadow:inset 1px 1px 0 #332d1d;font-size:10.5px;color:#e0b664}.dirty i{width:6px;height:6px;border-radius:50%;background:var(--amber)}.dirty b{letter-spacing:.1em;font-size:10px;color:var(--amber)}
 .tabs{display:flex;align-items:stretch;gap:2px;height:28px;flex:none;padding:0 10px;background:var(--panel2);box-shadow:inset 0 -1px 0 #090b0c}
-.tab{padding:0 14px;display:flex;align-items:center;font-size:10.5px;letter-spacing:.14em;font-weight:700;color:var(--dim);cursor:pointer}.tab.on{color:var(--acc);background:#14171a;box-shadow:inset 0 2px 0 var(--acc)}
+.tab{padding:0 14px;display:flex;align-items:center;white-space:nowrap;font-size:10.5px;letter-spacing:.14em;font-weight:700;color:var(--dim);cursor:pointer}.tab.on{color:var(--acc);background:#14171a;box-shadow:inset 0 2px 0 var(--acc)}
+@media (max-width:1439px){.tab{padding:0 7px;letter-spacing:.1em}}
 .kbd{padding:2px 5px;font:9.5px/1 var(--mono);color:var(--acc);background:#0f1a12;box-shadow:inset 1px 1px 0 #24382a}
 .k{font-size:9.5px;letter-spacing:.14em;font-weight:700;color:var(--dim)}
 .main{flex:1;min-height:0;display:none;gap:2px;padding:2px;background:var(--bg)}.main.on{display:flex}
@@ -46,6 +47,10 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .bar{flex:1;height:5px;background:#0b0e0f}.bar i{display:block;height:100%;background:var(--acc);width:40%;animation:pulse 1s infinite alternate}@keyframes pulse{from{opacity:.4}to{opacity:1}}
 .fail{margin-top:8px;display:flex;align-items:flex-start;gap:8px;padding:7px 8px;background:#1d1414;font:10.5px/1.5 var(--mono);color:#e0a09a}.fail b{font-family:inherit;color:var(--red);letter-spacing:.1em;font-size:10px;flex:none}
 .bottom{flex:none;height:60px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--bar);box-shadow:inset 0 1px 0 #2a3135}
+/* the transport's first row stays one line in the 60 px bar: the labels keep their size, the texts give way (the status
+   first) with an ellipsis and show in full on hover */
+.nowrow{display:flex;align-items:baseline;gap:10px;white-space:nowrap}.nowrow>*{flex:none}
+.nowrow>.fit{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}#looplabel2{flex-shrink:0;max-width:35%}#nowname{flex-shrink:0;max-width:30%}
 .play{width:36px;height:36px;display:grid;place-items:center;cursor:pointer;font-size:15px;color:#0c1a0f;background:var(--acc)}
 .loopbar{position:relative;height:6px;margin-bottom:2px;background:#0d1012;cursor:ew-resize}.loopbar i{position:absolute;top:0;bottom:0;background:var(--amber);opacity:.75}
 .lf{width:38px;padding:2px 3px;font:10px var(--mono)}
@@ -536,7 +541,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="bottom">
   <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
   <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
-    <div style="display:flex;align-items:baseline;gap:10px"><span class="k">LOOPING</span><span class="mono" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
+    <div class="nowrow" onmouseover="if(event.target.classList.contains('fit'))event.target.title=event.target.textContent"><span class="k">LOOPING</span><span class="mono fit" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span class="fit" id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span class="fit" id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
     <div class="loopbar" id="loopbar" onmousedown="loopDrag(event)" title="playback loop: drag here to loop a span of what plays (snapped to rows) · click to clear it"><i id="loopfill"></i></div>
     <div class="prog" id="prog" onmousedown="seekDrag(event)" title="click or drag to seek"><i id="progfill"></i><b id="proghead"></b></div>
     <div style="display:flex;gap:8px;align-items:center;min-width:0"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><span class="k" style="white-space:nowrap" title="the channels sounding at the playhead, with the slot each plays (from the pattern: a looped tone until its note-off, a one-shot until its sample runs out) · click one to solo it">SOUNDING</span><div id="live" style="flex:1;min-width:0;display:flex;gap:3px;overflow:hidden"></div></div>
@@ -576,7 +581,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="modal" id="keysmodal" onclick="toggle('keys',false)"><div class="box" style="width:520px">
   <div class="k" style="color:var(--acc);margin-bottom:10px">KEYBOARD</div>
   <div class="row"><span>1–9, 0</span><span>pick candidate 1–10</span></div><div class="row"><span>↑ ↓</span><span>previous / next candidate</span></div>
-  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 %, the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead</span></div><div class="row"><span>a fader's number</span><span>click to type it · Enter applies · Esc cancels</span></div><div class="row"><span>loop strip</span><span>drag above the progress bar to loop a span; click to clear</span></div><div class="row"><span>Pattern tab: Space / F7, F6, F8</span><span>live: play from the cursor (or stop), loop the pattern, stop</span></div><div class="row"><span>Pattern tab: arrows, Page Up/Down</span><span>move the cursor (a click sets it, a double-click plays from there)</span></div><div class="row"><span>Pattern tab: Z–M, Q–U</span><span>preview the instrument, two octaves from OCT</span></div><div class="row"><span>Pattern tab: Esc</span><span>edit mode: notes (1 off, ` fade, \ cut), digits, letters; Del or . clears, Insert / Backspace shift the channel</span></div><div class="row"><span>Pattern tab: Ctrl+Z, Ctrl+Y</span><span>undo, redo a pattern edit</span></div><div class="row"><span>Pattern tab: drag, Shift+arrows, Ctrl+A / L</span><span>select (the pattern, the channel)</span></div><div class="row"><span>Pattern tab: Ctrl+C X V, Ctrl+Shift+V</span><span>copy, cut, paste, mix-paste · Delete clears the selection</span></div><div class="row"><span>Pattern tab: Ctrl+Up/Down (+Shift)</span><span>transpose a semitone (an octave) · Ctrl+I interpolate</span></div><div class="row"><span>Pattern tab: Ctrl+F, F3</span><span>find and replace, find the next</span></div><div class="row"><span>SPECTRUM tab</span><span>the spectrogram of what plays; click or drag to seek</span></div>
+  <div class="row"><span>space</span><span>play / pause the loop</span></div><div class="row"><span>progress bar</span><span>click or drag to seek</span></div><div class="row"><span>SPEED</span><span>playback at 100 to 20 % (type… 10 to 200 %), the pitch kept</span></div><div class="row"><span>solo / mute while playing</span><span>the new render starts a second before the click</span></div><div class="row"><span>M / S</span><span>in mix / the sample alone (its WAV, not in the song)</span></div><div class="row"><span>SOLO IN SONG</span><span>mute every channel that never plays this slot</span></div><div class="row"><span>N</span><span>drop a note at the playhead</span></div><div class="row"><span>a fader's number</span><span>click to type it · Enter applies · Esc cancels</span></div><div class="row"><span>loop strip</span><span>drag above the progress bar to loop a span; click to clear</span></div><div class="row"><span>Pattern tab: Space / F7, F6, F8</span><span>live: play from the cursor (or stop), loop the pattern, stop</span></div><div class="row"><span>Pattern tab: arrows, Page Up/Down</span><span>move the cursor (a click sets it, a double-click plays from there)</span></div><div class="row"><span>Pattern tab: Z–M, Q–U</span><span>preview the instrument, two octaves from OCT</span></div><div class="row"><span>Pattern tab: Esc</span><span>edit mode: notes (1 off, ` fade, \ cut), digits, letters; Del or . clears, Insert / Backspace shift the channel</span></div><div class="row"><span>Pattern tab: Ctrl+Z, Ctrl+Y</span><span>undo, redo a pattern edit</span></div><div class="row"><span>Pattern tab: drag, Shift+arrows, Ctrl+A / L</span><span>select (the pattern, the channel)</span></div><div class="row"><span>Pattern tab: Ctrl+C X V, Ctrl+Shift+V</span><span>copy, cut, paste, mix-paste · Delete clears the selection</span></div><div class="row"><span>Pattern tab: Ctrl+Up/Down (+Shift)</span><span>transpose a semitone (an octave) · Ctrl+I interpolate</span></div><div class="row"><span>Pattern tab: Ctrl+F, F3</span><span>find and replace, find the next</span></div><div class="row"><span>SPECTRUM tab</span><span>the spectrogram of what plays; click or drag to seek</span></div>
   <div class="row"><span>SONG</span><span>play the song itself (no candidate swapped, the faders applied)</span></div><div class="row"><span>X</span><span>reject the chosen candidate</span></div><div class="row"><span>U</span><span>use the chosen candidate for this slot (shows the diff first)</span></div>
   <div class="row"><span>Esc</span><span>close</span></div>
 </div></div>
@@ -607,11 +612,11 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
   $('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
 function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
 async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
-async function newSong(){const p=$('newpath').value.trim();if(!p)return;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
-async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;
+async function newSong(){const p=$('newpath').value.trim();if(!p)return;await EDQ.chain;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
+async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;await EDQ.chain;
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
-async function browse(){const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
+async function browse(){await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
 function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
@@ -729,7 +734,7 @@ const nMix=()=>Object.entries(S.mix||{}).reduce((k,[kind,v])=>k+(kind==='instrum
 function renderStems(f){const n=f.channels.length,mx=S.mix||{},M=S.meters,nmix=nMix();$('stemsn').textContent=`${n} CHANNELS`;
   const mv=mixVal('mix_volume',null,f.mix_volume),pc=S.candidates.find(x=>x.id===sel),pk=pc?pc.peak:S.own&&S.own.peak;
   put('stemlist',`<div class="mix" style="padding:7px 4px 8px;margin-bottom:3px;box-shadow:inset 0 -1px 0 #0a0c0d"><span class="k" style="color:var(--mid)">MIX VOL</span><input type="range" min="0" max="128" value="${mv}" oninput="liveMix(this)" onchange="setMix('mix_volume',null,+this.value)" title="module mix_volume 0–128 (song: ${f.mix_volume})"><span class="v tv ${mx.mix_volume!=null?'chg':''}" id="mmv" style="width:26px" onclick="typeIn(this,0,128,v=>setMix('mix_volume',null,v),${mv})" title="click to type 0–128">${mv}</span><span class="db" style="width:auto;padding-left:4px;color:${pk>=.999?'var(--red)':'#8d979c'}" title="peak of the render that is playing (1.00: the mixer clipped)">${pk==null?'':pk>=.999?'CLIP':'PK '+pk.toFixed(2)}</span></div>`+
-   f.channels.map((ch,c)=>{const on=audible(c),m=S.muted.includes(c),so=S.solo===c,used=[...new Set(f.use.flatMap(o=>o[c]))].sort((a,b)=>a-b),v=mixVal('volume',c,f.volume[c]),p=mixVal('pan',c,f.pan[c]),db=meterDb(c),l=M&&M.levels&&M.levels[c];
+   f.channels.map((ch,c)=>{const on=audible(c),m=S.muted.includes(c),so=S.solo===c,used=[...new Set(f.use.flatMap(o=>o[c]))].sort((a,b)=>a-b),v=mixVal('volume',c,f.volume[c]),p=(q=>q==='surround'?100:q)(mixVal('pan',c,f.pan[c])),db=meterDb(c),l=M&&M.levels&&M.levels[c];
     return `<div class="stem ${on?'':'off'} ${so?'solo':''}"><span class="n">${pad(c+1)}</span><span class="ms ${m?'m':''}" onclick="muteCh(${c})" title="mute">M</span><span class="ms ${so?'s':''}" onclick="soloCh(${c})" title="solo">S</span><i class="fb" style="background:${famCol(ch)||'#333a3d'}"></i><span class="nm" title="${esc(ch)}">${esc(ch.toUpperCase())}</span><span class="smp" title="${esc(used.map(n=>pad(n)+' '+sName(n)).join(', ')||'plays no sample')}">${used.length===1?pad(used[0])+' '+esc(sName(used[0])):smpList(used)}</span></div>
     <div class="mix"><span>VOL</span><input type="range" min="0" max="64" value="${v}" oninput="liveVol(this,${c})" onchange="setMix('volume',${c},+this.value)" title="channel volume 0–64 (song: ${f.volume[c]})"><span class="v tv ${mx.volume&&mx.volume[c]!=null?'chg':''}" id="mv${c}" onclick="typeIn(this,0,64,v=>setMix('volume',${c},v),${v})" title="click to type 0–64">${v}</span><span>PAN</span><input type="range" min="0" max="64" value="${p===100?32:p}" oninput="livePan(this,${c})" onchange="setMix('pan',${c},+this.value)" style="flex:.7" title="channel pan: 0 left · 32 centre · 64 right (song: ${panLabel(f.pan[c])})"><span class="v tv ${mx.pan&&mx.pan[c]!=null?'chg':''}" id="mp${c}" onclick="typeIn(this,0,64,v=>setMix('pan',${c},v),'${panLabel(p)}',panParse)" title="click to type: 0–64 (32 centre), L50 / R20 / C, or S for surround">${panLabel(p)}</span><span class="meter" title="${l?`this channel soloed, over the tryout section: ${l.db} dB RMS whole, ${l.active_db==null?'silent':l.active_db+' dB'} over its active ${l.active_s} s`:M&&M.status==='failed'?'meters failed: '+esc(M.error):'measuring…'}"><i id="mb${c}" style="width:${meterW(db)}%"></i></span><span class="db" id="md${c}">${dbText(db)}</span></div>`}).join(''));
   const nm=S.muted.length,dirty=S.solo!=null||nm>0,st=$('stemstate'),x=S.stems,busy=x&&(x.status==='queued'||x.status==='rendering');
@@ -808,6 +813,8 @@ function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL
   const drums=drumChannels(),fo=focus||(EDIT||!PAT.active.length?f.channels.map((_,c)=>c):PAT.active),fits=Math.max(1,Math.floor(($('patscroll').clientWidth-26-18)/86));
   put('patctl',`<div style="display:flex;align-items:center;gap:6px"><span class="btn sm ${focus?'':'on'}" onclick="setFocus(null)">ACTIVE ${PAT.active.length}</span>${drums.length?`<span class="btn sm ${focus&&focus.join()===drums.join()?'on':''}" onclick="setFocus('drums')">DRUMS</span>`:''}<span class="btn sm ${focus&&focus.length===n?'on':''}" onclick="setFocus('all')">ALL ${n}</span><span class="btn sm ${hexRows?'on':''}" onclick="setHex(!hexRows)" title="hex row numbers">HEX</span><span style="flex:1;min-width:0;text-align:right;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${fo.length<=fits?'#6d777c':'var(--amber)'}">${fo.length<=fits?`all ${fo.length} fit`:`${fo.length} picked · ${fits} fit, scroll for ${fo.length-fits}`}</span></div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:6px">${f.channels.map((_,c)=>`<span class="btn sm ${fo.includes(c)?'on':PAT.active.includes(c)?'':'dimb'}" onclick="setFocus(${c})">${pad(c+1)}</span>`).join('')}</div>`);
   PAT.fo=fo;if(!fo.includes(CUR.ch))CUR.ch=fo[0];
+  if(PAT.order===CUR.o&&CUR.row>=rows.length)CUR.row=rows.length-1;  // the pattern got shorter under the cursor
+  if(SEL&&SEL.o===PAT.order&&Math.max(SEL.a.row,(SEL.b||SEL.a).row)>=rows.length)SEL=null;
   const N=selNorm();renderSelBar();
   const cell=(s,cur,row,vi)=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'',q=n=>(cur===n?' cc':'')+(N&&inSel(N,row,vi,n)?' sl':'');return `<span class="pc"><span class="n${z(a)}${q(0)}">${a}</span> <span class="i${z(b)}${q(1)}">${b}</span> <span class="v${z(c)}${q(2)}">${c}</span> <span class="e${z(d)}${q(3)}">${d[0]}</span><span class="e${z(d)}${q(4)}">${d.slice(1)}</span></span>`};
   const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}">${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}<i class="lvu" id="lvu${c}"></i></span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%HL[1]?i%HL[0]?'':'b4':'b16'}${PAT.order===CUR.o&&i===CUR.row?' cur':''}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map((c,vi)=>cell(r[c],PAT.order===CUR.o&&i===CUR.row&&c===CUR.ch?CUR.col:-1,i,vi)).join('')}</div>`).join('')}</div>`);
@@ -881,7 +888,8 @@ $('pat').addEventListener('mousedown',e=>{const c=cellAt(e.target);if(!c||e.butt
 $('pat').addEventListener('dblclick',e=>{const r=e.target.closest('.pt');if(r){setCursor(PAT.order,+r.dataset.r);lvPlay(CUR.o,CUR.row)}});
 // piano keys preview the instrument: on the song while it plays live, alone (a muted copy) while stopped
 const PIANO='zsxdcvgbhnjmq2w3er5t6y7u';
-async function lvNoteOn(k,insIdx,nt,vol){const id='k'+k;if(LV.held[id])return;const note=nt!=null?nt:12*(+$('lv-oct').value||0)+PIANO.indexOf(k);if(note>119)return;LV.held[id]={pending:true};
+function pianoNote(k){return 12*Math.max(0,Math.min(8,Math.floor(+$('lv-oct').value)||0))+PIANO.indexOf(k)}  // OCT as typed, kept to 0-8
+async function lvNoteOn(k,insIdx,nt,vol){const id='k'+k;if(LV.held[id])return;const note=nt!=null?nt:pianoNote(k);if(note>119)return;LV.held[id]={pending:true};
   try{await lvStart()}catch(e){delete LV.held[id];return}LV.ctx.resume();LV.node.port.postMessage({type:'note',id,ins:insIdx!=null?insIdx:+$('lv-ins').value||0,note,vol:vol!=null?vol:1})}
 function lvNoteOff(k){const id='k'+k,h=LV.held[id];if(!h)return;if(h.pending){h.release=true;return}delete LV.held[id];LV.node.port.postMessage({type:'noteoff',ch:h.ch,on:h.on})}
 // ---- pattern editing: the cursor is a row, a channel and a column (0 note, 1 instrument, 2 volume, 3 effect letter, 4
@@ -932,7 +940,7 @@ function flushMidiChord(){clearTimeout(MIDI.timer);const b=MIDI.pending;MIDI.pen
   const changes=notes.map(([n,v],i)=>{const p=cellOf(PAT.rows[b.row][b.ch+i]);p.n=noteTxt(n);p.i=pad(b.ins);if(v!=null)p.v='v'+pad(v);return {row:b.row,ch:b.ch+i,cell:cellText(p)}});
   patEdit(changes);if(!b.live){CUR.row=b.row;patMove(Math.max(0,+$('lv-step').value||0))}}
 function captureMidiChord(n,vol){const live=!!(LV.playing&&LV.pos&&LV.oi===PAT.order),row=live?Math.min(PAT.rows.length-1,LV.pos.row):CUR.row;
-  if(MIDI.pending&&(MIDI.pending.row!==row||MIDI.pending.idx!==PAT.idx))flushMidiChord();
+  if(MIDI.pending&&(MIDI.pending.idx!==PAT.idx||!MIDI.pending.live&&MIDI.pending.row!==row))flushMidiChord();  // a live chord keeps its first note's row
   if(!MIDI.pending){MIDI.pending={song:S.song.path,idx:PAT.idx,order:PAT.order,row,ch:CUR.ch,ins:insNum(),live,notes:new Map()};MIDI.timer=setTimeout(flushMidiChord,50)}
   MIDI.pending.notes.set(n,vol)}
 async function materializePattern(){if(PAT.idx==null||EDQ.n)return;const j=await act('materialize',{pattern:PAT.idx});if(!j.error){PAT.key=null;await refresh();setEdit(true)}}
@@ -949,7 +957,7 @@ function editKey(e,k){const p=cellOf(PAT.rows[CUR.row][CUR.ch]),col=CUR.col;
   if(e.key==='Delete'||k==='.'){if(col===0){p.n='...';p.i='..'}else if(col===1)p.i='..';else if(col===2)p.v='...';else p.e='...';putCell(p,true);return true}
   if(e.key==='Insert'){patShift(true);return true}
   if(e.key==='Backspace'){patShift(false);return true}
-  if(col===0){if(PIANO.includes(k)&&k.length===1){const note=12*(+$('lv-oct').value||0)+PIANO.indexOf(k);if(note>119)return true;enterNote(note);if(!e.repeat)lvNoteOn(k);return true}
+  if(col===0){if(PIANO.includes(k)&&k.length===1){const note=pianoNote(k);if(note>119)return true;enterNote(note);if(!e.repeat)lvNoteOn(k);return true}
     const sp={'1':'===','`':'~~~','\\':'^^^'}[k];if(sp){p.n=sp;putCell(p,true);return true}return false}
   if(col===1&&/^[0-9]$/.test(k)){const d=digit(k);p.i=d==='00'?'..':d;putCell(p,false);return true}
   if(col===2){if(VOLMAX[k]!=null&&k.length===1){p.v=k+pad(Math.min(VOLMAX[k],p.v==='...'?0:+p.v.slice(1)));putCell(p,false);return true}
@@ -1237,7 +1245,7 @@ function selInterpolate(){const n=selNorm();if(!n||n.r1-n.r0<2)return selInfo('s
   const c=applyCells((p,t)=>t.ok.forEach(([x,v0,v1,letter,base])=>{const v=Math.round(v0+(v1-v0)*t.frac);p[x]=letter+(base===16?v.toString(16).toUpperCase().padStart(2,'0'):pad(v))}),L);
   selInfo(`interpolated ${c} cells`+(skipped?` · ${skipped} column${skipped>1?'s':''} skipped (both ends need the same command)`:''))}
 // amplify the volume column by a percentage: v commands scale; a note without a volume gets one (from 64, the usual default volume)
-function selAmplify(){const pct=Math.max(0,+$('sel-amp').value||100),T=targets(true).filter(t=>t.f.has(2));
+function selAmplify(){const a=parseFloat($('sel-amp').value),pct=Math.max(0,Number.isNaN(a)?100:a),T=targets(true).filter(t=>t.f.has(2));
   applyCells(p=>{if(p.v[0]==='v')p.v='v'+pad(Math.min(64,Math.round(+p.v.slice(1)*pct/100)));else if(p.v==='...'&&/^[A-G][-#]\d$/.test(p.n))p.v='v'+pad(Math.min(64,Math.round(64*pct/100)))},T)}
 // humanize: every note in the selection (or at the cursor) gets its volume moved by a random amount within ± the given
 // range (from 64 when it has none), clamped to 1-64; a volume that is not a v command (a pan, a slide) is left alone
@@ -1336,7 +1344,7 @@ async function replaceAll(){const sp=findSpec(),f=S.song.facts,song=$('f-scope')
 // Pattern tab keys (a capture listener, before the app's own): Esc edit mode, Space / F7 play from the cursor or stop, F6
 // loop the pattern, F8 stop, arrows / Tab / Page Up/Down / Home / End move the cursor, Ctrl+Z / Ctrl+Y undo and redo; the
 // piano keys preview (or, in edit mode, enter notes)
-document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.song.facts&&!document.querySelector('.modal.on')){e.preventDefault();e.stopImmediatePropagation();
+document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.song.facts){e.preventDefault();e.stopImmediatePropagation();if(document.querySelector('.modal.on'))return;
     if(e.key==='F5'){lvPatLoop=false;lvPlay(0,0)}else if(e.key==='F6')lvLoopPattern();else if(e.key==='F7'){lvPatLoop=false;lvPlay(CUR.o,CUR.row)}else lvStop();return}
   if($('t-smp').classList.contains('on')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){const k=e.key.toLowerCase();
     if((e.ctrlKey||e.metaKey)&&(k==='z'||k==='y')){e.preventDefault();e.stopImmediatePropagation();patUndo(k==='y'||e.shiftKey);return}
@@ -1353,7 +1361,7 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
     else if(k==='c')selCopy(false);else if(k==='x')selCopy(true);else if(k==='v')selPaste(e.shiftKey,e.altKey);else if(k==='a')selectAll(false);else if(k==='l')selectAll(true);
     else if(e.key==='ArrowUp')selTranspose(e.shiftKey?12:1);else if(e.key==='ArrowDown')selTranspose(e.shiftKey?-12:-1);else if(k==='i')selInterpolate();else if(k==='f')toggleFind(true);else done=false}
   else if(e.key==='F3')findNext();
-  else if(e.key==='Delete'&&selNorm())selClear();
+  else if(e.key==='Delete'&&(selNorm()||!EDIT))selClear();
   else if(e.altKey)done=false;
   else if(e.key==='Escape')setEdit(!EDIT);
   else if(e.key===' ')lvPlayCursor();else if(e.key==='F7'){lvPatLoop=false;lvPlay(CUR.o,CUR.row)}else if(e.key==='F6')lvLoopPattern();else if(e.key==='F8')lvStop();
@@ -1363,6 +1371,7 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
   else if(e.key==='ArrowRight')withSel(e.shiftKey,()=>patCol(1));else if(e.key==='ArrowLeft')withSel(e.shiftKey,()=>patCol(-1));else if(e.key==='Tab')patChan(e.shiftKey?-1:1);
   else if(EDIT&&PAT.rows&&CUR.o===PAT.order&&editKey(e,k)){}
   else if(!EDIT&&PIANO.includes(k)&&k.length===1){if(!e.repeat)lvNoteOn(k)}
+  else if(/^[0-9msnux]$/.test(k)){}  // the Tryout's keys (pick, alone/mix, note, apply, reject) never act from this tab
   else done=false;
   if(done){e.preventDefault();e.stopImmediatePropagation()}},true);
 document.addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k))lvNoteOff(k)});
@@ -1463,7 +1472,9 @@ async function showDiff(url,title,apply){diffApply=apply;const d=await (await fe
 function useSel(){const id=sel;if(id!=null)showDiff('/api/diff/'+id,`APPLY TO SLOT ${pad(S.slot)}`,()=>act('apply',{id}).then(()=>tab('export')))}
 async function applySel(){toggle('diff',false);if(diffApply)await diffApply()}
 // ---- keys
-document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;const cs=visible(),i=cs.findIndex(c=>c.id===sel);
+document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
+  if((e.ctrlKey||e.altKey||e.metaKey)&&e.key!=='?')return;  // no key here takes a modifier: Ctrl+U or Alt+X must not apply or reject
+  const cs=visible(),i=cs.findIndex(c=>c.id===sel);
   if(e.key==='Escape'){toggle('diff',false);toggle('keys',false);if(S.song)toggle('start',false)}
   else if(e.key==='Enter'&&$('diffmodal').classList.contains('on'))applySel();
   else if(e.key===' '){e.preventDefault();togglePlay()}
@@ -1591,7 +1602,7 @@ async function pkLoad(paint){const sig=pkSig(paint);if(sig===PK.sig)return;if(PK
     else{const r=await faRender();made=pkSig(false);root=ptNote($('fa-note').value);ab=faWav(r.channels,44100,root).buf}
     const buf=await PK.ctx.decodeAudioData(ab);Object.assign(PK,{buf,root,sig:made})})();
   PK.job=job;try{await job.p}finally{if(PK.job===job)PK.job=null}}
-async function pkPlay(k){const paint=ptOn(),msg=$(paint?'pt-msg':'fa-msg'),semi=12*(+$('lv-oct').value||0)+PIANO.indexOf(k);  // the pitch at the key press
+async function pkPlay(k){const paint=ptOn(),msg=$(paint?'pt-msg':'fa-msg'),semi=pianoNote(k);  // the pitch at the key press
   try{PK.ctx=PK.ctx||new AudioContext();PK.ctx.resume();await pkLoad(paint);
     if(!(paint?ptOn():faOn()))return;  // the tab was left while it rendered
     const s=PK.ctx.createBufferSource();s.buffer=PK.buf;s.playbackRate.value=2**((semi-PK.root)/12);s.connect(PK.ctx.destination);

@@ -1,5 +1,6 @@
 """WAV reader (stdlib only): PCM 8/16/24/32-bit, float 32/64, WAVE_FORMAT_EXTENSIBLE, any channel count.
 Also reads loop points from a 'smpl' chunk if present."""
+import math
 import struct
 import sys
 from array import array
@@ -67,6 +68,8 @@ def read_wav(path) -> WavData:
         a = array("f" if width == 4 else "d", data)
         if sys.byteorder == "big":
             a.byteswap()
+        if not all(map(math.isfinite, a)):
+            raise WavError(f"{path}: the float samples hold NaN or infinite values")
         inter = [max(-32768, min(32767, round(x * 32767))) for x in a]
         out_bits = 16
     elif width == 1:

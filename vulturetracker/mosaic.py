@@ -80,7 +80,7 @@ def resynth(target, corpus, rate, block=0.05, overlap=4, variety=1, reuse=0.0, l
             typical = float(np.median(d[np.isfinite(d)])) or 1.0
         if reuse and recent:
             d[recent] += float(reuse) * typical
-        pick = np.argsort(d)[: max(1, int(variety))]
+        pick = np.argsort(d)[: max(1, min(int(variety), int(audible.sum())))]  # never a silent (infinitely far) block
         j = int(pick[rng.integers(len(pick))]) if len(pick) > 1 else int(pick[0])
         recent = (recent + [j])[-8:]
         used.add(j)
