@@ -71,6 +71,26 @@ class TestFeatures080Page(unittest.TestCase):
                     page.wait_for_timeout(100)
                     self.assertEqual(page.evaluate('navigator.clipboard.readText()'),
                                      'ModPlug Tracker  IT\r\n|D-502v32...|...........\r\n|===........|E-501...B..\r\n')
+                    # the computer's piano keys with CHORD: two keys struck together go in as one chord on key up...
+                    page.evaluate("SEL=null;$('midi-chord').checked=true;CUR.row=2;CUR.ch=0;CUR.col=0;renderPat()")
+                    z, x, c = page.evaluate("['z','x','c'].map(k=>noteTxt(pianoNote(k)))")
+                    page.keyboard.down('c')
+                    page.keyboard.down('z')
+                    page.wait_for_timeout(150)
+                    self.assertEqual(page.evaluate('PAT.rows[2][0]'), '... .. ... ...')  # still held
+                    page.keyboard.up('z')
+                    page.keyboard.up('c')
+                    page.wait_for_function(f"!EDQ.n && PAT.rows[2][1].startsWith('{c}')")
+                    self.assertTrue(page.evaluate(f"PAT.rows[2][0].startsWith('{z}') && CUR.row===3"))
+                    # ...and a key struck 150 ms after another, still held, is a note of its own on the next row
+                    page.evaluate('CUR.row=0;renderPat()')
+                    page.keyboard.down('z')
+                    page.wait_for_timeout(150)
+                    page.keyboard.down('x')
+                    page.keyboard.up('z')
+                    page.keyboard.up('x')
+                    page.wait_for_function(f"!EDQ.n && PAT.rows[1][0].startsWith('{x}')")
+                    self.assertEqual(page.evaluate('[PAT.rows[0][0].slice(0,3),PAT.rows[0][1],CUR.row]'), [z, '... .. ... ...', 2])
                     self.assertEqual(errors, [])
                     browser.close()
             finally:
