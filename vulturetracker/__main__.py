@@ -1,13 +1,14 @@
 """CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,export,collect,sections,
-checkpoint,phrase,gui,surge-params} ..."""
+checkpoint,phrase,undo,redo,trim-history,gui,surge-params} ..."""
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 
 import yaml
 
-from . import api
+from . import __version__, api
 from .song import SongError
 
 
@@ -31,20 +32,24 @@ def _say(text, file=None):
     print(str(text).encode(enc, "replace").decode(enc), file=file)
 
 
-WRITES = {"sections": ("save", "delete", "move", "duplicate"), "checkpoint": ("save", "restore", "delete"),
+WRITES = {"sections": ("save", "delete", "move", "duplicate", "rename"), "checkpoint": ("save", "restore", "delete"),
           "phrase": ("capture", "set", "accept")}
+HISTORY = ("undo", "redo", "trim-history")  # commands on the song's undo history: they always write
 
 
-def _open_song(song, write):
+def _open_song(song, write, wait=0.0):
     """(the song opened headless, its lock or None); what the opening noticed goes to stderr. A command that writes holds
     the song's lock (gui.app_lock_path) to its end, so an app opening the song meanwhile waits for it or opens it
-    read-only, and it is refused while an app or another command holds the lock. One that reads holds it while the song
-    is read; a song open in the app is read as it is (an interrupted save's journal or a file that does not parse is the
-    app's to reconcile)."""
+    read-only, and it is refused while an app or another command holds the lock (after `wait` seconds of asking again).
+    One that reads holds it while the song is read; a song open in the app is read as it is (an interrupted save's
+    journal or a file that does not parse is the app's to reconcile)."""
     from .fileio import lock_file, unlock_file
     from .gui import LOCKS, State, app_lock_path
     LOCKS.mkdir(parents=True, exist_ok=True)
-    lock = lock_file(app_lock_path(song))
+    lock, until = lock_file(app_lock_path(song)), time.monotonic() + wait
+    while write and lock is None and time.monotonic() < until:
+        time.sleep(0.25)
+        lock = lock_file(app_lock_path(song))
     if write and lock is None:
         raise ValueError(f"{Path(song).name} is open in VultureTracker or being changed by another command; the app keeps "
                          f"its history and tryout settings and would write them over this change: make it in the app, or "
@@ -67,7 +72,7 @@ def _song_tool(args):
     the song's history (.history.json) and tryout settings (.tryout.json) as in the app, so the app must not have the
     song open: it would write its own over them."""
     from .fileio import unlock_file
-    st, lock = _open_song(args.song, args.action in WRITES[args.cmd])
+    st, lock = _open_song(args.song, args.cmd in HISTORY or args.action in WRITES[args.cmd], args.wait)
     seen = len(st.notices)
     try:
         return _song_command(args, st)
@@ -84,41 +89,62 @@ def _song_command(args, st):
     from .fileio import atomic_write, protect_outputs
     for line in st.error or []:
         print(line)
+    if args.cmd in HISTORY:
+        if args.cmd == "trim-history":
+            st.trim_history(args.keep)
+        elif not (st.future if args.cmd == "redo" else st.history):
+            raise ValueError(f"nothing to {args.cmd}")
+        else:
+            st.undo(redo=args.cmd == "redo")
+        print({"undo": "undone", "redo": "redone", "trim-history": "trimmed"}[args.cmd]
+              + f": {len(st.history)} undo and {len(st.future)} redo steps")
+        return 0
     if st.error and args.cmd != "checkpoint":  # a checkpoint can bring back a song that no longer compiles
         return 1
     if args.action and args.cmd != "phrase" and not args.name:
         raise ValueError(f"{args.cmd} {args.action} needs a name")
+    say = (lambda *a: None) if args.json else _say
 
     if args.cmd == "sections":
         if args.action:
-            need = {"save": 2, "delete": 0, "move": 1, "duplicate": 1}[args.action]
-            if len(args.orders) != need:
+            need = {"save": 2, "delete": 0, "move": 1, "duplicate": 1, "rename": 0}[args.action]
+            if len(args.orders) != need or (args.action == "rename" and not args.new_name):
                 raise ValueError({"save": "sections save NAME FIRST END: the order positions FIRST to END-1",
                                   "delete": "sections delete NAME takes no order positions",
                                   "move": "sections move NAME TO: the order boundary it goes to",
-                                  "duplicate": "sections duplicate NAME TO: the order boundary the copy goes to"}[args.action])
+                                  "duplicate": "sections duplicate NAME TO: the order boundary the copy goes to",
+                                  "rename": "sections rename NAME --as NEW"}[args.action])
             body = {"action": args.action, "name": args.name}
             if args.action == "save":
                 body.update(start=args.orders[0], end=args.orders[1])
+            elif args.action == "rename":
+                body.update(new_name=args.new_name)
             elif args.orders:
                 body.update(to=args.orders[0], independent=not args.shared, new_name=args.new_name)
             st.section_edit(body)
         orders = [str(o) for o in st.song.get("orders") or []]
-        for name, (a, b) in (st.song.get("sections") or {}).items():
-            _say(f"{name}: orders {a}-{b - 1} ({' '.join(orders[a:b])})")
-        if not st.song.get("sections"):
-            print("no named sections")
+        sections = st.song.get("sections") or {}
+        if args.json:
+            print(json.dumps({"sections": {n: {"first": a, "end": b, "orders": orders[a:b]} for n, (a, b) in sections.items()}},
+                             indent=2))
+        for name, (a, b) in sections.items():
+            say(f"{name}: orders {a}-{b - 1} ({' '.join(orders[a:b])})")
+        if not sections:
+            say("no named sections")
         return 0
 
     if args.cmd == "checkpoint":
-        if not args.action:
+        res = st.checkpoint(args.name, args.action) if args.action else None
+        if args.json:
+            print(json.dumps({"checkpoints": {n: (s.get("version") or {}) for n, s in st.checkpoints.items()},
+                              "undo": len(st.history), "redo": len(st.future),
+                              **({"diff": res["lines"]} if args.action == "diff" else {})}, indent=2))
+        elif not args.action:
             for name, step in st.checkpoints.items():
                 v = step.get("version") or {}
                 _say(f"{name}  (the song as of {v.get('mtime', '?')}, version {v.get('hash', '?')})")
             print(f"{len(st.checkpoints)} checkpoints; {len(st.history)} undo and {len(st.future)} redo steps")
-            return 0
-        res = st.checkpoint(args.name, args.action)
-        if args.action == "diff":
+        elif args.action == "diff":
             for line in res["lines"] or ["the song is as the checkpoint has it"]:
                 _say(line)
         else:
@@ -147,8 +173,11 @@ def _song_command(args, st):
             body.update({k: getattr(args, k) for k in ("name", "stars", "note") if getattr(args, k) is not None})
             phrases.action(st, body)
         elif args.action == "diff":
-            for line in phrases.action(st, {"action": "diff", "variant": index})["lines"] or ["no difference"]:
-                _say(line)
+            lines = phrases.action(st, {"action": "diff", "variant": index})["lines"]
+            if args.json:
+                print(json.dumps({"diff": lines}, indent=2))
+            for line in lines or ["no difference"]:
+                say(line)
             return 0
         elif args.action == "render":
             if not args.output:
@@ -157,28 +186,32 @@ def _song_command(args, st):
             protect_outputs([args.output], sources(st))
             atomic_write(Path(args.output), phrases.variant_wav(st, phrase, phrases.edited_text(st, phrase, index)),
                          replace=args.replace)
-            print(f"wrote {args.output}")
+            print(json.dumps({"wrote": str(Path(args.output).resolve())}) if args.json else f"wrote {args.output}")
             return 0
         else:
             phrases.action(st, {"action": "accept", "variant": index})
-            print(f"accepted {v.upper() if index >= 0 else 'absent'} into the song (one undo step)")
+            say(f"accepted {v.upper() if index >= 0 else 'absent'} into the song (one undo step)")
     phrase = st.meta.get("phrase")
+    if args.json:
+        print(json.dumps({"phrase": phrase and {k: phrase[k] for k in ("order", "pattern", "r0", "r1", "chans", "variants",
+                                                                        "absent", "accepted") if k in phrase}}, indent=2))
     if not phrase:
-        print("no phrase captured")
+        say("no phrase captured")
         return 0
     accepted = phrase.get("accepted")
-    _say(f"order {phrase['order']} (pattern {phrase['pattern']}), rows {phrase['r0']}-{phrase['r1']}, channels "
-         + ",".join(str(c + 1) for c in phrase["chans"])
-         + ("" if accepted is None else f"; accepted: {'ABCD'[accepted] if accepted >= 0 else 'absent'}"))
+    say(f"order {phrase['order']} (pattern {phrase['pattern']}), rows {phrase['r0']}-{phrase['r1']}, channels "
+        + ",".join(str(c + 1) for c in phrase["chans"])
+        + ("" if accepted is None else f"; accepted: {'ABCD'[accepted] if accepted >= 0 else 'absent'}"))
     for label, var in [*zip("ABCD", phrase["variants"]), ("absent", phrase["absent"])]:
-        _say(" ".join(filter(None, (f"{label}: {var['name']}", "*" * var["stars"], var["note"] and f"({var['note']})"))))
+        say(" ".join(filter(None, (f"{label}: {var['name']}", "*" * var["stars"], var["note"] and f"({var['note']})"))))
         for line in (var.get("data") or "").splitlines():
-            _say("    " + line)
+            say("    " + line)
     return 0
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="vulturetracker", description="Compile YAML song files to Impulse Tracker modules.")
+    ap.add_argument("--version", action="version", version=f"VultureTracker {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("check", help="validate a song file")
     p.add_argument("song")
@@ -249,23 +282,30 @@ def main(argv=None):
     p.add_argument("song")
     p.add_argument("destination", help="a new folder (never merged into an existing one)")
     p.add_argument("--zip", action="store_true", help="also <folder>.zip beside it")
-    p = sub.add_parser("sections", help="list a song's named sections, or save, delete, move or duplicate one as the app's "
-                                        "SONG OVERVIEW does (each an undo step in the app's history)")
+    tool = argparse.ArgumentParser(add_help=False)  # what the commands on a song's history and settings share
+    tool.add_argument("--wait", type=float, default=0, metavar="SECONDS",
+                      help="while the song is open in the app or another command, ask again for this long before giving up")
+    listed = argparse.ArgumentParser(add_help=False)
+    listed.add_argument("--json", action="store_true", help="machine-readable output")
+    p = sub.add_parser("sections", parents=[tool, listed],
+                       help="list a song's named sections, or save, delete, move, duplicate or rename one as the app's "
+                            "SONG OVERVIEW does (each an undo step in the app's history)")
     p.add_argument("song")
-    p.add_argument("action", nargs="?", choices=["save", "delete", "move", "duplicate"])
+    p.add_argument("action", nargs="?", choices=["save", "delete", "move", "duplicate", "rename"])
     p.add_argument("name", nargs="?")
     p.add_argument("orders", nargs="*", type=int, help="save: FIRST END, the order positions FIRST to END-1 (0 is the "
                                                         "first); move, duplicate: TO, the order boundary it goes to")
     p.add_argument("--shared", action="store_true", help="duplicate: the copy plays the same patterns (default: copies)")
-    p.add_argument("--as", dest="new_name", help="duplicate: the copy's name (default: '<name> copy')")
-    p = sub.add_parser("checkpoint", help="list a song's named checkpoints, or save, diff, restore or delete one as the "
-                                          "app's PROJECT tab does")
+    p.add_argument("--as", dest="new_name", help="rename: the new name; duplicate: the copy's name (default: '<name> copy')")
+    p = sub.add_parser("checkpoint", parents=[tool, listed],
+                       help="list a song's named checkpoints, or save, diff, restore or delete one as the app's PROJECT "
+                            "tab does")
     p.add_argument("song")
     p.add_argument("action", nargs="?", choices=["save", "diff", "restore", "delete"])
     p.add_argument("name", nargs="?")
-    p = sub.add_parser("phrase", help="alternatives of a line over a frozen accompaniment, as the app's PHRASES tab: "
-                                      "capture rows of channels, set an alternative, diff, render or accept one (no action: "
-                                      "show the comparison)")
+    p = sub.add_parser("phrase", parents=[tool, listed],
+                       help="alternatives of a line over a frozen accompaniment, as the app's PHRASES tab: capture rows "
+                            "of channels, set an alternative, diff, render or accept one (no action: show the comparison)")
     p.add_argument("song")
     p.add_argument("action", nargs="?", choices=["capture", "set", "diff", "render", "accept"])
     p.add_argument("variant", nargs="?", help="A, B, C or D (by place), or absent: the line left out")
@@ -280,6 +320,14 @@ def main(argv=None):
     p.add_argument("--note", help="set: a note")
     p.add_argument("-o", "--output", help="render: the WAV to write")
     p.add_argument("--replace", action="store_true", help="render: replace an existing WAV of that name")
+    for cmd, what in (("undo", "undo the song's last change, as the app's undo does (its history: <song>.history.json)"),
+                      ("redo", "redo the change undo took back"),
+                      ("trim-history", "drop the song's older undo steps and every redo step, as PROJECT's history "
+                                       "trim does (named checkpoints stay)")):
+        p = sub.add_parser(cmd, parents=[tool], help=what)
+        p.add_argument("song")
+        if cmd == "trim-history":
+            p.add_argument("--keep", type=int, default=0, help="the most recent undo steps to keep, 0-200 (default 0)")
     p = sub.add_parser("gui", help="open the app for a song (its own window with pywebview installed, else the browser)")
     p.add_argument("song", nargs="?", help="song to open (default: the app's open-a-song screen)")
     p.add_argument("--port", type=int, default=0, help="listen port (default: 8723 when free, else any free port)")
@@ -426,7 +474,7 @@ def main(argv=None):
                 return 1
             return 0
 
-        if args.cmd in ("sections", "checkpoint", "phrase"):
+        if args.cmd in ("sections", "checkpoint", "phrase", *HISTORY):
             return _song_tool(args)
 
         if args.cmd == "surge-params":

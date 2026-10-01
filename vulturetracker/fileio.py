@@ -1,11 +1,42 @@
 """Small shared file-safety helpers for song writes and exports."""
 import io
+import itertools
 import os
 from pathlib import Path
+import re
 import shutil
+import sys
 import tempfile
 import time
 import wave
+
+
+def user_dir(local=False):
+    """VultureTracker's folder for this user, where each platform keeps an application's: the recent list, the library
+    index, the window's browser profile and the log; `local`: the downloaded synths and faustwasm. Windows %APPDATA%
+    (%LOCALAPPDATA%), macOS ~/Library/Application Support, elsewhere $XDG_CONFIG_HOME (~/.config) and $XDG_DATA_HOME
+    (~/.local/share)."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA" if local else "APPDATA")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = os.environ.get("XDG_DATA_HOME" if local else "XDG_CONFIG_HOME") or Path.home() / (".local/share" if local else ".config")
+    return Path(base or Path.home()) / "VultureTracker"
+
+
+def save_beside(folder, stem, suffix, data):
+    """`data` saved in `folder` as <stem><suffix>, numbered (-2, -3, ...) so no other file is replaced; an identical file
+    already there is reused. Returns (its path, whether it was written now)."""
+    stem = re.sub(r"[^\w.-]+", "_", stem)[:60] or "dropped"
+    stem = "_" + stem if device_name(stem) else stem  # CON.wav, NUL.wav: Windows devices, not files
+    for k in itertools.count(1):
+        p = folder / f"{stem}{'' if k == 1 else f'-{k}'}{suffix}"
+        if p.exists() and p.read_bytes() == data:
+            return p, False
+        if not p.exists():
+            atomic_write(p, data, replace=False)
+            return p, True
 
 
 def atomic_write(path, data, *, replace=True):

@@ -54,6 +54,7 @@ Top-level keys (no others are allowed):
 | `patterns` | yes | named patterns, each a grid of rows × channels |
 | `orders` | yes | playback order: a list of pattern names |
 | `sections` | no | named non-overlapping spans of order entries; editor annotations only |
+| `requires` | no | the oldest VultureTracker that reads the song, quoted: `requires: "1.2"` (section 10) |
 
 Unknown keys anywhere are errors, so typos are caught. Numbers are decimal unless stated otherwise
 (effect parameters are hex); a number written with a leading zero (`08`, `0125`) is decimal too, not YAML 1.1's
@@ -110,7 +111,7 @@ samples:
 
 | key | range | default | meaning |
 |---|---|---|---|
-| `file` | path | required* | WAV file: PCM 8/16/24/32-bit or float, any rate, mono or stereo. *A slot with only `name` (no `file`) is an empty sample slot. |
+| `file` | path | required* | WAV file: PCM 8/16/24/32-bit or float, any rate, mono or stereo (the app turns FLAC, AIFF, OGG and MP3 into WAVs beside the song when they are added). *A slot with only `name` (no `file`) is an empty sample slot. |
 | `name` | ≤25 ASCII chars | file stem | sample name; instruments may refer to a sample by this name (from the file stem, accents are dropped: `Böse Bass.wav` is "Bose Bass") |
 | `base_note` | note | `C-5` | the note at which the WAV plays at its recorded pitch |
 | `c5_speed` | 256–9999999 | from WAV | playback rate for C-5, in Hz, for the WAV as written (rescaled with it under `module: sample_rate`). Use instead of `base_note` for fine tuning. |
@@ -378,3 +379,18 @@ the audible band). Common mistakes it catches:
 - `Bxx` beyond the order list
 - misnumbered row labels
 - patterns with too many rows or cells
+
+## 10. Compatibility
+
+The format has no version number: it grows only by new optional keys, and a key keeps its meaning.
+
+- **The promise.** VultureTracker 1.x opens every song that 0.6 or later wrote, without changing it, and compiles it to
+  the same module. The tests hold the demos whose samples are all in git to the exact `.it` bytes they compile to
+  (`tests/test_release100.py`); a change of meaning would be a 2.0.
+- **A newer song in an older app.** A key added after an app was made is an "unknown key" error there. A song that uses
+  one can say so: `requires: "1.2"` at the top level, and an app older than 1.2 then reports that one thing ("this song
+  needs VultureTracker 1.2 or newer; this is 1.1.0") instead of the keys it does not know. Quote the version: YAML reads
+  a bare `1.10` as the number 1.1. The app's own edits keep the key.
+- **The files beside the song** (`<song>.tryout.json`, `.notes.json` and the notes archives, `.history.json`, and a
+  collected project's `project.json`) carry a `schema` number. An app reads its own and older ones and writes its own;
+  one written by a newer app opens the song read-only, with a notice naming the file, and nothing is written over it.

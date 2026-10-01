@@ -308,7 +308,7 @@ class TestGui(unittest.TestCase):
         n = st.add_note({"order": 0, "row": 2, "tag": "too loud", "channels": [1], "source": "song"})
         self.assertEqual([x["ch"] for x in n["sounding"]], [0, 1])
         self.assertAlmostEqual(n["time"], 2 * 6 * 2.5 / 125, places=2)
-        notes = json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))
+        notes = json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))["notes"]
         self.assertEqual((len(notes), notes[0]["tag"], notes[0]["pattern"], notes[0]["version"]["hash"]), (1, "too loud", "p1", st.version()["hash"]))
         md = (self.dir / "song.notes.md").read_text(encoding="utf-8")
         self.assertIn("- **TOO LOUD** at 0:00.2, row 02: A 01, **B 02**. Playing the song.", md)
@@ -322,7 +322,7 @@ class TestGui(unittest.TestCase):
         self.assertEqual([x["ch"] for x in st.notes[0]["sounding"]], [0, 1])
         self.assertIn("**A 01**, B 02", (self.dir / "song.notes.md").read_text(encoding="utf-8"))  # channel A is the picked one
         st.edit_note(n["id"], {"delete": True})
-        self.assertEqual(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8")), [])
+        self.assertEqual(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))["notes"], [])
         self.assertEqual(st.snapshot()["cand_counts"], {})
 
     def test_apply_keeps_line_endings(self):
@@ -422,9 +422,9 @@ class TestGui(unittest.TestCase):
         (self.dir / "song.yaml").write_bytes(SONG.replace("title: T", "title: T2").encode("utf-8"))
         st.reload()                                   # a change from outside archives them
         self.assertEqual(st.notes, [])
-        self.assertEqual(len(json.loads((self.dir / f"song.notes-{old}.json").read_text(encoding="utf-8"))), 1)
+        self.assertEqual(len(json.loads((self.dir / f"song.notes-{old}.json").read_text(encoding="utf-8"))["notes"]), 1)
         self.assertIn(f"version {old}", (self.dir / f"song.notes-{old}.md").read_text(encoding="utf-8"))
-        self.assertEqual(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8")), [])
+        self.assertEqual(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))["notes"], [])
         self.assertEqual(st.snapshot()["archives"], [f"song.notes-{old}.md"])
         st.add_note({"order": 0, "row": 0, "tag": "keep"})   # ids restart with the version
         self.assertEqual(st.notes[0]["id"], 1)
@@ -1008,7 +1008,7 @@ class TestGui(unittest.TestCase):
         self.assertEqual(len(st.snapshot()["notices"]), 2)
         self.assertTrue((self.dir / "song.tryout.json.corrupt").exists() and (self.dir / "song.notes.json.corrupt").exists())
         st.add_note({"order": 0, "row": 0, "tag": "ok"})
-        self.assertEqual(len(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))), 1)
+        self.assertEqual(len(json.loads((self.dir / "song.notes.json").read_text(encoding="utf-8"))["notes"]), 1)
         self.assertEqual([p.name for p in self.dir.glob("*.tmp")], [])  # no temporary file left behind
 
     def test_an_archive_reports_the_orders_its_notes_were_made_on(self):
@@ -1025,7 +1025,7 @@ class TestGui(unittest.TestCase):
         # T9: a second batch of notes on that version merges into its archive
         st.notes.append(dict(st.notes[0], id=7, when="x", version={"hash": old, "mtime": "x"}))
         st._archive_old_notes()
-        self.assertEqual(len(json.loads((self.dir / f"song.notes-{old}.json").read_text(encoding="utf-8"))), 2)
+        self.assertEqual(len(json.loads((self.dir / f"song.notes-{old}.json").read_text(encoding="utf-8"))["notes"]), 2)
 
     def test_a_brace_in_a_trailing_comment_is_not_the_entry(self):
         # F12: a fader written into a one-line channel entry whose comment holds a `}` lands in the entry
@@ -1470,8 +1470,11 @@ class TestPackage(unittest.TestCase):
                 shutil.copy(root / name, src / name)
             subprocess.run([sys.executable, "-m", "pip", "wheel", str(src), "--no-deps", "--no-build-isolation", "-q",
                             "-w", d], check=True, capture_output=True)
-            names = zipfile.ZipFile(next(Path(d).glob("*.whl"))).namelist()
+            wheel = next(Path(d).glob("*.whl"))
+            names = zipfile.ZipFile(wheel).namelist()
         self.assertIn("vulturetracker/SONG_FORMAT.md", names)
+        from vulturetracker import __version__
+        self.assertTrue(wheel.name.startswith(f"vulturetracker-{__version__}-"), wheel.name)  # pyproject reads __init__'s
 
 
 if __name__ == "__main__":

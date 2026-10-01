@@ -12,6 +12,19 @@ from .fileio import atomic_write
 MAX_BYTES = 64 * 1024 * 1024
 HISTORY_BYTES = 16 * 1024 * 1024
 JOURNAL_BYTES = 8 * MAX_BYTES  # six bounded files plus base64 overhead, including legacy history
+SCHEMA = 2       # .history.json and the save journal: this app reads 1 and 2 and writes 2
+SIDE_SCHEMA = 1  # .tryout.json, .notes.json and a collected project.json (before 1.0 they had none: read as older)
+
+
+class Newer(ValueError):
+    """A file beside the song written by a newer VultureTracker (a higher schema): nothing is read from it or written
+    over it; the song opens read-only."""
+
+
+def newer(value, schema=SIDE_SCHEMA):
+    """Whether a parsed file beside the song declares a schema above `schema`."""
+    s = value.get('schema') if isinstance(value, dict) else None
+    return type(s) is int and s > schema
 
 
 def digest(raw):
@@ -99,6 +112,7 @@ class History:
         self.paths = [self.song, self.song.with_suffix('.tryout.json'), self.path]
         self.notices = notices
         self.passive = passive
+        self.newer = False  # load found a history written by a newer app: left as it is
         if not passive:
             self.recover()
 
@@ -109,6 +123,8 @@ class History:
 
     def _decode(self, raw):
         obj = json.loads(raw)
+        if newer(obj, SCHEMA):
+            raise Newer(f'schema {obj["schema"]}')
         if not isinstance(obj, dict) or obj.get('schema') not in (1, 2) or obj.get('song') != str(self.song):
             raise ValueError('unsupported schema or different song location')
         return obj
@@ -140,6 +156,9 @@ class History:
                 obj[key] = [pack_step(step) for step in obj[key]]
             obj['checkpoints'] = {name: pack_step(step) for name, step in obj['checkpoints'].items()}
             return obj
+        except Newer:
+            self.newer = True
+            return None
         except (ValueError, TypeError, KeyError, UnicodeError, zlib.error):
             if self.passive:
                 self.notices.append(f'{self.path.name} could not be read; left as it is')
@@ -148,7 +167,7 @@ class History:
             return None
 
     def data(self, raw, undo, redo, checkpoints):
-        return json_bytes({'schema': 2, 'song': str(self.song), 'head': digest(raw),
+        return json_bytes({'schema': SCHEMA, 'song': str(self.song), 'head': digest(raw),
                            'undo': [pack_step(s) for s in undo], 'redo': [pack_step(s) for s in redo],
                            'checkpoints': {n: pack_step(s) for n, s in checkpoints.items()}})
 
@@ -218,7 +237,7 @@ class History:
         if any(x is not None and len(x) > MAX_BYTES for x in before + after):
             raise ValueError('A save file exceeds 64 MiB; trim history in PROJECT before saving.')
         pairs = [[None if x is None else compressed(x) for x in pair] for pair in zip(before, after)]
-        atomic_write(self.journal, json_bytes({'schema': 2, 'song': str(self.song), 'files': pairs}, JOURNAL_BYTES))
+        atomic_write(self.journal, json_bytes({'schema': SCHEMA, 'song': str(self.song), 'files': pairs}, JOURNAL_BYTES))
         try:
             if read_optional(self.song) != before[0]:
                 raise ValueError('The song changed while preparing the save; compare and RELOAD first')

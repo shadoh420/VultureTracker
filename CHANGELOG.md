@@ -4,6 +4,46 @@ What changed in each VultureTracker release (the GitHub release notes, without t
 
 ## Unreleased
 
+- **Songs stay readable across versions** (SONG_FORMAT.md, section 10). 1.x opens every song that 0.6 or later wrote,
+  unchanged, and compiles it to the same module: the demos whose samples are in git are held to their exact `.it`
+  bytes. A song can name the oldest app that reads it, `requires: "1.2"`; an older app then says only that, instead of
+  listing the keys it does not know. The files beside the song carry a `schema` number, and one written by a newer
+  VultureTracker opens the song read-only with a notice naming it, instead of being written over (a newer history was
+  moved aside as corrupt). `<song>.notes.json` is now `{"schema": 1, "notes": [...]}`; the older list is read, and an
+  app before this one reads the new file as empty. A listening note in a read-only window is refused, as edits are,
+  instead of being written over the other window's notes.
+- **The app says its version**: `vulturetracker --version`, the window title, the start screen and the listening-notes
+  report. It is set in one place, `vulturetracker/__init__.py`, which a pip install reads too.
+- **A log for bug reports.** The exe has no console, so what failed unexpectedly went nowhere. The app now writes it,
+  with the traceback, to `vulturetracker.log` in its settings folder (`%APPDATA%\VultureTracker`; two files of 256 KB
+  at most, each start naming the version, libopenmpt's and the system), and the error the page shows ends with the path.
+- **Installing from source** goes through extras: `pip install -e ".[all]"` (or `gui`, `record`, `synth`, `gp`, `midi`,
+  `test`); CI installs `.[test]`, so the package test runs there too.
+- **Linux and macOS paths.** The settings, library index, window profile and log live where each system keeps an
+  application's (`~/.config/VultureTracker` on Linux, `~/Library/Application Support/VultureTracker` on macOS; they were
+  in `~/VultureTracker`, whose recent list is still read), the downloads in `~/.local/share/VultureTracker`, and
+  installed Surge XT, Dexed and OB-Xd are found in the system's VST3 folders. README's Platforms says what stays
+  Windows-only.
+- **FLAC, AIFF, OGG and MP3 samples.** Wherever the app takes a WAV (a drop, a candidate path or glob, a new slot, a
+  slot's file) it now takes these too: each becomes a 16-bit WAV beside the song through the ffmpeg the export uses,
+  never over a file there, with the loops and root note OpenMPT keeps from it (a FLAC's embedded sampler chunks or its
+  LOOPSTART/LOOPLENGTH tags, an AIFF's loops; nothing from Ogg or MP3).
+- **The command line does what the app does to a song's history**: `undo`, `redo` and `trim-history --keep N`;
+  `sections rename NAME --as NEW` (also in the app's `section_edit`; the section keeps its place and comment);
+  `--json` on `sections`, `checkpoint` and `phrase`; and `--wait SECONDS` on all of them, to wait for a song the app or
+  another command has open instead of failing at once.
+- **Imports keep more, as OpenMPT does.** A MIDI file's pitch bends become E/F slides (with its RPN bend range), its
+  sustain pedal holds notes until it comes up, and its markers become named sections. Module names keep their letters
+  (`Böse` is `Bose`, read in the character set OpenMPT reads them in; it was `B?se`), and what an import drops without
+  a sound (an IT's edit history, MIDI pitch wheel depth, instruments' MIDI channel, program and bank) is now listed
+  with the other warnings.
+- **Faust sounds can be made again.** Each FAUST tab save also writes a `faust:` entry for its WAV (the code, the
+  notes, hold, tail, velocity and sliders) into `faust.yaml` beside the song, so `synth` and the RECIPE box render it
+  again and edit it. The code being typed is kept with each song (it was one draft per browser). The sustain pedal
+  (CC 64) holds notes on the FAUST tab. Leaving the tab, or COMPILE while notes sound, now lets the notes ring out on
+  their release: faustwasm's soft all-notes-off was a hard one (CC 123) and cut them at once.
+- **UI SCALE** (top bar and start screen, 90-200 %): the whole app larger or smaller, kept in the browser with the
+  other page settings. The app's window has no Ctrl+wheel or Ctrl+= zoom (pywebview turns WebView2's off).
 - **Faust plays chords, live and from MIDI.** The FAUST tab's code is now a polyphonic instrument, a voice per note in
   Faust's own way (`freq`, `gain` and `gate` set per voice; an `effect` in the code runs once on the sum). NOTE takes a
   chord (`C-5 E-5 G-5`) for PREVIEW and the saves. The piano keys play the code live at their real pitch (before, one

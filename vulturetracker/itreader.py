@@ -7,7 +7,7 @@ from pathlib import Path
 from . import notation
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
                     NOTE_FADE, ORDER_END, ORDER_SKIP)
-from .song import DCA, DCT, NNA, VIBRATO
+from .song import DCA, DCT, NNA, VIBRATO, it_text
 from .wavload import write_wav
 
 
@@ -15,9 +15,22 @@ class ITReadError(ValueError):
     pass
 
 
-def _cstr(raw):
-    text = raw.split(b"\0", 1)[0].decode("latin-1")
-    return "".join(c if 32 <= ord(c) < 127 else "?" for c in text).rstrip()
+def _cstr(raw, charset="cp437"):
+    """A name as the module stores it, in `charset` (OpenMPT's: CP437 for IT, S3M and XM, Windows-1252 for those an
+    OpenMPT saved, Latin-1 for MOD), transliterated as song.it_text writes names (Böse -> Bose, ? where none fits)."""
+    text = raw.split(b"\0", 1)[0].decode(charset, "replace")
+    return it_text(text, 2 * len(text)).replace("\x7f", "?").rstrip()  # ß becomes ss: room for what grows
+
+
+def _midi_settings(data, p, cmwt):
+    """(MIDI channel, program, bank, plugin) of the IT instrument at `p`, 0 where none, decoded as OpenMPT does
+    (ITTools.cpp, ITInstrToMPT: old ModPlug versions stored the program and bank one lower)."""
+    mch, mpr, b0, b1 = data[p + 0x3C: p + 0x40]
+    if cmwt in (0x202, 0x211, 0x220, 0x214) and mpr != 0xFF:
+        prog, bank = (mpr if mpr <= 128 else 0), (b0 | b1 << 8) if (b0 | b1 << 8) <= 128 else 0
+    else:
+        prog, bank = (mpr + 1 if mpr < 128 else 0), (b0 + 1 if b0 < 128 else 0) + (b1 << 7 if b1 < 128 else 0)
+    return (0, prog, bank, mch - 128) if mch >= 128 else (mch, prog, bank, 0)
 
 
 # ---------------------------------------------------------------- IT 2.14 / 2.15 sample decompression
@@ -135,11 +148,17 @@ def read_it(data: bytes):
     if data[:4] != b"IMPM" or len(data) < 0xC0:
         raise ITReadError("not an Impulse Tracker module (missing IMPM header)")
     mod = Module()
-    mod.title = _cstr(data[4:30])[:25]
     ordnum, insnum, smpnum, patnum, cwtv, cmwt, flags, special = struct.unpack_from("<8H", data, 0x20)
+    reserved = struct.unpack_from("<I", data, 0x3C)[0]
+    # OpenMPT reads names as CP437, or Windows-1252 when an OpenMPT or ModPlug saved the file (Load_it.cpp)
+    cs = "cp1252" if (cwtv & 0xF000) == 0x5000 or 0x888 in (cwtv, cmwt) or (cwtv, cmwt, reserved) == (0x214, 0x202, 0) \
+        or (cwtv, cmwt, reserved, ordnum, data[0x34], data[0x35]) == (0x300, 0x300, 0, 256, 128, 0) else "cp437"
+    mod.title = _cstr(data[4:30], cs)[:25]
     if special & 4:  # the highlight bytes count only with this bit, as in OpenMPT, Schism and libopenmpt
         mod.row_highlight = (data[0x1E], data[0x1F])
-    gv, mv, speed, tempo, sep, _pwd, msglen, msgoff = struct.unpack_from("<6BHI", data, 0x30)
+    gv, mv, speed, tempo, sep, pwd, msglen, msgoff = struct.unpack_from("<6BHI", data, 0x30)
+    if pwd:
+        warnings.append(f"the MIDI pitch wheel depth ({pwd} semitones; for MIDI output) is not carried over")
     if flags & 4 and cmwt < 0x200:
         raise ITReadError("old (pre-IT 2.00) instrument format is not supported")
     if flags & 0x80 or special & 8:
@@ -162,6 +181,11 @@ def read_it(data: bytes):
     smp_ptrs = struct.unpack_from(f"<{smpnum}I", data, pos)
     pos += 4 * smpnum
     pat_ptrs = struct.unpack_from(f"<{patnum}I", data, pos)
+    pos += 4 * patnum
+    if special & 2 and pos + 2 <= len(data):  # the edit history: what OpenMPT counts (a history past the first
+        n = struct.unpack_from("<H", data, pos)[0]  # parapointer is a writer's stray flag, not data)
+        if n and pos + 2 + 8 * n <= min([q for q in ins_ptrs + smp_ptrs + pat_ptrs if q] or [len(data)]):
+            warnings.append(f"the edit history ({n} editing session{'s' if n != 1 else ''}) is not carried over")
 
     for p in smp_ptrs:
         smp = Sample()
@@ -171,8 +195,8 @@ def read_it(data: bytes):
         (sflags, vol) = data[p + 0x12], data[p + 0x13]
         smp.global_volume = min(data[p + 0x11], 64)
         smp.volume = min(vol, 64)
-        smp.name = _cstr(data[p + 0x14: p + 0x2E])[:25]
-        smp.filename = _cstr(data[p + 4: p + 0x10])
+        smp.name = _cstr(data[p + 0x14: p + 0x2E], cs)[:25]
+        smp.filename = _cstr(data[p + 4: p + 0x10], cs)
         cvt, dfp = data[p + 0x2E], data[p + 0x2F]
         smp.pan = min(dfp & 0x7F, 64) if dfp & 0x80 else None
         length, lb, le, c5, sb, se, ptr = struct.unpack_from("<7I", data, p + 0x30)
@@ -196,12 +220,16 @@ def read_it(data: bytes):
 
     if flags & 4:
         mod.instruments = []
+        midi = [i + 1 for i, p in enumerate(ins_ptrs) if p and p + 554 <= len(data) and any(_midi_settings(data, p, cmwt))]
+        if midi:
+            warnings.append(f"instrument{'s' if len(midi) > 1 else ''} {', '.join(map(str, midi))}: MIDI channel, program, bank "
+                            f"or plugin (for MIDI output and plugins) not carried over")
         for p in ins_ptrs:
             ins = Instrument()
             if p == 0 or p + 554 > len(data):
                 mod.instruments.append(ins)
                 continue
-            ins.filename = _cstr(data[p + 4: p + 0x10])
+            ins.filename = _cstr(data[p + 4: p + 0x10], cs)
             ins.nna, ins.dct, ins.dca = min(data[p + 0x11], 3), min(data[p + 0x12], 3), min(data[p + 0x13], 2)
             fadeout, pps, ppc, gbv, dfp, rv, rp = struct.unpack_from("<HbBBBBB", data, p + 0x14)
             if fadeout > 256:
@@ -211,7 +239,7 @@ def read_it(data: bytes):
             ins.global_volume = min(gbv, 128)
             ins.pan = min(dfp, 64) if not dfp & 0x80 else None
             ins.random_volume, ins.random_pan = min(rv, 100), min(rp, 64)
-            ins.name = _cstr(data[p + 0x20: p + 0x3A])[:25]
+            ins.name = _cstr(data[p + 0x20: p + 0x3A], cs)[:25]
             ifc, ifr = data[p + 0x3A], data[p + 0x3B]
             ins.filter_cutoff = ifc & 0x7F if ifc & 0x80 else None
             ins.filter_resonance = ifr & 0x7F if ifr & 0x80 else None

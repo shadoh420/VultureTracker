@@ -59,20 +59,30 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
 unzip it anywhere and run `vulturetracker.exe`. The start screen lists two demo songs: open one, press play, then try
 a candidate sound in the Tryout.
 
-**From source** (any platform):
+**From source** (Python 3.10+):
 
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
 cd VultureTracker
-pip install pyyaml pywebview numpy imageio-ffmpeg sounddevice
+pip install -e ".[all]"
 ```
 
-Python 3.10+. Only PyYAML is required to compile songs. pywebview opens the app in its own window (without it, the app
-opens in the browser); numpy is needed for measurements, the spectrogram, the sample editor and resampling;
-imageio-ffmpeg provides the ffmpeg that the MP3 / OGG / FLAC export runs; sounddevice is the RECORD tab's audio input.
-Optional: `pip install pedalboard mido` for `synth` and the app's RECIPE box (SAMPLING.md), `pip install pyguitarpro` for the Guitar Pro import, `pip install mido` for the MIDI import; node for `faust:` recipes on the command line.
+`pip install -e .` alone installs PyYAML, all that compiling songs needs. The extras add the rest: `gui` (pywebview, the
+app in its own window, else it opens in the browser; numpy for measurements, the spectrogram, the sample editor and
+resampling; imageio-ffmpeg, the ffmpeg the MP3 / OGG / FLAC export and the FLAC, AIFF, OGG and MP3 samples run),
+`record` (sounddevice, the RECORD tab), `synth` (pedalboard and mido: `synth` and the app's RECIPE box, SAMPLING.md),
+`gp` (PyGuitarPro, the Guitar Pro import), `midi` (mido, the MIDI import), `all` (every one) and `test` (what the
+tests need). node runs `faust:` recipes on the command line.
 Windows x64 has libopenmpt in `vendor/`; elsewhere install libopenmpt or point `LIBOPENMPT` at it.
 `pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
+
+**Platforms.** The Windows exe (Windows 10 and 11, x64) is the product. Linux runs from source and is tested on every
+push (Ubuntu 24.04, its libopenmpt 0.7: `apt install libopenmpt0t64`; pywebview there needs GTK or Qt, see its docs).
+macOS is untested. Windows only: the exe, the RECIPE box's download of Surge XT and Dexed (elsewhere install them: the
+app finds them in the platform's VST3 folder and Surge's patches where its installer puts them, or set `SURGE_XT_DIR`,
+`DEXED_VST3`, `OBXD_VST3`) and the RECORD tab's ASIO. The app keeps its recent list, library index, window profile and
+log in `%APPDATA%\VultureTracker` (macOS `~/Library/Application Support/VultureTracker`, Linux
+`~/.config/VultureTracker`) and the downloads in `%LOCALAPPDATA%\VultureTracker` (Linux `~/.local/share/VultureTracker`).
 
 ## Use
 
@@ -84,6 +94,7 @@ python -m vulturetracker import some.xm -o some.yaml       # an .it, .xm, .s3m o
 python -m vulturetracker synth recipe.yaml                 # render samples from free synths or recordings
 python -m vulturetracker index ~/samples --like kick.wav   # index sample folders; the nearest sounds to a WAV
 python -m vulturetracker export song.yaml -f ogg --loop    # the app's RENDER & EXPORT: formats, sections, stems, game loops
+python -m vulturetracker undo song.yaml                    # the app's undo; also redo, trim-history, sections, checkpoint, phrase
 python -m vulturetracker --help                            # every command
 ```
 

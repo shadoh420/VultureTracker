@@ -176,7 +176,10 @@ shared by all voices, by label (an unknown label is an error; `gain` is the velo
 in the code (Faust's own convention) runs once on the voices' sum, a reverb over the whole chord say. The rest of the
 chain (`fx`, `trim`, `loop`, `normalize`) follows as for any sample.
 Rendering in a recipe runs under [node](https://nodejs.org) (`web/faust-render.mjs`); the app's FAUST tab renders the
-same code in the page without it.
+same code in the page without it. Every sound the FAUST tab saves gets an entry like the one above, named after its WAV,
+in `faust.yaml` beside the song (`out_dir: .`, so the entry writes that very WAV), with `trim: false` and `fade_out: 0`
+because the tab renders without them: `synth faust.yaml --only NAME` renders it again, and in the app the slot's
+RECIPE box shows it.
 
 ## Resynthesis from a corpus (`resynth:`)
 

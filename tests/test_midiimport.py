@@ -43,7 +43,7 @@ class TestMidiImport(unittest.TestCase):
             d = Path(d)
             mid.save(d / "t.mid")
             out, warnings = gui.import_beside(d / "t.mid")
-            self.assertEqual((out.name, warnings), ("t.yaml", ["1 pitch bends left out"]))
+            self.assertEqual((out.name, warnings), ("t.yaml", []))
             song = api.load(out)
             m = song["module"]
             self.assertEqual((m["title"], m["speed"], m["tempo"], m["rows_per_beat"], m["rows_per_bar"]), ("Song", 12, 100, 2, 6))
@@ -54,7 +54,9 @@ class TestMidiImport(unittest.TestCase):
                     for p, pat in song["patterns"].items() for i, row in enumerate(pat["data"].splitlines()) for c in range(4)}
             self.assertEqual([cell["b1", 0, c] for c in range(4)], ["C-5 01 v50 ...", "E-5 01 v50 ...", "C-3 02 v50 ...", "... .. ... ..."])
             self.assertEqual(cell["b1", 2, 3], "D-3 02 v50 ...")
-            self.assertEqual((cell["b1", 4, 0], cell["b1", 4, 1], cell["b1", 5, 0]), ("G-5 01 v50 ...", "=== .. ... ...", "A-5 01 v50 ..."))
+            # the bend (500 of 8192 at 2 semitones: 8/64 semitone) as an extra-fine slide where it is, then again under the
+            # next note, which starts unbent (OpenMPT's MIDI import)
+            self.assertEqual((cell["b1", 4, 0], cell["b1", 4, 1], cell["b1", 5, 0]), ("G-5 01 v50 FE8", "=== .. ... ...", "A-5 01 v50 FE8"))
             self.assertEqual(cell["b2", 0, 0], "=== .. ... ...")  # the last eighth ends on the next bar line
             res = api.check(out)
             self.assertEqual((res["errors"], res["warnings"]), ([], []))

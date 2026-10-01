@@ -104,6 +104,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div style="flex:1"></div>
   <div class="dirty" id="dirty" style="display:none" onclick="compareExternal()"><i></i>song changed on disk <b>COMPARE / RELOAD</b></div>
   <span class="meta" id="queue"></span>
+  <select class="uiscale" style="font:10px var(--mono);padding:1px 3px" onchange="setScale(this.value)" title="UI SCALE: the whole app larger or smaller (kept in this browser; the app window has no Ctrl+wheel zoom)"><option value="90">UI 90 %</option><option value="100">UI 100 %</option><option value="110">UI 110 %</option><option value="125">UI 125 %</option><option value="150">UI 150 %</option><option value="175">UI 175 %</option><option value="200">UI 200 %</option></select>
   <span class="btn" onclick="toggle('keys')">?</span>
 </div>
 <div class="tabs">
@@ -153,7 +154,7 @@ option.hascand{color:var(--acc);font-weight:700}
           <span class="k" style="margin-left:10px">sort</span><span class="btn on" id="s-added" onclick="setSort('added')">ADDED</span><span class="btn" id="s-dist" onclick="setSort('dist')">DISTANCE</span><span class="btn" id="s-rating" onclick="setSort('rating')">RATING</span>
         </span></div>
       <div style="display:flex;gap:6px;padding:8px 10px">
-        <input id="globs" placeholder="add candidate WAVs: a path or glob, relative to the song (e.g. cand/hat_*.wav or C:/kits/**/*.wav)" style="flex:1;padding:5px 8px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')addCands()">
+        <input id="globs" placeholder="add candidates (WAV, FLAC, AIFF, OGG, MP3): a path or glob, relative to the song (e.g. cand/hat_*.wav or C:/kits/**/*.flac)" style="flex:1;padding:5px 8px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')addCands()">
         <span class="btn" onclick="addCands()">ADD</span>
         <span class="btn" style="margin-left:6px" onclick="findSimilar(null)" title="the sounds of the library (MAP tab: its folders) nearest the slot's own sample by timbre become candidates">≈ LIKE SLOT</span><input id="simk" type="number" min="1" max="50" value="8" style="width:38px;font:11px var(--mono);padding:2px 4px" title="how many sounds FIND SIMILAR adds">
       </div>
@@ -297,7 +298,7 @@ option.hascand{color:var(--acc);font-weight:700}
       <button class="btn" onclick="sectionSave()">SAVE NAME / SPAN</button>
       <p><select id="section-select" aria-label="Named section"></select>
       <button class="btn" onclick="sectionAction('select')">SELECT</button><button class="btn" onclick="sectionAction('loop')">LOOP</button>
-      <button class="btn" onclick="sectionExport()">EXPORT SECTION</button><button class="btn" onclick="sectionAction('delete')">REMOVE NAME</button></p>
+      <button class="btn" onclick="sectionExport()">EXPORT SECTION</button><button class="btn" onclick="sectionAction('delete')">REMOVE NAME</button><button class="btn" onclick="sectionAction('rename')" title="the selected section takes the name typed in Name above">RENAME</button></p>
       <label>Before order <input id="section-to" type="number" min="0" value="0" style="width:50px"></label>
       <button class="btn" onclick="sectionAction('move')">MOVE SECTION</button>
       <select id="section-copy" aria-label="Section copy behavior"><option value="independent">Independent pattern copies</option><option value="shared">Shared pattern references</option></select>
@@ -568,7 +569,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div style="display:flex;gap:10px;margin-top:12px;align-items:center"><span class="btn big" onclick="applySel()">WRITE SONG &amp; REBUILD <span class="kbd">⏎</span></span><span class="btn" onclick="toggle('diff',false)">CANCEL ESC</span></div>
 </div></div>
 <div class="modal" id="startmodal" style="background:#0a0c0d"><div class="box" style="width:640px">
-  <div style="display:flex;align-items:center;margin-bottom:18px"><div class="logo"><i></i><b>VULTURETRACKER</b></div><div style="flex:1"></div><span class="btn" id="startclose" style="display:none" onclick="toggle('start',false)">CLOSE <span class="kbd">ESC</span></span></div>
+  <div style="display:flex;align-items:center;margin-bottom:18px"><div class="logo"><i></i><b>VULTURETRACKER</b></div><span class="meta" id="startver" style="margin-left:10px"></span><div style="flex:1"></div><select class="uiscale" style="font:10px var(--mono);padding:1px 3px" onchange="setScale(this.value)" title="UI SCALE: the whole app larger or smaller (kept in this browser; the app window has no Ctrl+wheel zoom)"><option value="90">UI 90 %</option><option value="100">UI 100 %</option><option value="110">UI 110 %</option><option value="125">UI 125 %</option><option value="150">UI 150 %</option><option value="175">UI 175 %</option><option value="200">UI 200 %</option></select><span class="btn" id="startclose" style="display:none" onclick="toggle('start',false)">CLOSE <span class="kbd">ESC</span></span></div>
   <div style="font-size:15px;font-weight:600;color:var(--hi)">Open a song</div>
   <div style="margin-top:4px;font-size:11.5px;color:var(--mid)">A song is a YAML file; the tryout screen renders candidate samples inside it.</div>
   <div style="margin-top:16px;display:flex;gap:6px"><input id="openpath" placeholder="path to song.yaml" style="flex:1;padding:7px 9px;font:11px var(--mono)" onkeydown="if(event.key==='Enter')openSong(this.value)"><span class="btn" onclick="openSong($('openpath').value)">OPEN</span><span class="btn big" onclick="browse()">BROWSE…</span></div>
@@ -590,6 +591,13 @@ option.hascand{color:var(--acc);font-weight:700}
 <script>
 let S=null,sel=null,solo=false,filter='all',sort='added',diffId=null,focus=null,PAT={key:null,rows:null,order:-1,active:[],row:-2};
 let hexRows=false;try{hexRows=localStorage.hexrows==='1'}catch(e){}
+// UI SCALE: the whole page zoomed (CSS zoom: the fonts are fixed px and the app window has no Ctrl+wheel or Ctrl+= zoom)
+let uiScale=100;try{uiScale=+localStorage.uiscale||100}catch(e){}
+const zf=()=>uiScale/100;  // viewport pixels (pointer, getBoundingClientRect) per pixel of the page's own lengths
+function setScale(v){uiScale=Math.max(50,Math.min(300,+v||100));try{localStorage.uiscale=String(uiScale)}catch(e){}
+  document.documentElement.style.zoom=uiScale===100?'':String(uiScale/100);for(const s of document.querySelectorAll('.uiscale'))s.value=String(uiScale);
+  dispatchEvent(new Event('resize'))}
+setScale(uiScale);
 let speed=1,landAt=null;try{speed=+localStorage.speed||1}catch(e){}  // playback speed; where to resume when a solo/mute render lands
 // channel families guessed from names: colour the stems and arrangement, and pick the DRUMS set
 const FAMS=[[/kick|snare|hat|hh|perc|drum|break|clap|tom|cym|ride|crash|shak|tamb|rim|conga|bongo/i,'#6b7378'],[/bass|\bsub\b/i,'#7a7268'],[/pad|bed|choir|string|chord|motif|vox|voice|organ/i,'#657080'],[/riff|lead|melod|arp|synth|pluck|seq/i,'#6d7a72'],[/fx|noise|rise|sweep|swell|gong|hit|impact|sfx/i,'#746b7a']];
@@ -610,14 +618,14 @@ async function refresh(){const j=await (await fetch('/api/state')).json();const 
 async function renderStart(){const j=await (await fetch('/api/start')).json();const li=(p,extra)=>`<div class="row" style="cursor:pointer;padding:6px 8px;background:#0f1416;margin-bottom:2px" onclick="openSong(${attr(p)})"><span style="font:11px var(--mono);color:var(--ink)">${esc(p.replace(/\\/g,'/').split('/').slice(-2).join('/'))}</span><span style="color:var(--dim);font-size:10px">${esc(extra||p)}</span></div>`;
   $('recentlist').innerHTML=(j.recent||[]).length?`<div class="k" style="margin-bottom:6px">RECENT</div>`+j.recent.map(p=>li(p)).join(''):'';
   $('demolist').innerHTML=(j.demos||[]).length?`<div class="k" style="margin-bottom:6px">DEMOS</div>`+j.demos.map(p=>li(p,'demo')).join(''):'';
-  $('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
-function resetPlayer(){faLetGo();sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
-async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
+  $('startver').textContent=j.version||'';$('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
+function resetPlayer(){faLetGo();clearTimeout(FA.draftT);$('fa-code').value='';sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
+async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}}
 async function newSong(){const p=$('newpath').value.trim();if(!p)return;await EDQ.chain;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;await EDQ.chain;
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
-async function browse(){await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
+async function browse(){await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}}
 function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen();else faLetGo()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
@@ -754,7 +762,7 @@ function renderSlots(f,ents){const sm=S.song.slot_meas||{},mx=S.mix||{},cc=S.can
 const panParse=s=>/^s/i.test(s)?'surround':/^c$/i.test(s)?32:/^[lr]\d+$/i.test(s)?Math.round(32+(s[0].toLowerCase()==='l'?-1:1)*Math.min(99,+s.slice(1))*32/99):+s;
 function typeIn(el,lo,hi,apply,cur,parse){const r=el.getBoundingClientRect(),inp=document.createElement('input');let done=false;
   inp.className='typein';inp.value=cur;inp.title=`${lo}–${hi} · Enter applies · Esc cancels`;
-  Object.assign(inp.style,{position:'fixed',left:r.left+'px',top:(r.top+r.height/2-9)+'px',width:Math.max(r.width,54)+'px',height:'18px',zIndex:20});
+  Object.assign(inp.style,{position:'fixed',left:r.left/zf()+'px',top:((r.top+r.height/2)/zf()-9)+'px',width:Math.max(r.width/zf(),54)+'px',height:'18px',zIndex:20});
   const close=()=>{if(!done){done=true;inp.remove()}};
   inp.onkeydown=e=>{e.stopPropagation();if(e.key==='Escape')return close();if(e.key!=='Enter')return;const s=inp.value.trim(),v=parse?parse(s):+s;close();
     if(typeof v==='string')apply(v);else if(s!==''&&isFinite(v))apply(Math.max(lo,Math.min(hi,Math.round(v))))};
@@ -825,7 +833,7 @@ function followPlayhead(){let p=playPos();if(p&&p.o!==PAT.order){if(!EDIT){showP
   if(PAT.row===r)return;PAT.row=r;const el=$('pat');el.querySelectorAll('.pt.now').forEach(e=>e.classList.remove('now'));
   if(r>=0){const e=el.querySelector(`.pt[data-r="${r}"]`),sc=$('patscroll');if(!e)return;e.classList.add('now');if(e.offsetTop<sc.scrollTop+20||e.offsetTop+15>sc.scrollTop+sc.clientHeight)sc.scrollTop=e.offsetTop-sc.clientHeight/3}}
 function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseInt(getComputedStyle(document.documentElement).getPropertyValue(v));
-  const mv=ev=>document.documentElement.style.setProperty(v,Math.max(min,Math.min(max,w0+sign*(ev.clientX-x0)))+'px'),up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);document.body.style.cursor='';if(PAT.order>=0)renderPat()};
+  const mv=ev=>document.documentElement.style.setProperty(v,Math.max(min,Math.min(max,w0+sign*(ev.clientX-x0)/zf()))+'px'),up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);document.body.style.cursor='';if(PAT.order>=0)renderPat()};
   addEventListener('mousemove',mv);addEventListener('mouseup',up);document.body.style.cursor='col-resize'}
 // ---- live engine: libopenmpt (WebAssembly) in an AudioWorklet (/engine-worklet.js: web/engine-core.js and
 // engine-worklet.js) plays the whole song as it is now (/api/it: the unwritten mix in), from any order and row. Mutes, solo,
@@ -1009,7 +1017,7 @@ function envSvg(kind,env,lo,hi){const g=envGeom(env,lo,hi,ENVD&&ENVD.kind===kind
     ${lo<0?`<line x1="34" x2="${g.W-10}" y1="${g.y(0)}" y2="${g.y(0)}" stroke="#242a2e"/>`:''}${sus.map(i=>ln(i,'#d9a441')).join('')}${lp.map(i=>ln(i,'#5f7d94')).join('')}
     <polyline points="${n.map(([t,v])=>`${g.x(t)},${g.y(v)}`).join(' ')}" fill="none" stroke="#7ee787" stroke-width="1.5"/>
     ${n.map(([t,v],i)=>`<circle data-i="${i}" cx="${g.x(t)}" cy="${g.y(v)}" r="5" fill="${sus.includes(i)?'#d9a441':'#7ee787'}" stroke="#0b0e0f" style="cursor:grab"><title>node ${i}: tick ${t}, ${v}</title></circle>`).join('')}${ticks}</svg>`}
-function envAt(e,r,env,lo,hi,T0){const g=envGeom(env,lo,hi,T0);return [g.t(e.clientX-r.left),Math.max(lo,Math.min(hi,g.v(e.clientY-r.top)))]}
+function envAt(e,r,env,lo,hi,T0){const g=envGeom(env,lo,hi,T0);return [g.t((e.clientX-r.left)/zf()),Math.max(lo,Math.min(hi,g.v((e.clientY-r.top)/zf())))]}
 function envDown(e,kind,lo,hi){if(e.button!==0)return;e.preventDefault();const r=e.currentTarget.getBoundingClientRect(),env=JSON.parse(JSON.stringify(insEntry()[kind])),i=e.target.dataset&&e.target.dataset.i;
   if(i==null){const [t,v]=envAt(e,r,env,lo,hi);if(t<=0||env.nodes.some(nd=>nd[0]===t)||env.nodes.length>=25)return;const k=env.nodes.findIndex(nd=>nd[0]>t),at=k<0?env.nodes.length:k;
     env.nodes.splice(at,0,[t,v]);shiftIdx(env,at,1);insSet(x=>x[kind]=env);return}
@@ -1162,12 +1170,12 @@ function renderSmp(){if(!$('smp-list')||!S||!S.song||!S.song.facts||!$('t-smp').
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 24px;max-width:640px">${vv('speed','speed',64)}${vv('depth','depth',64)}${vv('rate','rate (sweep)',255)}</div>`);
   renderSmpLoops();renderSmpInfo();smpFetch();drawWave()}
 addEventListener('resize',()=>{if($('t-smp').classList.contains('on')){drawWave();smpFetch()}});
-// ---- conveniences: WAVs dropped from the file manager are uploaded (the page cannot see a file's path) and saved beside
-// the song (an identical copy there is reused), then handed to `fn` as paths; a drop anywhere else does nothing (WebView2
+// ---- conveniences: sound files dropped from the file manager are uploaded (the page cannot see a file's path) and saved
+// beside the song as WAVs (an identical copy there is reused), then handed to `fn` as paths; a drop anywhere else does nothing (WebView2
 // would open the file in place of the app)
 function dragOver(ev){if([...ev.dataTransfer.types].includes('Files')){ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.add('drop')}}
-async function dropWav(ev,fn){ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.remove('drop');const fs=[...(ev.dataTransfer.files||[])].filter(f=>/\.wav$/i.test(f.name));
-  if(!fs.length){alert('drop WAV files');return}const paths=[];
+async function dropWav(ev,fn){ev.preventDefault();ev.stopPropagation();ev.currentTarget.classList.remove('drop');const fs=[...(ev.dataTransfer.files||[])].filter(f=>/\.(wav|flac|aiff?|aifc|ogg|oga|opus|mp3)$/i.test(f.name));
+  if(!fs.length){alert('drop sound files: WAV, FLAC, AIFF, OGG or MP3');return}const paths=[];
   for(const f of fs){const j=await (await fetch('/api/upload?name='+encodeURIComponent(f.name),{method:'POST',body:await f.arrayBuffer()})).json();if(j.error){alert(j.error);return}paths.push(j.path)}
   fn(paths)}
 addEventListener('dragover',e=>e.preventDefault());addEventListener('drop',e=>e.preventDefault());
@@ -1469,7 +1477,7 @@ function setLoop(a,b){act('loop',{from:a,to:b}).then(()=>{const L=loopSpan();if(
 function loopFields(){const v=[0,1,2,3].map(i=>$('lf'+i).value);if(v.some(x=>x===''))return;setLoop([+v[0],+v[1]],[+v[2],+v[3]])}
 function loopDrag(e){e.preventDefault();const el=$('loopbar'),r=el.getBoundingClientRect(),d=audio.duration;if(!isFinite(d)||solo)return;
   const tx=x=>d*Math.max(0,Math.min(.9999,(x-r.left)/r.width)),x0=e.clientX,fill=$('loopfill');let x1=x0;
-  const mv=ev=>{x1=ev.clientX;const a=Math.min(x0,x1)-r.left,b=Math.max(x0,x1)-r.left;fill.style.left=a+'px';fill.style.width=(b-a)+'px'};
+  const mv=ev=>{x1=ev.clientX;const a=Math.min(x0,x1)-r.left,b=Math.max(x0,x1)-r.left;fill.style.left=a/zf()+'px';fill.style.width=(b-a)/zf()+'px'};
   const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);if(Math.abs(x1-x0)<3)return act('loop',{});
     const p=posAt(tx(Math.min(x0,x1))),q=posAt(tx(Math.max(x0,x1)));setLoop([p.o,p.row],[q.o,q.row])};
   addEventListener('mousemove',mv);addEventListener('mouseup',up)}
@@ -1583,8 +1591,9 @@ function renderMap(){if(!mapOn()||!S.library)return;renderMapSide();if(S.library
 addEventListener('resize',()=>{if(mapOn())drawMap();if(ptOn())ptDraw()});
 // ---- the FAUST tab: Faust code compiled and a note or chord rendered in the page (web/faust-render.mjs over faustwasm, which the
 // server fetches from npm on request and serves under /faust/); the WAV goes up to the song's folder (/api/upload) and on
-// to the candidates or a new slot (POST place). The code is kept in this browser.
-const FA={m:null,F:null,loading:null,ctrls:[],vals:{},code:null,gen:null,node:null,nodeCode:null,held:{},played:0};
+// to the candidates or a new slot (POST place) with its faust: entry, written into faust.yaml beside the song so the RECIPE
+// box renders it again. The code being typed is kept with the song (its .tryout.json).
+const FA={m:null,F:null,loading:null,ctrls:[],vals:{},code:null,gen:null,node:null,nodeCode:null,held:{},played:0,pedal:false,sus:new Set()};
 const FA_EXAMPLE=`import("stdfaust.lib");
 // a voice per note: freq, gate and gain are set by each note (NOTE, a piano key, MIDI); the other sliders show up on the
 // right and act on every voice; bend follows a MIDI keyboard's pitch wheel (two semitones)
@@ -1599,8 +1608,10 @@ voice = (os.sawtooth(f) + os.sawtooth(f * (1 + detune / 100))) / 2;
 process = voice * en.adsr(0.005, 0.25, 0.5, 0.4, gate) * gain * 0.4 : fi.resonlp(cutoff, 1.5, 1) <: _, _;`;
 const faOn=()=>$('t-faust').classList.contains('on');
 function faExample(){$('fa-code').value=FA_EXAMPLE;faSaveCode();faCompile().catch(()=>{})}
-function faSaveCode(){try{localStorage.faustcode=$('fa-code').value}catch(e){}}
-async function faOpen(){if(!$('fa-code').value){let c='';try{c=localStorage.faustcode||''}catch(e){}$('fa-code').value=c||FA_EXAMPLE}
+function faSaveCode(){clearTimeout(FA.draftT);const code=$('fa-code').value;
+  FA.draftT=setTimeout(()=>fetch('/api/faustcode',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code})}),500)}
+// the song's own code (before 1.0 one draft was kept per browser: that one, once, for a song without its own)
+async function faOpen(){if(!$('fa-code').value){let c=S.faust_code||'';if(!c)try{c=localStorage.faustcode||''}catch(e){}$('fa-code').value=c||FA_EXAMPLE}
   const j=await (await fetch('/api/faust')).json();FA.have=j.have;const job=j.job||{};$('fa-get-panel').style.display=j.have?'none':'block';
   put('fa-get',j.have?'':job.status==='fetching'?`<div class="mono" style="font-size:10px">downloading… ${job.size?Math.round(job.got*100/job.size)+' %':''}</div>`:
     `<div style="font-size:10.5px;color:var(--mid);margin-bottom:6px">The Faust compiler (faustwasm ${esc(j.version)}, GRAME, LGPL-3.0, from npm: about 6 MB kept in <span class="mono">${esc(j.dir)}</span>) is not here yet.</div><span class="btn" onclick="faFetch()">GET FAUST</span>${job.error?`<div class="err">${esc(job.error)}</div>`:''}`);
@@ -1629,7 +1640,7 @@ function faNode(){const code=FA.code,gen=FA.gen;if(FA.njob&&FA.njob.code===code)
   const p=(async()=>{const ctx=pkCtx(),m=/\[nvoices:(\d+)\]/.exec(JSON.stringify(gen.getMeta().meta||[])),node=await gen.createNode(ctx,m?Math.max(1,Math.min(64,+m[1])):16);
     for(const c of FA.ctrls)if(FA.vals[c.label]!=null&&!faAuto(c))node.setParamValue(c.address,FA.vals[c.label]);
     node.connect(ctx.destination);const old=FA.node;Object.assign(FA,{node,nodeCode:code});
-    if(old)old.allNotesOff(false),setTimeout(()=>{old.allNotesOff(true);old.disconnect();old.destroy()},3000);return node})();
+    if(old)faRelease(old),setTimeout(()=>{old.allNotesOff(true);old.disconnect();old.destroy()},3000);return node})();
   FA.njob={code,p};p.catch(()=>{}).finally(()=>{if(FA.njob&&FA.njob.p===p)FA.njob=null});return p}
 // the node for the code in the box: compiled again after an edit (code that failed to compile gives its error again, not
 // another compile per key: COMPILE tries it again), built again after LATENCY
@@ -1638,22 +1649,31 @@ async function faReady(){const code=$('fa-code').value;if(FA.node&&FA.nodeCode==
 // a key (a piano key 'k…' or a MIDI note 'm…') down: a voice at its note; let go while the code compiles, it is released
 // as soon as it sounds. A key on a pitch another key holds plays it a millionth of a semitone higher: the node's key-off
 // goes by pitch and would let the older voice go, not this key's
-async function faKeyOn(id,note,vel){if(FA.held[id])return;while(Object.values(FA.held).some(h=>h.note===note))note+=1e-6;
+async function faKeyOn(id,note,vel){if(FA.held[id]){if(!FA.sus.delete(id))return;faKeyOff(id,true)}  // struck again under the pedal: anew
+  while(Object.values(FA.held).some(h=>h.note===note))note+=1e-6;
   const h=FA.held[id]={pending:true,note};FA.played++;
   try{const node=await faReady();pkCtx().resume();if(FA.held[id]!==h)return;if(!faOn()){delete FA.held[id];return}
     node.keyOn(0,note,vel);Object.assign(h,{pending:false,node});if(h.release)faKeyOff(id)}
   catch(e){if(FA.held[id]===h)delete FA.held[id];$('fa-msg').textContent=String(e.message||e)}}
-function faKeyOff(id){const h=FA.held[id];if(!h)return;if(h.pending){h.release=true;return}delete FA.held[id];h.node.keyOff(0,h.note,0)}
+// a key let go: its voice released, unless the sustain pedal (MIDI CC 64) is down: then when the pedal comes up
+function faKeyOff(id,now){const h=FA.held[id];if(!h)return;if(FA.pedal&&!now){FA.sus.add(id);return}if(h.pending){h.release=true;return}
+  delete FA.held[id];FA.sus.delete(id);h.node.keyOff(0,h.note,0)}
+// the voices `node` sounds for held keys, released (faustwasm's allNotesOff(false) is CC 123 to its processor, which cuts
+// every voice at once whatever `hard` says: a let-go releases each voice instead)
+function faRelease(node){for(const h of Object.values(FA.held))if(h.node===node&&!h.pending)node.keyOff(0,h.note,0)}
 // leaving the tab or the song: the notes go, and a pitch wheel's control goes back to its slider (the wheel's return to
 // centre comes while another tab has the MIDI)
-function faLetGo(){const n=FA.node,at=FA.played;FA.held={};if(!n)return;n.allNotesOff(false);clearTimeout(FA.letT);FA.letT=setTimeout(()=>{if(FA.played===at)n.allNotesOff(true)},3000);
+function faLetGo(){const n=FA.node,at=FA.played;if(n)faRelease(n);FA.held={};FA.pedal=false;FA.sus.clear();if(!n)return;clearTimeout(FA.letT);FA.letT=setTimeout(()=>{if(FA.played===at)n.allNotesOff(true)},3000);
   if(FA.nodeCode===FA.code)for(const c of FA.ctrls)if(/^pitchwheel/.test(c.midi))n.setParamValue(c.address,FA.vals[c.label]??c.init)}
 // MIDI on the FAUST tab: notes play the node (velocity, or VELOCITY with VEL→VOL off); the rest goes in as it came, so
 // pitch bend and CCs reach the controls the code maps with [midi:pitchwheel] / [midi:ctrl n] (CC 120/123: all notes off).
+// The sustain pedal (CC 64 at 64 or more) holds the notes let go until it comes up, the piano keys' too.
 // A CC moves its controls' sliders too (faustwasm's mapping: 0-127 over the slider's range), so PREVIEW and the saves
 // render what is heard
 function faMidi(d){const t=d[0]&0xf0;if(t===0x90&&d[2]>0)return faKeyOn('m'+d[1],d[1],MIDI.vel?d[2]:+$('fa-vel').value||100);
   if(t===0x80||t===0x90){lvNoteOff('m'+d[1]);return faKeyOff('m'+d[1])}  // a key held since another tab
+  if(t===0xb0&&d[1]===64){FA.pedal=d[2]>=64;if(!FA.pedal)for(const id of [...FA.sus])faKeyOff(id,true)}
+  if(t===0xb0&&(d[1]===120||d[1]===123)){FA.pedal=false;FA.sus.clear();FA.held={}}  // the node cuts every voice
   if(t===0xb0)for(const c of FA.ctrls){const m=/^ctrl\s+(\d+)(?:\s+(\d+))?/.exec(c.midi||''),ch=m&&+(m[2]||0);if(m&&+m[1]===d[1]&&(!ch||ch===(d[0]&15)+1))faShow(c,c.min+d[2]/127*(c.max-c.min))}
   if(FA.node)FA.node.midiMessage(Array.from(d))}
 function faSet(label,v){FA.vals[label]=v;const c=FA.ctrls.find(c=>c.label===label);if(FA.node&&c&&FA.nodeCode===FA.code)FA.node.setParamValue(c.address,v)}
@@ -1668,7 +1688,8 @@ function faCtrls(){const cs=FA.ctrls.filter(c=>!faAuto(c));
 async function faRender(){const gen=FA.gen&&FA.code===$('fa-code').value?FA.gen:await faCompile(),ns=faNotes();if(!ns)throw new Error('NOTE is a note or a chord: C-5, C-5 E-5 G-5…');
   const params={};for(const c of FA.ctrls)if(FA.vals[c.label]!=null&&!faAuto(c))params[c.label]=FA.vals[c.label];const velocity=+$('fa-vel').value||100,length=+$('fa-hold').value||1;
   const r=await FA.m.renderNotes(gen,{notes:ns.map(note=>({note,start:0,length,velocity})),tail:+$('fa-tail').value||0,params,rate:44100});
-  let peak=0;for(const ch of r.channels)for(const v of ch)peak=Math.max(peak,Math.abs(v));if(!r.channels.length)throw new Error('the code has no output: process = … ;');return {channels:r.channels,peak}}
+  let peak=0;for(const ch of r.channels)for(const v of ch)peak=Math.max(peak,Math.abs(v));if(!r.channels.length)throw new Error('the code has no output: process = … ;');
+  return {channels:r.channels,peak,faust:{code:FA.code,notes:ns,hold:length,tail:+$('fa-tail').value||0,velocity,params}}}
 function faWav(channels,rate,root){const n=channels[0].length,nc=channels.length,data=n*nc*2,smpl=36,buf=new ArrayBuffer(44+data+8+smpl),v=new DataView(buf);let o=0;
   const str=s=>{for(const c of s)v.setUint8(o++,c.charCodeAt(0))},u32=x=>{v.setUint32(o,x,true);o+=4},u16=x=>{v.setUint16(o,x,true);o+=2};
   str('RIFF');u32(36+data+8+smpl);str('WAVE');str('fmt ');u32(16);u16(1);u16(nc);u32(rate);u32(rate*nc*2);u16(nc*2);u16(16);str('data');u32(data);
@@ -1679,7 +1700,7 @@ async function faPreview(){$('fa-msg').textContent='rendering…';try{const r=aw
   $('fa-msg').textContent=`playing ${(r.channels[0].length/44100).toFixed(2)} s, peak ${(20*Math.log10(r.peak||1e-9)).toFixed(1)} dBFS${w.scaled?' (over full scale: scaled down)':''}`}catch(e){$('fa-msg').textContent=String(e.message||e)}}
 async function faSave(dest){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,faNotes()[0]),name=($('fa-name').value||'faust').replace(/[^\w.-]+/g,'_');
   const up=await (await fetch('/api/upload?name='+encodeURIComponent('faust-'+name+'.wav'),{method:'POST',body:w.buf})).json();if(up.error)throw new Error(up.error);
-  const j=await (await fetch('/api/place',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:up.path,dest,stereo:r.channels.length>1})})).json();
+  const j=await (await fetch('/api/place',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:up.path,dest,stereo:r.channels.length>1,faust:r.faust})})).json();
   $('fa-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'')+(w.scaled?' (scaled under full scale)':'');refresh()}catch(e){$('fa-msg').textContent=String(e.message||e)}}
 // ---- the PAINT tab (spectral.py): a picture over frequency (rows, lowest at the bottom) and time (columns); brightness is
 // the level, the colour the pan (red left, yellow centre, green right). Kept in this browser per song (localStorage).
@@ -1701,7 +1722,7 @@ async function pkPlay(k){const semi=pianoNote(k);  // the pitch at the key press
     const s=PK.ctx.createBufferSource();s.buffer=PK.buf;s.playbackRate.value=2**((semi-PK.root)/12);s.connect(PK.ctx.destination);
     PK.srcs.add(s);s.onended=()=>PK.srcs.delete(s);s.start()}
   catch(e){$('pt-msg').textContent=String(e.message||e)}}
-function pkStop(){PTA.pause();for(const s of PK.srcs)s.stop();PK.srcs.clear();FA.held={};if(FA.node)FA.node.allNotesOff(true)}
+function pkStop(){PTA.pause();for(const s of PK.srcs)s.stop();PK.srcs.clear();FA.held={};FA.sus.clear();if(FA.node)FA.node.allNotesOff(true)}
 function ptKey(){return 'paint|'+(S&&S.song?S.song.path:'')}
 function ptNew(r,c){PT.rows=r;PT.cols=c;PT.amp=new Float32Array(r*c);PT.pan=new Float32Array(r*c)}
 function ptSave(){try{localStorage[ptKey()]=JSON.stringify({rows:PT.rows,cols:PT.cols,amp:Array.from(PT.amp,v=>Math.round(v*1000)),pan:Array.from(PT.pan,v=>Math.round(v*1000)),
@@ -1772,12 +1793,12 @@ function renderProject(){
   $('history-count').textContent=`${S.undo} undo · ${S.redo} redo · ${(S.history_bytes/1048576).toFixed(2)} / ${(S.history_limit/1048576).toFixed(0)} MiB`;
   put('checkpoint-list',(S.checkpoints||[]).map(n=>`<p><span class="mono">${esc(n)}</span> <button class="btn" onclick="checkpointRestore(${attr(n)})">COMPARE / RESTORE</button> <button class="btn" onclick="act('checkpoint',{name:${attr(n)},action:'delete'})">DELETE CHECKPOINT</button></p>`).join(''));
 }
-const PROJECT_PREFS=['hexrows','speed','voice','lvlatency','midivel','metro','specscale','faustcode'];
+const PROJECT_PREFS=['hexrows','speed','voice','lvlatency','midivel','metro','specscale','faustcode','uiscale'];
 function browserSettings(){const settings={local:{}};try{for(const key of PROJECT_PREFS){const v=localStorage.getItem(key);if(v!==null)settings.local[key]=v}settings.paint=localStorage.getItem(ptKey())}catch(e){}return settings;}
 async function collectProject(){const j=await act('collect',{destination:$('collect-dest').value,zip:$('collect-zip').checked,browser:browserSettings()});if(!j.error)$('collect-result').textContent=j.report+' '+j.path+(j.zip?' · '+j.zip:'');}
 function restoreBrowserSettings(){const settings=S.project_settings||{};try{for(const key of PROJECT_PREFS){if(typeof settings.local?.[key]==='string')localStorage.setItem(key,settings.local[key])}if(settings.paint)localStorage.setItem(ptKey(),settings.paint);location.reload()}catch(e){alert(String(e))}}
 async function sectionSave(){await act('section',{action:'save',name:$('section-name').value,start:+$('section-start').value,end:+$('section-end').value});}
-async function sectionAction(action){await act('section',{action,name:$('section-select').value,to:+$('section-to').value,independent:$('section-copy').value==='independent'});}
+async function sectionAction(action){await act('section',{action,name:$('section-select').value,to:+$('section-to').value,independent:$('section-copy').value==='independent',...(action==='rename'?{new_name:$('section-name').value}:{})});}
 function sectionExport(){tab('export');if($('export-region'))$('export-region').value=$('section-select').value;}
 let phraseEditorKey='';
 async function phraseCapture(){if(!PAT.rows||!S.song.facts)return;const n=selNorm(),fo=PAT.fo||[];

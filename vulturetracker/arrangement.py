@@ -65,6 +65,14 @@ def sections_text(text, sections):
     return text
 
 
+def section_renamed(text, old, new):
+    """The song text with section `old` named `new` where it stands (its place, line and comments kept)."""
+    root = yaml.compose(text, Loader=api._Loader)
+    node = next(v for k, v in root.value if k.value == 'sections')
+    key = next(k for k, _ in node.value if k.value == old)
+    return text[:key.start_mark.index] + json.dumps(new) + text[key.end_mark.index:]
+
+
 def occurrence_map(before, after):
     """Stable identities for legacy order edits; explicit UI identities disambiguate repeated patterns."""
     remaining = list(enumerate(before))

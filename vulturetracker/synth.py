@@ -12,6 +12,7 @@ import yaml
 
 from . import notation
 from .fileio import protect_outputs
+from .fileio import user_dir
 from .wavload import write_wav
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,9 +20,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def tools_dir(root):
     """Where the synths and faustwasm go: tools/ of a checkout (its pyproject.toml beside the package); the exe and a pip
-    install keep them in %LOCALAPPDATA%/VultureTracker/tools (fetch_synth), never in site-packages."""
+    install keep them in the per-user folder (fileio.user_dir: %LOCALAPPDATA%/VultureTracker/tools on Windows), never in
+    site-packages."""
     if getattr(sys, "frozen", False) or not (root / "pyproject.toml").is_file():
-        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "VultureTracker" / "tools"
+        return user_dir(local=True) / "tools"
     return root / "tools"
 
 
@@ -54,20 +56,42 @@ class SynthMissing(RecipeError):
 # Patch names: Surge XT 'Category/Name' or '3rdparty/Author/Category/Name'; Dexed (DX7) 'dexed:Cartridge/Voice';
 # OB-Xd 'obxd:Bank/Program'. Every patch loads by handing the plugin its own saved-state format, as a DAW would.
 
-DEXED_VST3 = Path(os.environ.get("DEXED_VST3", TOOLS / "synths" / "dexed" / "Dexed.vst3"))
-OBXD_VST3 = Path(os.environ.get("OBXD_VST3", Path(os.environ.get("COMMONPROGRAMFILES", r"C:\Program Files\Common Files"))
-                                / "VST3" / "OB-Xd.vst3"))
-DEXED_CARTS = [Path(os.environ.get("APPDATA", Path.home())) / "DigitalSuburban" / "Dexed" / "Cartridges",
+# the platform's VST3 folders (Steinberg's list), where an installer puts a plug-in; and where Surge XT's installer puts
+# its patches and JUCE plug-ins (Dexed) their user data
+if os.name == "nt":
+    VST3_DIRS = [Path(os.environ.get("COMMONPROGRAMFILES", r"C:\Program Files\Common Files")) / "VST3"]
+    SURGE_DATA, JUCE_DATA = Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Surge XT", Path(os.environ.get("APPDATA", Path.home()))
+elif sys.platform == "darwin":
+    VST3_DIRS = [Path.home() / "Library/Audio/Plug-Ins/VST3", Path("/Library/Audio/Plug-Ins/VST3")]
+    SURGE_DATA, JUCE_DATA = Path("/Library/Application Support/Surge XT"), Path.home() / "Library"
+else:
+    VST3_DIRS = [Path.home() / ".vst3", Path("/usr/lib/vst3"), Path("/usr/local/lib/vst3")]
+    SURGE_DATA, JUCE_DATA = Path("/usr/share/surge-xt"), Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+
+
+def installed(bundle):
+    """`bundle` in the first VST3 folder that has it (else in the first, for the message that it is missing)."""
+    return next((d / bundle for d in VST3_DIRS if (d / bundle).exists()), VST3_DIRS[0] / bundle)
+
+
+DEXED_VST3 = Path(os.environ.get("DEXED_VST3") or next((p for p in (TOOLS / "synths" / "dexed" / "Dexed.vst3", installed("Dexed.vst3"))
+                                                          if p.exists()), TOOLS / "synths" / "dexed" / "Dexed.vst3"))
+OBXD_VST3 = Path(os.environ.get("OBXD_VST3") or installed("OB-Xd.vst3"))
+DEXED_CARTS = [JUCE_DATA / "DigitalSuburban" / "Dexed" / "Cartridges",
                TOOLS / "synths" / "cartridges"]  # Dexed writes its bundled cartridges to the first on first load
 OBXD_BANKS = Path.home() / "Documents" / "discoDSP" / "OB-Xd" / "Banks"
 
 
-def surge_dir():
+def surge_paths():
+    """(Surge XT.vst3, the folder of its patches): side by side in SURGE_XT_DIR or the portable copy the app downloads,
+    else Surge XT as its installer puts it on this platform."""
     d = Path(os.environ.get("SURGE_XT_DIR", DEFAULT_SURGE))
-    if not (d / "Surge XT.vst3").exists():
-        raise SynthMissing("surge", f"Surge XT not found in {d}; get it from the app's RECIPE box, run python "
-                                    "tools/fetch_surge.py or set SURGE_XT_DIR")
-    return d
+    if (d / "Surge XT.vst3").exists():
+        return d / "Surge XT.vst3", d / "SurgeXTData"
+    if "SURGE_XT_DIR" not in os.environ and installed("Surge XT.vst3").exists() and SURGE_DATA.is_dir():
+        return installed("Surge XT.vst3"), SURGE_DATA
+    raise SynthMissing("surge", f"Surge XT not found in {d} or {VST3_DIRS[0]}; get it from the app's RECIPE box "
+                                f"(Windows), install it, run python tools/fetch_surge.py or set SURGE_XT_DIR")
 
 
 # the Windows downloads fetch_synth unpacks into TOOLS (tools/fetch_surge.py and fetch_instruments.py do the same for a
@@ -173,7 +197,7 @@ def patch_index():
     import html
     out = {}
     try:
-        data = surge_dir() / "SurgeXTData"
+        data = surge_paths()[1]
         for base, prefix in ((data / "patches_factory", ""), (data / "patches_3rdparty", "3rdparty/")):
             for p in base.rglob("*.fxp"):
                 out[prefix + p.relative_to(base).with_suffix("").as_posix()] = ("surge", p, 0)
@@ -222,7 +246,7 @@ class Synths:
     def _plugin(self, kind):
         from pedalboard import load_plugin
         if kind not in self.plugins:
-            bundle = surge_dir() / "Surge XT.vst3" if kind == "surge" else DEXED_VST3 if kind == "dexed" else OBXD_VST3
+            bundle = surge_paths()[0] if kind == "surge" else DEXED_VST3 if kind == "dexed" else OBXD_VST3
             if not bundle.exists():
                 raise SynthMissing(kind, f"{kind} plugin not found at {bundle} (see SAMPLING.md, Setup)")
             self.plugins[kind] = load_plugin(str(bundle / "Contents" / "x86_64-win" / bundle.name)

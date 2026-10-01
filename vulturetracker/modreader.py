@@ -153,7 +153,7 @@ def read_mod(data: bytes):
     if not nch or nch > 64:
         raise ModReadError(f"not a 31-sample MOD (signature {data[1080:1084]!r})")
     warn = _Warn()
-    mod = _module(_cstr(data[:20]), nch, "mod")
+    mod = _module(_cstr(data[:20], "latin-1"), nch, "mod")  # OpenMPT: the Amiga's character set
     mod.mix_volume = 64  # libopenmpt mixes a MOD 2.5 dB louder than an IT at the default 48 (measured)
     mod.old_effects = True  # IT's old effects play ProTracker's vibrato and tremolo (depth, phase; measured)
     for i, ch in enumerate(mod.channels):
@@ -161,7 +161,7 @@ def read_mod(data: bytes):
     heads = []
     for i in range(31):
         o = 20 + 30 * i
-        name = _cstr(data[o:o + 22])
+        name = _cstr(data[o:o + 22], "latin-1")
         length, fine, vol, lstart, llen = struct.unpack_from(">HBBHH", data, o + 22)
         fine = (fine & 15) - 16 if fine & 8 else fine & 15
         heads.append((name, 2 * length, fine, min(vol, 64), 2 * lstart, 2 * llen))
@@ -216,7 +216,8 @@ def read_s3m(data: bytes):
     chset = data[0x40:0x60]
     used = [c for c in range(32) if chset[c] < 16]
     nch = max(used) + 1 if used else 1
-    mod = _module(_cstr(data[:28]), nch, "s3m")
+    cs = "cp1252" if (cwt & 0xF000) == 0x5000 else "cp437"  # OpenMPT: CP437, or Windows-1252 when an OpenMPT saved it
+    mod = _module(_cstr(data[:28], cs), nch, "s3m")
     mod.global_volume, mod.speed = min(128, 2 * gv), speed or 6
     mod.tempo = tempo if tempo >= 32 else 125
     stereo = bool(mv & 0x80)
@@ -241,7 +242,7 @@ def read_s3m(data: bytes):
         if o + 0x50 > len(data):
             continue
         kind = data[o]
-        smp.name, smp.filename = _cstr(data[o + 0x30:o + 0x4C])[:25], _cstr(data[o + 1:o + 13])
+        smp.name, smp.filename = _cstr(data[o + 0x30:o + 0x4C], cs)[:25], _cstr(data[o + 1:o + 13], cs)
         if kind != 1:
             if kind >= 2:
                 warn("AdLib instruments dropped (silent slots)")
@@ -363,7 +364,9 @@ def read_xm(data: bytes):
         raise ModReadError(f"XM version {ver >> 8}.{ver & 255:02d}: only 1.04 files (FastTracker 2.0x on) are read")
     hsize = struct.unpack_from("<I", data, 60)[0]
     slen, restart, nch, npat, nins, flags, speed, bpm = struct.unpack_from("<8H", data, 64)
-    mod = _module(_cstr(data[17:37]), max(1, min(64, nch)), "xm")
+    # OpenMPT: CP437, or Windows-1252 when OpenMPT or MadTracker saved it (Load_xm.cpp)
+    cs = "cp1252" if data[38:46] == b"OpenMPT " or data[38:52] == b"MadTracker 2.0" else "cp437"
+    mod = _module(_cstr(data[17:37], cs), max(1, min(64, nch)), "xm")
     mod.linear_slides = bool(flags & 1)
     mod.old_effects = True  # IT's old effects play FT2's vibrato and tremolo (measured, as for MOD)
     mod.speed, mod.tempo = min(255, speed or 6), max(32, min(255, bpm or 125))
@@ -401,7 +404,7 @@ def read_xm(data: bytes):
     mod.instruments = []
     for n in range(nins):
         isize = struct.unpack_from("<I", data, pos)[0]
-        ins = Instrument(name=_cstr(data[pos + 4:pos + 26])[:25])
+        ins = Instrument(name=_cstr(data[pos + 4:pos + 26], cs)[:25])
         mod.instruments.append(ins)
         nsmp = struct.unpack_from("<H", data, pos + 27)[0] if isize >= 29 else 0
         if not nsmp:
@@ -418,7 +421,7 @@ def read_xm(data: bytes):
         heads = []
         for s in range(nsmp):
             length, lstart, llen, vol, fine, typ, pan, rel = struct.unpack_from("<IIIBbBBb", data, pos)
-            heads.append((length, lstart, llen, vol, fine, typ, pan, rel, _cstr(data[pos + 18:pos + 40]), data[pos + 17]))
+            heads.append((length, lstart, llen, vol, fine, typ, pan, rel, _cstr(data[pos + 18:pos + 40], cs), data[pos + 17]))
             pos += shsize
         first = len(mod.samples) + 1
         for length, lstart, llen, vol, fine, typ, pan, rel, name, res in heads:

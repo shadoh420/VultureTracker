@@ -17,6 +17,7 @@ import hashlib
 import importlib
 import itertools
 import json
+import logging
 import math
 import os
 import queue
@@ -36,16 +37,16 @@ from urllib.parse import unquote
 
 import yaml
 
-from . import api
-from .fileio import atomic_write as _atomic, device_name, lock_file, protect_outputs, unlock_file, wav_bytes
+from . import __version__, api
+from .fileio import atomic_write as _atomic, lock_file, protect_outputs, save_beside, unlock_file, user_dir, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
-from .history import History, digest, json_bytes, pack_step, unpack_step, HISTORY_BYTES
+from .history import SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
 from .project import collect, file_updates, replace_values, resolve_meta, relative_meta
-from .arrangement import sections_text, occurrence_map, reorder
-from .openmpt import LoadedModule
+from .arrangement import section_renamed, sections_text, occurrence_map, reorder
+from .openmpt import LoadedModule, library_version
 from .song import SongError, it_text, load_song_text
-from .wavload import read_wav
+from .wavload import SOUND_FILES, read_wav, to_wav
 
 HTML = Path(__file__).with_name("gui.html")
 WEB = HTML.with_name("web")  # the live engine: libopenmpt 0.8.9 compiled to WebAssembly (official build) and its AudioWorklet
@@ -54,7 +55,7 @@ RATE = 44100
 # level up (dist/ in a checkout)
 ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
         if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
-RECENT = Path(os.environ.get("APPDATA", Path.home())) / "VultureTracker" / "recent.json"
+RECENT = user_dir() / "recent.json"
 REC_SETTINGS = RECENT.with_name("record.json")  # the RECORD tab's ASIO choice, read before sounddevice loads
 # the page is served from one address every launch when it can be, and the window keeps a WebView2 profile beside the
 # recent list, so what the browser stores per address stays: the page's settings (localStorage) and the MIDI permission
@@ -67,6 +68,39 @@ WORKERS = max(1, int(os.environ.get("VT_WORKERS") or 1))
 PROFILE = RECENT.parent / "webview"
 LOCKS = RECENT.parent / "open"  # one locked file per song open in an app (app_lock_path)
 OLD_RECENT = RECENT.parent.with_name("TrackerForge") / "recent.json"  # the app's previous name
+HOME_RECENT = Path.home() / "VultureTracker" / "recent.json"  # where Linux and macOS kept it before 1.0
+LOG = RECENT.parent / "vulturetracker.log"
+_log = logging.getLogger("vulturetracker")  # without start_log (the command line, the tests) errors go to stderr
+LOGGING = False
+
+
+def start_log():
+    """The app's log, for the exe (a windowed program has no console): unexpected errors with their tracebacks, after a
+    line naming this version, libopenmpt's and the system. At most two files of 256 KB (vulturetracker.log and .log.1)."""
+    global LOGGING
+    import logging.handlers
+    import platform
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        h = logging.handlers.RotatingFileHandler(LOG, maxBytes=256 * 1024, backupCount=1, encoding="utf-8")
+    except OSError:
+        return
+    h.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    _log.addHandler(h)
+    if sys.stderr:  # run from a console: there too
+        _log.addHandler(logging.StreamHandler())
+    _log.setLevel(logging.INFO)
+    _log.info("VultureTracker %s started: libopenmpt %s, Python %s, %s", __version__, library_version(),
+              platform.python_version(), platform.platform())
+    sys.excepthook = lambda *exc: _log.error("Unexpected error", exc_info=exc)
+    threading.excepthook = lambda a: a.exc_type is SystemExit or _log.error(
+        "Unexpected error in %s", a.thread.name if a.thread else "a thread", exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+    LOGGING = True
+
+
+def logged(error):
+    """An error for the page, naming the log when the app keeps one."""
+    return f"{error} (details in {LOG})" if LOGGING else error
 
 
 def _atomic_text(path, text):
@@ -93,7 +127,7 @@ def _read_json(path, default, notices, move=True):
 
 
 def recent_songs():
-    for f in (RECENT, OLD_RECENT):
+    for f in (RECENT, OLD_RECENT, HOME_RECENT):
         try:
             return [p for p in json.loads(f.read_text(encoding="utf-8")) if Path(p).exists()]
         except (OSError, ValueError):
@@ -204,7 +238,7 @@ MIDI_SUFFIXES = (".mid", ".midi")
 
 
 def start_snapshot():
-    return {"song": None, "recent": recent_songs(), "demos": demo_songs()}
+    return {"song": None, "recent": recent_songs(), "demos": demo_songs(), "version": __version__}
 
 
 # ---------------------------------------------------------------- measurements
@@ -552,8 +586,8 @@ def ffmpeg_exe():
     except (ImportError, RuntimeError):
         exe = shutil.which("ffmpeg")
     if not exe:
-        raise OSError("MP3/OGG/FLAC export needs ffmpeg: ffmpeg.exe beside vulturetracker.exe, pip install imageio-ffmpeg, "
-                      "or ffmpeg on PATH")
+        raise OSError("MP3/OGG/FLAC export, and FLAC, AIFF, OGG and MP3 samples, need ffmpeg: ffmpeg.exe beside "
+                      "vulturetracker.exe, pip install imageio-ffmpeg, or ffmpeg on PATH")
     return exe
 
 
@@ -928,6 +962,9 @@ class State:
     READ_ONLY = ("{name} is open in another VultureTracker window or being changed by a command-line tool, so it opened "
                  "read-only: it plays, but edits, checkpoints and tryout settings are not saved. Close the other (or let "
                  "the command finish), then open the song again to edit it.")
+    NEWER = ("{names} beside {name} {were} written by a newer VultureTracker, so the song opened read-only: it plays, but "
+             "nothing is saved, so that version's files are not written over. Open the song in that version, or update "
+             "this one (https://github.com/shadoh420/VultureTracker/releases).")
 
     def __init__(self, song_path, headless=False, passive=False):
         """`headless` (the command line): no workers, no .tryout cache, no lock, notes left where they are. `passive`:
@@ -957,9 +994,17 @@ class State:
         self._history_ready = False
         self._asset_hashes = {}
         meta = _read_json(self.meta_path, {}, self.notices, move=not passive)
-        self.meta.update(resolve_meta(meta, self.base_dir) if isinstance(meta, dict) else {})
         self.notes_path = self.song_path.with_name(self.song_path.stem + ".notes.json")
         notes = _read_json(self.notes_path, [], self.notices, move=not passive)
+        saved = self.history_store.load()
+        late = [p.name for p, v in ((self.meta_path, meta), (self.notes_path, notes)) if newer(v)]
+        late += [self.history_store.path.name] if self.history_store.newer else []
+        if late:  # read nothing from them, write nothing over them
+            self.read_only = self.NEWER.format(names=" and ".join(late), name=self.song_path.name, were="were" if len(late) > 1 else "was")
+            self.notices.append(self.read_only)
+            meta = notes = saved = None
+        self.meta.update(resolve_meta(meta, self.base_dir) if isinstance(meta, dict) else {})
+        notes = notes.get("notes") if isinstance(notes, dict) else notes  # a list: notes from before 1.0
         self.notes = notes if isinstance(notes, list) else []
         self.lock = threading.RLock()
         self.jobs = queue.PriorityQueue()  # (priority, sequence, job): what is playing first, then the song, the rest, meters last
@@ -993,7 +1038,6 @@ class State:
         self.it_stamps = None
         self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
         self.reload(archive=not headless)
-        saved = self.history_store.load()
         if saved:
             self.checkpoints = saved['checkpoints']
             if saved['head'] == digest(self._raw):
@@ -1051,11 +1095,11 @@ class State:
             threading.Thread(target=lambda: [self.measured(f) for f in files if Path(f).exists()], daemon=True).start()
             if self.meta["slot"] not in (self.song.get("samples") or {}):
                 self.meta["slot"] = min(self.song.get("samples") or {1: 0})
-            if archive:
+            if archive and not self.read_only:
                 self._archive_old_notes()
-                if self._history_ready and not self.read_only:
+                if self._history_ready:
                     _atomic(self.history_store.path, self.history_store.data(self._raw, self.history, self.future, self.checkpoints))
-            if self.notes and not self.headless:
+            if self.notes and not self.headless and not self.read_only:
                 try:
                     self.save_notes()
                 except OSError as e:
@@ -1209,9 +1253,9 @@ class State:
             if not g:
                 continue
             pat = g if os.path.isabs(g) else str(self.base_dir / g)
-            files = sorted(f for f in glob.glob(pat, recursive=True) if Path(f).suffix.lower() == ".wav") or [pat]
+            files = sorted(f for f in glob.glob(pat, recursive=True) if Path(f).suffix.lower() in (".wav", *SOUND_FILES)) or [pat]
             for f in files:
-                f = str(Path(f).resolve())
+                f = str(self.as_wav(Path(f).resolve())[0])
                 if f not in self.cands():
                     self.cands().append(f)
                     added.append(f)
@@ -1342,8 +1386,8 @@ class State:
 
     def _job_failed(self, job, error):
         """The job ends in its own failed state with the message, as the page shows it."""
-        import traceback
-        traceback.print_exc()
+        _log.exception("A %s job failed", job[0])
+        error = logged(error)
         with self.lock:
             if job[0] == "export":
                 job[1]["result"].update(status="failed", error=error)
@@ -1568,6 +1612,7 @@ class State:
         """A note at (order, row) of the facts' order list with what was playing; the channels sounding there and the song
         version are filled in here. Saves the JSON and rewrites the report. Returns the note."""
         f = self.facts
+        self._writable()
         if not f:
             raise ValueError("the song does not compile")
         order = max(0, min(len(f["orders"]) - 1, int(body.get("order") or 0)))
@@ -1589,6 +1634,7 @@ class State:
         return note
 
     def edit_note(self, nid, body):
+        self._writable()
         with self.lock:
             for n in self.notes:
                 if n["id"] == nid:
@@ -1604,7 +1650,9 @@ class State:
             self.save_notes()
 
     def save_notes(self):
-        _atomic_text(self.notes_path, json.dumps(self.notes, indent=1))
+        if self.read_only:  # another window's notes, or a newer app's file: not written over (add_note says so)
+            return
+        _atomic_text(self.notes_path, json.dumps({"schema": SIDE_SCHEMA, "notes": self.notes}, indent=1))
         _atomic_text(self.notes_path.with_suffix(".md"), self.report())
 
     def _archive_old_notes(self):
@@ -1619,9 +1667,13 @@ class State:
             batch = [n for n in old if ((n.get("version") or {}).get("hash") or "unknown") == h]
             p = self.song_path.with_name(f"{self.song_path.stem}.notes-{h}.json")
             kept = _read_json(p, [], self.notices)
+            if newer(kept):  # a newer app's archive is left as it is; these notes stay in the active file
+                old = [n for n in old if n not in batch]
+                continue
+            kept = kept.get("notes", []) if isinstance(kept, dict) else kept if isinstance(kept, list) else []
             seen = {(n["id"], n.get("when")) for n in kept}
             kept += [n for n in batch if (n["id"], n.get("when")) not in seen]
-            _atomic_text(p, json.dumps(kept, indent=1))
+            _atomic_text(p, json.dumps({"schema": SIDE_SCHEMA, "notes": kept}, indent=1))
             _atomic_text(p.with_suffix(".md"), self.report(kept, batch[0].get("version")))
         self.notes = [n for n in self.notes if n not in old]
         self.save_notes()
@@ -1633,7 +1685,8 @@ class State:
         f, v, notes = self.facts, version or self.version(), self.notes if notes is None else notes
         fmt = lambda t: f"{int(t // 60)}:{t % 60:04.1f}"  # noqa: E731
         L = [f"# Listening notes: {f['title'] if f else self.song_path.stem}", "",
-             f"`{self.song_path.name}` version {v['hash']} ({v['mtime']}), {len(notes)} note{'s' if len(notes) != 1 else ''}.",
+             f"`{self.song_path.name}` version {v['hash']} ({v['mtime']}), {len(notes)} note{'s' if len(notes) != 1 else ''}; "
+             f"VultureTracker {__version__}.",
              "Time is the position in the whole song where the listener clicked (allow up to a second of reaction delay); ord is",
              "the order index, row the row in its pattern. **Bold** channels are the ones the listener pointed at; the others are",
              "what was sounding there (sample number after the name; `~` marks a looped tone still held from an earlier note).", ""]
@@ -2419,6 +2472,7 @@ class State:
             f = (f if f.is_absolute() else self.base_dir / f).resolve()
             if not f.exists():
                 raise ValueError(f"no such WAV: {f}")
+            f = self._wav_for_op(f)
             entry = api.swap_sample(copy.deepcopy(self.song), num, f)
             frames = len(read_wav(f).channels[0])
             for k in ("loop", "sustain_loop"):  # loop points past the new WAV's end go
@@ -2501,6 +2555,7 @@ class State:
                 f = f if f.is_absolute() else self.base_dir / f
                 if not f.exists():
                     raise ValueError(f"no such WAV: {f}")
+                f = self._wav_for_op(f)
                 try:
                     rel = os.path.relpath(f.resolve(), self.base_dir).replace(os.sep, "/")
                 except ValueError:
@@ -2982,6 +3037,14 @@ class State:
                 del sections[name]
                 self._commit(sections_text(self.text, sections))
                 return
+            if action == 'rename':
+                new = str(body.get('new_name') or '').strip()
+                if not new or len(new) > 80:
+                    raise ValueError('Name the section 1-80 characters')
+                if new in sections:
+                    raise ValueError(f'A section is named {new} already')
+                self._commit(section_renamed(self.text, name, new))
+                return
             meta = copy.deepcopy(self.meta)
             if action in ('select', 'loop'):
                 playable = [i for i, o in enumerate(self.facts['orders']) if a <= o['order'] < b]
@@ -3042,6 +3105,13 @@ class State:
                 lines = sections_text(''.join(lines), sections).splitlines(keepends=True)
             self._write_orders(lines, after)
             self._commit(''.join(lines), meta=meta)
+
+    def _wav_for_op(self, f):
+        """An edit's sound file as a WAV (as_wav); one written for it goes again when the edit is refused."""
+        f, new = self.as_wav(f)
+        if new:
+            self._created.append(f)
+        return f.resolve()
 
     def song_edit(self, ops):
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
@@ -3301,6 +3371,41 @@ class State:
         self.song_edit(ops)
         return f"in new slot {num:02d}" + (f", played by instrument {ops[1]['num']:02d}" if len(ops) > 1 else "")
 
+    def faust_recipe(self, wav, faust):
+        """The FAUST tab's save made reproducible: a `faust:` entry named after `wav` in faust.yaml beside the song (made
+        when missing) that renders it again (the code, NOTE, HOLD, TAIL, VELOCITY and the sliders; no trim or fade, as the
+        tab renders), so the RECIPE box shows it for the slot, renders it again and edits it. Returns the report's words."""
+        from .synth import RecipeError, expand
+        notes = [format_note(int(n)) for n in faust.get("notes") or []] or ["C-5"]
+        spec = {"faust": str(faust.get("code") or ""), **({"chord": notes} if len(notes) > 1 else {"note": notes[0]}),
+                "hold": float(faust.get("hold") or 1), "tail": float(faust.get("tail") or 0),
+                "velocity": int(faust.get("velocity") or 100),
+                **({"params": {str(k): float(v) for k, v in faust["params"].items()}} if faust.get("params") else {}),
+                "trim": False, "fade_out": 0}
+        path, name = self.base_dir / "faust.yaml", Path(wav).stem
+        dump = lambda d: yaml.dump(d, Dumper=api._Dumper, sort_keys=False, width=120, allow_unicode=True)  # noqa: E731
+        text = path.read_text(encoding="utf-8") if path.exists() else (
+            "# Sounds saved from the FAUST tab: each entry renders its WAV again (SAMPLING.md, faust:)\nout_dir: .\nsamples:\n")
+        try:
+            doc = yaml.load(text, Loader=api._Loader)
+            new = name not in ((doc or {}).get("samples") or {})
+            if new:
+                text += ("" if text.endswith("\n") else "\n") + "".join(f"  {line}\n" for line in dump({name: spec}).splitlines())
+                doc = yaml.load(text, Loader=api._Loader)
+                list(expand(doc))
+        except (RecipeError, yaml.YAMLError, AttributeError) as e:
+            return f" (its faust: entry was not written: {path.name}: {e})"
+        if new:
+            if (doc["samples"].get(name) != spec or list(doc).index("samples") != len(doc) - 1
+                    or (self.base_dir / str(doc.get("out_dir", "."))).resolve() != self.base_dir.resolve()):
+                return f" (its faust: entry was not written: {path.name} is not laid out as the app writes it)"
+            _atomic(path, text.encode("utf-8"))
+        with self.lock:
+            self.meta.setdefault("recipe_of", {})[str(Path(wav).resolve())] = {"recipe": str(path), "name": name, "note": None,
+                                                                               "spec": dump(doc["samples"][name])}
+            self.save_meta()
+        return f"; its faust: entry is in {path.name}"
+
     def current_file_of(self, num):
         f = ((self.song.get("samples") or {}).get(int(num)) or {}).get("file")
         return str((self.base_dir / f).resolve()) if f else ""
@@ -3412,24 +3517,32 @@ class State:
         return out
 
     def save_upload(self, name, data):
-        """A WAV dropped on the page (its bytes: the page cannot know the file's path) saved beside the song as <name>.wav,
-        numbered so no other file is replaced; an identical copy already there is reused. Returns the path."""
+        """A sound file dropped on the page (its bytes: the page cannot know the file's path) saved beside the song as
+        <name>.wav, numbered so no other file is replaced; an identical copy already there is reused. A FLAC, AIFF, OGG or
+        MP3 becomes that WAV (as_wav). Returns the path."""
+        if Path(name).suffix.lower() in SOUND_FILES and data[:4] != b"RIFF":
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                src = Path(tmp) / f"upload{Path(name).suffix.lower()}"
+                src.write_bytes(data)
+                return self.as_wav(src, name)[0]
         if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
-            raise ValueError(f"{name}: not a WAV file")
-        stem = re.sub(r"[^\w.-]+", "_", Path(name).stem)[:60] or "dropped"
-        stem = "_" + stem if device_name(stem) else stem  # CON.wav, NUL.wav: Windows devices, not files
-        for k in itertools.count(1):
-            p = self.base_dir / f"{stem}{'' if k == 1 else f'-{k}'}.wav"
-            if p.exists() and p.read_bytes() == data:
-                return p
-            if not p.exists():
-                p.write_bytes(data)
-                try:
-                    read_wav(p)
-                except (OSError, ValueError):
-                    p.unlink()
-                    raise
-                return p
+            raise ValueError(f"{name}: not a WAV, FLAC, AIFF, OGG or MP3 file")
+        p, new = save_beside(self.base_dir, Path(name).stem, ".wav", data)
+        if new:
+            try:
+                read_wav(p)
+            except (OSError, ValueError):
+                p.unlink()
+                raise
+        return p
+
+    def as_wav(self, path, name=None):
+        """(`path`, False) for a WAV; a FLAC, AIFF, OGG or MP3 becomes a WAV beside the song, never over a file there, with
+        the loops and root note OpenMPT keeps from it (wavload.to_wav): (that WAV, whether it was written now)."""
+        if Path(path).suffix.lower() not in SOUND_FILES:
+            return Path(path), False
+        return to_wav(path, self.base_dir, ffmpeg_exe(), name)
 
     # ---- pattern view
 
@@ -3502,6 +3615,7 @@ class State:
                 "candidates": cands, "build": self.build, "stems": self.stems, "export": self.export_result,
                 "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
+                "faust_code": self.meta.get("faust_code"),
                 "undo": len(self.history), "redo": len(self.future), "unused": self.unused(),
                 "checkpoints": list(self.checkpoints),
                 "history_bytes": self.history_store.path.stat().st_size if self.history_store.path.exists() else 0,
@@ -3696,7 +3810,7 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def browse(cls, wav=False, module=False):
         """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module) path or None."""
-        kind, pat = ("WAV files", "*.wav") if wav else ("Modules, tabs and MIDI", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("Song files", "*.yaml;*.yml")
+        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Modules, tabs and MIDI", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("Song files", "*.yaml;*.yml")
         if cls.window is not None:
             import webview
             r = cls.window.create_file_dialog(webview.OPEN_DIALOG, file_types=(f"{kind} ({pat})", "All files (*.*)"))
@@ -3782,7 +3896,7 @@ class Handler(BaseHTTPRequestHandler):
         return origin is not None and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
 
     def _guarded(fn):
-        """An unexpected error is printed and answered with a 500 and its message: the page is never left without one."""
+        """An unexpected error is logged and answered with a 500 and its message: the page is never left without one."""
         @functools.wraps(fn)
         def run(self):
             try:
@@ -3790,10 +3904,9 @@ class Handler(BaseHTTPRequestHandler):
             except ConnectionError:
                 raise
             except Exception as e:  # noqa: BLE001
-                import traceback
-                traceback.print_exc()
+                _log.exception("%s %s failed", self.command, self.path.split("?")[0])
                 try:
-                    self._send(500, {"error": f"{type(e).__name__}: {e}"})
+                    self._send(500, {"error": logged(f"{type(e).__name__}: {e}")})
                 except OSError:
                     pass
         return run
@@ -3805,7 +3918,8 @@ class Handler(BaseHTTPRequestHandler):
         st = self.state
         path = self.path.split("?")[0]
         if path == "/":
-            return self._send(200, HTML.read_bytes(), "text/html; charset=utf-8")
+            return self._send(200, HTML.read_bytes().replace(b"<title>VultureTracker</title>", f"<title>VultureTracker {__version__}</title>".encode()),
+                              "text/html; charset=utf-8")
         if path == "/engine-worklet.js":
             return self._send(200, worklet_js(), "text/javascript; charset=utf-8")
         if path == "/web/libopenmpt.wasm":
@@ -4015,7 +4129,13 @@ class Handler(BaseHTTPRequestHandler):
                 f = Path(str(body["path"])).resolve()
                 if f.parent != st.base_dir or f.suffix.lower() != ".wav":
                     raise ValueError("only a WAV beside the song")
-                return self._send(200, {"report": f"{f.name} " + st.place_wav(f, body.get("dest"), bool(body.get("stereo")))})
+                report = f"{f.name} " + st.place_wav(f, body.get("dest"), bool(body.get("stereo")))
+                if isinstance(body.get("faust"), dict):  # the FAUST tab's code and settings: its recipe entry
+                    report += st.faust_recipe(f, body["faust"])
+                return self._send(200, {"report": report})
+            elif act == "faustcode":  # the FAUST tab's code as it is typed, kept with the song
+                st.meta["faust_code"] = str(body.get("code") or "")[:200000]
+                st.save_meta()
             elif act == "want":
                 st.set_want(st.cands()[int(body["id"])] if body.get("id") is not None else None)
             elif act == "note":
@@ -4091,7 +4211,7 @@ class _Server(ThreadingHTTPServer):
     def handle_error(self, request, client_address):
         """A page that went away mid-answer (closed, reloaded, a seek that cancelled a request) is no error to print."""
         if not isinstance(sys.exc_info()[1], ConnectionError):
-            super().handle_error(request, client_address)
+            _log.exception("A request from %s failed", client_address[0])
 
 
 def make_server(port=0):
@@ -4107,6 +4227,7 @@ def make_server(port=0):
 def serve(song_path=None, port=0, open_browser=True, window=True):
     """Serve the UI. With pywebview installed (and `window`), it opens in a native window; else the default
     browser. `song_path` may be None: the UI then starts on its open-a-song screen."""
+    start_log()
     for p in LOCKS.glob("*.lock"):  # left by sessions that ended (the system let go of their locks)
         f = lock_file(p)
         if f:
@@ -4126,7 +4247,7 @@ def serve(song_path=None, port=0, open_browser=True, window=True):
         except ImportError:
             webview = None
         if webview:
-            Handler.window = webview.create_window("VultureTracker", url, width=1400, height=900, min_size=(1000, 600), background_color="#0a0c0d")
+            Handler.window = webview.create_window(f"VultureTracker {__version__}", url, width=1400, height=900, min_size=(1000, 600), background_color="#0a0c0d")
             webview.start(private_mode=False, storage_path=str(PROFILE))
             return 0
     print(f"VultureTracker GUI: {url}  (Ctrl+C to stop)")

@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libopenmpt0t64
-          python -m pip install -q pyyaml numpy imageio-ffmpeg Pillow playwright pyguitarpro mido
+          python -m pip install -q ".[test]"
           python -m playwright install --with-deps chromium
           python -c "from vulturetracker import faust; faust.have() or faust.fetch()" || true
       - name: Portable tests
@@ -34,8 +34,8 @@ jobs:
           tests.test_modimport tests.test_compose tests.test_record tests.test_library tests.test_mosaic
           tests.test_spectral tests.test_gpimport tests.test_midiimport tests.test_faust tests.test_workflow
           tests.test_release070 tests.test_release080 tests.test_release080_import tests.test_release080_dsp
-          tests.test_import tests.test_synth
+          tests.test_import tests.test_synth tests.test_release100
       - name: Page tests
         run: >-
           python -m unittest tests.test_page tests.test_workflow_page tests.test_release070_page
-          tests.test_release080_page tests.test_features080_page
+          tests.test_release080_page tests.test_features080_page tests.test_release100_page

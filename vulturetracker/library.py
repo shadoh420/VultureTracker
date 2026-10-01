@@ -285,7 +285,8 @@ def pca2(vecs, centre, scale):
 
 def default_index():
     """Where the index lives: $VT_LIBRARY, else library.json beside the app's recent-songs list."""
-    return Path(os.environ.get("VT_LIBRARY") or Path(os.environ.get("APPDATA", Path.home())) / "VultureTracker" / "library.json")
+    from .fileio import user_dir
+    return Path(os.environ.get("VT_LIBRARY") or user_dir() / "library.json")
 
 
 def default_roots():

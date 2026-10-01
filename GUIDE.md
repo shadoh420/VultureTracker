@@ -15,11 +15,19 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
 cd VultureTracker
-pip install pyyaml
+pip install -e ".[all]"
 ```
 
-Python 3.10+. On Windows x64, libopenmpt (used to verify and render) is included in `vendor/`.
-Elsewhere, install libopenmpt (e.g. `apt install libopenmpt0`) or set `LIBOPENMPT` to its path.
+Python 3.10+; `pip install -e .` alone (PyYAML) compiles songs, and README's Install names what each extra adds. On
+Windows x64, libopenmpt (used to verify and render) is included in `vendor/`. Elsewhere, install libopenmpt (e.g.
+`apt install libopenmpt0t64`) or set `LIBOPENMPT` to its path. README's Platforms says what is Windows-only and where
+the app keeps its files on Linux and macOS (the `%APPDATA%` and `%LOCALAPPDATA%` folders below are Windows').
+`vulturetracker --version` prints the version; the window title and the start screen show it too.
+
+**When something fails.** The app writes what fails unexpectedly, with its traceback, to
+`%APPDATA%\VultureTracker\vulturetracker.log` (at most two files of 256 KB; the first line of each start names the
+version, libopenmpt's and the system), and the error the page shows ends with that path. Attach the file to a bug
+report.
 
 ## Usage
 
@@ -39,6 +47,7 @@ python -m vulturetracker collect song.yaml ../song-copy --zip           # PROJEC
 python -m vulturetracker sections song.yaml save Intro 0 4              # SONG's named sections (orders 0-3) without the app
 python -m vulturetracker checkpoint song.yaml save "Before the mix"     # PROJECT's checkpoints: save, diff, restore, delete
 python -m vulturetracker phrase song.yaml capture --order 2 --rows 0-15 --channels 3 # PHRASES: then set, diff, render, accept
+python -m vulturetracker undo song.yaml                                # the app's undo (redo; trim-history --keep N)
 ```
 
 `pip install -e .` also installs a `vulturetracker` command.
@@ -144,8 +153,10 @@ written when Shift is let go, CHORD checked or not. The chord is one undo step a
 needs more channels than remain, nothing is written and the selection bar explains why. Uncheck CHORD for
 one-note-at-a-time entry. The app serves its page from port 8723 when that is free (another app window takes any free
 port) and keeps the window's browser profile in `%APPDATA%\VultureTracker\webview`, so the page's own settings (speed,
-latency, hex rows, MIDI) and the MIDI permission
-carry over from one launch to the next.
+latency, hex rows, MIDI, UI scale) and the MIDI permission
+carry over from one launch to the next. UI SCALE, at the right of the top bar and on the start screen, makes the whole
+app larger or smaller (90 to 200 %): the app's window has no Ctrl+wheel or Ctrl+= zoom of its own (pywebview turns
+WebView2's off), and the page's sizes are fixed pixels.
 
 **Following OpenMPT.** Where the app does something OpenMPT also does, it does it OpenMPT's way, checked against
 OpenMPT's source. The piano keys go by their place on the keyboard, not the letter printed on them, as OpenMPT's
@@ -154,10 +165,14 @@ note-off (`` ` ``) and fade (Shift+`` ` `` or `\`). CHORD joins a note struck wi
 60 ms of the one before (OpenMPT's Auto Chord Wait Time, 60 ms by default, timed from each note), and Shift is the chord
 modifier. COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
 hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
-import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. Deliberate
+import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. A FLAC, AIFF, OGG
+or MP3 sample keeps what OpenMPT's loaders keep from it (its loops; a FLAC's root note), above. Deliberate
 differences: the MIDI import reads track names written as UTF-8 as UTF-8 (OpenMPT reads them as Latin-1, so they come
-out garbled there) and keeps the file's time signatures (OpenMPT imports every file as 4/4). Any other difference
-from OpenMPT is a bug.
+out garbled there), keeps the file's time signatures (OpenMPT imports every file as 4/4), makes a marker a named
+section where OpenMPT names a pattern, and bends no drums (their keys are kit pieces here); its bends, pedal and the
+module import's name character sets are OpenMPT's (above); a sample's root note (a
+WAV's or a FLAC's `smpl` unity note) becomes the slot's `base_note` when the sample is put in a slot, where OpenMPT
+keeps it only as a label and plays every file at its own rate on C-5. Any other difference from OpenMPT is a bug.
 
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
 stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
@@ -173,6 +188,12 @@ WAVs dragged from the file manager can be dropped on a slot in the Samples tab (
 WAV the way the Tryout's apply does, on the slot list (Samples tab, or SAMPLE SLOTS in the Instruments tab) for new
 slots, or on the Tryout's candidate list to try them in the slot. A dropped WAV is saved beside the song under its own
 name (the page cannot see where it came from; an identical copy already there is reused, a different one is numbered).
+FLAC, AIFF, Ogg Vorbis, Opus and MP3 files are taken wherever a WAV is (dropped, added as candidates by path or glob,
+picked for a new slot): each becomes a 16-bit WAV beside the song in the same way, through the ffmpeg the export uses,
+and the source file is never touched. What OpenMPT keeps from them besides the audio comes along in the WAV's `smpl`
+chunk: from a FLAC the loops and root note of a sampler's embedded RIFF chunks, or its `LOOPSTART` and `LOOPLENGTH`
+tags; from an AIFF its sustain and release loops (the release loop is the normal one; like OpenMPT, its base note is
+not used); from Ogg, Opus and MP3 nothing (OpenMPT reads no loop tags there).
 
 **Selections and commands.** Drag over cells, or hold Shift with the arrows (and Page Up/Down, Home, End), to select a
 block the way trackers do: the first channel from the column the selection starts in, the last up to the column it
@@ -377,8 +398,12 @@ note is the WAV's root), HOLD holds the gates down, TAIL goes on after their rel
 renders it and plays it; → NEW SLOT writes `faust-<name>.wav` beside the song as a new slot (its base note the first
 note; with an instrument in a song with instruments; one undo step), → CANDIDATE adds it to the tryout slot's
 candidates. Renders are made offline at 44100 Hz, a voice per note (never stealing one); one over full scale is scaled under it
-(the message says so). Code that does not compile, an `effect` included, gives its error under the code; the keys and
-MIDI give it again rather than compiling the same code at every note.
+(the message says so). Each save also writes a `faust:` entry named after the WAV into `faust.yaml` beside the song
+(made the first time; SAMPLING.md): the code, NOTE, HOLD, TAIL, VELOCITY and the sliders, with no trim or fade, as the
+tab rendered it. So the sound can be rendered again, and the slot's RECIPE box shows the entry, renders it anew and
+writes an edit of it, as for any recipe sample. The code in the box is kept with the song (in `<song>.tryout.json`, as
+it is typed), so each song opens with its own. Code that does not compile, an `effect` included, gives its error under
+the code; the keys and MIDI give it again rather than compiling the same code at every note.
 
 COMPILE also builds a live instrument from the code: the piano keys (Z to M and Q to U, two octaves from OCT) play it
 at their own pitch with VELOCITY, a voice per key held (two keys on one pitch, a piano key and a MIDI key, each
@@ -386,11 +411,12 @@ keep their own), released when the key is let go; a slider moved while notes
 sound acts on them at once. With MIDI on, a MIDI keyboard plays it while the Faust tab is open (and only then: elsewhere
 MIDI does what it always does): note on and off with its velocity (VEL→VOL off: VELOCITY), and the pitch wheel and
 controllers reach the controls the code maps with Faust's `[midi:pitchwheel]` and `[midi:ctrl n]` (the EXAMPLE's `bend`
-follows the wheel, two semitones). A controller moves its control's slider too, so PREVIEW and the saves render
+follows the wheel, two semitones), and the sustain pedal (CC 64) holds the notes let go, the piano keys' too, until it
+comes up (a key struck again under it sounds anew). A controller moves its control's slider too, so PREVIEW and the saves render
 what was heard; leaving the tab puts a pitch-wheel control back to its slider, wherever the wheel was let go. It has 16 voices unless the code declares others (`declare options
 "[nvoices:8]";`, 1 to 64); a note beyond them takes the oldest voice in release, else the oldest sounding one. It runs at the
-sound device's rate and the LATENCY setting of the live bar. ■ silences it at once; leaving the tab or the song lets its
-notes go. A COMPILE while notes sound lets them ring out on the old code. The compiler (faustwasm, LGPL-3.0, about 6
+sound device's rate and the LATENCY setting of the live bar. ■ silences it at once; leaving the tab or the song releases its
+notes (each voice's own release), cut 3 s later. A COMPILE while notes sound releases them on the old code. The compiler (faustwasm, LGPL-3.0, about 6
 MB) is fetched from npm on first use with GET FAUST, into `tools/faustwasm` (the exe and a pip install:
 `%LOCALAPPDATA%/VultureTracker/tools/faustwasm`). A sample recipe renders the same code with `faust:` (SAMPLING.md; needs
 node), chords and phrases too.
@@ -426,7 +452,8 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
 1. **New song.** Open NEW SONG, choose a new YAML filename and channels. The tone gets an unused filename;
    existing songs and source WAVs are never replaced. Edit notes in PATTERN; every valid edit saves immediately.
 2. **Arrange.** In SONG, name a section with a first order and an exclusive end (0–4 means orders 0 through 3).
-   SELECT and LOOP use the whole section. MOVE inserts before the chosen order boundary. DUPLICATE offers shared
+   SELECT and LOOP use the whole section; RENAME gives the selected one the Name typed above, where it stands in the
+   file. MOVE inserts before the chosen order boundary. DUPLICATE offers shared
    pattern references or independent pattern copies. Repeated names share their notes; **MAKE THIS OCCURRENCE
    UNIQUE** clones just the selected occurrence. Section operations are undoable. `Bxx` jumps follow their original
    target occurrences; independent section copies retarget internal jumps into the copy. Removing a jump destination,
@@ -475,16 +502,20 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    changes only `file:` paths, keeping tuning, loop settings and comments (a slot named after its file gets that
    name written as `name:`, so instruments that refer to it still find it); the complete song must compile.
 
-**From the command line.** `sections`, `checkpoint` and `phrase` do what SONG, PROJECT and PHRASES do, on a song the
-app does not have open. Without an action they list (sections with their orders; checkpoints with the undo and redo
-counts; the phrase comparison with each alternative's cells). `sections SONG save|delete|move|duplicate NAME [orders]`
-(save takes FIRST END, move and duplicate the order boundary TO; `--shared`, `--as NAME`); `checkpoint SONG
+**From the command line.** `sections`, `checkpoint` and `phrase` do what SONG, PROJECT and PHRASES do, and `undo`,
+`redo` and `trim-history [--keep N]` what the app's undo, redo and PROJECT's history trim do, on a song the app does not
+have open. Without an action they list (sections with their orders; checkpoints with the undo and redo counts; the
+phrase comparison with each alternative's cells); `--json` prints the listing (after the action, and a diff as
+`diff`) as JSON instead. `sections SONG save|delete|move|duplicate|rename NAME [orders]` (save takes FIRST END, move
+and duplicate the order boundary TO; `--shared`; `--as NAME` names the copy, or the new name for rename, which keeps
+the section's place and comment in the file); `checkpoint SONG
 save|diff|restore|delete NAME`; `phrase SONG capture --order N --rows A-B --channels C[,D] [--count 2-4]`, then
 `phrase SONG set|diff|render|accept A-D|absent` (alternatives by place; set takes `--cells FILE` (`-` reads standard input) with one row per
 line and `|` between channels, `--name`, `--stars`, `--note`; render writes `-o FILE.wav`, replacing one only with `--replace`). Orders and rows count
 from 0, channels from 1, as the app shows them. Each change is an undo step in `<song>.history.json`, so the app
 opens on it and can undo it. While the app has the song open, or another command is changing it, the commands that write are refused (exit
-code 1): the app keeps the history and tryout settings in memory and would write over them. Listings, diffs and renders
+code 1; `undo` and `redo` with nothing to take back are too): the app keeps the history and tryout settings in memory
+and would write over them. `--wait SECONDS` asks again until then instead of failing at once. Listings, diffs and renders
 still work and leave the app's files alone. What the app would show as a notice (undo steps dropped after an external
 edit, a damaged history moved aside) the commands print as `note:` lines. The other way round, an app opening a song
 that a command is changing, or that another app window has open, waits a moment, then opens it read-only with a
@@ -657,10 +688,20 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   line (up to 12 rows a quarter); a played-in one gets sixteenths at speed 6 with each note delayed (SDx) to the nearest
   of 24 ticks a quarter. Bars (from the time signatures, 4/4 without one) become patterns, identical ones shared; a note
   ends with a note-off at the row nearest its end; velocity goes to the volume column, a channel's volume and pan
-  before its first note to the channel. Past 64 channels the least used are left out. Pitch bends, later controller
-  changes and the sustain pedal are left out and counted in the warnings.
-- `import` keeps patterns, instruments, envelopes and samples. It drops embedded MIDI macros and
-  OpenMPT-only extensions (with a warning). It also reads XM, S3M and 31-sample MOD files (`vulturetracker/modreader.py`,
+  before its first note to the channel. Past 64 channels the least used are left out. As OpenMPT's MIDI import does,
+  pitch bends become E (down) and F (up) slides on the rows where the bend changes, while a note sounds: extra-fine
+  under a quarter semitone, fine under a semitone, else over the row's ticks, each row making up what the slides
+  before it rounded off; the bend range comes from RPN 0 (2 semitones until it is set; CC 121 resets it and the bend),
+  and a note struck under a bend starts on the bend's nearest semitone. The sustain pedal (CC 64 at 64 or more) holds a
+  note that is let go until the pedal comes up, an all-notes-off (CC 120 or 123), or the same key is struck again.
+  Markers and cue points become named sections, each from its bar to the next one's (OpenMPT names the pattern they
+  fall in; here bars that sound alike share a pattern, so the name goes on the span). Later volume, pan and other
+  controller changes are left out and counted in the warnings.
+- `import` keeps patterns, instruments, envelopes and samples, and names as written (IT, S3M and XM names read in CP437,
+  or Windows-1252 when OpenMPT saved them, MOD names in the Amiga's Latin-1, as OpenMPT reads them; letters IT cannot
+  hold lose their accents, ß becomes ss). It drops embedded MIDI macros, OpenMPT-only extensions, an IT's edit history,
+  its MIDI pitch wheel depth and its instruments' MIDI channel, program and bank (all for MIDI output), each with a
+  warning. It also reads XM, S3M and 31-sample MOD files (`vulturetracker/modreader.py`,
   told apart by their headers; the app's start screen has IMPORT A MODULE, which writes `name.yaml` and `name_samples/`
   beside the module and opens it). Each is mapped onto IT the way it plays in libopenmpt, measured against it
   (`tests/test_modimport.py` renders small modules both ways): ProTracker and FastTracker 2 effects to their IT letters,

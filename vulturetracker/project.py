@@ -13,7 +13,7 @@ import yaml
 
 from . import api
 from .fileio import atomic_write, link_new, protect_outputs
-from .history import digest, json_bytes
+from .history import SIDE_SCHEMA, digest, json_bytes
 from .song import it_text
 
 
@@ -69,8 +69,10 @@ def file_updates(doc, files):
 
 
 def map_meta(meta, convert):
-    """The file identities in tryout metadata (not arbitrary strings such as listening notes)."""
+    """The file identities in tryout metadata (not arbitrary strings such as listening notes); every write of the
+    settings goes through here, so it also stamps the schema they are written in."""
     out = copy.deepcopy(meta)
+    out['schema'] = SIDE_SCHEMA
     out['candidates'] = {str(k): [convert(p) for p in v] for k, v in (out.get('candidates') or {}).items()}
     for key in ('ratings', 'found', 'recipe_of'):
         if out.get(key):
@@ -251,7 +253,7 @@ def collect(state, destination, make_zip=False, browser=None):
             (temp / name).write_bytes(data)
         # Compilation only reads paths inside the temporary copy, never the original locations.
         api.compile_song(song)
-        manifest = {'song': song.name, 'source_version': state.version(),
+        manifest = {'schema': SIDE_SCHEMA, 'song': song.name, 'source_version': state.version(),
                     'files': {p.relative_to(temp).as_posix(): digest(p.read_bytes()) for p in sorted(temp.rglob('*')) if p.is_file()},
                     'asset_credits': credits,
                     'history': 'New copy starts fresh; source undo and checkpoints stay with the original.',

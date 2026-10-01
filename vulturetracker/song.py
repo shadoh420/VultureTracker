@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from . import notation
+from . import __version__, notation
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
                     MAX_CHANNELS, ORDER_END, ORDER_SKIP)
 from .wavload import WavData, WavError, read_wav
@@ -712,12 +712,35 @@ def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest):
                 ctx.error(line, f"{at}: C{cell.param:02X} breaks to row {cell.param}; the parameter is hex (C10 = row 16)")
 
 
+def _version(text):
+    """(1, 2, 0) of '1.2', '1.2.0' or the start of '1.2.0rc1'; None for anything else."""
+    m = re.match(r"(\d+)\.(\d+)(?:\.(\d+))?", text)
+    return m and tuple(int(g or 0) for g in m.groups())
+
+
+def _requires(ctx, tree):
+    """`requires: X.Y`, the oldest VultureTracker that reads the song. False when this app is older: that is then the one
+    error, not the unknown keys a newer song may hold."""
+    if tree.get("requires") is None:
+        return True
+    text, line = str(tree["requires"]).strip(), _line(tree, "requires")
+    if not re.fullmatch(r"\d+\.\d+(\.\d+)?", text):
+        ctx.error(line, f"'requires' must be a version like '1.2' (quoted), got {tree['requires']!r}")
+    elif _version(text) > _version(__version__):
+        ctx.error(line, f"this song needs VultureTracker {tree['requires']} or newer; this is {__version__} "
+                        f"(https://github.com/shadoh420/VultureTracker/releases)")
+        return False
+    return True
+
+
 def compile_tree(tree, ctx, base_dir) -> Module:
     mod = Module()
     if not isinstance(tree, LMap):
         ctx.error(1, "the song file must be a mapping with module, samples, instruments, patterns, orders")
         return mod
-    _check_keys(ctx, tree, ["module", "samples", "instruments", "patterns", "orders", "sections"], "the song file")
+    if not _requires(ctx, tree):
+        return mod
+    _check_keys(ctx, tree, ["module", "samples", "instruments", "patterns", "orders", "sections", "requires"], "the song file")
     try:
         _module(ctx, _map(ctx, tree.get("module"), _line(tree, "module"), "module"), mod)
     except _Bad:

@@ -203,11 +203,12 @@ class Placeholders:
         return num
 
 
-def write_song(song_path, title, lanes, bars, ph, r, speed, tempo, ts, warnings, head):
+def write_song(song_path, title, lanes, bars, ph, r, speed, tempo, ts, warnings, head, sections=None):
     """Write an import's song file and return it: `lanes` (cells on absolute rows; 64 at most are kept) cut into a
     pattern per bar (`bars`: (name, first row, rows) in play order; identical bars share a pattern), the placeholders
     `ph`, `r` rows a quarter note played at `speed` and `tempo`, a beat and a bar from the time signature `ts` =
-    (numerator, denominator); `head`: the comment lines on top, the warnings after them."""
+    (numerator, denominator); `head`: the comment lines on top, the warnings after them; `sections`: named spans of
+    the bars ({name: [first, end]})."""
     from .api import to_yaml
     if len(lanes) > 64:
         warnings.append(f"{len(lanes)} channels: IT has 64, the rest are left out")
@@ -241,6 +242,7 @@ def write_song(song_path, title, lanes, bars, ph, r, speed, tempo, ts, warnings,
         "module": {"title": it_text(title, 25), "tempo": tempo, "speed": speed, "global_volume": 128,
                    "mix_volume": 48, "sample_rate": 44100, "rows_per_beat": min(255, beat), "rows_per_bar": min(255, bar), "channels": chans},
         "samples": ph.samples, "instruments": ph.instruments, "patterns": patterns, "orders": orders,
+        **({"sections": sections} if sections else {}),
     }
     head += "".join(f"# import warning: {w}\n" for w in warnings)
     Path(song_path).write_bytes((head + to_yaml(song)).encode("utf-8"))
