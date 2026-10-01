@@ -2,7 +2,9 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 0.9.0 (2026-10-01)
+
+The finishing workflows on the command line, chords the OpenMPT way, and a second pass over the 0.7.0 audit.
 
 - **Chords from the computer keyboard follow OpenMPT:** with CHORD checked, keys struck within 50 ms are one chord,
   written as the keys go down (0.8.0 waited until they were let go); holding Shift, OpenMPT's chord modifier, gathers
@@ -34,6 +36,10 @@ level (it lost up to 30 dB); recipes read `0100` as a hundred and a sample `010`
 them; a name such as "08" stays "08" when the app writes it; the sample library reads an unfinished WAV's real length
 (it reads every file again once); Ctrl+Alt+V floods on layouts where AltGr+V types `@`; a ring-out ending on a
 full-scale negative peak is no longer cut short.
+
+**Upgrade note:** song files, history and checkpoints are unchanged from 0.8.0. The sample library reads every file
+again once. SLICE's automatic points and STRETCH on short selections can differ from 0.8.0's (see above). In a sample
+recipe, numbers with leading zeros read as decimals and a sample named `01` writes `01.wav` (it wrote `1.wav`).
 
 ## 0.8.0 (2026-10-01)
 

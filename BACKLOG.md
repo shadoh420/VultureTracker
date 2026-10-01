@@ -12,7 +12,7 @@ configurable beat spacing, and shared phrase-sample storage.
 
 Done in 0.8.0 (CHANGELOG.md): game-engine loop export, OpenMPT clipboard both ways, CLI export and collect,
 computer-keyboard chord entry, continuous integration and the changelog, MIDI file import.
-Done after 0.8.0 (CHANGELOG.md, Unreleased): command-line sections, checkpoints and phrase comparisons.
+Done in 0.9.0 (CHANGELOG.md): command-line sections, checkpoints and phrase comparisons.
 
 ## Owner-declined proposals
 
