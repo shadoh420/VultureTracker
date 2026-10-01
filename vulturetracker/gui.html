@@ -380,15 +380,15 @@ option.hascand{color:var(--acc);font-weight:700}
 
 <div class="main" id="t-faust">
   <div class="panel col" style="flex:1;min-width:0">
-    <div class="ph" style="gap:8px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">FAUST</span><span class="btn sm" onclick="faCompile(true).catch(()=>{})" title="compile the code (Ctrl+Enter): its controls appear on the right">COMPILE</span><span class="btn sm" onclick="faExample()" title="put the example back (the code in the box is replaced)">EXAMPLE</span><span class="mono" id="fa-state" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><a href="https://faustdoc.grame.fr/manual/syntax/" target="_blank" style="font-size:10px;color:var(--blue)">FAUST SYNTAX</a><a href="https://faustlibraries.grame.fr/" target="_blank" style="font-size:10px;color:var(--blue)">LIBRARIES</a></div>
-    <textarea id="fa-code" spellcheck="false" style="flex:1;min-height:0;resize:none;font:12px/1.5 var(--mono);padding:10px 12px" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();faCompile(true).catch(()=>{})}" oninput="faSaveCode()"></textarea>
+    <div class="ph" style="gap:8px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">FAUST</span><span class="btn sm" onclick="faCompile().catch(()=>{})" title="compile the code (Ctrl+Enter): its controls appear on the right">COMPILE</span><span class="btn sm" onclick="faExample()" title="put the example back (the code in the box is replaced)">EXAMPLE</span><span class="mono" id="fa-state" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span><a href="https://faustdoc.grame.fr/manual/syntax/" target="_blank" style="font-size:10px;color:var(--blue)">FAUST SYNTAX</a><a href="https://faustlibraries.grame.fr/" target="_blank" style="font-size:10px;color:var(--blue)">LIBRARIES</a></div>
+    <textarea id="fa-code" spellcheck="false" style="flex:1;min-height:0;resize:none;font:12px/1.5 var(--mono);padding:10px 12px" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();faCompile().catch(()=>{})}" oninput="faSaveCode()"></textarea>
     <div class="err" id="fa-err" style="flex:none;max-height:30%;overflow:auto;padding:0 12px"></div>
   </div>
   <div class="col" style="width:340px;flex:none;overflow-y:auto">
     <div class="panel" style="flex:none" id="fa-get-panel"><div class="ph"><span class="k">THE FAUST COMPILER</span></div><div class="pb" id="fa-get"></div></div>
     <div class="panel" style="flex:none"><div class="ph"><span class="k">NOTE</span><span class="meta">what the render plays</span></div>
       <div class="pb" style="display:grid;grid-template-columns:auto 1fr;gap:5px 8px;align-items:center;font:10px var(--mono)">
-        <span class="k">NOTE</span><span><input id="fa-note" value="C-5" style="width:54px" title="sets a control labelled freq to its pitch, and is the WAV's root note"> <span id="fa-hz" style="color:var(--dim)"></span></span>
+        <span class="k">NOTE</span><span><input id="fa-note" value="C-5" style="width:96px" title="a note, or a chord (C-5 E-5 G-5): a voice per note, its control labelled freq at the note's pitch; the first note is the WAV's root note" oninput="renderFaust()"> <span id="fa-hz" style="color:var(--dim)"></span></span>
         <span class="k">HOLD</span><span><input id="fa-hold" type="number" min="0.01" max="30" step="0.1" value="1" style="width:60px"> S <span style="color:var(--dim)">a control labelled gate is held down</span></span>
         <span class="k">TAIL</span><span><input id="fa-tail" type="number" min="0" max="30" step="0.1" value="0.5" style="width:60px"> S <span style="color:var(--dim)">after its release</span></span>
         <span class="k">VELOCITY</span><span><input id="fa-vel" type="number" min="1" max="127" value="100" style="width:60px"> <span style="color:var(--dim)">a control labelled gain gets vel / 127</span></span>
@@ -399,7 +399,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <div style="display:flex;gap:2px"><span class="btn" onclick="faPreview()" title="render the note in this page and play it">▶ PREVIEW</span><span class="btn" onclick="pkStop()">■</span><input id="fa-name" value="faust" style="flex:1;min-width:0;font:10.5px var(--mono);padding:2px 6px" title="the WAV's name: faust-&lt;name&gt;.wav beside the song"></div>
         <div style="display:flex;gap:2px;margin-top:4px"><span class="btn" style="flex:1;text-align:center;color:#9df0a5;background:#1f3326" onclick="faSave('slot')" title="write it beside the song as a new slot (base note = NOTE; with an instrument in a song with instruments); one undo step">→ NEW SLOT</span><span class="btn" style="flex:1;text-align:center" onclick="faSave('candidate')" title="write it beside the song and add it to the tryout slot's candidates">→ CANDIDATE</span></div>
         <div class="mono" id="fa-msg" style="margin-top:10px;font-size:10px;color:var(--dim);white-space:pre-wrap"></div>
-        <div style="margin-top:10px;font-size:10px;color:var(--dim)">Compiled and rendered in this page (the Faust compiler as WebAssembly). A sample recipe can render the same code with <span class="mono">faust:</span> (SAMPLING.md; needs node).</div>
+        <div style="margin-top:10px;font-size:10px;color:var(--dim)">Compiled and rendered in this page (the Faust compiler as WebAssembly). The piano keys (Z–M, Q–U; OCT) and a MIDI keyboard play the code live, a voice per key, the sliders acting at once; ■ silences it. A sample recipe can render the same code with <span class="mono">faust:</span> (SAMPLING.md; needs node).</div>
       </div></div>
   </div>
 </div>
@@ -611,14 +611,14 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
   $('recentlist').innerHTML=(j.recent||[]).length?`<div class="k" style="margin-bottom:6px">RECENT</div>`+j.recent.map(p=>li(p)).join(''):'';
   $('demolist').innerHTML=(j.demos||[]).length?`<div class="k" style="margin-bottom:6px">DEMOS</div>`+j.demos.map(p=>li(p,'demo')).join(''):'';
   $('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
-function resetPlayer(){sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
+function resetPlayer(){faLetGo();sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
 async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false)}}
 async function newSong(){const p=$('newpath').value.trim();if(!p)return;await EDQ.chain;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;await EDQ.chain;
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false)}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen()}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen();else faLetGo()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -867,7 +867,7 @@ async function lvPlay(oi,row){try{await lvStart()}catch(e){return}const o=S.song
 function lvPlayCursor(){if(LV.playing)return lvStop();lvPatLoop=false;lvPlay(CUR.o,CUR.row)}
 function lvLoopPattern(){lvPatLoop=!(lvPatLoop&&LV.playing);if(lvPatLoop)lvPlay(CUR.o,CUR.row);else lvStop()}
 function lvStop(){if(PK.srcs.size)pkStop();if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=LV.pos.row}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar()}
-function lvSetLatency(v){lvLatency=v;try{localStorage.lvlatency=v}catch(e){}if(LV.ctx){lvStop();LV.ctx.close();Object.assign(LV,{ctx:null,node:null,ready:null,key:'',pos:null,oi:-1,sent:{}})}renderLiveBar()}
+function lvSetLatency(v){lvLatency=v;try{localStorage.lvlatency=v}catch(e){}if(PK.ctx){pkStop();PK.ctx.close();PK.ctx=FA.node=null}if(LV.ctx){lvStop();LV.ctx.close();Object.assign(LV,{ctx:null,node:null,ready:null,key:'',pos:null,oi:-1,sent:{}})}renderLiveBar()}
 function renderLiveBar(){if(!S||!S.song||!S.song.facts)return;const f=S.song.facts,ins=f.instruments&&f.instruments.length?f.instruments.map((n,i)=>[i,`${pad(i+1)} ${n}`]):f.samples.map((s,i)=>[i,`${pad(s.num)} ${s.name}`]);
   put('lv-ins',ins.map(([i,n])=>`<option value="${i}">${esc(n)}</option>`).join(''));$('lv-lat').value=lvLatency;
   $('lv-edit').classList.toggle('warn',EDIT);$('lv-undo').textContent=`↶ ${S.undo||0}`;$('lv-redo').textContent=`↷ ${S.redo||0}`;
@@ -926,7 +926,8 @@ function patShift(down){const rows=PAT.rows,ch=CUR.ch,col=rows.map(r=>r[ch]),out
 // cursor follows it there, and STEP does not move it on: the song moves on by itself)
 function enterNote(note,vol){const live=LV.playing&&LV.pos&&LV.oi===PAT.order&&CUR.o===PAT.order;if(live)CUR.row=Math.max(0,Math.min(PAT.rows.length-1,LV.pos.row));
   const p=cellOf(PAT.rows[CUR.row][CUR.ch]);p.n=noteTxt(note);p.i=pad(insNum());if(vol!=null)p.v='v'+pad(vol);putCell(p,!live)}
-// ---- MIDI input: Web MIDI in the page (no Python side). Note-on previews through the live engine like the piano keys (the
+// ---- MIDI input: Web MIDI in the page (no Python side). On the FAUST tab it all goes to the Faust code's live node (faMidi).
+// Elsewhere note-on previews through the live engine like the piano keys (the
 // instrument on show in INSTRUMENTS, the slot's player in SAMPLES, else INS), at the key's loudness with VEL→VOL; in edit
 // mode on the Pattern tab it also enters the note at the cursor (INS instrument, the velocity as v01-v64). MIDI note 60 =
 // C-5. Note-off releases the preview. Access is asked for (the window's permission prompt, kept in its profile) only once
@@ -935,7 +936,7 @@ const MIDI={access:null,err:null,on:false,vel:true};try{MIDI.on=localStorage.mid
 async function midiStart(){if(MIDI.access)return;if(!navigator.requestMIDIAccess){MIDI.err='no Web MIDI here';return renderMidi()}
   try{MIDI.access=await navigator.requestMIDIAccess();MIDI.access.onstatechange=midiBind;midiBind()}catch(e){MIDI.err=String(e.message||e);renderMidi()}}
 function midiBind(){MIDI.access.inputs.forEach(i=>{i.onmidimessage=e=>midiMsg(e.data)});renderMidi()}
-function midiMsg(d){if(!MIDI.on||!S||!S.song||!S.song.facts)return;const t=d[0]&0xf0;
+function midiMsg(d){if(!MIDI.on)return;if(faOn())return faMidi(d);if(!S||!S.song||!S.song.facts)return;const t=d[0]&0xf0;
   if(t===0x90&&d[2]>0)midiNoteOn(d[1],d[2]);else if(t===0x80||t===0x90)lvNoteOff('m'+d[1])}
 function flushMidiChord(){clearTimeout(MIDI.timer);const b=MIDI.pending;MIDI.pending=null;if(!b)return;
   if(b.song!==S.song.path||b.idx!==PAT.idx||b.order!==PAT.order||!PAT.rows)return;
@@ -1404,8 +1405,8 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
   else if(/^[0-9msnux]$/.test(k)){}  // the Tryout's keys (pick, alone/mix, note, apply, reject) never act from this tab
   else done=false;
   if(done){e.preventDefault();e.stopImmediatePropagation()}},true);
-document.addEventListener('keyup',e=>{const k=pianoKey(e);if(k.length===1&&PIANO.includes(k))lvNoteOff(k);if(e.key==='Shift')shiftChordUp()});
-window.addEventListener('blur',shiftChordUp);
+document.addEventListener('keyup',e=>{const k=pianoKey(e);if(k.length===1&&PIANO.includes(k)){lvNoteOff(k);faKeyOff('k'+k)}if(e.key==='Shift')shiftChordUp()});
+window.addEventListener('blur',()=>{shiftChordUp();for(const id in FA.held)if(id[0]==='k')faKeyOff(id)});  // their key-up goes elsewhere
 // ---- audio
 let lastSrc='',lastInput=0;
 function pick(id){sel=id;render();act('want',{id})}
@@ -1568,21 +1569,24 @@ function mapAddRoot(){const v=$('map-root').value.trim();if(!v)return;$('map-roo
 function mapDelRoot(i){const L=S.library;mapPost({roots:L.roots.filter((_,k)=>k!==i),scan:true})}
 function renderMap(){if(!mapOn()||!S.library)return;renderMapSide();if(S.library.loaded&&S.library.generation!==MAP.gen&&!S.library.busy)mapLoad();else drawMap();renderMapSel()}
 addEventListener('resize',()=>{if(mapOn())drawMap();if(ptOn())ptDraw()});
-// ---- the FAUST tab: Faust code compiled and one note rendered in the page (web/faust-render.mjs over faustwasm, which the
+// ---- the FAUST tab: Faust code compiled and a note or chord rendered in the page (web/faust-render.mjs over faustwasm, which the
 // server fetches from npm on request and serves under /faust/); the WAV goes up to the song's folder (/api/upload) and on
 // to the candidates or a new slot (POST place). The code is kept in this browser.
-const FA={m:null,F:null,loading:null,ctrls:[],vals:{},code:null};
+const FA={m:null,F:null,loading:null,ctrls:[],vals:{},code:null,gen:null,node:null,nodeCode:null,held:{},played:0};
 const FA_EXAMPLE=`import("stdfaust.lib");
-// one voice: freq, gate and gain are set by NOTE, HOLD and VELOCITY; the other sliders show up on the right
+// a voice per note: freq, gate and gain are set by each note (NOTE, a piano key, MIDI); the other sliders show up on the
+// right and act on every voice; bend follows a MIDI keyboard's pitch wheel (two semitones)
 freq = hslider("freq", 261.6, 20, 4000, 0.01);
 gate = button("gate");
 gain = hslider("gain", 0.8, 0, 1, 0.01);
+bend = hslider("bend[midi:pitchwheel]", 0, -2, 2, 0.01);
 cutoff = hslider("cutoff", 1800, 100, 8000, 1);
 detune = hslider("detune", 0.3, 0, 2, 0.01);
-voice = (os.sawtooth(freq) + os.sawtooth(freq * (1 + detune / 100))) / 2;
+f = freq * ba.semi2ratio(bend);
+voice = (os.sawtooth(f) + os.sawtooth(f * (1 + detune / 100))) / 2;
 process = voice * en.adsr(0.005, 0.25, 0.5, 0.4, gate) * gain * 0.4 : fi.resonlp(cutoff, 1.5, 1) <: _, _;`;
 const faOn=()=>$('t-faust').classList.contains('on');
-function faExample(){$('fa-code').value=FA_EXAMPLE;faSaveCode();faCompile(true).catch(()=>{})}
+function faExample(){$('fa-code').value=FA_EXAMPLE;faSaveCode();faCompile().catch(()=>{})}
 function faSaveCode(){try{localStorage.faustcode=$('fa-code').value}catch(e){}}
 async function faOpen(){if(!$('fa-code').value){let c='';try{c=localStorage.faustcode||''}catch(e){}$('fa-code').value=c||FA_EXAMPLE}
   const j=await (await fetch('/api/faust')).json();FA.have=j.have;const job=j.job||{};$('fa-get-panel').style.display=j.have?'none':'block';
@@ -1590,20 +1594,55 @@ async function faOpen(){if(!$('fa-code').value){let c='';try{c=localStorage.faus
     `<div style="font-size:10.5px;color:var(--mid);margin-bottom:6px">The Faust compiler (faustwasm ${esc(j.version)}, GRAME, LGPL-3.0, from npm: about 6 MB kept in <span class="mono">${esc(j.dir)}</span>) is not here yet.</div><span class="btn" onclick="faFetch()">GET FAUST</span>${job.error?`<div class="err">${esc(job.error)}</div>`:''}`);
   $('fa-state').textContent=j.have?(FA.F?'Faust '+FA.F.version:'ready'):'the compiler is missing: GET FAUST on the right';if(job.status==='fetching')setTimeout(()=>faOn()&&faOpen(),700);renderFaust()}
 async function faFetch(){await fetch('/api/fetchfaust',{method:'POST',body:'{}'});faOpen()}
-function faHz(){const n=ptNote($('fa-note').value);return isFinite(n)?440*2**((n-69)/12):NaN}
-function renderFaust(){if(!faOn()||!S||!S.song)return;$('fa-slot').textContent='TRYOUT SLOT '+pad(S.slot);const hz=faHz();$('fa-hz').textContent=isFinite(hz)?hz.toFixed(2)+' Hz':'a note: C-5, A#3…'}
+// NOTE's notes (a chord: C-5 E-5 G-5, spaces or commas), null when one is not a note
+function faNotes(){const ns=$('fa-note').value.split(/[\s,]+/).filter(Boolean).map(ptNote);return ns.length&&ns.every(n=>Number.isInteger(n)&&n>=0&&n<120)?ns:null}
+function renderFaust(){if(!faOn()||!S||!S.song)return;$('fa-slot').textContent='TRYOUT SLOT '+pad(S.slot);const ns=faNotes();
+  $('fa-hz').textContent=!ns?'C-5, or a chord: C-5 E-5 G-5':ns.length>1?ns.length+' notes':(440*2**((ns[0]-69)/12)).toFixed(2)+' Hz'}
 async function faLoad(){if(FA.F)return FA.F;if(!FA.loading)FA.loading=(async()=>{$('fa-state').textContent='loading the Faust compiler…';FA.m=await import('/web/faust-render.mjs');FA.F=await FA.m.loadFaust('/faust');$('fa-state').textContent='Faust '+FA.F.version;return FA.F})();
   try{return await FA.loading}catch(e){FA.loading=null;throw e}}
-async function faCompile(show){const code=$('fa-code').value;$('fa-err').textContent='';
-  try{await faLoad();const proc=await FA.m.compileFaust(FA.F,code,44100);FA.code=code;FA.ctrls=FA.m.controls(proc);if(show)faCtrls();if(show)$('fa-state').textContent=`Faust ${FA.F.version} · compiled: ${proc.getNumOutputs()} output${proc.getNumOutputs()>1?'s':''}, ${FA.ctrls.length} controls`;return proc}
-  catch(e){$('fa-err').textContent=String(e.message||e);$('fa-state').textContent='the code does not compile (below)';throw e}}
-const FA_AUTO=['freq','gate','gain'];
-function faCtrls(){const cs=FA.ctrls.filter(c=>!FA_AUTO.includes(c.label.toLowerCase()));
+// the code in the box compiled (once however many ask while it compiles), then its live node built (faNode)
+function faCompile(){const code=$('fa-code').value;if(FA.cjob&&FA.cjob.code===code)return FA.cjob.p;$('fa-err').textContent='';
+  const p=(async()=>{try{await faLoad();const gen=await FA.m.compileFaust(FA.F,code),outs=gen.getMeta().outputs;Object.assign(FA,{code,gen,ctrls:FA.m.controls(gen)});faCtrls();
+      $('fa-state').textContent=`Faust ${FA.F.version} · compiled: ${outs} output${outs>1?'s':''}, ${FA.ctrls.length} controls`}
+    catch(e){$('fa-err').textContent=String(e.message||e);$('fa-state').textContent='the code does not compile (below)';throw e}
+    await faNode().catch(e=>{$('fa-msg').textContent='the live keys: '+(e.message||e)});return FA.gen})();
+  FA.cjob={code,p};p.catch(()=>{}).finally(()=>{if(FA.cjob&&FA.cjob.p===p)FA.cjob=null});return p}
+// ---- the live node: faustwasm's poly AudioWorkletNode from the compiled code, in PK.ctx at the device's rate (the saves
+// stay offline renders at 44100). Its voices: the code's [nvoices:n], else 16; a key or MIDI note takes one (the oldest
+// voice in release is stolen first, then the oldest sounding), its freq, gain and gate set by the note; the sliders act on
+// all voices at once. A new node (COMPILE, an edit, LATENCY) takes over at once: the old one lets its notes go and is
+// dropped 3 s later. The node's own notes let go on ■ (at once), on leaving the tab or the song (released, cut 3 s later
+// if no key was played since: a code without a gate never decays).
+function faNode(){const code=FA.code,gen=FA.gen;if(FA.njob&&FA.njob.code===code)return FA.njob.p;
+  const p=(async()=>{const ctx=pkCtx(),m=/\[nvoices:(\d+)\]/.exec(JSON.stringify(gen.getMeta().meta||[])),node=await gen.createNode(ctx,m?Math.max(1,Math.min(64,+m[1])):16);
+    for(const c of FA.ctrls)if(FA.vals[c.label]!=null&&!faAuto(c))node.setParamValue(c.address,FA.vals[c.label]);
+    node.connect(ctx.destination);const old=FA.node;Object.assign(FA,{node,nodeCode:code});
+    if(old)old.allNotesOff(false),setTimeout(()=>{old.allNotesOff(true);old.disconnect();old.destroy()},3000);return node})();
+  FA.njob={code,p};p.catch(()=>{}).finally(()=>{if(FA.njob&&FA.njob.p===p)FA.njob=null});return p}
+// the node for the code in the box: compiled again after an edit, built again after LATENCY
+async function faReady(){const code=$('fa-code').value;if(FA.node&&FA.nodeCode===code)return FA.node;
+  if(FA.gen&&FA.code===code)return faNode();await faCompile();if(FA.nodeCode!==code)throw new Error($('fa-msg').textContent);return FA.node}
+// a key (a piano key 'k…' or a MIDI note 'm…') down: a voice at its note; let go while the code compiles, it is released
+// as soon as it sounds
+async function faKeyOn(id,note,vel){if(FA.held[id])return;const h=FA.held[id]={pending:true};FA.played++;
+  try{const node=await faReady();pkCtx().resume();if(FA.held[id]!==h)return;if(!faOn()){delete FA.held[id];return}
+    node.keyOn(0,note,vel);Object.assign(h,{pending:false,node,note});if(h.release)faKeyOff(id)}
+  catch(e){if(FA.held[id]===h)delete FA.held[id];$('fa-msg').textContent=String(e.message||e)}}
+function faKeyOff(id){const h=FA.held[id];if(!h)return;if(h.pending){h.release=true;return}delete FA.held[id];h.node.keyOff(0,h.note,0)}
+function faLetGo(){const n=FA.node,at=FA.played;FA.held={};if(!n)return;n.allNotesOff(false);clearTimeout(FA.letT);FA.letT=setTimeout(()=>{if(FA.played===at)n.allNotesOff(true)},3000)}
+// MIDI on the FAUST tab: notes play the node (velocity, or VELOCITY with VEL→VOL off); the rest goes in as it came, so
+// pitch bend and CCs reach the controls the code maps with [midi:pitchwheel] / [midi:ctrl n] (CC 120/123: all notes off)
+function faMidi(d){const t=d[0]&0xf0;if(t===0x90&&d[2]>0)return faKeyOn('m'+d[1],d[1],MIDI.vel?d[2]:+$('fa-vel').value||100);
+  if(t===0x80||t===0x90){lvNoteOff('m'+d[1]);return faKeyOff('m'+d[1])}if(FA.node)FA.node.midiMessage(Array.from(d))}  // a key held since another tab
+function faSet(label,v){FA.vals[label]=v;const c=FA.ctrls.find(c=>c.label===label);if(FA.node&&c&&FA.nodeCode===FA.code)FA.node.setParamValue(c.address,v)}
+const faAuto=c=>/\/(freq|gate|gain)$/.test(c.address);  // set per voice by its note (Faust's polyphony)
+function faCtrls(){const cs=FA.ctrls.filter(c=>!faAuto(c));
   put('fa-ctrls',cs.length?cs.map(c=>{const v=FA.vals[c.label]!=null?FA.vals[c.label]:c.init,num=c.type==='button'||c.type==='checkbox';
-    return `<div class="vrow"><span class="vl" title="${esc(c.address)}">${esc(c.label)}</span>${num?`<input type="checkbox" ${v?'checked':''} onchange="FA.vals[${attr(c.label)}]=this.checked?1:0">`:`<input type="range" min="${c.min}" max="${c.max}" step="${c.step||(c.max-c.min)/1000}" value="${v}" oninput="FA.vals[${attr(c.label)}]=+this.value;this.nextElementSibling.textContent=(+this.value).toPrecision(4)"><span class="vv">${(+v).toPrecision(4)}</span>`}</div>`}).join(''):'<span style="color:var(--dim)">none besides freq, gate and gain</span>')}
-async function faRender(){const proc=await faCompile(FA.code!==$('fa-code').value);if(FA.code!==$('fa-code').value)faCtrls();const hz=faHz();if(!isFinite(hz))throw new Error('NOTE is a note: C-5, A#3…');
-  const params={};for(const c of FA.ctrls)if(FA.vals[c.label]!=null&&!FA_AUTO.includes(c.label.toLowerCase()))params[c.label]=FA.vals[c.label];
-  const r=FA.m.renderNote(proc,{hz,velocity:+$('fa-vel').value||100,hold:+$('fa-hold').value||1,tail:+$('fa-tail').value||0,params,rate:44100});
+    return `<div class="vrow"><span class="vl" title="${esc(c.address)}">${esc(c.label)}</span>${num?`<input type="checkbox" ${v?'checked':''} onchange="faSet(${attr(c.label)},this.checked?1:0)">`:`<input type="range" min="${c.min}" max="${c.max}" step="${c.step||(c.max-c.min)/1000}" value="${v}" oninput="faSet(${attr(c.label)},+this.value);this.nextElementSibling.textContent=(+this.value).toPrecision(4)"><span class="vv">${(+v).toPrecision(4)}</span>`}</div>`}).join(''):'<span style="color:var(--dim)">none besides freq, gate and gain</span>')}
+// NOTE (a voice per note of a chord) held for HOLD, then TAIL, offline at 44100 with the sliders as they are
+async function faRender(){const gen=FA.gen&&FA.code===$('fa-code').value?FA.gen:await faCompile(),ns=faNotes();if(!ns)throw new Error('NOTE is a note or a chord: C-5, C-5 E-5 G-5…');
+  const params={};for(const c of FA.ctrls)if(FA.vals[c.label]!=null&&!faAuto(c))params[c.label]=FA.vals[c.label];const velocity=+$('fa-vel').value||100,length=+$('fa-hold').value||1;
+  const r=await FA.m.renderNotes(gen,{notes:ns.map(note=>({note,start:0,length,velocity})),tail:+$('fa-tail').value||0,params,rate:44100});
   let peak=0;for(const ch of r.channels)for(const v of ch)peak=Math.max(peak,Math.abs(v));if(!r.channels.length)throw new Error('the code has no output: process = … ;');return {channels:r.channels,peak}}
 function faWav(channels,rate,root){const n=channels[0].length,nc=channels.length,data=n*nc*2,smpl=36,buf=new ArrayBuffer(44+data+8+smpl),v=new DataView(buf);let o=0;
   const str=s=>{for(const c of s)v.setUint8(o++,c.charCodeAt(0))},u32=x=>{v.setUint32(o,x,true);o+=4},u16=x=>{v.setUint16(o,x,true);o+=2};
@@ -1611,35 +1650,33 @@ function faWav(channels,rate,root){const n=channels[0].length,nc=channels.length
   let peak=0;for(const ch of channels)for(const x of ch)peak=Math.max(peak,Math.abs(x));const g=peak>0.999?0.999/peak:1;
   for(let i=0;i<n;i++)for(let c=0;c<nc;c++){v.setInt16(o,Math.max(-32768,Math.min(32767,Math.round(channels[c][i]*g*32767))),true);o+=2}
   str('smpl');u32(smpl);u32(0);u32(0);u32(Math.round(1e9/rate));u32(root);u32(0);u32(0);u32(0);u32(0);u32(0);return {buf,scaled:g<1}}
-async function faPreview(){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,ptNote($('fa-note').value));if(PTA.src)URL.revokeObjectURL(PTA.src);PTA.src=URL.createObjectURL(new Blob([w.buf],{type:'audio/wav'}));PTA.play().catch(()=>{});
+async function faPreview(){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,faNotes()[0]);if(PTA.src)URL.revokeObjectURL(PTA.src);PTA.src=URL.createObjectURL(new Blob([w.buf],{type:'audio/wav'}));PTA.play().catch(()=>{});
   $('fa-msg').textContent=`playing ${(r.channels[0].length/44100).toFixed(2)} s, peak ${(20*Math.log10(r.peak||1e-9)).toFixed(1)} dBFS${w.scaled?' (over full scale: scaled down)':''}`}catch(e){$('fa-msg').textContent=String(e.message||e)}}
-async function faSave(dest){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,ptNote($('fa-note').value)),name=($('fa-name').value||'faust').replace(/[^\w.-]+/g,'_');
+async function faSave(dest){$('fa-msg').textContent='rendering…';try{const r=await faRender(),w=faWav(r.channels,44100,faNotes()[0]),name=($('fa-name').value||'faust').replace(/[^\w.-]+/g,'_');
   const up=await (await fetch('/api/upload?name='+encodeURIComponent('faust-'+name+'.wav'),{method:'POST',body:w.buf})).json();if(up.error)throw new Error(up.error);
   const j=await (await fetch('/api/place',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:up.path,dest,stereo:r.channels.length>1})})).json();
   $('fa-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'')+(w.scaled?' (scaled under full scale)':'');refresh()}catch(e){$('fa-msg').textContent=String(e.message||e)}}
 // ---- the PAINT tab (spectral.py): a picture over frequency (rows, lowest at the bottom) and time (columns); brightness is
 // the level, the colour the pan (red left, yellow centre, green right). Kept in this browser per song (localStorage).
 const PT={rows:72,cols:128,amp:null,pan:null,tool:'brush',drag:null};const PTA=new Audio();const ptOn=()=>$('t-paint').classList.contains('on');
-// the piano keys on the PAINT and FAUST tabs: the picture (as C-5) or the Faust note (as NOTE), rendered again after any
-// change and played at the key's pitch, one shot per key
+// the piano keys: on the PAINT tab the picture (as C-5), rendered again after any change and played at the key's pitch,
+// one shot per key; on the FAUST tab the code's live node (faKeyOn). One AudioContext for both, at the LATENCY setting.
 const PK={sig:'',buf:null,root:60,ctx:null,job:null,srcs:new Set()};
-const pkSig=paint=>paint?JSON.stringify(ptBody('preview')):[$('fa-code').value,JSON.stringify(FA.vals),$('fa-note').value,$('fa-vel').value,$('fa-hold').value,$('fa-tail').value].join('|');
-// the buffer for the settings as they are: one render however many keys ask while it runs, kept under the settings that
-// made it (Faust reads its controls after compiling, so its signature is taken once the render is done)
-async function pkLoad(paint){const sig=pkSig(paint);if(sig===PK.sig)return;if(PK.job&&PK.job.sig===sig)return PK.job.p;
-  const job={sig};job.p=(async()=>{let ab,root=60,made=sig;
-    if(paint){const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:sig});
-      if(!(r.headers.get('content-type')||'').startsWith('audio/'))throw new Error(((await r.json()).error||'').replace(/^\w+: /,''));ab=await r.arrayBuffer()}
-    else{const r=await faRender();made=pkSig(false);root=ptNote($('fa-note').value);ab=faWav(r.channels,44100,root).buf}
-    const buf=await PK.ctx.decodeAudioData(ab);Object.assign(PK,{buf,root,sig:made})})();
+const pkCtx=()=>PK.ctx=PK.ctx||new AudioContext({latencyHint:lvLatency==='0'?0:lvLatency});
+// the buffer for the picture as it is: one render however many keys ask while it runs
+async function pkLoad(){const sig=JSON.stringify(ptBody('preview'));if(sig===PK.sig)return;if(PK.job&&PK.job.sig===sig)return PK.job.p;
+  const job={sig};job.p=(async()=>{const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:sig});
+    if(!(r.headers.get('content-type')||'').startsWith('audio/'))throw new Error(((await r.json()).error||'').replace(/^\w+: /,''));
+    const buf=await PK.ctx.decodeAudioData(await r.arrayBuffer());Object.assign(PK,{buf,root:60,sig})})();
   PK.job=job;try{await job.p}finally{if(PK.job===job)PK.job=null}}
-async function pkPlay(k){const paint=ptOn(),msg=$(paint?'pt-msg':'fa-msg'),semi=pianoNote(k);  // the pitch at the key press
-  try{PK.ctx=PK.ctx||new AudioContext();PK.ctx.resume();await pkLoad(paint);
-    if(!(paint?ptOn():faOn()))return;  // the tab was left while it rendered
+async function pkPlay(k){const semi=pianoNote(k);  // the pitch at the key press
+  if(!ptOn())return faKeyOn('k'+k,semi,+$('fa-vel').value||100);
+  try{pkCtx().resume();await pkLoad();
+    if(!ptOn())return;  // the tab was left while it rendered
     const s=PK.ctx.createBufferSource();s.buffer=PK.buf;s.playbackRate.value=2**((semi-PK.root)/12);s.connect(PK.ctx.destination);
     PK.srcs.add(s);s.onended=()=>PK.srcs.delete(s);s.start()}
-  catch(e){msg.textContent=String(e.message||e)}}
-function pkStop(){PTA.pause();for(const s of PK.srcs)s.stop();PK.srcs.clear()}
+  catch(e){$('pt-msg').textContent=String(e.message||e)}}
+function pkStop(){PTA.pause();for(const s of PK.srcs)s.stop();PK.srcs.clear();FA.held={};if(FA.node)FA.node.allNotesOff(true)}
 function ptKey(){return 'paint|'+(S&&S.song?S.song.path:'')}
 function ptNew(r,c){PT.rows=r;PT.cols=c;PT.amp=new Float32Array(r*c);PT.pan=new Float32Array(r*c)}
 function ptSave(){try{localStorage[ptKey()]=JSON.stringify({rows:PT.rows,cols:PT.cols,amp:Array.from(PT.amp,v=>Math.round(v*1000)),pan:Array.from(PT.pan,v=>Math.round(v*1000)),

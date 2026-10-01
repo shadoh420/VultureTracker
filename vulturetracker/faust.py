@@ -1,7 +1,8 @@
 """Faust (GRAME's DSP language) as a sound source. The faustwasm package (the Faust compiler as WebAssembly with the Faust
 libraries in its .data file; LGPL-3.0) is fetched on demand from npm into tools/faustwasm (the exe:
 %LOCALAPPDATA%/VultureTracker/tools/faustwasm), like the synths, and never shipped. web/faust-render.mjs compiles and
-renders one note offline: under node for sample recipes (`faust:`, SAMPLING.md), in the page for the FAUST tab."""
+renders notes offline, a voice each: under node for sample recipes (`faust:`, SAMPLING.md), in the page for the FAUST
+tab (which also plays the code live)."""
 import json
 import os
 import shutil
@@ -73,9 +74,11 @@ class FaustMissing(ValueError):
     pass
 
 
-def render(code, hz=261.6256, velocity=100, hold=1.0, tail=0.5, params=None, rate=44100):
-    """Faust `code` compiled and one note rendered under node (web/faust-render.mjs). Returns (float32 channels x
-    frames, the DSP's controls). FaustMissing without node or faustwasm; ValueError with the compiler's message."""
+def render(code, hz=261.6256, velocity=100, hold=1.0, tail=0.5, params=None, rate=44100, notes=None, seconds=None):
+    """Faust `code` compiled and rendered under node (web/faust-render.mjs): one note (`hz`, `velocity`, held for `hold`
+    seconds, then `tail`), or `notes` [{note (MIDI, C-5 = 60), start, length (seconds), velocity}] a voice each, `seconds`
+    long (default: the last key-off plus `tail`). Returns (float32 channels x frames, the DSP's controls). FaustMissing
+    without node or faustwasm; ValueError with the compiler's message."""
     node = shutil.which("node")
     if not node:
         raise FaustMissing("rendering Faust in a recipe needs node (https://nodejs.org); the app's FAUST tab renders in "
@@ -83,7 +86,8 @@ def render(code, hz=261.6256, velocity=100, hold=1.0, tail=0.5, params=None, rat
     if not have():
         raise FaustMissing(f"faustwasm is not in {faust_dir()}: get it from the app's FAUST tab or run python -c "
                            "\"from vulturetracker import faust; faust.fetch()\"")
-    job = {"code": code, "hz": hz, "velocity": velocity, "hold": hold, "tail": tail, "params": params or {}, "rate": rate}
+    job = {"code": code, "hz": hz, "velocity": velocity, "hold": hold, "tail": tail, "params": params or {}, "rate": rate,
+           **({"notes": notes, "seconds": seconds} if notes else {})}
     with tempfile.TemporaryDirectory() as tmp:
         jf, out = Path(tmp) / "job.json", Path(tmp) / "out.f32"
         jf.write_text(json.dumps(job), encoding="utf-8")

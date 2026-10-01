@@ -10,7 +10,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
+
 from vulturetracker import gui
+from vulturetracker.library import read_audio
 from vulturetracker.wavload import write_wav
 
 from tests.test_gui import RATE, SONG_BLOCK, SONG_INS, sine
@@ -247,19 +250,33 @@ class TestPage(unittest.TestCase):
                     page.evaluate("localStorage.removeItem('faustcode'); tab('faust')")
                     page.wait_for_function("$('fa-code').value.length > 0")
                     page.click("#t-faust span.btn:text-is('COMPILE')")
-                    page.wait_for_function("FA.ctrls.length === 5", timeout=30000)
-                    self.assertEqual(page.locator("#fa-ctrls input").count(), 2)  # cutoff and detune; freq, gate, gain set by the note
+                    page.wait_for_function("FA.ctrls.length === 6", timeout=30000)
+                    self.assertEqual(page.locator("#fa-ctrls input").count(), 3)  # bend, cutoff, detune; freq, gate, gain set by the note
                     page.fill("#fa-note", "A-4")
                     page.fill("#fa-name", "saw")
                     page.click("#t-faust span.btn:text-is('→ NEW SLOT')")
                     page.wait_for_function("$('fa-msg').textContent.includes('new slot')", timeout=30000)
                     self.assertEqual(st.song["samples"][3], {"file": "faust-saw.wav", "name": "faust-saw", "stereo": True,
                                                              "base_note": "A-4"})
+                    page.fill("#fa-note", "C-5 E-5 G-5")  # a chord: a voice per note, its first note the root
+                    page.fill("#fa-name", "triad")
+                    page.evaluate("$('fa-msg').textContent = ''")
+                    page.click("#t-faust span.btn:text-is('→ NEW SLOT')")
+                    page.wait_for_function("$('fa-msg').textContent.includes('new slot')", timeout=30000)
+                    self.assertIn("file: faust-triad.wav", (d / "song.yaml").read_text())
+                    self.assertEqual(st.song["samples"][4], {"file": "faust-triad.wav", "name": "faust-triad", "stereo": True})
+                    x, rate, info = read_audio(d / "faust-triad.wav")
+                    self.assertEqual((info["root"], len(x)), (60, round(1.5 * rate)))  # HOLD 1 + TAIL 0.5
+                    seg = x[int(0.1 * rate): int(0.9 * rate)]
+                    spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
+                    hz = np.fft.rfftfreq(len(seg), 1 / rate)
+                    at = [spec[np.abs(hz - f) < 3].max() for f in (261.63, 329.63, 392.0)]  # E and G are no harmonics of C
+                    self.assertGreater(min(at), max(at) / 4, at)
                     page.fill("#fa-code", "process = foo;")
                     page.click("#t-faust span.btn:text-is('COMPILE')")
                     page.wait_for_function("$('fa-err').textContent.includes('undefined symbol')")
                     page.click("#t-faust span.btn:text-is('EXAMPLE')")
-                    page.wait_for_function("$('fa-err').textContent === '' && FA.ctrls.length === 5")
+                    page.wait_for_function("$('fa-err').textContent === '' && FA.ctrls.length === 6")
                     browser.close()
                 self.assertEqual(errors, [])
             finally:
@@ -271,6 +288,95 @@ class TestPage(unittest.TestCase):
                     if not any(r["status"] == "rendering" for r in st.renders.values()):
                         break
                     time.sleep(0.05)
+
+    def test_faust_live_keys_and_midi(self):
+        # the FAUST tab's live node: built by COMPILE, the piano keys play voices at their pitch until let go, a slider
+        # reaches the sounding node, MIDI notes and the pitch wheel play it only while the tab is open, ■ silences it at
+        # once, leaving the tab lets go, COMPILE while a note sounds swaps the node; levels read from an AnalyserNode
+        from vulturetracker import faust
+        if sync_playwright is None or not faust.have():
+            self.skipTest("needs playwright and faustwasm")
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)])
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.yaml").write_bytes(SONG_INS.encode())
+            st = gui.Handler.state = gui.State(d / "song.yaml")
+            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            errors = []
+            level = "(()=>{const a=FA.an,x=new Float32Array(a.fftSize);a.getFloatTimeDomainData(x);let m=0;for(const v of x)m=Math.max(m,Math.abs(v));return m})()"
+            try:
+                with sync_playwright() as p:
+                    exe = os.environ.get("VT_CHROMIUM")
+                    try:
+                        browser = p.chromium.launch(**({"executable_path": exe} if exe else {}))
+                    except PlaywrightError as e:
+                        self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
+                    page = browser.new_page(viewport={"width": 1400, "height": 900})
+                    page.on("pageerror", lambda e: errors.append(str(e)))
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
+                    page.evaluate("localStorage.removeItem('faustcode'); tab('faust')")
+                    page.wait_for_function("$('fa-code').value.length > 0")
+                    page.click("#t-faust span.btn:text-is('COMPILE')")
+                    page.wait_for_function("FA.node && FA.nodeCode === $('fa-code').value", timeout=30000)
+                    page.evaluate("FA.an = PK.ctx.createAnalyser(); FA.node.connect(FA.an); document.activeElement.blur()")
+                    self.assertLess(page.evaluate(level), 1e-4)
+                    for k in "zcb":  # C-5 E-5 G-5 at OCT 5: three voices
+                        page.keyboard.down(k)
+                    page.wait_for_function(f"Object.keys(FA.held).length === 3 && {level} > 0.05", timeout=5000)
+                    self.assertEqual(sorted(h["note"] for h in page.evaluate("Object.values(FA.held)")), [60, 64, 67])
+                    page.evaluate("faSet('cutoff', 500)")  # a slider while they sound: on every voice, no recompile
+                    page.wait_for_function("Math.abs(FA.node.getParamValue('/vt/cutoff') - 500) < 1e-3")
+                    for k in "zcb":
+                        page.keyboard.up(k)
+                    page.wait_for_function(f"Object.keys(FA.held).length === 0 && {level} < 1e-3", timeout=5000)
+
+                    page.evaluate("MIDI.on = true; midiMsg([0x90, 64, 100])")  # fake MIDI: a note and the wheel
+                    page.wait_for_function(f"FA.held.m64 && {level} > 0.02", timeout=5000)
+                    page.evaluate("FA.node.setInputParamHandler((p, v) => { if (p.endsWith('/bend')) window.bend = v }); midiMsg([0xE0, 0x7f, 0x7f])")
+                    page.wait_for_function("Math.abs(window.bend - 2) < 0.01")  # the processor's [midi:pitchwheel] control
+                    page.evaluate("midiMsg([0x80, 64, 0]); midiMsg([0xE0, 0, 0x40])")
+                    page.wait_for_function(f"!FA.held.m64 && {level} < 1e-3", timeout=5000)
+
+                    page.keyboard.down("z")  # ■ silences at once
+                    page.wait_for_function(f"{level} > 0.02", timeout=5000)
+                    page.click("#t-faust span.btn:text-is('■')")
+                    page.wait_for_function(f"{level} < 1e-4", timeout=500)
+                    page.keyboard.up("z")
+
+                    page.keyboard.down("x")  # leaving the tab lets go; MIDI then goes where it went before
+                    page.wait_for_function(f"{level} > 0.02", timeout=5000)
+                    page.evaluate("tab('pattern'); midiMsg([0x90, 60, 100])")
+                    page.wait_for_function(f"{level} < 1e-3", timeout=5000)
+                    self.assertEqual(page.evaluate("[Object.keys(FA.held).length, 'km60' in LV.held]"), [0, True])
+                    page.keyboard.up("x")
+                    page.evaluate("midiMsg([0x80, 60, 0]); tab('faust')")
+
+                    page.keyboard.down("z")  # COMPILE while it sounds: a new node, the old one released and dropped
+                    page.wait_for_function(f"{level} > 0.02", timeout=5000)
+                    page.evaluate("window.oldNode = FA.node; $('fa-code').value = $('fa-code').value.replace('0.3, 0, 2', '0.5, 0, 2')")
+                    page.click("#t-faust span.btn:text-is('COMPILE')")
+                    page.wait_for_function("FA.node !== oldNode && FA.nodeCode === $('fa-code').value", timeout=30000)
+                    page.wait_for_function(f"{level} < 1e-3", timeout=5000)  # the analyser hangs on the old node
+                    page.keyboard.up("z")
+                    page.evaluate("FA.node.connect(FA.an)")
+                    page.keyboard.down("v")  # the next key plays the new node
+                    page.wait_for_function(f"FA.held.kv && FA.held.kv.node === FA.node && {level} > 0.02", timeout=5000)
+                    page.keyboard.up("v")
+                    page.evaluate("tab('paint'); PT.amp.fill(0); PT.amp[30 * PT.cols + 5] = 1; document.activeElement.blur()")
+                    page.keyboard.down("z")  # PAINT's keys keep their buffer, in the same context
+                    page.keyboard.up("z")
+                    page.wait_for_function("PK.buf && PK.root === 60 && PK.srcs.size === 1", timeout=30000)
+                    self.assertEqual(page.evaluate("[$('pt-msg').textContent, Object.keys(FA.held).length]"), ["", 0])
+                    browser.close()
+                self.assertEqual(errors, [])
+            finally:
+                srv.shutdown()
+                srv.server_close()
+                gui.Handler.state = None
+                st.close()
 
     @mock.patch.dict(os.environ, {"VT_FAKE_AUDIO": "1"})
     def test_record_tab_controls_hold_between_polls(self):

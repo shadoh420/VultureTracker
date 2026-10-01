@@ -1,7 +1,9 @@
 // Faust code compiled and rendered offline with faustwasm (GRAME's Faust compiler as WebAssembly, LGPL-3.0, fetched on
 // demand into the faustwasm folder, never shipped): in node for sample recipes (`faust:`, vulturetracker/faust.py) and in
-// the page for the FAUST tab. One note: a "freq" control is set to the note's pitch, "gain" to the velocity, a "gate"
-// button is held for `hold` seconds and released for `tail`; other controls by their label (params).
+// the page for the FAUST tab, whose live node (createNode) comes from the same compiled code. Polyphonic, Faust's way:
+// each note is a voice whose controls ending in /freq, /gain and /gate get the note's pitch, velocity / 127 and 1 at
+// key-on (0 at key-off); the other controls are shared by all voices (params, by label); `effect = ...;` in the code
+// runs once on the voices' sum.
 //   node faust-render.mjs <faustwasm folder> <job.json> <out.f32>   prints {"channels", "frames", "controls"}
 
 const isNode = typeof window === 'undefined';
@@ -32,32 +34,47 @@ export function controls(proc) {
   return out;
 }
 
-export async function compileFaust(F, code, rate = 44100) {
-  const gen = new F.lib.FaustMonoDspGenerator();
+// a FaustPolyDspGenerator: offline renders (renderNotes) and live nodes (createNode) are made from it
+export async function compileFaust(F, code) {
+  const gen = new F.lib.FaustPolyDspGenerator();
   try {
-    await gen.compile(F.compiler, 'vt', code, '-ftz 2');
+    if (await gen.compile(F.compiler, 'vt', code, '-ftz 2')) return gen;
   } catch (e) {
     throw new Error(String(F.compiler.getErrorMessage() || e.message || e).trim());
   }
-  const proc = await gen.createOfflineProcessor(rate, 128);
-  if (!proc) throw new Error(String(F.compiler.getErrorMessage() || 'the Faust code did not compile').trim());
-  return proc;
+  throw new Error(String(F.compiler.getErrorMessage() || 'the Faust code did not compile').trim());
 }
 
-// one note: returns {channels: Float32Array[], controls}
-export function renderNote(proc, {hz = 261.6256, velocity = 100, hold = 1, tail = 0.5, params = {}, rate = 44100} = {}) {
+// notes [{note, start, length, velocity}] (note as MIDI, C-5 = 60, fractional between keys; start and length in seconds),
+// a voice each, keyed on and off at their frames; `seconds` long (default: the last key-off plus `tail`).
+// Returns {channels: Float32Array[], controls}
+export async function renderNotes(gen, {notes, seconds, tail = 0.5, params = {}, rate = 44100}) {
+  const proc = await gen.createOfflineProcessor(rate, 128, Math.max(1, Math.min(64, notes.length)));
   const cs = controls(proc), find = name => cs.find(c => c.label.toLowerCase() === String(name).toLowerCase() || c.address === name);
-  for (const c of cs) proc.setParamValue(c.address, c.init);
-  const set = (name, v) => { const c = find(name); if (c) proc.setParamValue(c.address, v); return !!c };
-  set('freq', hz);
-  set('gain', velocity / 127);
-  for (const [k, v] of Object.entries(params)) if (!set(k, +v)) throw new Error(`the Faust code has no control named "${k}" (it has: ${cs.map(c => c.label).join(', ') || 'none'})`);
-  const gate = find('gate');
-  if (gate) proc.setParamValue(gate.address, 1);
-  const a = proc.render(undefined, Math.max(1, Math.round(hold * rate)));
-  if (gate) proc.setParamValue(gate.address, 0);
-  const b = proc.render(undefined, Math.max(0, Math.round(tail * rate)));
-  const channels = a.map((ch, i) => { const out = new Float32Array(ch.length + (b[i] ? b[i].length : 0)); out.set(ch); if (b[i]) out.set(b[i], ch.length); return out });
+  for (const [k, v] of Object.entries(params)) {
+    const c = find(k);
+    if (!c) throw new Error(`the Faust code has no control named "${k}" (it has: ${cs.map(c => c.label).join(', ') || 'none'})`);
+    proc.setParamValue(c.address, +v);
+  }
+  // faustwasm 0.18.5 (pinned): a poly DSP's compute(inputs, outputs, events) applies {frame, apply} at its frame in the block
+  const dsp = proc.fDSPCode, B = 128, ev = [];
+  for (const n of notes) {
+    const on = Math.round(n.start * rate);
+    ev.push({at: on, off: 0, apply: () => dsp.keyOn(0, n.note, n.velocity)},
+            {at: Math.max(on, Math.round((n.start + n.length) * rate)), off: 1, apply: () => dsp.keyOff(0, n.note, 0)});
+  }
+  ev.sort((a, b) => a.at - b.at || b.off - a.off);
+  const total = Math.max(1, Math.round((seconds ?? Math.max(...notes.map(n => n.start + n.length)) + tail) * rate));
+  const ins = Array.from({length: dsp.getNumInputs()}, () => new Float32Array(B));
+  const outs = Array.from({length: dsp.getNumOutputs()}, () => new Float32Array(B));
+  const channels = outs.map(() => new Float32Array(total));
+  dsp.start();
+  for (let at = 0, k = 0; at < total; at += B) {
+    const evs = [];
+    while (k < ev.length && ev[k].at < at + B) { const e = ev[k++]; evs.push({frame: e.at - at, apply: e.apply}) }
+    dsp.compute(ins, outs, evs);
+    outs.forEach((o, c) => channels[c].set(o.subarray(0, Math.min(B, total - at)), at));
+  }
   return {channels, controls: cs};
 }
 
@@ -69,8 +86,11 @@ if (isNode) {
     try {
       const job = JSON.parse(fs.readFileSync(jobFile, 'utf8'));
       const F = await loadFaust(base);
-      const proc = await compileFaust(F, job.code, job.rate || 44100);
-      const {channels, controls: cs} = renderNote(proc, job);
+      // a job is notes (and seconds), or one note: hz, velocity, held for hold, then tail
+      const one = !job.notes, hold = job.hold ?? 1;
+      const notes = job.notes || [{note: 69 + 12 * Math.log2((job.hz || 261.6256) / 440), start: 0, length: hold, velocity: job.velocity ?? 100}];
+      const {channels, controls: cs} = await renderNotes(await compileFaust(F, job.code),
+                                                         {...job, notes, seconds: one ? hold + (job.tail ?? 0.5) : job.seconds});
       const n = channels[0] ? channels[0].length : 0, inter = new Float32Array(n * channels.length);
       channels.forEach((ch, c) => { for (let i = 0; i < n; i++) inter[i * channels.length + c] = ch[i] });
       fs.writeFileSync(outFile, Buffer.from(inter.buffer));

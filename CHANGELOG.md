@@ -2,6 +2,17 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- **Faust plays chords, live and from MIDI.** The FAUST tab's code is now a polyphonic instrument, a voice per note in
+  Faust's own way (`freq`, `gain` and `gate` set per voice; an `effect` in the code runs once on the sum). NOTE takes a
+  chord (`C-5 E-5 G-5`) for PREVIEW and the saves. The piano keys play the code live at their real pitch (before, one
+  render was replayed faster or slower) and hold the note until let go; sliders act on the notes sounding; with the
+  tab open a MIDI keyboard plays it, with velocity, and pitch bend and controllers reach the controls the code maps
+  with `[midi:...]`. Recipes: `faust:` samples take `chord:` and `phrase:` like synth patches.
+
+Fixes: a Faust render's release no longer starts up to 127 samples late (a note's key-off now lands on its sample).
+
 ## 0.9.0 (2026-10-01)
 
 The finishing workflows on the command line, chords the OpenMPT way, and a second pass over the 0.7.0 audit.

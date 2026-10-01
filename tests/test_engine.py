@@ -348,6 +348,7 @@ const out=[],tabs=new Set(['t-pattern']),$=id=>({classList:{contains:c=>tabs.has
 let S={song:{facts:{}}},EDIT=false,PAT={rows:[['... .. v20 A06'],['... .. ... ...'],['... .. ... ...']],order:0},CUR={o:0,row:0,ch:0},INS_SEL=null,W={data:null};
 const LV={playing:false,pos:null,oi:-1};
 const insNum=()=>3,putCell=(p,adv)=>out.push(['cell',cellText(p),adv,CUR.row]),lvNoteOn=(...a)=>out.push(['on',...a]),lvNoteOff=k=>out.push(['off',k]);
+const faOn=()=>tabs.has('t-faust'),faMidi=d=>out.push(['faust',...d]);
 PAGE
 MIDI.on=true;midiMsg([0x90,60,127]);midiMsg([0x80,60,0]);          // preview only
 EDIT=true;midiMsg([0x90,61,64]);midiMsg([0x90,61,0]);  // edit mode: entered with the velocity, note-on at 0 = note-off
@@ -356,6 +357,8 @@ MIDI.on=false;midiMsg([0x90,50,100]);                 // MIDI switched off: noth
 MIDI.on=true;LV.playing=true;LV.oi=0;LV.pos={order:0,row:2};midiMsg([0x90,62,127]);  // recorded at the row playing, no step
 LV.oi=1;midiMsg([0x90,63,127]);LV.playing=false;                      // another pattern plays: at the cursor
 EDIT=false;MIDI.on=true;tabs.clear();tabs.add('t-smp');W.data={player:[4,60]};midiMsg([0x90,64,127]);  // the Samples tab plays the slot's player
+EDIT=true;tabs.add('t-faust');midiMsg([0x90,60,100]);midiMsg([0xE0,0,64]);midiMsg([0x80,60,0]);  // the FAUST tab: all to Faust, no entry
+MIDI.on=false;midiMsg([0x90,61,100]);                 // switched off: nothing there either
 console.log(JSON.stringify(out));
 """
 
@@ -374,7 +377,8 @@ class TestMidi(unittest.TestCase):
                                ["cell", "C-6 03 v20 A06", True, 0], ["on", "m72", None, 72, 1],
                                ["cell", "D-5 03 ... ...", False, 2], ["on", "m62", None, 62, 1],
                                ["cell", "D#5 03 ... ...", True, 2], ["on", "m63", None, 63, 1],
-                               ["on", "m64", 4, 64, 1]])
+                               ["on", "m64", 4, 64, 1],
+                               ["faust", 0x90, 60, 100], ["faust", 0xE0, 0, 64], ["faust", 0x80, 60, 0]])
 
 
 if __name__ == "__main__":

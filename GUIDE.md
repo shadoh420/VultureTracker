@@ -133,11 +133,12 @@ keyboard plugged in before or while the app runs is then picked up through the p
 its name next to MIDI and VEL→VOL. Its keys play like the piano
 keys, MIDI note 60 being C-5: a preview through the live engine (the INS instrument; in the Instruments tab the
 instrument on show, in the Samples tab the slot), at the key's loudness with VEL→VOL; releasing the key releases the
-note. In edit mode on the Pattern tab each key also enters its note at the cursor with the INS instrument, and with
-VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STEP rows. While the live engine plays the
-pattern on show, a key records instead: its note goes into the cursor's channel at the row playing when it went down,
-and the cursor follows (the piano keys on the computer keyboard record the same way). With CHORD checked,
-notes arriving within 50 ms are captured together, lowest first, across consecutive channels starting at the
+note. On the Faust tab they play the Faust code instead (see there). In edit mode on the Pattern tab each key also
+enters its note at the cursor with the INS instrument, and with VEL→VOL its velocity as the volume column (v01-v64),
+then the cursor moves STEP rows. While the live engine plays the pattern on show, a key records instead: its note goes
+into the cursor's channel at the row playing when it went down, and the cursor follows (the piano keys on the
+computer keyboard record the same way). With CHORD checked, notes arriving within 50 ms are captured together,
+lowest first, across consecutive channels starting at the
 cursor, the computer's piano keys too; with Shift held (OpenMPT's chord modifier) every key struck joins the chord,
 written when Shift is let go, CHORD checked or not. The chord is one undo step and advances STEP only once. If it
 needs more channels than remain, nothing is written and the selection bar explains why. Uncheck CHORD for
@@ -356,14 +357,28 @@ slot through it and FILTER SLOT writes it as a new WAV (`<name>-spectral_mask.wa
 step). The picture and its settings are kept in the browser per song.
 
 **The Faust tab** takes [Faust](https://faust.grame.fr) code (EXAMPLE puts back a two-saw voice with a resonant
-filter) and compiles it in the page (COMPILE, or Ctrl+Enter; the compiler's message appears under the code). NOTE sets a
-control labelled `freq` and is the WAV's root, HOLD holds a `gate` button down, TAIL goes on after its release, VELOCITY
-sets a `gain` control (vel / 127); every other slider of the code appears under CONTROLS. ▶ PREVIEW renders the note and
-plays it; → NEW SLOT writes `faust-<name>.wav` beside the song as a new slot (its base note the NOTE; with an
-instrument in a song with instruments; one undo step), → CANDIDATE adds it to the tryout slot's candidates. A render
-over full scale is scaled under it (the message says so). The compiler (faustwasm, LGPL-3.0, about 6 MB) is fetched
-from npm on first use with GET FAUST, into `tools/faustwasm` (the exe: `%LOCALAPPDATA%/VultureTracker/tools/faustwasm`).
-A sample recipe renders the same code with `faust:` (SAMPLING.md; needs node).
+filter) and compiles it in the page (COMPILE, or Ctrl+Enter; the compiler's message appears under the code). The code
+plays polyphonically, a voice per note, the way Faust does it: the controls whose paths end in `freq`, `gain` and
+`gate` get each voice's pitch, velocity / 127 and key; every other slider of the code appears under CONTROLS and acts on
+all voices (an `effect = ...;` in the code runs once on their sum). NOTE is a note or a chord (`C-5 E-5 G-5`; the first
+note is the WAV's root), HOLD holds the gates down, TAIL goes on after their release, VELOCITY is the velocity. ▶ PREVIEW
+renders it and plays it; → NEW SLOT writes `faust-<name>.wav` beside the song as a new slot (its base note the first
+note; with an instrument in a song with instruments; one undo step), → CANDIDATE adds it to the tryout slot's
+candidates. Renders are made offline at 44100 Hz, a voice per note; one over full scale is scaled under it (the message
+says so).
+
+COMPILE also builds a live instrument from the code: the piano keys (Z to M and Q to U, two octaves from OCT) play it
+at their own pitch with VELOCITY, a voice per key held, released when the key is let go; a slider moved while notes
+sound acts on them at once. With MIDI on, a MIDI keyboard plays it while the Faust tab is open (and only then: elsewhere
+MIDI does what it always does): note on and off with its velocity (VEL→VOL off: VELOCITY), and the pitch wheel and
+controllers reach the controls the code maps with Faust's `[midi:pitchwheel]` and `[midi:ctrl n]` (the EXAMPLE's `bend`
+follows the wheel, two semitones). It has 16 voices unless the code declares others (`declare options
+"[nvoices:8]";`); a note beyond them takes the oldest voice in release, else the oldest sounding one. It runs at the
+sound device's rate and the LATENCY setting of the live bar. ■ silences it at once; leaving the tab or the song lets its
+notes go. A COMPILE while notes sound lets them ring out on the old code. The compiler (faustwasm, LGPL-3.0, about 6
+MB) is fetched from npm on first use with GET FAUST, into `tools/faustwasm` (the exe:
+`%LOCALAPPDATA%/VultureTracker/tools/faustwasm`). A sample recipe renders the same code with `faust:` (SAMPLING.md; needs
+node), chords and phrases too.
 
 **Instrument panel.** Under SLOT, INSTRUMENT shows the instrument that plays the slot (through `sample:`) and what the
 tracker does to every note it plays: a volume envelope (ATTACK and DECAY in ticks, SUSTAIN held until note-off; 0 lets

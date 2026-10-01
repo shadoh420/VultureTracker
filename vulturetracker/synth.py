@@ -431,10 +431,8 @@ def expand(recipe):
             raise RecipeError(f"{where}: needs exactly one of 'patch' (a synth), 'file' (audio file), 'resynth' "
                               "(a target rebuilt from a corpus) or 'faust' (Faust code, or a .dsp file)")
         merged = {**defaults, **spec}
-        if "faust" in spec:
-            if "chord" in spec or "phrase" in spec:
-                raise RecipeError(f"{where}: 'faust' samples play one note at a time: note or notes")
-            merged.setdefault("note", "C-5")
+        if "faust" in spec and "notes" not in spec and not any(k in merged for k in ("note", "chord", "phrase")):
+            merged["note"] = "C-5"
         if "resynth" in spec:
             rs = spec["resynth"]
             if not isinstance(rs, dict) or not rs.get("target") or not rs.get("corpus"):
@@ -488,7 +486,7 @@ def _load_recipe(path):
 def _job_root(name, spec):
     """(output name, sounding root) of one expanded job, without rendering it."""
     where = f"sample '{name}'"
-    root = (_note(spec.get("note", "C-5"), where) if any(k in spec for k in ("file", "resynth", "faust"))
+    root = (_note(spec.get("note", "C-5"), where) if any(k in spec for k in ("file", "resynth"))
             else _events(spec, where)[2])
     root += int(spec.get("root_offset", 0))  # patches that sound in a different octave than the key played
     if not 0 <= root < 120:
@@ -560,7 +558,7 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
     elif "resynth" in spec:
         audio, source = _resynth(path, spec, rate, where, log)
     elif "faust" in spec:
-        audio, source = _faust(path, spec, rate, root, where)
+        audio, source = _faust(path, spec, rate, where)
     else:
         events, seconds, _ = _events(spec, where)
         source = spec["patch"]
@@ -589,10 +587,11 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
     return file, root, loop
 
 
-def _faust(path, spec, rate, root, where):
-    """The `faust:` source (faust.py): its code (or a .dsp file beside the recipe) compiled and one note rendered: the
-    root's pitch on a `freq` control, the velocity on `gain`, a `gate` button held for `hold` s then `tail` s more,
-    `params` on the controls by label. Returns (channels x frames, label)."""
+def _faust(path, spec, rate, where):
+    """The `faust:` source (faust.py): its code (or a .dsp file beside the recipe) compiled and its note, chord or
+    phrase rendered a voice per note: the pitch on a `freq` control, the velocity on `gain`, a `gate` button held for the
+    note's length (`hold` s for a note or chord), `tail` s more after the last; `params` on the controls by label.
+    Returns (channels x frames, label)."""
     from . import faust
     code = str(spec["faust"])
     if "\n" not in code and code.strip().lower().endswith(".dsp"):
@@ -600,10 +599,10 @@ def _faust(path, spec, rate, root, where):
         if not f.is_file():
             raise RecipeError(f"{where}: faust: no such file {f}")
         code = f.read_text(encoding="utf-8")
-    hz = 440 * 2 ** ((root - int(spec.get("root_offset", 0)) - 69) / 12)
+    events, seconds, _ = _events(spec, where)
+    notes = [{"note": n, "start": a, "length": b - a, "velocity": v} for n, v, a, b in events]
     try:
-        x, _ = faust.render(code, hz, int(spec.get("velocity", 100)), float(spec.get("hold", 1.0)),
-                            float(spec.get("tail", 0.5)), spec.get("params"), rate)
+        x, _ = faust.render(code, params=spec.get("params"), rate=rate, notes=notes, seconds=seconds)
     except faust.FaustMissing as e:  # faustwasm can be fetched (the RECIPE box offers it); node cannot
         raise SynthMissing("faust", str(e)) if not faust.have() else RecipeError(f"{where}: {e}")
     except ValueError as e:
