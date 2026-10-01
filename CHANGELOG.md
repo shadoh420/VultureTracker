@@ -2,6 +2,19 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- **Chords from the computer keyboard follow OpenMPT:** with CHORD checked, keys struck within 50 ms are one chord,
+  written as the keys go down (0.8.0 waited until they were let go); holding Shift, OpenMPT's chord modifier, gathers
+  any keys into one chord, written when Shift is let go.
+- **Names from non-ASCII file names are transliterated:** `Böse Bass.wav` becomes the sample name "Bose Bass" instead
+  of "B?se Bass"; imported titles and track names likewise. What has no ASCII form still becomes `?`.
+
+Fixes: a pattern loop across the 192-row split of a long imported pattern plays as the original (its part ends after
+the loop, and a loop longer than any part is played out); an XM restart position whose last row has no free effect
+slot gets a channel of its own; SLICE finds a hit in the last half millisecond of a selection; a naive (aliased) saw
+high up is no longer read an octave low (the sample library reads its pitches again once).
+
 ## 0.8.0 (2026-10-01)
 
 Getting music and sounds in and out.

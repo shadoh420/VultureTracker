@@ -37,6 +37,15 @@ class TestRelease080Dsp(unittest.TestCase):
             got = dsp.pitch_of(0.5 * np.sin(2 * np.pi * hz * t), R)
             self.assertIsNotNone(got, hz)
             self.assertLess(abs(1200 * np.log2(got / hz)), 10, hz)
+        # a naive (aliased) saw whose period is no whole number of samples read two periods; a square (odd harmonics
+        # only) and a missing fundamental (harmonics 2-6) keep their pitch
+        cases = [(0.5 * (2 * ((hz * t) % 1) - 1), hz) for hz in (1046.5, 2093.0, 3520.0, 4186.0)]
+        cases += [(0.5 * np.sign(np.sin(2 * np.pi * 200 * t)), 200), (0.5 * np.sign(np.sin(2 * np.pi * 2093 * t)), 2093),
+                  (0.3 * sum(np.sin(2 * np.pi * 100 * k * t) / k for k in range(2, 7)), 100)]
+        for x, hz in cases:
+            got = dsp.pitch_of(x, R)
+            self.assertIsNotNone(got, hz)
+            self.assertLess(abs(1200 * np.log2(got / hz)), 25, hz)
         for level in (0.5, 0.3):
             self.assertIsNone(dsp.pitch_of(np.full(R, level), R))
             self.assertEqual(dsp.yin(np.full(4410, level), R), (None, 0.0))
@@ -106,6 +115,17 @@ class TestRelease080Dsp(unittest.TestCase):
             x[0, at:] += hit(n - at)
             self.assertTrue(any(abs(p - at) < 200 for p in dsp.onsets(x, R, 50)), n)
             self.assertEqual(dsp.onsets(tone[None, :n], R, 50), [0], n)
+        # the last half millisecond (the window's taper hid it), at a file's end and at a selection's inside a file;
+        # a hit that rises just after the selection is not one of its points
+        for ms in (0.25, 0.5):
+            y = np.zeros((1, 2 * R))
+            at = R - int(ms * R / 1000)
+            y[0, at:at + 4000] += hit(4000)
+            for pts in (dsp.onsets(y[:, :R].copy(), R, 50), dsp.onsets(y, R, 50, 0, R)):
+                self.assertTrue(any(abs(p - at) < 200 for p in pts), (ms, pts))
+        y = np.zeros((1, 2 * R))
+        y[0, R + 22: R + 4022] += hit(4000)
+        self.assertEqual(dsp.onsets(y, R, 50, 0, R), [0])
 
 
 if __name__ == "__main__":

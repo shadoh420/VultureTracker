@@ -472,15 +472,22 @@ def read_xm(data: bytes):
 
 def _restart(mod, restart, warn):
     """XM's restart position (the order the song goes on at after its end, where IT goes to the first) as a jump on the
-    last row of the last order's pattern, a copy of it when other orders play it too."""
+    last row of the last order's pattern, a copy of it when other orders play it too; on a channel of its own when that
+    row has no free effect slot."""
     o = mod.orders[-1]
     last = mod.patterns[o].rows[-1]
     if any(c.effect == fx("B") for c in last):
         return  # the song never ends there
     k = next((k for k, c in enumerate(last) if not c.effect), None)
     if k is None:
-        warn("the restart position dropped (no free effect slot on the song's last row)")
-        return
+        if len(mod.channels) >= 64:
+            warn("the restart position dropped (no free effect slot on the song's last row, and 64 channels)")
+            return
+        mod.channels.append(Channel(name="Restart"))
+        for p in mod.patterns:
+            for row in p.rows:
+                row.append(Cell())
+        k = len(last) - 1
     if mod.orders.count(o) > 1:
         mod.patterns.append(Pattern(f"p{len(mod.patterns):02d}", [[replace(c) for c in row] for row in mod.patterns[o].rows]))
         o = mod.orders[-1] = len(mod.patterns) - 1
@@ -492,16 +499,17 @@ def _split_long(mod, warn, size=192):
     """Patterns longer than IT's 200 rows as parts of `size` rows (a multiple of 16, so bars stay whole), played one after
     the other: the order list follows, a jump (Bxx) goes to where its order now starts, and a break (Cxx) that leaves a
     part early or lands past a part's end becomes a jump to the right part plus a break to the row in it (in a free effect
-    slot of the row). A part ends early where its cut would fall inside a pattern loop (_cuts)."""
+    slot of the row). A part ends early, or late, where its cut would fall inside a pattern loop, and a loop no part
+    can hold is played out (_cuts)."""
     if all(len(p.rows) <= 200 for p in mod.patterns):
         return
-    parts, pats, cuts = {}, [], {}
+    parts, pats, cuts, moved = {}, [], {}, {}
     for i, p in enumerate(mod.patterns):
-        cuts[i] = _cuts(p.rows, size, warn)
+        rows, cuts[i], moved[i] = _cuts(p.rows, size, warn)
         parts[i] = []
         for k, a in enumerate(cuts[i]):
             parts[i].append(len(pats))
-            pats.append(Pattern(p.name if len(cuts[i]) == 1 else f"{p.name}{chr(97 + k)}", p.rows[a:(cuts[i] + [None])[k + 1]]))
+            pats.append(Pattern(p.name if len(cuts[i]) == 1 else f"{p.name}{chr(97 + k)}", rows[a:(cuts[i] + [None])[k + 1]]))
     orders, start = [], []
     for o in mod.orders:
         start.append(len(orders))
@@ -519,6 +527,8 @@ def _split_long(mod, warn, size=192):
                         pos = where.get(i, [])
                         nxt = (pos[0] + 1) % len(mod.orders) if len(pos) == 1 else None
                         nc = cuts[mod.orders[nxt]] if nxt is not None and mod.orders[nxt] < ORDER_SKIP else [0]
+                        if nxt is not None and mod.orders[nxt] < ORDER_SKIP:  # the row in a pattern a loop was played out of
+                            cell.param = moved[mod.orders[nxt]](cell.param)
                         into = sum(c <= cell.param for c in nc[1:])  # the part of the next pattern it lands in
                         if k == len(parts[i]) - 1 and not into:
                             continue
@@ -537,31 +547,70 @@ def _split_long(mod, warn, size=192):
     mod.patterns, mod.orders = pats, orders
 
 
-def _cuts(rows, size, warn):
-    """The rows a pattern's parts start at: every `size` rows, or earlier at the start of a pattern loop (SB0 ... SBx in a
-    channel) that a cut would fall inside, so the loop starts its part; a loop that cannot start one (it has no SB0, or
-    is too long) is cut with a warning."""
-    if len(rows) <= 200:
-        return [0]
-    loops = []
-    for col in zip(*rows):
-        s = 0  # no SB0 yet: the loop starts at the pattern's first row or before it
+def _loops(rows):
+    """The pattern loops of `rows`: (first row, last row, repeats, channel), a loop with no SB0 before it starting at the
+    pattern's first row."""
+    out = []
+    for ch, col in enumerate(zip(*rows)):
+        s = 0
         for r, cell in enumerate(col):
             if cell.effect == fx("S") and cell.param >> 4 == 0xB:
                 if cell.param & 15:
-                    loops.append((s, r))
+                    out.append((s, r, cell.param & 15, ch))
                 else:
                     s = r
+    return out
+
+
+def _unroll(rows, loop):
+    """`rows` with `loop` played out (its rows written once per pass, its SB0 and SBx gone), or None when that would change
+    what plays: another loop marker inside it, or a later SBx of its channel that would loop back to it."""
+    s, e, x, ch = loop
+    marks = [(r, c) for r, row in enumerate(rows) for c, cell in enumerate(row)
+             if cell.effect == fx("S") and cell.param >> 4 == 0xB]
+    if any(s <= r <= e and (r, c) not in ((s, ch), (e, ch)) for r, c in marks):
+        return None
+    later = [r for r, c in marks if c == ch and r > e]
+    if later and rows[later[0]][ch].param & 15:
+        return None
+    body = [[replace(c) for c in row] for row in rows[s:e + 1]]
+    for r in {0, e - s}:
+        cell = body[r][ch]
+        if cell.effect == fx("S") and cell.param >> 4 == 0xB:
+            cell.effect, cell.param = 0, 0
+    return rows[:s] + [[replace(c) for c in row] for _ in range(x + 1) for row in body] + rows[e + 1:]
+
+
+def _cuts(rows, size, warn):
+    """(rows, the rows its parts start at, original row -> row): every `size` rows, a cut that would fall inside a pattern
+    loop moved to the loop's start or, when the part still holds 200 rows, past its end; a loop no part can hold (over
+    200 rows) is played out first (_unroll), else cut with a warning."""
+    if len(rows) <= 200:
+        return rows, [0], lambda r: r
+    shifts = []  # (last row of a played-out loop, rows it added), in the row numbers before it was played out
+    for loop in sorted((lp for lp in _loops(rows) if lp[1] - lp[0] + 1 > 200), reverse=True):  # from the end: rows before stay put
+        new = _unroll(rows, loop)
+        if new is not None:
+            shifts.append((loop[1], len(new) - len(rows)))
+            rows = new
+    loops = [(s, e) for s, e, _, _ in _loops(rows)]
     cuts = [0]
     while len(rows) - cuts[-1] > 200:
-        cut = cuts[-1] + size
-        while any(s < cut <= e for s, e in loops):
-            cut = min(s for s, e in loops if s < cut <= e)
-        if cut <= cuts[-1]:
+        c0 = cuts[-1]
+        cut = c0 + size
+        for _ in range(64):
+            inside = [(s, e) for s, e in loops if s < cut <= e]
+            if not inside:
+                break
+            back, forward = min(s for s, _ in inside), max(e for _, e in inside) + 1
+            cut = back if back > c0 else forward if forward - c0 <= 200 else None
+            if cut is None:
+                break
+        if cut is None or inside:
             warn("a pattern loop across the split of a long pattern cut (it plays differently)")
-            cut = cuts[-1] + size
+            cut = c0 + size
         cuts.append(cut)
-    return cuts
+    return rows, cuts, lambda r: r + sum(add for e, add in shifts if r > e)
 
 
 def _compact(mod, warn):

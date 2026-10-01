@@ -22,7 +22,7 @@ import numpy as np
 # checkout), whose samples/ and tools/cc0 are indexed when no folders were chosen
 ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
         if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
-VERSION = 3            # bump when the vector changes: every file is read again (3: pitch read to 4.2 kHz)
+VERSION = 4            # bump when the vector changes: every file is read again (4: high aliased saws an octave up)
 MAX_SECONDS = 10.0     # what is analysed of a longer file (its start)
 N_MFCC, N_MELS = 13, 40
 # the vector's layout: name -> slice; the groups' weights sum the squared distance a group can add (in library z-scores)

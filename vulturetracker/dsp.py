@@ -42,7 +42,12 @@ def onsets(x, rate, sensitivity=50, a=0, b=None, min_gap=0.05):
     if len(m) < 64:
         return [a]
     size, hop = 1024, 256
-    skip = max(0, len(m) - size) % hop  # the frames end where the selection does, so a hit in its last hop is seen
+    # half a window past the selection (the file's own sound where it goes on, else silence), so a hit in its last
+    # milliseconds sits mid-window, not under the window's taper
+    tail = x[..., b:b + size // 2]
+    seg = np.concatenate([seg, tail, np.zeros(seg.shape[:-1] + (size // 2 - tail.shape[-1],))], axis=-1)
+    n, m = len(m), _mono(seg)  # a hit counts where it rises inside the selection's n frames
+    skip = max(0, seg.shape[-1] - size) % hop  # the frames end where the extended selection does
     flux, hop = novelty(seg[..., skip:], rate, hop, size)
     flux = flux / (flux.max() or 1)
     # the local level the threshold rides on: a 0.2 s moving median, reflected at the end (a hit in the last frame is
@@ -65,9 +70,12 @@ def onsets(x, rate, sensitivity=50, a=0, b=None, min_gap=0.05):
         # where the window saw the rise
         lo, hi = max(0, skip + i * hop - size // 2), min(len(m), skip + i * hop + size + hop)
         rise = np.nonzero(env[lo:hi] >= 0.2 * env[lo:hi].max())[0]
-        at = max(0, lo + (int(rise[0]) if len(rise) else size // 2) - ms)  # 1 ms before the hit reaches a fifth of its level
-        at = zero_crossing(m, at, 2 * ms)
-        if at - (out[-1] - a) >= int(min_gap * rate / 2) and at > 0:
+        r = lo + (int(rise[0]) if len(rise) else size // 2)  # where the hit reaches a fifth of its level
+        at = zero_crossing(m, max(0, r - ms), 2 * ms)  # 1 ms before that
+        # a window reaching past the selection counts only a hit that rises in it: a held sound cut off there (the
+        # silence after a file's end) is not one
+        rose = skip + i * hop + size <= n or (len(rise) and rise[0] > 0)
+        if at - (out[-1] - a) >= int(min_gap * rate / 2) and at > 0 and r < n and rose:
             out.append(a + at)
     return out
 
@@ -322,7 +330,27 @@ def pitch_of(x, rate, fmin=27.5, fmax=4200.0):
     loud = level >= np.median(level)
     found = [yin(m[s:s + size], rate, fmin, fmax) for s, ok in zip(starts, loud) if ok]
     hz = [h for h, conf in found if h and conf > 0.8]
-    return float(np.median(hz)) if len(hz) >= max(1, len(found) // 3) else None
+    if len(hz) < max(1, len(found) // 3):
+        return None
+    hz = float(np.median(hz))
+    # YIN takes two periods when one is no whole number of samples (a naive saw high up): then the spectrum holds the
+    # even harmonics of what it read and not the odd ones, which a real pitch (a square, a missing fundamental) keeps
+    if 2 * hz <= fmax and _odd_even(m[max(0, len(m) // 2 - rate // 2):][:rate], rate, hz) < 0.3:
+        hz *= 2
+    return hz
+
+
+def _odd_even(m, rate, hz):
+    """The spectrum's strongest odd harmonic of `hz` (1, 3, 5) over its strongest even one (2, 4, 6), each the peak within
+    3 % of the harmonic; inf without even ones."""
+    spec = np.abs(np.fft.rfft((m - m.mean()) * np.hanning(len(m))))
+    f = np.fft.rfftfreq(len(m), 1 / rate)
+
+    def level(k):
+        band = (f > k * hz * 0.97) & (f < k * hz * 1.03)
+        return spec[band].max() if k * hz < rate / 2 and band.any() else 0.0
+    even = max(level(k) for k in (2, 4, 6))
+    return max(level(k) for k in (1, 3, 5)) / even if even else float("inf")
 
 
 def trim_edges(x, rate, db=-50.0, pre_ms=10, post_ms=50):

@@ -110,8 +110,30 @@ class TestRelease080Import(unittest.TestCase):
         it, song, _ = imported(data, "xm")
         self.assertEqual(len(pcm(it)), len(pcm(data)))
         self.assertEqual([song["patterns"][p]["rows"] for p in song["orders"]], [150, 106])
-        loop = grid([(0, 0, (C4, 1, 0, 0, 0)), (250, 0, (0, 0, 0, 0xE, 0x61))], E_XM, rows=256)  # no E60: from row 0
-        self.assertTrue(any("pattern loop" in w for w in read_module(write_xm([XM_INS], [loop], [0], speed=2))[1]))
+        # a loop of 196 rows a cut at 192 falls inside: its part starts at the loop and ends after it (10, 196, 50 rows);
+        # a loop no part holds (no E60: rows 0-250, twice) is played out (507 rows in parts of 192)
+        for events, parts in (([(10, 0, (C4 + 7, 1, 0, 0xE, 0x60)), (205, 0, (0, 0, 0, 0xE, 0x61))], [10, 196, 50]),
+                              ([(250, 0, (0, 0, 0, 0xE, 0x61))], [192, 192, 123])):
+            data = write_xm([XM_INS], [grid([(0, 0, (C4, 1, 0, 0, 0))] + events, E_XM, rows=256)], [0], speed=2)
+            it, song, warnings = imported(data, "xm")
+            with self.subTest(parts=parts):
+                self.assertEqual([song["patterns"][p]["rows"] for p in song["orders"]], parts)
+                self.assertEqual(len(pcm(it)), len(pcm(data)))  # as long as the original (XM and IT mix apart)
+                self.assertFalse(any("pattern loop" in w for w in warnings), warnings)
+        # IT (patterns to 1024 rows, breaks to row 255): a break into a pattern whose loop was played out lands on the
+        # row it meant, renumbered past the copies
+        m = it_module(2)  # the second channel's effect slot takes the break to the row in the part
+        a, b = [[Cell(), Cell()] for _ in range(16)], [[Cell(), Cell()] for _ in range(300)]
+        a[0][0], a[0][1], a[15][0] = Cell(note=60, instrument=1), Cell(note=64, instrument=1), Cell(effect=3, param=252)
+        b[0][0], b[210][0], b[252][0] = Cell(note=67, instrument=1), Cell(effect=19, param=0xB1), Cell(note=72, instrument=1)
+        m.patterns, m.orders = [Pattern("a", a), Pattern("b", b)], [0, 1]
+        it, song, _ = imported(write_it(m), "it")
+        self.assertEqual(len(pcm(it)), len(pcm(write_it(m))))
+        self.assertEqual(sum(song["patterns"][p]["rows"] for p in song["orders"][1:]), 300 + 211)
+        # another channel's loop inside it: played out it would play differently, so it stays cut with a warning
+        nested = grid([(0, 0, (C4, 1, 0, 0, 0)), (250, 0, (0, 0, 0, 0xE, 0x61)), (20, 1, (0, 0, 0, 0xE, 0x60)),
+                       (30, 1, (0, 0, 0, 0xE, 0x61))], E_XM, rows=256)
+        self.assertTrue(any("pattern loop" in w for w in read_module(write_xm([XM_INS], [nested], [0], speed=2))[1]))
 
     # 25c: the XM restart position, on a copy of the last pattern when it is played twice
     def test_xm_restart_position(self):
@@ -125,6 +147,14 @@ class TestRelease080Import(unittest.TestCase):
             with self.subTest(orders=orders):
                 self.assertEqual(pcm(it, 1), pcm(data, 1))
                 self.assertEqual(len(song["patterns"]), len(set(orders)) + (orders.count(orders[-1]) > 1))
+        # every effect slot of the last row taken (set panning to the centre): the jump gets a channel of its own
+        full = grid([(0, 0, (C4 + 12, 1, 0, 0, 0))] + [(15, c, (0, 0, 0, 8, 0x80)) for c in range(4)], E_XM, rows=16)
+        data = bytearray(write_xm([XM_INS], [a, full], [0, 1]))
+        struct.pack_into("<H", data, 66, 1)
+        it, song, warnings = imported(bytes(data), "xm")
+        self.assertEqual(pcm(it, 1), pcm(bytes(data), 1))
+        self.assertEqual(len(song["module"]["channels"]), 5)
+        self.assertFalse(any("restart" in w for w in warnings), warnings)
 
     # 25d: XM Cxx and a volume-column command in one cell: both kept
     def test_xm_set_volume_beside_a_volume_column_command(self):
