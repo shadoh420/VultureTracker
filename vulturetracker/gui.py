@@ -37,7 +37,7 @@ from urllib.parse import unquote
 import yaml
 
 from . import api
-from .fileio import atomic_write as _atomic, device_name, protect_outputs, wav_bytes
+from .fileio import atomic_write as _atomic, device_name, lock_file, protect_outputs, unlock_file, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
 from .history import History, digest, json_bytes, pack_step, unpack_step, HISTORY_BYTES
@@ -65,6 +65,7 @@ PORT = 8723
 # hold the GIL between libopenmpt's calls), so one worker stays the default
 WORKERS = max(1, int(os.environ.get("VT_WORKERS") or 1))
 PROFILE = RECENT.parent / "webview"
+LOCKS = RECENT.parent / "open"  # one locked file per song open in an app (app_lock_path)
 OLD_RECENT = RECENT.parent.with_name("TrackerForge") / "recent.json"  # the app's previous name
 
 
@@ -861,6 +862,26 @@ def voice_entry(ins, edit):
 
 # ---------------------------------------------------------------- state
 
+def app_lock_path(song_path):
+    """The file the app holds locked while a song is open in it: beside the recent-songs list, not in the song's folder
+    (Windows would refuse to rename or move a folder holding an open file)."""
+    key = os.path.normcase(str(Path(song_path).resolve()))
+    return LOCKS / (hashlib.sha1(key.encode("utf-8")).hexdigest()[:16] + ".lock")
+
+
+def open_in_app(song_path):
+    """Whether a running app has the song open: it keeps the song's history and tryout settings in memory and writes
+    them over a change made beside it (a checkpoint saved from the command line would vanish)."""
+    p = app_lock_path(song_path)
+    if not p.exists():
+        return False
+    f = lock_file(p)
+    if f is None:
+        return True
+    unlock_file(f)
+    return False
+
+
 class State:
     def __init__(self, song_path, headless=False):
         """`headless` (the export and collect commands): no workers, no .tryout cache, notes left where they are."""
@@ -871,6 +892,7 @@ class State:
         self.meta_path = self.song_path.with_name(self.song_path.stem + ".tryout.json")
         self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
         self.closed = False
+        self._app_lock = None  # held while the app has the song open (open_in_app)
         self.notices = []     # what the page should tell once: a meta or notes file that could not be read
         self.history_store = History(self.song_path, self.notices)
         self.checkpoints = {}
@@ -924,6 +946,8 @@ class State:
         if headless:
             return
         self.cache_dir.mkdir(exist_ok=True)
+        LOCKS.mkdir(parents=True, exist_ok=True)
+        self._app_lock = lock_file(app_lock_path(self.song_path))  # the command line's tools see the song is open here
         for _ in range(WORKERS):
             threading.Thread(target=self._worker, daemon=True).start()
 
@@ -1202,6 +1226,13 @@ class State:
         """Another song replaced this one in the app: the worker stops after the job it is on (it would keep rendering
         into this song's cache and prune it against the new state's writes)."""
         self.closed = True
+        if self._app_lock:
+            unlock_file(self._app_lock)
+            self._app_lock = None
+            try:
+                app_lock_path(self.song_path).unlink()
+            except OSError:  # another window of the app has it open this moment: it stays, unlocked
+                pass
         for _ in range(WORKERS):
             self._put(-1, ("close",))
 
@@ -2002,6 +2033,8 @@ class State:
                 raise ValueError('Give the checkpoint a name of 1-80 characters')
             if self.dirty():
                 raise ValueError('Compare and RELOAD external edits first')
+            if action in ('diff', 'restore', 'delete') and name not in self.checkpoints:
+                raise ValueError(f'No checkpoint named {name}')
             if action == 'diff':
                 return self._diff(unpack_step(self.checkpoints[name])['text'], False)
             if action == 'restore':
@@ -3574,6 +3607,8 @@ class Handler(BaseHTTPRequestHandler):
         old, cls.state = cls.state, State(path)
         if old is not None:
             old.close()
+            if cls.state._app_lock is None:  # the same song opened again: the old state held its lock until now
+                cls.state._app_lock = lock_file(app_lock_path(cls.state.song_path))
         remember_song(cls.state.song_path)
 
     @classmethod
@@ -3990,6 +4025,14 @@ def make_server(port=0):
 def serve(song_path=None, port=0, open_browser=True, window=True):
     """Serve the UI. With pywebview installed (and `window`), it opens in a native window; else the default
     browser. `song_path` may be None: the UI then starts on its open-a-song screen."""
+    for p in LOCKS.glob("*.lock"):  # left by sessions that ended (the system let go of their locks)
+        f = lock_file(p)
+        if f:
+            unlock_file(f)
+            try:
+                p.unlink()
+            except OSError:  # another app window took it this moment
+                pass
     if song_path:
         Handler.open_song(song_path)
     srv = make_server(port)

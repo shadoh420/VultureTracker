@@ -585,3 +585,71 @@ class TestSafety(unittest.TestCase):
         self.addCleanup((self.dir.parent / (self.dir.name + '-copy.zip')).unlink)
         self.assertTrue((self.dir.parent / (self.dir.name + '-copy') / 'song.yaml').is_file())
         self.assertEqual(sorted(p.name for p in self.dir.iterdir()), sorted(before + ['out']))  # no .tryout cache beside the song
+
+    def test_cli_sections_checkpoints_and_phrases_land_in_the_apps_history(self):
+        import contextlib
+        import io
+        from vulturetracker.__main__ import main
+        song = self.dir / 'song.yaml'
+        song.write_bytes(SONG_BLOCK.replace('orders: [p1, p2]', 'orders: [p1, p2, p1]').encode())
+
+        def run(*args):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                code = main([args[0], str(song), *args[1:]])
+            return code, out.getvalue()
+        self.assertEqual(run('sections', 'save', 'Intro', '0', '2'), (0, 'Intro: orders 0-1 (p1 p2)\n'))
+        self.assertEqual(run('sections', 'duplicate', 'Intro', '3')[0], 0)
+        self.assertIn('Intro copy: orders 3-4 (p1_copy1 p2_copy1)', run('sections')[1])
+        self.assertEqual(run('sections', 'save', 'Bad', '0', '9')[0], 1)  # past the orders: check's error, nothing written
+        self.assertEqual(run('checkpoint', 'save', 'Before')[0], 0)
+        self.assertEqual(run('sections', 'delete', 'Intro copy')[0], 0)
+        self.assertIn('+  "Intro copy": [3, 5]', run('checkpoint', 'diff', 'Before')[1])
+        self.assertEqual(run('checkpoint', 'restore', 'Nope')[0], 1)
+        self.assertEqual(run('checkpoint', 'restore', 'Before')[0], 0)
+        self.assertIn('Intro copy', api.load(song)['sections'])
+        # a phrase: capture, write one alternative, hear it, accept it
+        self.assertEqual(run('phrase', 'capture', '--order', '2', '--rows', '0-3', '--channels', '1', '--count', '2')[0], 0)
+        (self.dir / 'cells.txt').write_text('D-5 01 ... ...\n... .. ... ...\n... .. ... ...\n... .. ... ...\n', newline='\n')
+        code, shown = run('phrase', 'set', 'B', '--cells', str(self.dir / 'cells.txt'), '--stars', '4', '--note', 'rises')
+        self.assertEqual(code, 0)
+        self.assertIn('B: B **** (rises)\n    D-5 01 ... ...', shown)
+        self.assertEqual(run('phrase', 'set', 'C')[0], 1)  # two alternatives: A and B
+        self.assertEqual(run('phrase', 'render', 'B', '-o', str(self.dir / 'line-b.wav'))[0], 0)
+        self.assertEqual(run('phrase', 'render', 'A', '-o', str(self.dir / 'line-b.wav'))[0], 1)  # exists: --replace
+        self.assertEqual(run('phrase', 'render', 'A', '-o', str(self.dir / 'line-b.wav'), '--replace')[0], 0)
+        self.assertEqual(run('phrase', 'render', 'B', '-o', str(self.dir / 'a.wav'))[0], 1)  # a source of the song
+        self.assertIn('+      00: D-5 01', run('phrase', 'diff', 'B')[1])
+        self.assertEqual(run('phrase', 'accept', 'B')[0], 0)
+        self.assertNotIn('.tryout', [p.name for p in self.dir.iterdir()])
+        # the app opens on all of it: one undo step each, the accept undone first
+        st = self.state()
+        self.assertIn('Before', st.checkpoints)
+        self.assertEqual(st.mod.patterns[st.mod.orders[2]].rows[0][0].note, 62)
+        steps = len(st.history)
+        self.assertEqual(steps, 5)  # save, duplicate, delete, restore, accept
+        st.undo()
+        self.assertEqual(st.mod.patterns[st.mod.orders[2]].rows[0][0].note, 60)
+        # while the app has the song open, the commands that write are refused; those that read still answer
+        history = st.history_store.path.read_bytes()
+        for args in (('checkpoint', 'save', 'Later'), ('sections', 'delete', 'Intro'), ('phrase', 'accept', 'A')):
+            code, said = run(*args)
+            self.assertEqual(code, 1, args)
+            self.assertIn('open in VultureTracker', said)
+        self.assertEqual(st.history_store.path.read_bytes(), history)
+        self.assertEqual(run('checkpoint')[0], 0)
+        from vulturetracker.fileio import unlock_file
+        unlock_file(st._app_lock)  # what State.close does when the app opens another song (the system, when it quits)
+        st._app_lock = None
+        self.assertEqual(run('checkpoint', 'save', 'Later')[0], 0)
+        # the same song opened again in the app stays locked: the new state takes the lock the old one held
+        with mock.patch.object(gui, 'remember_song'), mock.patch.object(gui, 'WORKERS', 0):
+            old = gui.Handler.state
+            try:
+                gui.Handler.open_song(song)
+                gui.Handler.open_song(song)
+                self.assertTrue(gui.open_in_app(song))
+            finally:
+                gui.Handler.state.close()
+                gui.Handler.state = old
+        self.assertFalse(gui.open_in_app(song))

@@ -36,6 +36,9 @@ python -m vulturetracker index C:/samples samples                      # index W
 python -m vulturetracker tryout song.yaml --sample 3 --like kick.wav -k 8 # the 8 sounds nearest kick.wav, in the song
 python -m vulturetracker export song.yaml -f ogg --section Loop --loop --stems # RENDER & EXPORT without the app
 python -m vulturetracker collect song.yaml ../song-copy --zip           # PROJECT's Collect Samples without the app
+python -m vulturetracker sections song.yaml save Intro 0 4              # SONG's named sections (orders 0-3) without the app
+python -m vulturetracker checkpoint song.yaml save "Before the mix"     # PROJECT's checkpoints: save, diff, restore, delete
+python -m vulturetracker phrase song.yaml capture --order 2 --rows 0-15 --channels 3 # PHRASES: then set, diff, render, accept
 ```
 
 `pip install -e .` also installs a `vulturetracker` command.
@@ -441,6 +444,17 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    replacement WAVs in PROJECT, then RELINK (or all missing samples together). This
    changes only `file:` paths, keeping tuning, loop settings and comments (a slot named after its file gets that
    name written as `name:`, so instruments that refer to it still find it); the complete song must compile.
+
+**From the command line.** `sections`, `checkpoint` and `phrase` do what SONG, PROJECT and PHRASES do, on a song the
+app does not have open. Without an action they list (sections with their orders; checkpoints with the undo and redo
+counts; the phrase comparison with each alternative's cells). `sections SONG save|delete|move|duplicate NAME [orders]`
+(save takes FIRST END, move and duplicate the order boundary TO; `--shared`, `--as NAME`); `checkpoint SONG
+save|diff|restore|delete NAME`; `phrase SONG capture --order N --rows A-B --channels C[,D] [--count 2-4]`, then
+`phrase SONG set|diff|render|accept A-D|absent` (alternatives by place; set takes `--cells FILE` with one row per
+line and `|` between channels, `--name`, `--stars`, `--note`; render writes `-o FILE.wav`, replacing one only with `--replace`). Orders and rows count
+from 0, channels from 1, as the app shows them. Each change is an undo step in `<song>.history.json`, so the app
+opens on it and can undo it. While the app has the song open, the commands that write are refused: the app keeps the
+history and tryout settings in memory and would write over them. Listings, diffs and renders still work.
 
 **Persistence and external files.** The YAML remains the musical source of truth, with comments, BOM and line endings
 retained by app writes. `<song>.tryout.json` holds audition settings, candidates and phrase choices;

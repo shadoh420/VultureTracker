@@ -1,4 +1,5 @@
-"""CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,export,collect,gui} ..."""
+"""CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,export,collect,sections,
+checkpoint,phrase,gui} ..."""
 import argparse
 import json
 import sys
@@ -19,6 +20,125 @@ def _print_info(d):
     print(f"  orders:      {d['orders']}")
     for w in d["warnings"]:
         print(f"  libopenmpt: {w}")
+
+
+def _say(text):
+    """A line that may hold what was typed in the app (names, notes): what the console cannot show becomes ?."""
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(str(text).encode(enc, "replace").decode(enc))
+
+
+WRITES = {"sections": ("save", "delete", "move", "duplicate"), "checkpoint": ("save", "restore", "delete"),
+          "phrase": ("capture", "set", "accept")}
+
+
+def _song_tool(args):
+    """sections, checkpoint and phrase: the app's own methods on the song opened headless. What they change goes into
+    the song's history (.history.json) and tryout settings (.tryout.json) as in the app, so the app must not have the
+    song open: it would write its own over them."""
+    from . import phrases
+    from .export import sources
+    from .fileio import atomic_write, protect_outputs
+    from .gui import State, open_in_app
+    if args.action in WRITES[args.cmd] and open_in_app(args.song):
+        print(f"error: {Path(args.song).name} is open in VultureTracker, which keeps its history and tryout settings and "
+              f"would write them over this change: {args.action} it in the app, or open another song there first",
+              file=sys.stderr)
+        return 1
+    st = State(args.song, headless=True)
+    for line in st.error or []:
+        print(line)
+    if st.error and args.cmd != "checkpoint":  # a checkpoint can bring back a song that no longer compiles
+        return 1
+    if args.action and args.cmd != "phrase" and not args.name:
+        raise ValueError(f"{args.cmd} {args.action} needs a name")
+
+    if args.cmd == "sections":
+        if args.action:
+            need = {"save": 2, "delete": 0, "move": 1, "duplicate": 1}[args.action]
+            if len(args.orders) != need:
+                raise ValueError({"save": "sections save NAME FIRST END: the order positions FIRST to END-1",
+                                  "delete": "sections delete NAME takes no order positions",
+                                  "move": "sections move NAME TO: the order boundary it goes to",
+                                  "duplicate": "sections duplicate NAME TO: the order boundary the copy goes to"}[args.action])
+            body = {"action": args.action, "name": args.name}
+            if args.action == "save":
+                body.update(start=args.orders[0], end=args.orders[1])
+            elif args.orders:
+                body.update(to=args.orders[0], independent=not args.shared, new_name=args.new_name)
+            st.section_edit(body)
+        orders = [str(o) for o in st.song.get("orders") or []]
+        for name, (a, b) in (st.song.get("sections") or {}).items():
+            _say(f"{name}: orders {a}-{b - 1} ({' '.join(orders[a:b])})")
+        if not st.song.get("sections"):
+            print("no named sections")
+        return 0
+
+    if args.cmd == "checkpoint":
+        if not args.action:
+            for name, step in st.checkpoints.items():
+                v = step.get("version") or {}
+                _say(f"{name}  (the song as of {v.get('mtime', '?')}, version {v.get('hash', '?')})")
+            print(f"{len(st.checkpoints)} checkpoints; {len(st.history)} undo and {len(st.future)} redo steps")
+            return 0
+        res = st.checkpoint(args.name, args.action)
+        if args.action == "diff":
+            for line in res["lines"] or ["the song is as the checkpoint has it"]:
+                _say(line)
+        else:
+            done = {"save": "saved", "restore": "restored", "delete": "deleted"}[args.action]
+            _say(f"{done} checkpoint {args.name}")
+        return 0
+
+    if args.action == "capture":
+        if args.order is None or not args.rows or not args.channels:
+            raise ValueError("phrase capture needs --order, --rows and --channels")
+        r0, _, r1 = args.rows.partition("-")
+        phrases.action(st, {"action": "capture", "order": args.order, "r0": int(r0), "r1": int(r1 or r0),
+                            "chans": [int(c) - 1 for c in args.channels.split(",")], "count": args.count})
+    elif args.action:
+        if not st.meta.get("phrase"):
+            raise ValueError("capture a phrase first (phrase SONG capture --order N --rows A-B --channels C)")
+        v = (args.variant or "").strip()
+        index = -1 if v.lower() == "absent" else "ABCD".index(v.upper()) if len(v) == 1 and v.upper() in "ABCD" else -2
+        if not -1 <= index < len(st.meta["phrase"]["variants"]):
+            raise ValueError(f"name the alternative: {', '.join('ABCD'[:len(st.meta['phrase']['variants'])])} (by place) or absent")
+        if args.action == "set":
+            body = {"action": "update", "variant": index}
+            if args.cells:
+                cells = sys.stdin.read() if args.cells == "-" else Path(args.cells).read_text(encoding="utf-8")
+                body["data"] = cells.strip("\n")
+            body.update({k: getattr(args, k) for k in ("name", "stars", "note") if getattr(args, k) is not None})
+            phrases.action(st, body)
+        elif args.action == "diff":
+            for line in phrases.action(st, {"action": "diff", "variant": index})["lines"] or ["no difference"]:
+                _say(line)
+            return 0
+        elif args.action == "render":
+            if not args.output:
+                raise ValueError("phrase render needs -o OUTPUT.wav")
+            phrase = st.meta["phrase"]
+            protect_outputs([args.output], sources(st))
+            atomic_write(Path(args.output), phrases.variant_wav(st, phrase, phrases.edited_text(st, phrase, index)),
+                         replace=args.replace)
+            print(f"wrote {args.output}")
+            return 0
+        else:
+            phrases.action(st, {"action": "accept", "variant": index})
+            print(f"accepted {v.upper() if index >= 0 else 'absent'} into the song (one undo step)")
+    phrase = st.meta.get("phrase")
+    if not phrase:
+        print("no phrase captured")
+        return 0
+    accepted = phrase.get("accepted")
+    _say(f"order {phrase['order']} (pattern {phrase['pattern']}), rows {phrase['r0']}-{phrase['r1']}, channels "
+         + ",".join(str(c + 1) for c in phrase["chans"])
+         + ("" if accepted is None else f"; accepted: {'ABCD'[accepted] if accepted >= 0 else 'absent'}"))
+    for label, var in [*zip("ABCD", phrase["variants"]), ("absent", phrase["absent"])]:
+        _say(" ".join(filter(None, (f"{label}: {var['name']}", "*" * var["stars"], var["note"] and f"({var['note']})"))))
+        for line in (var.get("data") or "").splitlines():
+            _say("    " + line)
+    return 0
 
 
 def main(argv=None):
@@ -93,6 +213,37 @@ def main(argv=None):
     p.add_argument("song")
     p.add_argument("destination", help="a new folder (never merged into an existing one)")
     p.add_argument("--zip", action="store_true", help="also <folder>.zip beside it")
+    p = sub.add_parser("sections", help="list a song's named sections, or save, delete, move or duplicate one as the app's "
+                                        "SONG OVERVIEW does (each an undo step in the app's history)")
+    p.add_argument("song")
+    p.add_argument("action", nargs="?", choices=["save", "delete", "move", "duplicate"])
+    p.add_argument("name", nargs="?")
+    p.add_argument("orders", nargs="*", type=int, help="save: FIRST END, the order positions FIRST to END-1 (0 is the "
+                                                        "first); move, duplicate: TO, the order boundary it goes to")
+    p.add_argument("--shared", action="store_true", help="duplicate: the copy plays the same patterns (default: copies)")
+    p.add_argument("--as", dest="new_name", help="duplicate: the copy's name (default: '<name> copy')")
+    p = sub.add_parser("checkpoint", help="list a song's named checkpoints, or save, diff, restore or delete one as the "
+                                          "app's PROJECT tab does")
+    p.add_argument("song")
+    p.add_argument("action", nargs="?", choices=["save", "diff", "restore", "delete"])
+    p.add_argument("name", nargs="?")
+    p = sub.add_parser("phrase", help="alternatives of a line over a frozen accompaniment, as the app's PHRASES tab: "
+                                      "capture rows of channels, set an alternative, diff, render or accept one (no action: "
+                                      "show the comparison)")
+    p.add_argument("song")
+    p.add_argument("action", nargs="?", choices=["capture", "set", "diff", "render", "accept"])
+    p.add_argument("variant", nargs="?", help="A, B, C or D (by place), or absent: the line left out")
+    p.add_argument("--order", type=int, help="capture: the order position (0 is the first)")
+    p.add_argument("--rows", help="capture: rows FIRST-LAST of its pattern, e.g. 0-15")
+    p.add_argument("--channels", help="capture: channels numbered as the app shows them (1 is the first), e.g. 2,3")
+    p.add_argument("--count", type=int, default=3, help="capture: how many alternatives, 2-4 (default 3)")
+    p.add_argument("--cells", help="set: a file with the alternative's rows, cells as in a pattern with | between "
+                                   "channels (- reads them from stdin)")
+    p.add_argument("--name", help="set: its name")
+    p.add_argument("--stars", type=int, help="set: a rating 0-5")
+    p.add_argument("--note", help="set: a note")
+    p.add_argument("-o", "--output", help="render: the WAV to write")
+    p.add_argument("--replace", action="store_true", help="render: replace an existing WAV of that name")
     p = sub.add_parser("gui", help="open the app for a song (its own window with pywebview installed, else the browser)")
     p.add_argument("song", nargs="?", help="song to open (default: the app's open-a-song screen)")
     p.add_argument("--port", type=int, default=0, help="listen port (default: 8723 when free, else any free port)")
@@ -238,6 +389,9 @@ def main(argv=None):
                 print(f"error: {res['error']}", file=sys.stderr)
                 return 1
             return 0
+
+        if args.cmd in ("sections", "checkpoint", "phrase"):
+            return _song_tool(args)
 
         if args.cmd == "surge-params":
             from .synth import list_params

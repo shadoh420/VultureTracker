@@ -9,6 +9,10 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   any keys into one chord, written when Shift is let go.
 - **Names from non-ASCII file names are transliterated:** `Böse Bass.wav` becomes the sample name "Bose Bass" instead
   of "B?se Bass"; imported titles and track names likewise. What has no ASCII form still becomes `?`.
+- **Sections, checkpoints and phrases from the command line:** `sections`, `checkpoint` and `phrase` list, save,
+  move, duplicate, diff, restore, capture, render and accept as SONG, PROJECT and PHRASES do, each change an undo step
+  the app opens with. While the app has the song open, the commands that would change it are refused (the app would
+  write its own history over theirs).
 
 Fixes: a pattern loop across the 192-row split of a long imported pattern plays as the original (its part ends after
 the loop, and a loop longer than any part is played out); an XM restart position whose last row has no free effect

@@ -130,6 +130,13 @@ def edited_text(state, phrase, variant, accepting=False):
     return ''.join(lines)
 
 
+def variant_wav(state, phrase, text):
+    """The captured rows of `text` (edited_text of one alternative) as a WAV, with the mix and mutes of the capture."""
+    snap = snapshot(api.from_yaml(text), state.base_dir, (phrase['order'], phrase['r0'], phrase['order'], phrase['r1']),
+                    phrase['mix'], phrase['muted'], tail=0)
+    return wav_bytes(render(snap))
+
+
 def action(state, body):
     with state.lock:
         kind = body.get('action')
@@ -173,10 +180,7 @@ def action(state, body):
                                      phrase['r1']]))[:24]
             out = state.cache_dir / f'{key}.wav'
             if not out.exists():
-                snap = snapshot(api.from_yaml(text), state.base_dir,
-                                (phrase['order'], phrase['r0'], phrase['order'], phrase['r1']),
-                                phrase['mix'], phrase['muted'], tail=0)
-                atomic_write(out, wav_bytes(render(snap)))
+                atomic_write(out, variant_wav(state, phrase, text))
             state.renders[key] = {'status': 'ready', 'file': str(out), 'error': None}
             return {'key': key, 'path': str(out)}
         raise ValueError('Unknown phrase action')

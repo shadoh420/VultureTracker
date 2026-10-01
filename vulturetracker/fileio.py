@@ -54,6 +54,32 @@ def device_name(name):
     return str(name).split('.')[0].strip().upper() in DEVICES
 
 
+def lock_file(path):
+    """`path` opened and locked for this process, or None when another process (or another handle here) holds it.
+    The system lets go when the process ends, so a crash leaves no stale lock. unlock_file gives it back."""
+    f = open(path, 'a+b')
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        return None
+    return f
+
+
+def unlock_file(f):
+    if os.name == 'nt':
+        import msvcrt
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    f.close()
+
+
 def protect_outputs(outputs, sources):
     """Reject paths (including symlinks and hardlinks) that alias an input or each other."""
     seen = [Path(p) for p in sources]
