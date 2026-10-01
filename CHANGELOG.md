@@ -2,7 +2,11 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.0.0 (2026-10-01)
+
+A song, its history and its exports stay right from version to version, and the first things a new user reaches for
+work: other sample formats, imports that keep more, a command line on a par with the app, Faust sounds that can be
+made again, and a UI scale.
 
 - **Songs stay readable across versions** (SONG_FORMAT.md, section 10). 1.x opens every song that 0.6 or later wrote,
   unchanged, and compiles it to the same module: the demos whose samples are in git are held to their exact `.it`
@@ -22,7 +26,7 @@ What changed in each VultureTracker release (the GitHub release notes, without t
 - **Linux and macOS paths.** The settings, library index, window profile and log live where each system keeps an
   application's (`~/.config/VultureTracker` on Linux, `~/Library/Application Support/VultureTracker` on macOS; they were
   in `~/VultureTracker`, whose recent list is still read), the downloads in `~/.local/share/VultureTracker`, and
-  installed Surge XT, Dexed and OB-Xd are found in the system's VST3 folders. README's Platforms says what stays
+  installed Surge XT, Dexed and OB-Xd are found in the system's VST3 folders. GUIDE.md's Platforms says what stays
   Windows-only.
 - **FLAC, AIFF, OGG and MP3 samples.** Wherever the app takes a WAV (a drop, a candidate path or glob, a new slot, a
   slot's file) it now takes these too: each becomes a 16-bit WAV beside the song through the ffmpeg the export uses,
@@ -94,10 +98,14 @@ Install and tests: a pip-installed package has the Pattern tab's effect help and
 Playwright or PyGuitarPro; a test that failed about one run in 19 no longer does.
 
 **Upgrade note:** the note-off, note cut and fade keys moved to OpenMPT's (above). Song files, history and checkpoints
-are unchanged from 0.9.0, and so are renders. Song lengths are now
-taken at the rate the audio is mixed at, so a game loop's length and a song's reported length can differ from 0.9.0's
-by a few hundredths of a percent. A MIDI file played in under about 90 BPM imports at speed 16 or less. A recipe that
-clipped renders a little quieter, unclipped.
+are unchanged from 0.9.0, and so are renders. The listening notes (`<song>.notes.json`) are written in a new layout
+when the next note is made: 0.9.0 and older read that file as empty, and a note added there replaces the others, so
+keep a song's notes in 1.0. On Linux and macOS the settings, the library index and the window profile move to the
+system's folder (the recent list is read from the old `~/VultureTracker`; the library is indexed again). Song lengths
+are now taken at the rate the audio is mixed at, so a game loop's length and a song's reported length can differ from
+0.9.0's by a few hundredths of a percent. A MIDI file imported again comes out with its bends, pedal and markers (and
+one played in under about 90 BPM at speed 16 or less), and a module's names keep their letters. A recipe that clipped
+renders a little quieter, unclipped.
 
 ## 0.9.0 (2026-10-01)
 
