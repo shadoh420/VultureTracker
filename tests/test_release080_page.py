@@ -145,6 +145,28 @@ class TestRelease080Page(unittest.TestCase):
                     page.keyboard.press('Enter')
                     page.wait_for_function("S.mix?.pan?.['0']==='surround'")
                     page.wait_for_function("$('mp0').textContent==='S'")
+                    # Ctrl+Alt+V floods on a layout where AltGr+V types '@' (Czech, Slovak, Hungarian): the key is '@'
+                    page.click('[data-t="pattern"]')
+                    page.evaluate("setEdit(false);SEL=null;setCursor(0,2,1,0);selCopy(false);setCursor(0,0,1,0)")
+                    page.evaluate("""document.dispatchEvent(new KeyboardEvent('keydown',{key:'@',code:'KeyV',ctrlKey:true,altKey:true,
+                        bubbles:true,cancelable:true}))""")
+                    for _ in range(100):
+                        if all(st.mod.patterns[0].rows[r][1].note == 60 for r in range(4)):
+                            break
+                        time.sleep(0.05)
+                    self.assertEqual([st.mod.patterns[0].rows[r][1].note for r in range(4)], [60] * 4)
+                    # TRIM HISTORY with the keep field emptied keeps every undo step (it read as 0 and cleared them)
+                    steps, said = len(st.history), []
+                    page.once('dialog', lambda d: (said.append(d.message), d.dismiss()))
+                    page.click('[data-t="project"]')
+                    page.fill('#history-keep', '')
+                    page.click('text=TRIM HISTORY')
+                    for _ in range(100):
+                        if said:
+                            break
+                        page.wait_for_timeout(50)
+                    self.assertIn('how many', said[0])
+                    self.assertEqual(len(st.history), steps)
                     self.assertEqual(errors, [])
                     browser.close()
             finally:

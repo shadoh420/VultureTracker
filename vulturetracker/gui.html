@@ -507,7 +507,7 @@ option.hascand{color:var(--acc);font-weight:700}
     <p>External changes require comparison and reload. Reload starts a new undo/redo boundary; checkpoints remain.</p>
     <button class="btn" onclick="act('undo')">UNDO</button> <button class="btn" onclick="act('redo')">REDO</button>
     <button class="btn" onclick="compareExternal()">COMPARE EXTERNAL FILE</button> <span id="history-count" class="meta"></span>
-    <p><label>Keep recent undo steps <input id="history-keep" type="number" min="0" max="200" value="20" style="width:65px"></label> <button class="btn" onclick="act('trimhistory',{keep:+$('history-keep').value})">TRIM HISTORY</button> <button class="btn" onclick="act('trimhistory',{keep:0})">CLEAR UNDO / REDO</button> Checkpoints stay.</p>
+    <p><label>Keep recent undo steps <input id="history-keep" type="number" min="0" max="200" value="20" style="width:65px"></label> <button class="btn" onclick="act('trimhistory',{keep:$('history-keep').value})">TRIM HISTORY</button> <button class="btn" onclick="act('trimhistory',{keep:0})">CLEAR UNDO / REDO</button> Checkpoints stay.</p>
     <p><label>Checkpoint name <input id="checkpoint-name" maxlength="80" placeholder="Before final mix"></label>
     <button class="btn" onclick="checkpointSave()">SAVE CHECKPOINT</button></p><div id="checkpoint-list"></div>
     <hr><h3>Save Copy / Collect Samples</h3>
@@ -1388,7 +1388,7 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||document.querySelector('.modal.on'))return;
   const k=e.key.toLowerCase(),rows=PAT.rows?PAT.rows.length:64;let done=true;
   if(e.ctrlKey||e.metaKey){if(k==='z'&&!e.shiftKey)patUndo(false);else if(k==='y'||(k==='z'&&e.shiftKey))patUndo(true);
-    else if(k==='c')selCopy(false);else if(k==='x')selCopy(true);else if(k==='v')return pasteKey(e);else if(k==='a')selectAll(false);else if(k==='l')selectAll(true);
+    else if(k==='c')selCopy(false);else if(k==='x')selCopy(true);else if(k==='v'||e.code==='KeyV'&&e.altKey)return pasteKey(e);else if(k==='a')selectAll(false);else if(k==='l')selectAll(true);
     else if(e.key==='ArrowUp')selTranspose(e.shiftKey?12:1);else if(e.key==='ArrowDown')selTranspose(e.shiftKey?-12:-1);else if(k==='i')selInterpolate();else if(k==='f')toggleFind(true);else done=false}
   else if(e.key==='F3')findNext();
   else if(e.key==='Delete'&&(selNorm()||!EDIT))selClear();

@@ -282,6 +282,110 @@ class TestRelease080(unittest.TestCase):
             srv.server_close()
             gui.Handler.state = old
 
+    # ---- the audit's suspicions confirmed on 2026-10-01 (scratch/audit-080/agentF)
+
+    def test_sample_edits_follow_a_from_wav_loop_that_runs_past_the_audio(self):
+        write_wav(self.dir / 'lp.wav', 44100, [fixtures.sine(440, 0.1)], loop=(1000, 99999, False))
+        st = self.song(fixtures.SONG.replace('{file: a.wav, name: A tone}', '{file: lp.wav, loop: from_wav}'))
+        self.assertIsNone(st.error)
+        for op in ({'action': 'fade_out'}, {'action': 'reverse'}, {'action': 'crossfade', 'frames': 200}):
+            st.song_edit([{'op': 'sample_process', 'num': 1, **op}])
+            self.assertEqual(st.song['samples'][1]['loop']['end'] - st.song['samples'][1]['loop']['start'],
+                             4410 - 1000, op)
+            st.undo()
+        # a write that fails halfway leaves nothing beside the song
+        before = set(self.dir.glob('*.wav'))
+
+        def half(path, *a, **k):
+            Path(path).write_bytes(b'RIFF')
+            raise OSError('disk full')
+        with mock.patch('vulturetracker.wavload.write_wav', half), self.assertRaises(OSError):
+            st.song_edit([{'op': 'sample_process', 'num': 1, 'action': 'fade_in'}])
+        self.assertEqual(set(self.dir.glob('*.wav')), before)
+
+    def test_an_edit_that_changes_nothing_adds_no_step_and_keeps_redo(self):
+        st = self.song(fixtures.SONG_BLOCK)  # channel edits need the block-style module
+        st.song_edit([{'op': 'channel_rename', 'ch': 1, 'name': 'Bee'}])
+        st.undo()
+        before = (self.dir / 'song.yaml').read_bytes()
+        st.song_edit([{'op': 'channel_move', 'ch': 0, 'to': -1}])
+        st.song_edit([{'op': 'channel_move', 'ch': 1, 'to': 2}])
+        self.assertEqual((len(st.history), len(st.future)), (0, 1))
+        self.assertEqual((self.dir / 'song.yaml').read_bytes(), before)
+        st.undo(redo=True)
+        self.assertEqual(st.mod.channels[1].name, 'Bee')
+
+    def test_trim_history_with_an_empty_keep_field_keeps_the_steps(self):
+        st = self.song(fixtures.SONG_BLOCK)  # channel edits need the block-style module
+        for name in ('Aa', 'Bb'):
+            st.song_edit([{'op': 'channel_rename', 'ch': 0, 'name': name}])
+        with self.assertRaisesRegex(ValueError, 'how many'):
+            st.trim_history('')
+        self.assertEqual(len(st.history), 2)
+        st.trim_history('1')
+        self.assertEqual(len(st.history), 1)
+
+    def test_windows_device_names_are_no_export_or_upload_names(self):
+        st = self.state()
+        for name in ('CON', 'nul', 'Com1', 'LPT9', 'aux.final'):
+            with self.assertRaisesRegex(ValueError, 'device name'):
+                export.prepare(st, {'fmt': 'it', 'name': name})
+        self.assertEqual(export.prepare(st, {'fmt': 'it', 'name': 'CONTROL'})['todo'][0][0].name, 'CONTROL.it')
+        data = (self.dir / 'a.wav').read_bytes()
+        self.assertEqual(st.save_upload('CON.wav', data).name, '_CON.wav')
+        self.assertEqual(st.save_upload('nul.wav', data).name, '_nul.wav')
+
+    def test_a_rating_takes_stars_0_to_5_and_a_bad_stored_one_keeps_notes_saving(self):
+        old = gui.Handler.state
+        st = gui.Handler.state = self.state()
+        st.meta['slot'] = 1
+        st.add_candidates('cand.wav')
+        srv = gui._Server(('127.0.0.1', 0), gui.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        def post(act, body):
+            req = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/api/{act}', data=json.dumps(body).encode())
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status
+            except urllib.error.HTTPError as e:
+                with e:
+                    return e.code
+        try:
+            self.assertEqual([post('rate', {'id': 0, 'stars': s}) for s in ('abc', 6, 2.5, True, 4)], [400, 400, 400, 400, 200])
+            st.meta['ratings'][st.cands()[0]]['stars'] = 'abc'  # a hand-edited .tryout.json
+            self.assertEqual(post('note', {'order': 0, 'row': 1, 'text': 'too loud'}), 200)
+            self.assertIn('too loud', st.notes_path.with_suffix('.md').read_text(encoding='utf-8'))
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            gui.Handler.state = old
+
+    def test_recipe_numbers_read_as_the_song_reads_them_and_names_as_written(self):
+        (self.dir / 'r.yaml').write_text('out_dir: out\nsamples:\n  010: {file: a.wav, note: C-5}\n  08: {file: a.wav, note: C-5}\n'
+                                         '  01: {file: a.wav, note: C-5}\n  tone: {file: a.wav, note: C-5, velocity: 0100}\n',
+                                         newline='\n')
+        self.assertEqual([Path(f).name for f, _, _ in synth.recipe_outputs(self.dir / 'r.yaml')],
+                         ['010.wav', '08.wav', '01.wav', 'tone.wav'])
+        self.assertEqual(dict(synth.expand(synth._load_recipe(self.dir / 'r.yaml')[0]))['tone']['velocity'], 100)
+        self.assertEqual(gui.State._recipe_spec('{file: a.wav, velocity: 0100}')['velocity'], 100)
+
+    def test_a_name_like_08_stays_a_name(self):
+        back = api.from_yaml(api.to_yaml({'samples': {1: {'file': 'a.wav', 'name': '08'}}, 'title': '-09'}))
+        self.assertEqual((back['samples'][1]['name'], back['title']), ('08', '-09'))
+        st = self.song(fixtures.SONG_BLOCK)  # channel edits need the block-style module
+        st.song_edit([{'op': 'channel_rename', 'ch': 0, 'name': '08'}])
+        self.assertEqual(st.mod.channels[0].name, '08')
+
+    def test_library_reads_the_frames_an_unfinished_wav_holds(self):
+        raw = bytearray((self.dir / 'a.wav').read_bytes())
+        at = raw.index(b'data')
+        struct.pack_into('<I', raw, 4, 0xFFFFFFFF)
+        struct.pack_into('<I', raw, at + 4, 0xFFFFFFFF)
+        (self.dir / 'open.wav').write_bytes(bytes(raw))
+        _, info = library.file_features(self.dir / 'open.wav')
+        self.assertAlmostEqual(info['duration'], 0.3, places=2)
+
 
 if __name__ == '__main__':
     unittest.main()

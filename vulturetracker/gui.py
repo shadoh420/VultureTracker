@@ -37,7 +37,7 @@ from urllib.parse import unquote
 import yaml
 
 from . import api
-from .fileio import atomic_write as _atomic, protect_outputs, wav_bytes
+from .fileio import atomic_write as _atomic, device_name, protect_outputs, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
 from .history import History, digest, json_bytes, pack_step, unpack_step, HISTORY_BYTES
@@ -597,14 +597,14 @@ def wave_peaks(x, a, b, n):
 
 def entry_loops(entry, w):
     """The sample entry's `loop` and `sustain_loop` in the WAV's frames: {key: (start, end, pingpong) or None}
-    (`from_wav` read from the WAV's smpl chunk)."""
-    out = {}
+    (`from_wav` read from the WAV's smpl chunk, its end clamped to the audio as the compiler plays it)."""
+    out, n = {}, len(w.channels[0])
     for k in ("loop", "sustain_loop"):
         spec = entry.get(k)
         if spec == "from_wav":
-            out[k] = w.loops[0] if w.loops else None
+            s, e, pp = w.loops[0] if w.loops else (0, 0, False)
+            out[k] = (s, min(e, n), pp) if min(e, n) > s else None
         elif isinstance(spec, dict):
-            n = len(w.channels[0])
             out[k] = (int(spec.get("start", 0)), int(spec.get("end", n)), spec.get("type") == "pingpong")
         else:
             out[k] = None
@@ -1313,7 +1313,7 @@ class State:
                     key = (str(rec), st.st_mtime, st.st_size, name)
                     if key not in self._recipe_memo:
                         try:
-                            self._recipe_memo[key] = yaml.safe_dump(recipe_entry(rec, name)[0], default_flow_style=False,
+                            self._recipe_memo[key] = api.safe_dump(recipe_entry(rec, name)[0], default_flow_style=False,
                                                                     sort_keys=False, width=100)
                         except RecipeError:
                             self._recipe_memo[key] = None
@@ -1325,7 +1325,7 @@ class State:
     @staticmethod
     def _recipe_spec(text):
         try:
-            spec = yaml.safe_load(text or "")
+            spec = api.from_yaml(text or "")  # numbers as the recipe file reads them (0100 is a hundred)
         except yaml.YAMLError as e:
             raise ValueError(f"the sample entry is not YAML: {e}")
         if not isinstance(spec, dict):
@@ -1566,8 +1566,9 @@ class State:
         for slot, cands in self.meta.get("candidates", {}).items():
             for c in cands:
                 r = self.meta["ratings"].get(c) or {}
-                if r.get("stars") or r.get("rejected") or r.get("note"):
-                    rated.append(f"- slot {slot}: {Path(c).stem} " + ("rejected" if r.get("rejected") else "*" * int(r.get("stars") or 0))
+                stars = r.get("stars") if type(r.get("stars")) is int else 0  # a hand-edited .tryout.json: no stars
+                if stars or r.get("rejected") or r.get("note"):
+                    rated.append(f"- slot {slot}: {Path(c).stem} " + ("rejected" if r.get("rejected") else "*" * stars)
                                  + (f' "{r["note"]}"' if r.get("note") else ""))
         if rated:
             L += ["## Tryout ratings", ""] + rated + [""]
@@ -1635,10 +1636,10 @@ class State:
             lines[i] = f"{indent}{key}{sp}{flow}{tail}{nl}"
             return 1
         if flow:
-            lines[i] = f"{indent}{key}{sp}{yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()}{tail}{nl}"
+            lines[i] = f"{indent}{key}{sp}{api.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()}{tail}{nl}"
             return 1
         j = State._span(lines, i)
-        block = [f"{indent}  {b}\n" for b in yaml.safe_dump(entry, default_flow_style=False, width=10 ** 6, sort_keys=False).splitlines()]
+        block = [f"{indent}  {b}\n" for b in api.safe_dump(entry, default_flow_style=False, width=10 ** 6, sort_keys=False).splitlines()]
         lines[i:j] = [lines[i]] + block
         return 1 + len(block)
 
@@ -2035,6 +2036,8 @@ class State:
         with self.lock:
             if self.dirty():
                 raise ValueError('Compare and RELOAD external edits first')
+            if not str(keep).strip():  # an emptied field is no 0: CLEAR UNDO / REDO is the way to drop every step
+                raise ValueError('Type how many recent undo steps to keep (0-200)')
             keep = int(keep)
             if not 0 <= keep <= self.UNDO_LIMIT:
                 raise ValueError('Keep between 0 and 200 undo steps')
@@ -2068,9 +2071,12 @@ class State:
         return dict(self._diff(text, False), token=digest(raw))
 
     def _commit(self, new, loaded=None, meta=None):
-        """Compile, write, then publish one undo step. A failed write consumes no history or settings."""
-        loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
+        """Compile, write, then publish one undo step. A failed write consumes no history or settings; an edit that
+        changes nothing (channel 1 moved up) adds no step and keeps the redo steps."""
         meta = copy.deepcopy(self.meta if meta is None else meta)
+        if new == self.text and meta == self.meta:
+            return
+        loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
         changed = {k: copy.deepcopy(self.meta.get(k)) for k in self.META_KEYS if self.meta.get(k) != meta.get(k)}
         back = self._step(changed or None)
         history = (self.history + [back])[-self.UNDO_LIMIT:]
@@ -2329,8 +2335,8 @@ class State:
                 self._report.append(f"{20 * math.log10(peak):.1f} dB down to stay under full scale")
             chans = np.clip(np.round(y * full), -full, full - 1).astype(np.int32).tolist()
             out = self._new_wav(path, str(op["action"]))
+            self._created.append(out)  # before the write: a write that fails halfway is removed too
             write_wav(out, w.rate, chans, bits=w.out_bits, loop=loops.get("loop") or loops.get("sustain_loop"), root_note=w.root)
-            self._created.append(out)
             try:
                 rel = os.path.relpath(out, self.base_dir).replace(os.sep, "/")
             except ValueError:
@@ -2407,7 +2413,7 @@ class State:
                 ind = " " * (self._ind(lines[kids[0][0]]) if kids else 2)
                 after = [j for j, n in kids if n < num]
                 at = self._span(lines, max(after)) if after else (kids[0][0] if kids else top + 1)
-                flow = yaml.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()
+                flow = api.safe_dump(entry, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()
                 lines.insert(at, f"{ind}{num}: {flow}\n")
         elif kind == "instrument_delete":
             num = int(op["num"])
@@ -2585,7 +2591,7 @@ class State:
             pcm = lm.render(RATE, max_seconds=end - start + tail)
         x = np.frombuffer(pcm, "<i2").reshape(-1, 2)
         rows_end = min(len(x), round((end - start) * RATE))
-        loud = np.nonzero(np.abs(x[rows_end:]).max(axis=1) > 2)[0]  # the ring-out stops at its last frame above 2 LSB
+        loud = np.nonzero(np.abs(x[rows_end:].astype(np.int32)).max(axis=1) > 2)[0]  # the ring-out stops at its last frame above 2 LSB (int32: abs(-32768))
         return x[: rows_end + (loud[-1] + 1 if len(loud) else 0)].tobytes(), end - start
 
     def _render_sample(self, lines, orders, op, remap):
@@ -2596,15 +2602,15 @@ class State:
         order, r0, r1 = int(op["order"]), int(op.get("r0") or 0), int(op.get("r1") if op.get("r1") is not None else 199)
         pcm, secs = self.render_rows(order, r0, r1, op.get("chans"), op.get("tail", 2.0))
         x = np.frombuffer(pcm, "<i2").reshape(-1, 2)
-        if not len(x) or not np.abs(x).max():
+        if not x.any():
             raise ValueError("the render is silent: nothing plays on those rows and channels")
         stereo = bool((x[:, 0] != x[:, 1]).any())
         name = self.mod.patterns[self.mod.orders[order]].name
         stem = re.sub(r"[^\w.-]+", "_", f"{self.song_path.stem}-{name}-{r0}-{r1}")
         out = next(p for p in (self.base_dir / f"render-{stem}{'' if k == 1 else f'-{k}'}.wav" for k in itertools.count(1))
                    if not p.exists())
-        write_wav(out, RATE, [x[:, c].tolist() for c in range(2 if stereo else 1)])
         self._created.append(out)
+        write_wav(out, RATE, [x[:, c].tolist() for c in range(2 if stereo else 1)])
         num = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
         self._song_op(lines, orders, {"op": "sample_new", "num": num, "file": str(out), "stereo": stereo,
                                       "name": f"{name} {r0}-{r1}"[:25]}, remap)
@@ -2668,9 +2674,9 @@ class State:
             out = next(p for p in (self.base_dir / f"{stem}-slice{k + 1:02d}{'' if j == 1 else f'-{j}'}.wav" for j in itertools.count(1))
                        if not p.exists())
             root = notes[k][1] if mode == "multi" else w.root
+            self._created.append(out)
             write_wav(out, w.rate, np.clip(np.round(y * full), -full, full - 1).astype(np.int32).tolist(), bits=w.out_bits,
                       root_note=root)
-            self._created.append(out)
             n_slot = first + len(nums)
             k_keep = dict(keep)
             name = f"{entry.get('name') or path.stem} {k + 1}"
@@ -3294,6 +3300,7 @@ class State:
         if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
             raise ValueError(f"{name}: not a WAV file")
         stem = re.sub(r"[^\w.-]+", "_", Path(name).stem)[:60] or "dropped"
+        stem = "_" + stem if device_name(stem) else stem  # CON.wav, NUL.wav: Windows devices, not files
         for k in itertools.count(1):
             p = self.base_dir / f"{stem}{'' if k == 1 else f'-{k}'}.wav"
             if p.exists() and p.read_bytes() == data:
@@ -3866,10 +3873,12 @@ class Handler(BaseHTTPRequestHandler):
                 st.remove_candidate(st.cands()[int(body["id"])])
             elif act == "rate":
                 c = st.cands()[int(body["id"])]
+                if "stars" in body and (type(body["stars"]) is not int or not 0 <= body["stars"] <= 5):
+                    raise ValueError("stars are a whole number 0-5")
                 r = st.meta["ratings"].setdefault(c, {})
-                for k in ("stars", "rejected", "note"):
+                for k, kind in (("stars", int), ("rejected", bool), ("note", str)):
                     if k in body:
-                        r[k] = body[k]
+                        r[k] = kind(body[k])
                 st.save_meta()
             elif act == "similar":  # the slot's WAV, a candidate (id) or any WAV (path): its nearest become candidates
                 q = body.get("path") or (st.cands()[int(body["id"])] if body.get("id") is not None else st.current_file())

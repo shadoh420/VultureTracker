@@ -14,7 +14,20 @@ from .song import SongError, it_text, load_song_text, read_song_text
 
 # ---------------------------------------------------------------- YAML round-trip
 
-class _Dumper(yaml.SafeDumper):
+class SafeDumper(yaml.SafeDumper):
+    """yaml.SafeDumper that quotes the strings the song's loader (_Loader below) reads as numbers: a name "08" is
+    written '08' and comes back a string, not 8."""
+
+
+SafeDumper.add_implicit_resolver('tag:yaml.org,2002:int', re.compile(r'[-+]?0[0-9]+$'), list('-+0123456789'))
+
+
+def safe_dump(data, **kw):
+    """yaml.safe_dump for what the song's loader reads back (sample entries, channels, recipe entries)."""
+    return yaml.dump(data, Dumper=SafeDumper, **kw)
+
+
+class _Dumper(SafeDumper):
     pass
 
 

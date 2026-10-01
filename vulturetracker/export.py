@@ -12,7 +12,7 @@ from . import api
 from .model import ORDER_END
 from .notation import format_cell
 from .openmpt import LoadedModule
-from .fileio import atomic_write, link_new, protect_outputs, wav_bytes
+from .fileio import atomic_write, device_name, link_new, protect_outputs, wav_bytes
 from .history import digest
 
 RATE = 44100
@@ -169,8 +169,9 @@ def prepare(state, options):
         snap = snapshot(base, state.base_dir, region, mix, silenced, options.get('tail', 2), loop)
         folder = (state.base_dir / Path(options.get('destination') or '.').expanduser()).resolve()  # relative: beside the song
         name = str(options.get('name') or state.song_path.stem)
-        if name in ('.', '..') or not name.strip() or re.search(r'[\\/:*?"<>|]', name):
-            raise ValueError('Output name must be a filename without directories or reserved characters')
+        if name in ('.', '..') or not name.strip() or re.search(r'[\\/:*?"<>|]', name) or device_name(name):
+            raise ValueError('Output name must be a filename without directories or reserved characters, and not a '
+                             'Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9)')
         chans = [i for i in range(snap['channels']) if any(u[i] for u in state.facts['use'])] if options.get('stems') else []
         stemfmt = 'wav' if fmt == 'it' else fmt
         todo = [(folder / (name+'.'+fmt), None, fmt)] if options.get('song', True) else []

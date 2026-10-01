@@ -110,15 +110,13 @@ def _module(title, nch, fmt):
 
 
 def _orders(mod, orders, npat):
-    """Order list entries past the patterns dropped; '+++' and '---' kept."""
+    """The order list up to '---'; an entry past the patterns becomes '+++' (libopenmpt skips it too), so every later
+    entry keeps its index and a Bxx its target."""
     out = []
     for o in orders:
         if o == 0xFF:
             break
-        if o == 0xFE:
-            out.append(ORDER_SKIP)
-        elif o < npat:
-            out.append(o)
+        out.append(o if o < npat else ORDER_SKIP)
     mod.orders = out or [0]
 
 

@@ -208,7 +208,7 @@ def collect(state, destination, make_zip=False, browser=None):
                         if wav.resolve() in wanted:
                             meta.setdefault('recipe_of', {}).setdefault(str(wav.resolve()),
                                 {'recipe': str(rec), 'name': name, 'note': note,
-                                 'spec': yaml.safe_dump(api.from_yaml(before.decode('utf-8-sig'))['samples'][name], sort_keys=False)})
+                                 'spec': api.safe_dump(api.from_yaml(before.decode('utf-8-sig'))['samples'][name], sort_keys=False)})
         # Retained ratings for retired/missing candidates are annotations, not playback dependencies.
         def convert(path):
             src = (state.base_dir / path).resolve()
@@ -218,7 +218,7 @@ def collect(state, destination, make_zip=False, browser=None):
                 # A candidate's editable entry can differ from the recipe on disk.
                 transformed = recipe_text(Path(rec['recipe']), 'samples:\n  candidate:\n' +
                                           ''.join('    ' + line + '\n' for line in rec['spec'].splitlines()))
-                rec['spec'] = yaml.safe_dump(api.from_yaml(transformed)['samples']['candidate'], sort_keys=False)
+                rec['spec'] = api.safe_dump(api.from_yaml(transformed)['samples']['candidate'], sort_keys=False)
         if meta.get('phrase'):
             ph = meta['phrase']
             changes, assets = [], {}

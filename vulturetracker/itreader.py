@@ -283,7 +283,8 @@ def read_it(data: bytes):
         mod.channels.append(Channel(f"Ch {ch + 1}", 100 if pan & 0x7F == 100 else min(pan & 0x7F, 64),
                                     min(chnvol[ch], 64), bool(pan & 0x80)))
 
-    while orders and orders[-1] == ORDER_END:
+    jumps = {c.param for p in mod.patterns for row in p.rows for c in row if c.effect == ord("B") - 64}
+    while orders and orders[-1] == ORDER_END and len(orders) - 1 not in jumps:  # a '---' a Bxx jumps to ends the song
         orders.pop()
     for o in orders:
         if o < ORDER_SKIP and o >= len(mod.patterns):
@@ -437,8 +438,9 @@ def module_to_song(mod: Module, song_path, samples_dir) -> dict:
     samples_dir.mkdir(parents=True, exist_ok=True)
     rel = Path(os.path.relpath(samples_dir.resolve(), song_path.resolve().parent))
 
-    module = {"title": mod.title, "tempo": mod.tempo, "speed": mod.speed,
-              'rows_per_beat': mod.row_highlight[0] or 4, 'rows_per_bar': mod.row_highlight[1] or 16,
+    beat = mod.row_highlight[0] or 4
+    module = {"title": mod.title, "tempo": mod.tempo, "speed": mod.speed,  # no bar highlight: bars of four beats
+              'rows_per_beat': beat, 'rows_per_bar': mod.row_highlight[1] or (4 * beat if beat <= 63 else beat),
               "global_volume": mod.global_volume, "mix_volume": mod.mix_volume}
     if mod.separation != 128:
         module["separation"] = mod.separation
@@ -552,7 +554,8 @@ def module_to_song(mod: Module, song_path, samples_dir) -> dict:
 def import_it(it_path, song_path, samples_dir):
     """Convert a module (.it, or .xm / .s3m / .mod through modreader, told apart by their headers) to a song YAML plus
     WAVs. Returns (song dict, warnings)."""
-    from .api import save
+    from .api import to_yaml
+    from .fileio import atomic_write
     from .modreader import match_level, read_module
     data = Path(it_path).read_bytes()
     mod, warnings = read_module(data)
@@ -567,6 +570,5 @@ def import_it(it_path, song_path, samples_dir):
     header = f"# Imported from {Path(it_path).name} by vulturetracker import\n"
     for w in warnings:
         header += f"# import warning: {w}\n"
-    save(song, song_path)
-    Path(song_path).write_text(header + Path(song_path).read_text(encoding="utf-8"), encoding="utf-8")
+    atomic_write(song_path, (header + to_yaml(song)).encode("utf-8"))  # one write, LF as the other importers
     return song, warnings

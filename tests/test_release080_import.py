@@ -5,6 +5,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from vulturetracker import api, openmpt
 from vulturetracker.itreader import import_it, read_it
@@ -13,7 +14,7 @@ from vulturetracker.model import Cell, Channel, Loop, Module, Pattern, Sample
 from vulturetracker.modreader import read_module
 from vulturetracker.notation import format_cell
 from vulturetracker.wavload import write_wav
-from tests.test_modimport import C4, E_XM, EMPTY4, TONE, compare, grid, imported, write_mod, write_xm
+from tests.test_modimport import C4, E_S3M, E_XM, EMPTY4, TONE, L, compare, grid, imported, write_mod, write_s3m, write_xm
 
 try:
     import guitarpro
@@ -223,6 +224,45 @@ class TestRelease080Import(unittest.TestCase):
         r = api.check(self.song(patterns="  1: |\n    C-5 01\n  '1': |\n    D-5 01\n").replace("orders: [a]", "orders: [1]"), self.dir)
         self.assertFalse(r["ok"])
         self.assertTrue(any("pattern '1' has the same name as pattern 1 " in e for e in r["errors"]), r["errors"])
+
+    # ---- the audit's suspicions confirmed on 2026-10-01 (scratch/audit-080/agentF)
+
+    def test_an_order_entry_past_the_patterns_keeps_later_jumps_on_target(self):
+        jump = [(0, 0, (0x40, 1, None, 0, 0)), (3, 0, (None, 0, None, L("B"), 2))]  # B02: on to order 2
+        s3m = write_s3m([("t", TONE, 64, 8363, (0, 4000))], [grid(jump, E_S3M), grid([(0, 0, (0x50, 1, None, 0, 0))], E_S3M),
+                                                              grid([(0, 0, (0x30, 1, None, 0, 0))], E_S3M)], [0, 9, 1, 2])
+        xm = write_xm([XM_INS], [grid([(0, 0, (C4, 1, 0, 0, 0)), (3, 0, (0, 0, 0, 0xB, 2))], E_XM),
+                                 grid([(0, 0, (C4 + 12, 1, 0, 0, 0))], E_XM), grid([(0, 0, (C4 - 12, 1, 0, 0, 0))], E_XM)],
+                      [0, 9, 1, 2])
+        for data, suffix in ((s3m, "s3m"), (xm, "xm")):
+            it, song, _ = imported(data, suffix)
+            with self.subTest(suffix):
+                self.assertEqual(song["orders"], ["p00", "+++", "p01", "p02"])
+                self.assertEqual(len(pcm(it)), len(pcm(data)))
+
+    def test_a_trailing_end_order_a_jump_aims_at_is_kept(self):
+        rows = "".join(f"      {r:02d}: {'C-5 01' if r == 0 else '... ..'} ... {'B02' if r == 3 else '...'}\n" for r in range(4))
+        it = api.compile_song(self.song(patterns=f"  a:\n    rows: 64\n    data: |\n{rows}  b: |\n    E-5 01\n")
+                              .replace("orders: [a]", "orders: [a, b, '---', '---']"), self.dir)[0]
+        it2, song, warnings = imported(it, "it")
+        self.assertEqual(song["orders"], ["p00", "p01", "---"])
+        self.assertEqual(warnings, [])
+        self.assertEqual(len(pcm(it2)), len(pcm(it)))
+
+    def test_a_beat_highlight_without_a_bar_imports_bars_of_four_beats(self):
+        b = bytearray(api.compile_song(self.song(extra="  rows_per_beat: 3\n  rows_per_bar: 12\n"), self.dir)[0])
+        b[0x1F] = 0
+        song = imported(bytes(b), "it")[1]
+        self.assertEqual((song["module"]["rows_per_beat"], song["module"]["rows_per_bar"]), (3, 12))
+
+    def test_an_imported_module_is_written_lf_in_one_go(self):
+        it = api.compile_song(self.song(), self.dir)[0]
+        (self.dir / "m.it").write_bytes(it)
+        with mock.patch("pathlib.Path.write_text", side_effect=AssertionError("write_text")):
+            import_it(self.dir / "m.it", self.dir / "m.yaml", self.dir / "m_samples")
+        raw = (self.dir / "m.yaml").read_bytes()
+        self.assertNotIn(b"\r\n", raw)
+        self.assertTrue(raw.startswith(b"# Imported from m.it"))
 
 
 if __name__ == "__main__":

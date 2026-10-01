@@ -15,6 +15,22 @@ the loop, and a loop longer than any part is played out); an XM restart position
 slot gets a channel of its own; SLICE finds a hit in the last half millisecond of a selection; a naive (aliased) saw
 high up is no longer read an octave low (the sample library reads its pitches again once).
 
+More fixes, from the audit's unconfirmed suspicions (16 of 26 confirmed, each with a regression test): sample edits on
+a `loop: from_wav` whose loop runs past the audio work (FADE, REVERSE and CROSSFADE were refused, and a refused edit
+could leave a WAV behind); an edit that changes nothing (▲ on channel 1) adds no undo step and keeps the redo steps;
+TRIM HISTORY with the keep field emptied no longer clears every undo step; export names and dropped WAVs called CON,
+NUL, COM1 or another Windows device name are refused or renamed (an export called CON froze the app run from a
+terminal); a rating outside 0-5 is refused, and a bad one in a hand-edited `.tryout.json` no longer stops the notes
+report. Imports: an S3M or XM order entry past the last pattern becomes `+++` (a later jump could skip a whole
+pattern), an IT `---` that a jump aims at is kept, a beat highlight with no bar gives bars of four beats, and the song
+is written LF in one atomic write. SLICE skips a hit's abrupt end (a click) and places a hit over a pad or a tail at
+its start (up to 30 ms early before; a point now needs the level to rise about 3 dB over what sounds just before it,
+so a softer hit inside a louder sound is no longer one); STRETCH of a selection shorter than about 90 ms keeps its
+level (it lost up to 30 dB); recipes read `0100` as a hundred and a sample `010` writes `010.wav`, as song files read
+them; a name such as "08" stays "08" when the app writes it; the sample library reads an unfinished WAV's real length
+(it reads every file again once); Ctrl+Alt+V floods on layouts where AltGr+V types `@`; a ring-out ending on a
+full-scale negative peak is no longer cut short.
+
 ## 0.8.0 (2026-10-01)
 
 Getting music and sounds in and out.

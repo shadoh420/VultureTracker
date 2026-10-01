@@ -127,6 +127,34 @@ class TestRelease080Dsp(unittest.TestCase):
         y[0, R + 22: R + 4022] += hit(4000)
         self.assertEqual(dsp.onsets(y, R, 50, 0, R), [0])
 
+    def test_onsets_skip_a_hit_cut_off_and_find_hits_over_what_sounds(self):
+        """2026-10-01: a hit cut off abruptly (a click 41 dB down) got a second point 27 ms before the cut, in its decay;
+        a hit over a pad or a tail was placed where the window started."""
+        t = np.arange(R) / R
+        hit = 0.8 * np.sin(2 * np.pi * 150 * t[:4000]) * np.exp(-t[:4000] / 0.02)  # ends at 0.0086 (a step to 0)
+        x = np.zeros((1, R))
+        for at in (11025, 22050):
+            x[0, at:at + 4000] += hit
+        self.assertEqual(len(dsp.onsets(x, R, 50)), 3)
+        noise = np.random.default_rng(1).standard_normal(8000) * np.exp(-np.arange(8000) / R / 0.02)
+        pad = 0.3 * np.sin(2 * np.pi * 220 * t)
+        pad[22050:30050] += 0.4 * noise
+        kick = np.zeros(R)
+        kick[1000:] = 0.9 * np.sin(2 * np.pi * 60 * t[:R - 1000]) * np.exp(-t[:R - 1000] / 0.15)
+        kick[5410:5410 + 3000] += 0.15 * noise[:3000]                                 # a soft hat over the kick's tail
+        for y, at in ((pad, 22050), (kick, 5410)):
+            pts = dsp.onsets(y[None], R, 50)
+            self.assertTrue(any(abs(p - at) < 200 for p in pts), (at, pts))  # was 1200-1300 frames early
+
+    def test_stretch_of_a_short_selection_keeps_its_level(self):
+        """2026-10-01: a 2048-frame window over a shorter output lost up to 30 dB (a 46 ms tone at 25 %: 13.6 dB)."""
+        for ms, ratio in ((20, 0.25), (46, 0.25), (20, 0.5), (60, 0.25), (20, 2.0)):
+            n = int(ms * R / 1000)
+            x = 0.5 * np.sin(2 * np.pi * 440 * np.arange(n) / R)[None]
+            y = dsp.stretch(x, ratio)
+            self.assertEqual(y.shape[1], round(n * ratio))
+            self.assertLess(abs(20 * np.log10(np.abs(y).max() / 0.5)), 1.0, (ms, ratio))
+
 
 if __name__ == "__main__":
     unittest.main()

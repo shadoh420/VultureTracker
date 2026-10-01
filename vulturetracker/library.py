@@ -22,7 +22,8 @@ import numpy as np
 # checkout), whose samples/ and tools/cc0 are indexed when no folders were chosen
 ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
         if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
-VERSION = 4            # bump when the vector changes: every file is read again (4: high aliased saws an octave up)
+VERSION = 5            # bump when the vector changes: every file is read again (4: high aliased saws an octave up;
+                       # 5: an unfinished WAV's duration from the frames present)
 MAX_SECONDS = 10.0     # what is analysed of a longer file (its start)
 N_MFCC, N_MELS = 13, 40
 # the vector's layout: name -> slice; the groups' weights sum the squared distance a group can add (in library z-scores)
@@ -60,7 +61,8 @@ def read_audio(path, max_seconds=None):
             if cid == b"fmt ":
                 fmt = f.read(size)
                 f.seek(size & 1, 1)
-            elif cid == b"data":
+            elif cid == b"data":  # the frames present: a recorder that never finalised the file leaves 0xFFFFFFFF
+                size = min(size, os.fstat(f.fileno()).st_size - f.tell())
                 data = (f.tell(), size)
                 f.seek(size + (size & 1), 1)
             elif cid == b"smpl" and size >= 16:

@@ -45,6 +45,15 @@ def link_new(src, dst):
             shutil.copyfileobj(s, d)
 
 
+DEVICES = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}
+
+
+def device_name(name):
+    """A Windows device name (CON, NUL, COM1, ... in any case, with any extension): Windows opens the device, not a
+    file, so an export called CON waits on the console and one called NUL vanishes."""
+    return str(name).split('.')[0].strip().upper() in DEVICES
+
+
 def protect_outputs(outputs, sources):
     """Reject paths (including symlinks and hardlinks) that alias an input or each other."""
     seen = [Path(p) for p in sources]

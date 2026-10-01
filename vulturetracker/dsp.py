@@ -63,18 +63,27 @@ def onsets(x, rate, sensitivity=50, a=0, b=None, min_gap=0.05):
     out, last = [a], -gap
     ms = max(1, rate // 1000)
     env = np.sqrt(np.convolve(m * m, np.ones(ms) / ms, mode="same"))  # a 1 ms RMS envelope
+    blk = max(1, rate // 100)  # the window's level in 10 ms blocks: free of a low tone's ripple
     for i in peaks:
         if i - last < gap:
             continue
         last = i
-        # where the window saw the rise
+        # where the window saw the rise: its biggest step up, from the quietest block before it. A sound decaying from
+        # the window's start, or one cut off in it (a click 40 dB down), only steps down: no hit
         lo, hi = max(0, skip + i * hop - size // 2), min(len(m), skip + i * hop + size + hop)
-        rise = np.nonzero(env[lo:hi] >= 0.2 * env[lo:hi].max())[0]
-        r = lo + (int(rise[0]) if len(rise) else size // 2)  # where the hit reaches a fifth of its level
+        lv = np.array([np.abs(m[j:j + blk]).max() for j in range(lo, hi, blk)])
+        k = int(np.argmax(lv - np.minimum.accumulate(lv)))
+        q = int(np.argmin(lv[:k + 1]))
+        if lv[k] < 1.4 * lv[q] + 1e-6:
+            continue
+        e = env[lo + q * blk:hi]
+        base = e[:blk].max()  # what sounds in the quiet block (a pad, a tail) is not the hit's own level
+        rise = q * blk + int(np.argmax(e >= base + 0.2 * (e.max() - base)))
+        r = lo + rise  # where the hit reaches a fifth of its level over what sounded before
         at = zero_crossing(m, max(0, r - ms), 2 * ms)  # 1 ms before that
         # a window reaching past the selection counts only a hit that rises in it: a held sound cut off there (the
         # silence after a file's end) is not one
-        rose = skip + i * hop + size <= n or (len(rise) and rise[0] > 0)
+        rose = skip + i * hop + size <= n or rise > 0
         if at - (out[-1] - a) >= int(min_gap * rate / 2) and at > 0 and r < n and rose:
             out.append(a + at)
     return out
@@ -155,6 +164,8 @@ def stretch(x, ratio, size=2048):
     if not 0.25 <= ratio <= 4:
         raise ValueError("a stretch is 25-400 %")
     n = x.shape[-1]
+    # a window no longer than the output (256 at least): a 46 ms tone squeezed to 25 % in 2048 frames lost 13.6 dB
+    size = int(min(size, max(256, 2 ** np.floor(np.log2(max(1.0, n * ratio))))))
     # the synthesis hop hs stays near size / 4: four windows overlap at any ratio, no dips in their sum at the joins
     ha = size // 4 if ratio <= 1 else max(1, round(size / (4 * ratio)))
     hs = ha * ratio

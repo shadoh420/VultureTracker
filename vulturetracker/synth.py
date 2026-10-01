@@ -466,10 +466,19 @@ def expand(recipe):
 
 
 def _load_recipe(path):
-    """(recipe dict, sample rate, output directory) of the recipe at `path`, its top level checked."""
-    recipe = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    """(recipe dict, sample rate, output directory) of the recipe at `path`, its top level checked. Numbers read as the
+    song file reads them (0100 is a hundred, not YAML 1.1's octal 64); sample names as written (010 writes 010.wav)."""
+    from .api import _Loader
+    text = Path(path).read_text(encoding="utf-8")
+    recipe = yaml.load(text, Loader=_Loader) or {}
     if not isinstance(recipe, dict):
         raise RecipeError("a recipe is a mapping with out_dir, sample_rate, defaults and samples")
+    samples = recipe.get("samples")
+    if isinstance(samples, dict) and not all(isinstance(k, str) for k in samples):
+        node = next(v for k, v in yaml.compose(text, Loader=_Loader).value if k.value == "samples")
+        if len(node.value) != len(samples):
+            raise RecipeError("two samples have the same name")
+        recipe["samples"] = {k.value: v for (k, _), v in zip(node.value, samples.values())}
     unknown = set(recipe) - set(RECIPE_KEYS)
     if unknown:
         raise RecipeError(f"unknown top-level keys {sorted(unknown)} (allowed: {', '.join(RECIPE_KEYS)})")
