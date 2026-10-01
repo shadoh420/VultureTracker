@@ -103,18 +103,23 @@ def write_wav(path, rate, channels, bits=16, loop=None, root_note=None):
     _write_pcm(path, rate, channels, bits)
     if loop is None and root_note is None:
         return
+    with open(path, "r+b") as f:
+        data = add_smpl(f.read(), rate, loop, root_note)
+        f.seek(0)
+        f.write(data)
+
+
+def add_smpl(wav, rate, loop=None, root_note=None):
+    """A RIFF WAV's bytes with a 'smpl' chunk appended: `loop` = (start, end_exclusive, pingpong), `root_note` as in
+    write_wav."""
     loops = [loop] if loop else []
     body = struct.pack("<9I", 0, 0, round(1e9 / rate), root_note if root_note is not None else 60, 0, 0, 0, len(loops), 0)
     for i, (start, end, pingpong) in enumerate(loops):
         body += struct.pack("<6I", i, 1 if pingpong else 0, start, end - 1, 0, 0)  # smpl end is inclusive
-    with open(path, "r+b") as f:
-        f.seek(0, 2)
-        if f.tell() % 2:  # RIFF chunks start on even offsets: an odd data chunk (8-bit, odd length) takes a pad byte
-            f.write(b"\0")
-        f.write(b"smpl" + struct.pack("<I", len(body)) + body)
-        size = f.tell()
-        f.seek(4)
-        f.write(struct.pack("<I", size - 8))
+    pad = b"\0" * (len(wav) % 2)  # RIFF chunks start on even offsets: an odd data chunk (8-bit, odd length) takes a pad byte
+    out = bytearray(wav + pad + b"smpl" + struct.pack("<I", len(body)) + body)
+    out[4:8] = struct.pack("<I", len(out) - 8)
+    return bytes(out)
 
 
 def _write_pcm(path, rate, channels, bits):

@@ -471,7 +471,8 @@ option.hascand{color:var(--acc);font-weight:700}
       <p><label>Tail <select id="export-tail-mode" onchange="$('export-tail').disabled=this.value==='cut'"><option value="ring">Fixed ring-out</option><option value="cut">Cut at region end</option></select></label>
       <label>Seconds <input id="export-tail" type="number" min="0" max="10" step=".1" value="2" style="width:65px"></label>
       <label><input type="checkbox" id="export-song" checked> Song file</label>
-      <label><input type="checkbox" id="export-stems"> Aligned stems (WAV when format is IT)</label></p>
+      <label><input type="checkbox" id="export-stems"> Aligned stems (WAV when format is IT)</label>
+      <label title="the region (whole song without one) as a seamless loop: WAV marks it in a smpl chunk, OGG and FLAC in LOOPSTART and LOOPLENGTH tags; the tail after it is the release"><input type="checkbox" id="export-loop"> Game loop (WAV, OGG, FLAC)</label></p>
       <p class="meta">Audio warms up preceding orders for a section. IT is a standalone order slice using initial song settings; tail length applies to audio only. Stems share exact start and end frames.</p>
       <label><input type="checkbox" id="export-replace"> Replace previous exports safely</label>
       <p><button class="btn big" id="export-go" onclick="exportStart()">EXPORT</button>
@@ -1701,7 +1702,7 @@ async function phrasePlay(variant){const a=$('phrase-audio'),pos=a.currentTime||
 async function phraseDiff(){const variant=+$('phrase-variant').value,j=await act('phrase',{action:'diff',variant});if(j.error)return;
  workflowDiff('Accept phrase alternative','Only the selected rows and channels change. A repeated pattern becomes unique here. One undo step.',j.lines,'ACCEPT PHRASE',()=>act('phrase',{action:'accept',variant,token:j.token}));}
 function renderExport(){const selected=$('export-region').value;put('export-region','<option value="">Whole song</option>'+Object.keys(S.sections||{}).map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join(''));if(S.sections?.[selected])$('export-region').value=selected;
- const j=S.export;$('export-result').textContent=j?`${j.status} · ${j.done}/${j.total} files · snapshot ${j.snapshot}\n${j.error||''}\n${(j.files||[]).join('\n')}`:'';}
-async function exportStart(){await act('export',{destination:$('export-dest').value,name:$('export-name').value,fmt:$('export-format').value,region:$('export-region').value,mix:$('export-mix').value,mutes:$('export-mutes').value,tail:$('export-tail-mode').value==='cut'?0:+$('export-tail').value,song:$('export-song').checked,stems:$('export-stems').checked,replace:$('export-replace').checked});}
+ const j=S.export;$('export-result').textContent=j?`${j.status} · ${j.done}/${j.total} files · snapshot ${j.snapshot}${j.loop?` · loop frames ${j.loop[0]}–${j.loop[1]}`:''}\n${j.error||''}\n${(j.files||[]).join('\n')}`:'';}
+async function exportStart(){await act('export',{destination:$('export-dest').value,name:$('export-name').value,fmt:$('export-format').value,region:$('export-region').value,mix:$('export-mix').value,mutes:$('export-mutes').value,tail:$('export-tail-mode').value==='cut'?0:+$('export-tail').value,song:$('export-song').checked,stems:$('export-stems').checked,loop:$('export-loop').checked,replace:$('export-replace').checked});}
 async function relinkAll(){const links={};document.querySelectorAll('.relink-missing').forEach(e=>{if(e.value.trim())links[e.dataset.slot]=e.value});await act('relink',{links});}
 </script></body></html>

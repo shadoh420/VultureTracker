@@ -548,10 +548,12 @@ def ffmpeg_exe():
     return exe
 
 
-def _encode(path, pcm, fmt):
-    """Interleaved int16 stereo PCM at RATE to `fmt` (a key of ENCODE) through ffmpeg (no console window on Windows)."""
+def _encode(path, pcm, fmt, loop=None):
+    """Interleaved int16 stereo PCM at RATE to `fmt` (a key of ENCODE) through ffmpeg (no console window on Windows);
+    `loop` = (start, end_exclusive) frames as the LOOPSTART and LOOPLENGTH tags game engines read from OGG and FLAC."""
+    tags = ["-metadata", f"LOOPSTART={loop[0]}", "-metadata", f"LOOPLENGTH={loop[1] - loop[0]}"] if loop else []
     r = subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "s16le", "-ar", str(RATE), "-ac", "2", "-i", "-",
-                        *ENCODE[fmt], str(path)], input=pcm, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                        *ENCODE[fmt], *tags, str(path)], input=pcm, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode:
         raise OSError(f"ffmpeg failed: {r.stderr.decode(errors='replace').strip()[-400:]}")
 

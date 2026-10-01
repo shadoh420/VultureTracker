@@ -56,11 +56,15 @@ def protect_outputs(outputs, sources):
         seen.append(path)
 
 
-def wav_bytes(pcm, rate=44100):
+def wav_bytes(pcm, rate=44100, loop=None):
+    """Interleaved int16 stereo PCM as a WAV; `loop` = (start, end_exclusive) frames, stored in a 'smpl' chunk."""
     buf = io.BytesIO()
     with wave.open(buf, 'wb') as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(rate)
         w.writeframes(pcm)
-    return buf.getvalue()
+    if loop is None:
+        return buf.getvalue()
+    from .wavload import add_smpl
+    return add_smpl(buf.getvalue(), rate, (loop[0], loop[1], False))

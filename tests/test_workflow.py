@@ -499,7 +499,7 @@ class TestSafety(unittest.TestCase):
         previous.write_bytes(b'previous finished export')
         opts = {'destination': str(dest), 'fmt': 'mp3', 'replace': True, 'stems': True}
 
-        def failed_encoder(path, pcm, fmt):
+        def failed_encoder(path, pcm, fmt, loop=None):
             path.write_bytes(b'partial encoder output')
             raise OSError('simulated encoder failure')
 
@@ -539,3 +539,34 @@ class TestSafety(unittest.TestCase):
         self.assertEqual(result['status'], 'failed')
         for file, raw in original.items():
             self.assertEqual(file.read_bytes(), raw)
+
+    def test_game_loop_export(self):
+        # p2 (the section) starts a B note on its last row that rings past its end: the loop must start with it
+        song = SONG_BLOCK.replace('      02: ... .. ... ... | C-5 02 ... ...', '      02: ... .. ... ... | ... .. ... ...')
+        song = song.replace('      03: ... .. ... ... | ... .. ... ...\norders', '      03: ... .. ... ... | C-5 02 ... ...\norders')
+        (self.dir / 'song.yaml').write_bytes((song + 'sections:\n  Two: [1, 2]\n').encode())
+        st = self.state()
+        opts = {'destination': str(self.dir / 'out'), 'fmt': 'wav', 'region': 'Two', 'loop': True, 'tail': 0.5,
+                'replace': True}
+        job = export.prepare(st, opts)
+        start, end = job['snapshot']['loop']
+        self.assertEqual((start, end), (0, round(4 * 6 * 2.5 / 125 * gui.RATE)))
+        import numpy as np
+        b = np.frombuffer(export.render(job['snapshot'], silenced=[0]), '<i2').reshape(-1, 2).astype(int)
+        self.assertGreater(np.abs(b[:2000]).max(), 1000)  # the ring-over from the region's own end
+        self.assertLessEqual(np.abs(b[64:2000] - b[end+64:end+2000]).max(), 2)  # = the release after the loop's end
+        result = export.run(job, gui._encode)
+        from vulturetracker.wavload import read_wav
+        self.assertEqual(read_wav(result['files'][0]).loops, [(start, end, False)])
+        result = export.run(export.prepare(st, dict(opts, fmt='ogg')), gui._encode)
+        tags = Path(result['files'][0]).read_bytes()[:4096]
+        self.assertIn(b'LOOPSTART=0', tags)
+        self.assertIn(f'LOOPLENGTH={end}'.encode(), tags)
+        whole = export.prepare(st, dict(opts, region='', tail=0))
+        self.assertEqual(whole['snapshot']['loop'], (0, round(8 * 6 * 2.5 / 125 * gui.RATE)))
+        for fmt in ('mp3', 'it'):
+            with self.assertRaisesRegex(ValueError, 'game loop'):
+                export.prepare(st, dict(opts, fmt=fmt))
+        st.edit_cells(0, [{'row': 1, 'ch': 1, 'cell': '... .. ... B01'}])
+        with self.assertRaisesRegex(ValueError, 'position jumps'):
+            export.prepare(st, dict(opts, region=''))

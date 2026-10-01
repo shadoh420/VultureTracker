@@ -414,6 +414,10 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    stems have identical start frames and lengths, including silent padding. Section audio warms up preceding orders
    for player state. An IT section is an ordinary standalone order slice using the song's initial settings; it does
    not embed already sounding notes from earlier orders. Tail options affect audio, not IT playback.
+   **Game loop** exports the section (the whole song without one) for a game engine to loop: the audio is the region's
+   second pass, so it starts with what its own end leaves ringing and the seam is continuous; the tail after it is the
+   release. WAV marks the loop in a `smpl` chunk, OGG and FLAC in `LOOPSTART` and `LOOPLENGTH` tags (frames);
+   MP3 and IT cannot carry it. A region with a position jump (Bxx) before its last pattern is refused.
    The job compiles its snapshot when queued, so later edits and faders cannot change it. Every output is prepared
    before publication; source paths, symlinks and hardlinks are protected. Existing exports require the Replace
    option. An encoder failure or cancellation preserves previous files. Cancellation is checked while rendering and
