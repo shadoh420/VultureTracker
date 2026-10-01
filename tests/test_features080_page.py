@@ -71,20 +71,18 @@ class TestFeatures080Page(unittest.TestCase):
                     page.wait_for_timeout(100)
                     self.assertEqual(page.evaluate('navigator.clipboard.readText()'),
                                      'ModPlug Tracker  IT\r\n|D-502v32...|...........\r\n|===........|E-501...B..\r\n')
-                    # the computer's piano keys with CHORD: two keys struck together go in as one chord on key up...
+                    # the computer's piano keys with CHORD (OpenMPT's way): keys struck together go in as one chord, written
+                    # 50 ms after the first, while they are still held
                     page.evaluate("SEL=null;$('midi-chord').checked=true;CUR.row=2;CUR.ch=0;CUR.col=0;renderPat()")
-                    z, x, c = page.evaluate("['z','x','c'].map(k=>noteTxt(pianoNote(k)))")
-                    held = page.evaluate('PAT.rows[2][0]')
+                    z, x, c, two = page.evaluate("['z','x','c','2'].map(k=>noteTxt(pianoNote(k)))")
                     page.keyboard.down('c')
                     page.keyboard.down('z')
-                    page.wait_for_timeout(150)
-                    self.assertEqual(page.evaluate('PAT.rows[2][0]'), held)  # still held: nothing written yet
-                    page.keyboard.up('z')
-                    page.keyboard.up('c')
                     page.wait_for_function(f"!EDQ.n && PAT.rows[2][1].startsWith('{c}')")
                     self.assertTrue(page.evaluate(f"PAT.rows[2][0].startsWith('{z}') && CUR.row===3"))
                     self.assertIn(page.evaluate('PAT.rows[2].join(" | ")'), song.read_text())  # the server took it
-                    # ...and a key struck 150 ms after another, still held, is a note of its own on the next row
+                    page.keyboard.up('z')
+                    page.keyboard.up('c')
+                    # a key struck 150 ms after another is a note of its own on the next row
                     page.evaluate('CUR.row=0;renderPat()')
                     page.keyboard.down('z')
                     page.wait_for_timeout(150)
@@ -94,6 +92,20 @@ class TestFeatures080Page(unittest.TestCase):
                     page.wait_for_function(f"!EDQ.n && PAT.rows[1][0].startsWith('{x}')")
                     self.assertIn(page.evaluate('PAT.rows[1].join(" | ")'), song.read_text())
                     self.assertEqual(page.evaluate('[PAT.rows[0][0].slice(0,3),PAT.rows[0][1],CUR.row]'), [z, '... .. ... ...', 2])
+                    # Shift held (OpenMPT's chord modifier): keys struck any time apart join one chord, written when Shift
+                    # is let go; Shift+2 types '@' but is still the 2
+                    page.evaluate('CUR.row=3;renderPat()')
+                    held = page.evaluate('PAT.rows[3].join(" | ")')
+                    page.keyboard.down('Shift')
+                    page.keyboard.press('z')
+                    page.wait_for_timeout(150)
+                    page.keyboard.press('2')
+                    page.wait_for_timeout(150)
+                    self.assertEqual(page.evaluate('PAT.rows[3].join(" | ")'), held)  # nothing written while Shift is held
+                    page.keyboard.up('Shift')
+                    page.wait_for_function(f"!EDQ.n && PAT.rows[3][1].startsWith('{two}')")
+                    self.assertTrue(page.evaluate(f"PAT.rows[3][0].startsWith('{z}')"))
+                    self.assertIn(page.evaluate('PAT.rows[3].join(" | ")'), song.read_text())
                     self.assertEqual(errors, [])
                     browser.close()
             finally:

@@ -203,7 +203,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="btn sm" id="lv-cur" onclick="lvPlayCursor()" title="play from the cursor (Space, F7; Space again stops)">▶ FROM CURSOR</span><span class="btn sm" onclick="lvPlay(0,0)" title="play the song from its start">▶ SONG</span><span class="btn sm" id="lv-pat" onclick="lvLoopPattern()" title="loop the pattern at the cursor (F6)">↻ PATTERN</span><span class="btn sm" onclick="lvStop()" title="stop (F8)">■</span>
         <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
         <span class="k" style="margin-left:8px">INS</span><select id="lv-ins" style="font:10px var(--mono);padding:1px 3px;max-width:190px" title="the instrument the piano keys play (preview) and enter (edit mode): Z to M and Q to U, two octaves from OCT"></select><span class="k">OCT</span><input id="lv-oct" type="number" min="0" max="8" value="5" style="width:36px;font:10px var(--mono);padding:1px 3px">
-        <span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes within 50 ms; the computer's piano keys within 100 ms, written when the last is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes and the computer's piano keys within 50 ms; Shift held (OpenMPT's chord modifier) gathers any keys into one chord, written when Shift is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
         <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
         <span class="mono" id="lv-status" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right"></span>
       </div>
@@ -889,6 +889,8 @@ $('pat').addEventListener('mousedown',e=>{const c=cellAt(e.target);if(!c||e.butt
 $('pat').addEventListener('dblclick',e=>{const r=e.target.closest('.pt');if(r){setCursor(PAT.order,+r.dataset.r);lvPlay(CUR.o,CUR.row)}});
 // piano keys preview the instrument: on the song while it plays live, alone (a muted copy) while stopped
 const PIANO='zsxdcvgbhnjmq2w3er5t6y7u';
+// a piano key with Shift held too: Shift+2 types '@', its key is still the 2
+function pianoKey(e){const k=e.key.toLowerCase();return PIANO.includes(k)?k:/^Digit\d$/.test(e.code||'')&&PIANO.includes(e.code[5])?e.code[5]:k}
 function pianoNote(k){return 12*Math.max(0,Math.min(8,Math.floor(+$('lv-oct').value)||0))+PIANO.indexOf(k)}  // OCT as typed, kept to 0-8
 async function lvNoteOn(k,insIdx,nt,vol){const id='k'+k;if(LV.held[id])return;const note=nt!=null?nt:pianoNote(k);if(note>119)return;LV.held[id]={pending:true};
   try{await lvStart()}catch(e){delete LV.held[id];return}LV.ctx.resume();LV.node.port.postMessage({type:'note',id,ins:insIdx!=null?insIdx:+$('lv-ins').value||0,note,vol:vol!=null?vol:1})}
@@ -944,12 +946,11 @@ function captureMidiChord(n,vol){const live=!!(LV.playing&&LV.pos&&LV.oi===PAT.o
   if(MIDI.pending&&(MIDI.pending.idx!==PAT.idx||!MIDI.pending.live&&MIDI.pending.row!==row))flushMidiChord();  // a live chord keeps its first note's row
   if(!MIDI.pending){MIDI.pending={song:S.song.path,idx:PAT.idx,order:PAT.order,row,ch:CUR.ch,ins:insNum(),live,notes:new Map()};MIDI.timer=setTimeout(flushMidiChord,50)}
   MIDI.pending.notes.set(n,vol)}
-// the computer's piano keys with CHORD: keys struck within 100 ms of the chord's first go in with it, written when the
-// last is let go (a key struck later writes the chord first, so quick typing with overlapping keys stays one note a key)
-const KEYCHORD={keys:new Set(),t:0};
-function keyChord(note,k){const now=performance.now();if(MIDI.pending&&(!KEYCHORD.keys.size||now-KEYCHORD.t>100))flushMidiChord();
-  if(!MIDI.pending){KEYCHORD.keys.clear();KEYCHORD.t=now}captureMidiChord(note,null);clearTimeout(MIDI.timer);KEYCHORD.keys.add(k)}
-function keyChordUp(k){if(KEYCHORD.keys.delete(k)&&!KEYCHORD.keys.size)flushMidiChord()}
+// the computer's piano keys as OpenMPT takes them: with CHORD, keys struck within 50 ms go in as one chord, as MIDI
+// notes do; with Shift held (OpenMPT's chord modifier) every key struck joins the chord, written when Shift is let go
+let SHIFTCHORD=false;
+function keyChord(note,shift){if(MIDI.pending&&SHIFTCHORD&&!shift)flushMidiChord();captureMidiChord(note,null);SHIFTCHORD=shift;if(shift)clearTimeout(MIDI.timer)}
+function shiftChordUp(){if(SHIFTCHORD){SHIFTCHORD=false;flushMidiChord()}}
 async function materializePattern(){if(PAT.idx==null||EDQ.n)return;const j=await act('materialize',{pattern:PAT.idx});if(!j.error){PAT.key=null;await refresh();setEdit(true)}}
 function midiNoteOn(n,vel){if(n>119)return;
   if($('t-pattern').classList.contains('on')&&EDIT&&PAT.rows&&!document.querySelector('.modal.on')){if(CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}const vol=MIDI.vel?Math.max(1,Math.round(vel*64/127)):null;if($('midi-chord').checked)captureMidiChord(n,vol);else enterNote(n,vol)}
@@ -964,8 +965,8 @@ function editKey(e,k){const p=cellOf(PAT.rows[CUR.row][CUR.ch]),col=CUR.col;
   if(e.key==='Delete'||k==='.'){if(col===0){p.n='...';p.i='..'}else if(col===1)p.i='..';else if(col===2)p.v='...';else p.e='...';putCell(p,true);return true}
   if(e.key==='Insert'){patShift(true);return true}
   if(e.key==='Backspace'){patShift(false);return true}
-  if(col===0){if(PIANO.includes(k)&&k.length===1){const note=pianoNote(k);if(note>119)return true;
-      if(!$('midi-chord').checked)enterNote(note);else if(!e.repeat)keyChord(note,k);if(!e.repeat)lvNoteOn(k);return true}
+  if(col===0){const pk=pianoKey(e);if(PIANO.includes(pk)&&pk.length===1){const note=pianoNote(pk);if(note>119)return true;
+      if(e.shiftKey||$('midi-chord').checked){if(!e.repeat)keyChord(note,e.shiftKey)}else enterNote(note);if(!e.repeat)lvNoteOn(pk);return true}
     const sp={'1':'===','`':'~~~','\\':'^^^'}[k];if(sp){p.n=sp;putCell(p,true);return true}return false}
   if(col===1&&/^[0-9]$/.test(k)){const d=digit(k);p.i=d==='00'?'..':d;putCell(p,false);return true}
   if(col===2){if(VOLMAX[k]!=null&&k.length===1){p.v=k+pad(Math.min(VOLMAX[k],p.v==='...'?0:+p.v.slice(1)));putCell(p,false);return true}
@@ -1403,8 +1404,8 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
   else if(/^[0-9msnux]$/.test(k)){}  // the Tryout's keys (pick, alone/mix, note, apply, reject) never act from this tab
   else done=false;
   if(done){e.preventDefault();e.stopImmediatePropagation()}},true);
-document.addEventListener('keyup',e=>{const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k)){lvNoteOff(k);keyChordUp(k)}});
-window.addEventListener('blur',()=>{if(KEYCHORD.keys.size){KEYCHORD.keys.clear();flushMidiChord()}});
+document.addEventListener('keyup',e=>{const k=pianoKey(e);if(k.length===1&&PIANO.includes(k))lvNoteOff(k);if(e.key==='Shift')shiftChordUp()});
+window.addEventListener('blur',shiftChordUp);
 // ---- audio
 let lastSrc='',lastInput=0;
 function pick(id){sel=id;render();act('want',{id})}

@@ -135,11 +135,12 @@ VEL→VOL its velocity as the volume column (v01-v64), then the cursor moves STE
 pattern on show, a key records instead: its note goes into the cursor's channel at the row playing when it went down,
 and the cursor follows (the piano keys on the computer keyboard record the same way). With CHORD checked,
 notes arriving within 50 ms are captured together, lowest first, across consecutive channels starting at the
-cursor; on the computer's piano keys, keys struck within 100 ms of the first, written when the last is let go (a key
-struck later writes the chord before it, so fast typing stays one note a key). The chord is one undo step and advances STEP only once. If it needs more channels than remain, nothing
-is written and the selection bar explains why. Uncheck CHORD for one-note-at-a-time entry. The app serves its
-page from port 8723 when that is free (another app window takes any free port) and keeps the window's browser profile in
-`%APPDATA%\VultureTracker\webview`, so the page's own settings (speed, latency, hex rows, MIDI) and the MIDI permission
+cursor, the computer's piano keys too; with Shift held (OpenMPT's chord modifier) every key struck joins the chord,
+written when Shift is let go, CHORD checked or not. The chord is one undo step and advances STEP only once. If it
+needs more channels than remain, nothing is written and the selection bar explains why. Uncheck CHORD for
+one-note-at-a-time entry. The app serves its page from port 8723 when that is free (another app window takes any free
+port) and keeps the window's browser profile in `%APPDATA%\VultureTracker\webview`, so the page's own settings (speed,
+latency, hex rows, MIDI) and the MIDI permission
 carry over from one launch to the next.
 
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
