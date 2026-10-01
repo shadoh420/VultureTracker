@@ -2,7 +2,7 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 0.8.0 (2026-10-01)
 
 Getting music and sounds in and out.
 
