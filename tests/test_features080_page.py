@@ -1,5 +1,5 @@
-"""0.8.0 features in Chromium on a disposable song: OpenMPT's clipboard both ways. The native paste writes the system
-clipboard (the owner's clipboard, when run on the desktop)."""
+"""0.8.0 features in Chromium on a disposable song: OpenMPT's clipboard both ways, chords from the computer keyboard.
+Headless Chromium and Edge keep a clipboard of their own: the desktop's is left alone (checked 2026-10-01)."""
 import os
 os.environ['VT_WORKERS'] = '1'
 import tempfile
