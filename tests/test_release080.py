@@ -153,7 +153,7 @@ class TestRelease080(unittest.TestCase):
         song.write_bytes(fixtures.SONG.replace('{file: a.wav, name: A tone}', '{file: "Böse Bass.wav"}').encode())
         r = api.check(song)
         self.assertTrue(r['ok'], r['errors'])
-        self.assertEqual(r['summary']['sample_names'][0], 'B?se Bass')
+        self.assertEqual(r['summary']['sample_names'][0], 'Bose Bass')
         from tests.test_gpimport import tab, guitarpro
         from vulturetracker.gpimport import import_gp
         if guitarpro is None:

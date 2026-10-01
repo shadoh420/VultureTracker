@@ -226,7 +226,7 @@ def write_song(song_path, title, lanes, bars, ph, r, speed, tempo, ts, warnings,
             seen[data] = got
         orders.append(got)
     if any(ord(c) > 127 for c in title + "".join(ln.name for ln in lanes)):
-        warnings.append('Non-ASCII title or track name characters replaced with ? for the IT song format')
+        warnings.append('Non-ASCII title or track name characters transliterated for the IT song format (? where none fits)')
     chans = []
     for ln in lanes:
         c = {"name": it_text(ln.name, 20)}

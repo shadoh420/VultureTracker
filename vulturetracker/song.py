@@ -1,6 +1,7 @@
 """Song file (YAML) -> Module, with line-referenced validation errors."""
 import re
 import threading
+import unicodedata
 from array import array
 from pathlib import Path
 
@@ -19,9 +20,15 @@ MAX_ROWS = 200
 MAX_NUMBER = 99
 
 
+_LATIN = str.maketrans({"ß": "ss", "æ": "ae", "Æ": "AE", "ø": "o", "Ø": "O", "œ": "oe", "Œ": "OE", "ł": "l", "Ł": "L",
+                        "đ": "d", "Đ": "D", "þ": "th", "Þ": "Th", "ð": "d", "Ð": "D"})
+
+
 def it_text(s, n):
-    """`s` as IT stores a name: ASCII (other characters become '?', as imports write them), at most `n` characters."""
-    return str(s).encode("ascii", "replace").decode()[:n]
+    """`s` as IT stores a name: ASCII, at most `n` characters. Accented letters lose their accents (Böse -> Bose) and a
+    few others take their usual spelling (ß -> ss); what has no ASCII form becomes '?'."""
+    s = unicodedata.normalize("NFKD", str(s).translate(_LATIN))
+    return "".join(c for c in s if not unicodedata.combining(c)).encode("ascii", "replace").decode()[:n]
 
 
 class SongError(Exception):

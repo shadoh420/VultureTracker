@@ -68,7 +68,7 @@ a letter.
 
 | key | range | default | meaning |
 |---|---|---|---|
-| `title` | ≤25 ASCII chars | `""` | song title |
+| `title` | ≤25 ASCII chars | `""` | song title (an imported one has its accents dropped) |
 | `tempo` | 32–255 | 125 | initial tempo (IT "T") |
 | `speed` | 1–255 | 6 | initial ticks per row (IT "A") |
 | `rows_per_beat` | 1-255 | 4 | grid/metronome beat spacing; displayed BPM = tempo * 24 / speed / rows_per_beat |
@@ -111,7 +111,7 @@ samples:
 | key | range | default | meaning |
 |---|---|---|---|
 | `file` | path | required* | WAV file: PCM 8/16/24/32-bit or float, any rate, mono or stereo. *A slot with only `name` (no `file`) is an empty sample slot. |
-| `name` | ≤25 chars | file stem | sample name; instruments may refer to a sample by this name |
+| `name` | ≤25 ASCII chars | file stem | sample name; instruments may refer to a sample by this name (from the file stem, accents are dropped: `Böse Bass.wav` is "Bose Bass") |
 | `base_note` | note | `C-5` | the note at which the WAV plays at its recorded pitch |
 | `c5_speed` | 256–9999999 | from WAV | playback rate for C-5, in Hz, for the WAV as written (rescaled with it under `module: sample_rate`). Use instead of `base_note` for fine tuning. |
 | `volume` | 0–64 | 64 | default note volume (used when a cell has no volume command) |
