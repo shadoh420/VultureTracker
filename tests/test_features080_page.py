@@ -65,6 +65,10 @@ class TestFeatures080Page(unittest.TestCase):
                     page.keyboard.press('Control+Shift+V')
                     page.wait_for_function("!EDQ.n && PAT.rows[2][0].startsWith('F-5')", timeout=5000)
                     self.assertEqual(page.evaluate('PAT.rows[2].join(" | ")'), 'F-5 03 v10 ... | C-5 02 ... ...')
+                    # a key whose paste event never comes (a synthetic one here): the page reads the clipboard itself
+                    page.evaluate("t=>navigator.clipboard.writeText(t)", 'ModPlug Tracker  IT\r\n|A-504......\r\n')
+                    page.evaluate("CUR.row=3;CUR.ch=0;renderPat();document.dispatchEvent(new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true}))")
+                    page.wait_for_function("!EDQ.n && PAT.rows[3][0].startsWith('A-5 04')", timeout=5000)
                     # and back: Ctrl+C puts OpenMPT's format on the system clipboard
                     page.evaluate("SEL={o:0,a:{row:0,ch:0,col:0},b:{row:1,ch:1,col:4}};renderPat()")
                     page.keyboard.press('Control+C')
