@@ -151,7 +151,9 @@ def prepare(state, options):
         if region_name or loop:
             orders = state.mod.orders
             if region_name:
-                a, b = (state.song.get('sections') or {})[region_name]
+                if region_name not in (state.song.get('sections') or {}):
+                    raise ValueError(f'No section named {region_name}')
+                a, b = state.song['sections'][region_name]
             else:  # a loop without a section: the whole song, its orders up to the end marker
                 a, b = 0, orders.index(ORDER_END) if ORDER_END in orders else len(orders)
             playable = [i for i in range(a, b) if state.mod.orders[i] < len(state.mod.patterns)]

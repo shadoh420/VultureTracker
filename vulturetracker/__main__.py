@@ -1,4 +1,4 @@
-"""CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,gui} ..."""
+"""CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,export,collect,gui} ..."""
 import argparse
 import json
 import sys
@@ -69,6 +69,29 @@ def main(argv=None):
     p.add_argument("--index", help="the index file (default: the app's, or $VT_LIBRARY)")
     p.add_argument("--like", metavar="WAV", help="then print the sounds nearest this WAV")
     p.add_argument("-k", "--k", type=int, default=8)
+    p = sub.add_parser("export", help="render a song or a section as the app's RENDER & EXPORT does: IT, WAV, MP3, OGG or "
+                                      "FLAC, aligned stems, a game loop (reads the app's .tryout.json for --mix current "
+                                      "and --respect-mutes; writes nothing else beside the song)")
+    p.add_argument("song")
+    p.add_argument("-o", "--destination", help="output folder (default: beside the song)")
+    p.add_argument("--name", help="output file name without extension (default: the song's)")
+    p.add_argument("-f", "--format", default="wav", choices=["it", "wav", "mp3", "ogg", "flac"])
+    p.add_argument("--section", default="", help="a named section instead of the whole song")
+    p.add_argument("--tail", type=float, default=2.0, help="seconds of ring-out after the end, 0-10 (0: cut at the end)")
+    p.add_argument("--stems", action="store_true", help="also a file per channel in use, all the same length")
+    p.add_argument("--no-song", action="store_true", help="the stems only")
+    p.add_argument("--with-it", action="store_true", help="also the .it beside the audio")
+    p.add_argument("--loop", action="store_true", help="a seamless game loop: WAV smpl chunk, OGG/FLAC LOOPSTART and "
+                                                       "LOOPLENGTH; the tail is its release")
+    p.add_argument("--mix", choices=["saved", "current"], default="saved",
+                   help="current: the app's unwritten faders and selected candidate")
+    p.add_argument("--respect-mutes", action="store_true", help="apply the app's audition mute and solo")
+    p.add_argument("--replace", action="store_true", help="replace earlier exports of the same names")
+    p = sub.add_parser("collect", help="copy a song into a new folder with its samples, candidates, notes and recipes, "
+                                       "as the app's PROJECT > Collect Samples does")
+    p.add_argument("song")
+    p.add_argument("destination", help="a new folder (never merged into an existing one)")
+    p.add_argument("--zip", action="store_true", help="also <folder>.zip beside it")
     p = sub.add_parser("gui", help="open the app for a song (its own window with pywebview installed, else the browser)")
     p.add_argument("song", nargs="?", help="song to open (default: the app's open-a-song screen)")
     p.add_argument("--port", type=int, default=0, help="listen port (default: 8723 when free, else any free port)")
@@ -185,6 +208,35 @@ def main(argv=None):
         if args.cmd == "gui":
             from .gui import serve
             return serve(args.song, args.port, not args.no_browser, window=not (args.browser or args.no_browser))
+
+        if args.cmd in ("export", "collect"):
+            from .gui import State, _encode
+            st = State(args.song, headless=True)
+            for line in st.error or []:
+                print(line)
+            if st.error:
+                return 1
+            if args.cmd == "collect":
+                from .project import collect
+                res = collect(st, str(Path(args.destination).resolve()), args.zip)
+                print(f"{res['report']} {res['path']}" + (f", {res['zip']}" if res["zip"] else ""))
+                return 0
+            from .export import RATE, prepare, run
+            res = run(prepare(st, {
+                "destination": str(Path(args.destination).resolve()) if args.destination else "", "name": args.name,
+                "fmt": args.format, "region": args.section, "tail": args.tail, "stems": args.stems, "song": not args.no_song,
+                "include_it": args.with_it, "loop": args.loop, "mix": args.mix, "replace": args.replace,
+                "mutes": "respect" if args.respect_mutes else "ignore"}), _encode)
+            for w in res["warnings"]:
+                print(w)
+            for f in res["files"]:
+                print(f"wrote {f}")
+            if res["loop"]:
+                print(f"loop: frames {res['loop'][0]}-{res['loop'][1]}, then {res['seconds'] - res['loop'][1] / RATE:.2f} s of release")
+            if res["status"] != "done":
+                print(f"error: {res['error']}", file=sys.stderr)
+                return 1
+            return 0
 
         if args.cmd == "surge-params":
             from .synth import list_params

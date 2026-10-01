@@ -33,6 +33,8 @@ python -m vulturetracker import some.xm -o some.yaml                  # existing
 python -m vulturetracker import riff.gp5 -o riff.yaml                 # a Guitar Pro tab, with placeholder sounds
 python -m vulturetracker index C:/samples samples                      # index WAVs by timbre (the app's MAP tab)
 python -m vulturetracker tryout song.yaml --sample 3 --like kick.wav -k 8 # the 8 sounds nearest kick.wav, in the song
+python -m vulturetracker export song.yaml -f ogg --section Loop --loop --stems # RENDER & EXPORT without the app
+python -m vulturetracker collect song.yaml ../song-copy --zip           # PROJECT's Collect Samples without the app
 ```
 
 `pip install -e .` also installs a `vulturetracker` command.

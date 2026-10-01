@@ -857,9 +857,11 @@ def voice_entry(ins, edit):
 # ---------------------------------------------------------------- state
 
 class State:
-    def __init__(self, song_path):
+    def __init__(self, song_path, headless=False):
+        """`headless` (the export and collect commands): no workers, no .tryout cache, notes left where they are."""
         self.song_path = Path(song_path).resolve()
         self.base_dir = self.song_path.parent
+        self.headless = headless
         self.cache_dir = self.base_dir / ".tryout"
         self.meta_path = self.song_path.with_name(self.song_path.stem + ".tryout.json")
         self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
@@ -905,7 +907,7 @@ class State:
         self.mod = None       # compiled model of the last good load (pattern view)
         self.it_stamps = None
         self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
-        self.reload()
+        self.reload(archive=not headless)
         saved = self.history_store.load()
         if saved:
             self.checkpoints = saved['checkpoints']
@@ -914,6 +916,8 @@ class State:
             else:
                 self.notices.append('External edits since the last session: undo/redo start fresh; named checkpoints remain available for comparison.')
         self._history_ready = True
+        if headless:
+            return
         self.cache_dir.mkdir(exist_ok=True)
         for _ in range(WORKERS):
             threading.Thread(target=self._worker, daemon=True).start()
@@ -966,7 +970,7 @@ class State:
                 self._archive_old_notes()
                 if self._history_ready:
                     _atomic(self.history_store.path, self.history_store.data(self._raw, self.history, self.future, self.checkpoints))
-            if self.notes:
+            if self.notes and not self.headless:
                 try:
                     self.save_notes()
                 except OSError as e:

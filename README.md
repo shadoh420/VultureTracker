@@ -83,6 +83,7 @@ python -m vulturetracker build song.yaml --render song.wav # compile, verify wit
 python -m vulturetracker import some.xm -o some.yaml       # an .it, .xm, .s3m or .mod -> song file + WAVs
 python -m vulturetracker synth recipe.yaml                 # render samples from free synths or recordings
 python -m vulturetracker index ~/samples --like kick.wav   # index sample folders; the nearest sounds to a WAV
+python -m vulturetracker export song.yaml -f ogg --loop    # the app's RENDER & EXPORT: formats, sections, stems, game loops
 python -m vulturetracker --help                            # every command
 ```
 

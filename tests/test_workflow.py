@@ -570,3 +570,18 @@ class TestSafety(unittest.TestCase):
         st.edit_cells(0, [{'row': 1, 'ch': 1, 'cell': '... .. ... B01'}])
         with self.assertRaisesRegex(ValueError, 'position jumps'):
             export.prepare(st, dict(opts, region=''))
+
+    def test_cli_export_and_collect_are_headless(self):
+        from vulturetracker.__main__ import main
+        from vulturetracker.wavload import read_wav
+        before = sorted(p.name for p in self.dir.iterdir())
+        song = str(self.dir / 'song.yaml')
+        self.assertEqual(main(['export', song, '-o', str(self.dir / 'out'), '--loop', '--tail', '0', '--stems']), 0)
+        self.assertEqual(read_wav(self.dir / 'out' / 'song.wav').loops, [(0, round(8 * 6 * 2.5 / 125 * gui.RATE), False)])
+        self.assertEqual(len(list((self.dir / 'out' / 'song_stems').iterdir())), 2)
+        self.assertEqual(main(['export', song, '-o', str(self.dir / 'out')]), 1)  # exists: --replace
+        self.assertEqual(main(['collect', song, str(self.dir.parent / (self.dir.name + '-copy')), '--zip']), 0)
+        self.addCleanup(shutil.rmtree, self.dir.parent / (self.dir.name + '-copy'))
+        self.addCleanup((self.dir.parent / (self.dir.name + '-copy.zip')).unlink)
+        self.assertTrue((self.dir.parent / (self.dir.name + '-copy') / 'song.yaml').is_file())
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), sorted(before + ['out']))  # no .tryout cache beside the song
