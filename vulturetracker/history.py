@@ -90,13 +90,17 @@ def validate_step(step):
 
 
 class History:
-    def __init__(self, song, notices):
+    def __init__(self, song, notices, passive=False):
+        """`passive`: another process has the song open; an interrupted save's journal and a history that does not parse
+        are left for it to reconcile."""
         self.song = Path(song)
         self.path = self.song.with_suffix('.history.json')
         self.journal = self.song.with_suffix('.recovery.json')
         self.paths = [self.song, self.song.with_suffix('.tryout.json'), self.path]
         self.notices = notices
-        self.recover()
+        self.passive = passive
+        if not passive:
+            self.recover()
 
     def _read(self, path):
         if path.stat().st_size > (JOURNAL_BYTES if path == self.journal else MAX_BYTES):
@@ -137,7 +141,10 @@ class History:
             obj['checkpoints'] = {name: pack_step(step) for name, step in obj['checkpoints'].items()}
             return obj
         except (ValueError, TypeError, KeyError, UnicodeError, zlib.error):
-            quarantine(self.path, 'corrupt', self.notices)
+            if self.passive:
+                self.notices.append(f'{self.path.name} could not be read; left as it is')
+            else:
+                quarantine(self.path, 'corrupt', self.notices)
             return None
 
     def data(self, raw, undo, redo, checkpoints):

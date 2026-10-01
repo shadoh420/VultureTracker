@@ -1,13 +1,19 @@
 """Finishing/sharing workflow regressions, using disposable synthetic songs only."""
+import contextlib
 import copy
+import io
 import json
 from pathlib import Path
 import shutil
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
-from vulturetracker import api, gui
+import yaml
+
+from vulturetracker import api, arrangement, gui, synth
 from vulturetracker import history as history_io
 from vulturetracker.project import collect
 from vulturetracker.phrases import action as phrase_action
@@ -478,7 +484,9 @@ class TestSafety(unittest.TestCase):
         self.assertAlmostEqual(snap['seconds'], .48, places=6)
 
     def test_export_refuses_changing_source_during_snapshot(self):
-        st = self.state()
+        # headless: a render worker would run the global compile_song mock too, at a moment the test does not control
+        # (it copied b.wav over a.wav before the snapshot read it: about 1 run in 19 failed)
+        st = gui.State(self.dir / 'song.yaml', headless=True)
         real_compile = api.compile_song
 
         def changed(*args, **kwargs):
@@ -638,9 +646,7 @@ class TestSafety(unittest.TestCase):
             self.assertIn('open in VultureTracker', said)
         self.assertEqual(st.history_store.path.read_bytes(), history)
         self.assertEqual(run('checkpoint')[0], 0)
-        from vulturetracker.fileio import unlock_file
-        unlock_file(st._app_lock)  # what State.close does when the app opens another song (the system, when it quits)
-        st._app_lock = None
+        st.release_lock()  # what State.close does when the app opens another song (the system, when it quits)
         self.assertEqual(run('checkpoint', 'save', 'Later')[0], 0)
         # the same song opened again in the app stays locked: the new state takes the lock the old one held
         with mock.patch.object(gui, 'remember_song'), mock.patch.object(gui, 'WORKERS', 0):
@@ -653,3 +659,230 @@ class TestSafety(unittest.TestCase):
                 gui.Handler.state.close()
                 gui.Handler.state = old
         self.assertFalse(gui.open_in_app(song))
+
+
+def cli(*args):
+    """The command line in this process: (exit code, stdout, stderr)."""
+    from vulturetracker.__main__ import main
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main([str(a) for a in args])
+    return code, out.getvalue(), err.getvalue()
+
+
+def wait_for(done, seconds=10):
+    end = time.time() + seconds
+    while not done() and time.time() < end:
+        time.sleep(0.02)
+    return done()
+
+
+# a click at the start of the section, at a tempo whose ticks are no whole number of samples at 44.1 or 48 kHz
+CLICK_SONG = """\
+module: {title: Loop, tempo: 137, speed: 6, channels: [{name: Click}]}
+samples: {1: {file: click.wav}}
+patterns:
+  p1: {rows: 16, data: 'C-5 01 ... ...'}
+  p2: {rows: 16, data: ''}
+orders: [p1, p2]
+sections: {Loop: [0, 2]}
+"""
+
+
+class TestAudit090(unittest.TestCase):
+    """The 0.9.0 audit's bugs (scratch/audit-100/REPORT.md), each test named by what it pins."""
+    setUp = fixtures.TestGui.setUp
+    tearDown = fixtures.TestGui.tearDown
+    state = fixtures.TestGui.state
+
+    def test_two_commands_on_one_song_one_is_refused_and_nothing_is_lost(self):
+        # B1: the command line held no lock; a second command saved over the first and both answered "saved"
+        song = self.dir / 'song.yaml'
+        real, inner = gui.State.checkpoint, []
+
+        def checkpoint(st, name, action='save'):
+            if not inner:
+                inner.append(None)
+                inner[0] = cli('checkpoint', song, 'save', 'second')
+            return real(st, name, action)
+        with mock.patch.object(gui.State, 'checkpoint', checkpoint):
+            self.assertEqual(cli('checkpoint', song, 'save', 'first')[0], 0)
+        code, _, said = inner[0]
+        self.assertEqual(code, 1)
+        self.assertIn('open in VultureTracker', said)
+        self.assertEqual(list(gui.State(song, headless=True).checkpoints), ['first'])
+
+    def test_the_app_opening_a_song_a_command_is_changing_opens_it_read_only(self):
+        # B2: the lock was checked once, before the command opened the song; an app opening it meanwhile later wrote
+        # its own history over the command's change
+        song = self.dir / 'song.yaml'
+        real, apps = gui.State.checkpoint, []
+
+        def checkpoint(st, name, action='save'):
+            if not apps:
+                apps.append(self.state())  # the app opens the song while the command works on it
+            return real(st, name, action)
+        with mock.patch.object(gui, 'LOCK_WAITS', (0.01,)), mock.patch.object(gui.State, 'checkpoint', checkpoint):
+            self.assertEqual(cli('checkpoint', song, 'save', 'cli')[0], 0)
+        app = apps[0]
+        self.assertIn('read-only', app.read_only)
+        self.assertIn(app.read_only, app.notices)  # the page shows it once
+        with self.assertRaisesRegex(ValueError, 'read-only'):
+            app.checkpoint('app')
+        with self.assertRaisesRegex(ValueError, 'read-only'):
+            app.edit_cells(0, [{'row': 0, 'ch': 0, 'cell': 'D-5 01 ... ...'}])
+        self.assertEqual(list(gui.State(song, headless=True).checkpoints), ['cli'])
+
+    def test_a_second_app_on_a_song_another_holds_opens_it_read_only(self):
+        # B3: State ignored a lock it could not take: a second app ran unlocked; once the first ended, a command wrote
+        # and the second app wrote its own history over it
+        from vulturetracker.fileio import lock_file, unlock_file
+        song = self.dir / 'song.yaml'
+        gui.LOCKS.mkdir(parents=True, exist_ok=True)
+        other = lock_file(gui.app_lock_path(song))  # the first app, in another process
+        with mock.patch.object(gui, 'LOCK_WAITS', (0.01,)):
+            st = self.state()
+        self.assertIn('read-only', st.read_only)
+        unlock_file(other)  # the first app ends
+        self.assertEqual(cli('checkpoint', song, 'save', 'cli')[0], 0)
+        with self.assertRaisesRegex(ValueError, 'read-only'):
+            st.checkpoint('app')
+        self.assertEqual(list(gui.State(song, headless=True).checkpoints), ['cli'])
+        # one that lets go while the app waits: the app takes the lock and edits
+        other = lock_file(gui.app_lock_path(song))
+        threading.Timer(0.05, unlock_file, [other]).start()
+        with mock.patch.object(gui, 'LOCK_WAITS', (0.3, 0.3)):
+            st = self.state()
+        self.assertIsNone(st.read_only)
+        st.checkpoint('app')
+
+    def test_commands_that_read_leave_the_files_of_a_song_open_in_the_app(self):
+        # B4: a listing or an export ran History.recover (and moved bad files aside) beside a song the app had open
+        song = self.dir / 'song.yaml'
+        st = self.state()
+        st.history_store.journal.write_bytes(b'{"schema": 2}')  # the journal of a save of the app's, in flight
+        st.meta_path.write_bytes(b'{"slot":')
+        self.assertEqual(cli('checkpoint', song)[0], 0)
+        self.assertEqual(cli('export', song, '-o', self.dir / 'out', '-f', 'it')[0], 0)
+        self.assertEqual(st.history_store.journal.read_bytes(), b'{"schema": 2}')
+        self.assertEqual(st.meta_path.read_bytes(), b'{"slot":')
+
+    def test_the_command_line_says_what_the_app_would_tell(self):
+        # B5: notices were never printed: after an external edit `checkpoint save` dropped every undo step silently
+        song = self.dir / 'song.yaml'
+        self.assertEqual(cli('sections', song, 'save', 'Intro', '0', '1')[0], 0)
+        song.write_bytes(song.read_bytes() + b'# a hand edit\n')
+        code, _, said = cli('checkpoint', song, 'save', 'later')
+        self.assertEqual(code, 0)
+        self.assertIn('External edits since the last session', said)
+
+    def test_game_loop_and_song_lengths_are_the_audio_s_at_any_tempo(self):
+        # B6: positions were taken at libopenmpt's default 48 kHz while the audio mixes at 88.2 kHz, each counting a tick
+        # in whole samples: at tempo 137 the loop was 114 frames short of the region it plays
+        import numpy as np
+        from vulturetracker.openmpt import LoadedModule
+        from vulturetracker.wavload import read_wav, write_wav
+        write_wav(self.dir / 'click.wav', fixtures.RATE, [[30000] + [0] * 400])
+        (self.dir / 'song.yaml').write_bytes(CLICK_SONG.encode())
+        st = gui.State(self.dir / 'song.yaml', headless=True)
+        twice = dict(st.song, orders=['p1', 'p2', 'p1', 'p2'])
+        twice.pop('sections')
+        with LoadedModule(api.compile_song(twice, self.dir)[0]) as lm:
+            x = np.frombuffer(lm.render(gui.RATE), '<i2')[::2].astype(int)
+        clicks = np.nonzero(x > x.max() // 2)[0]
+        self.assertEqual(len(clicks), 2)
+        length = int(clicks[1] - clicks[0])  # what one pass of the section (and of the song) lasts in the audio
+        for fmt in ('wav', 'ogg', 'flac'):
+            res = export.run(export.prepare(st, {'destination': str(self.dir / 'out'), 'fmt': fmt, 'region': 'Loop',
+                                                 'loop': True, 'tail': 0.5, 'replace': True}), gui._encode)
+            self.assertEqual(tuple(res['loop']), (0, length), fmt)
+            out = Path(res['files'][0])
+            if fmt == 'wav':
+                self.assertEqual(read_wav(out).loops, [(0, length, False)])
+            else:
+                self.assertIn(f'LOOPLENGTH={length}'.encode(), out.read_bytes()[:8192])
+        self.assertEqual(export.snapshot(st.song, self.dir, tail=0)['frames'], length)  # the whole song, cut at its end
+
+    def test_checkpoints_save_and_restore_a_song_that_is_not_valid_yaml(self):
+        # B7: the undo step's asset fingerprints parsed the current text: ParserError (a traceback; a 500 in the app)
+        song = self.dir / 'song.yaml'
+        good = song.read_bytes()
+        self.assertEqual(cli('checkpoint', song, 'save', 'good')[0], 0)
+        song.write_bytes(good.replace(b'orders: [p1, p2]', b'orders: [p1, p2'))
+        self.assertEqual(cli('checkpoint', song, 'save', 'broken')[0], 0)
+        self.assertEqual(cli('checkpoint', song, 'restore', 'good')[0], 0)
+        self.assertEqual(song.read_bytes(), good)
+        with mock.patch.object(gui.State, 'checkpoint', side_effect=yaml.YAMLError('bad')):
+            code, _, said = cli('checkpoint', song, 'diff', 'good')
+        self.assertEqual((code, said.strip().splitlines()[-1]), (1, 'error: bad'))
+
+    def test_app_files_beside_the_song_are_no_outputs(self):
+        # B8: `phrase render -o song.notes.md --replace` wrote a WAV over the notes report
+        song = self.dir / 'song.yaml'
+        for name in ('song.notes.md', 'song.notes-abc.json', 'song.notes-abc.md'):
+            (self.dir / name).write_bytes(b'kept')
+        (self.dir / 'song.phrases').mkdir()
+        (self.dir / 'song.phrases' / 'old.json').write_bytes(b'kept')
+        st = gui.State(song, headless=True)
+        protected = {Path(p).resolve() for p in export.sources(st)}
+        for name in ('song.notes.md', 'song.notes-abc.json', 'song.notes-abc.md', 'song.recovery.json', 'song.phrases/old.json'):
+            self.assertIn((self.dir / name).resolve(), protected, name)
+        self.assertEqual(cli('phrase', song, 'capture', '--order', '0', '--rows', '0-3', '--channels', '1')[0], 0)
+        self.assertEqual(cli('phrase', song, 'render', 'A', '-o', self.dir / 'song.notes.md', '--replace')[0], 1)
+        self.assertEqual((self.dir / 'song.notes.md').read_bytes(), b'kept')
+
+    def test_api_save_writes_lf_in_one_atomic_write(self):
+        # B9: api.save wrote with Path.write_text: CRLF on Windows, and not atomically
+        path = self.dir / 'saved.yaml'
+        with mock.patch.object(api, 'atomic_write', wraps=api.atomic_write) as write:
+            api.save(api.load(self.dir / 'song.yaml'), path)
+        write.assert_called_once()
+        self.assertNotIn(b'\r\n', path.read_bytes())
+        self.assertEqual(api.load(path)['orders'], ['p1', 'p2'])
+
+    def test_phrase_stars_outside_0_to_5_are_refused(self):
+        # B10: a phrase alternative's stars were clamped silently (the rating route refuses them since 0.9.0)
+        st = self.state()
+        phrase_action(st, {'action': 'capture', 'order': 0, 'r0': 0, 'r1': 3, 'chans': [0], 'count': 2})
+        for stars in (9, -3):
+            with self.assertRaisesRegex(ValueError, '0 to 5'):
+                phrase_action(st, {'action': 'update', 'variant': 0, 'stars': stars})
+        self.assertEqual(cli('phrase', self.dir / 'song.yaml', 'set', 'A', '--stars', '9')[0], 1)
+        phrase_action(st, {'action': 'update', 'variant': 0, 'stars': 5})
+        self.assertEqual(st.meta['phrase']['variants'][0]['stars'], 5)
+
+    def test_an_output_that_is_a_folder_or_has_no_folder_is_named_in_the_error(self):
+        # B11: the error named the hidden temporary file beside the output
+        from vulturetracker.fileio import atomic_write
+        (self.dir / 'taken.wav').write_bytes(b'x')
+        for out, named, kw in ((self.dir, str(self.dir), {}), (self.dir / 'nowhere' / 'x.wav', 'nowhere', {}),
+                               (self.dir / 'taken.wav', 'taken.wav', {'replace': False})):
+            with self.assertRaises(OSError) as e:
+                atomic_write(out, b'data', **kw)
+            self.assertNotIn('.tmp', str(e.exception))
+            self.assertIn(named, str(e.exception))
+        self.assertEqual((self.dir / 'taken.wav').read_bytes(), b'x')
+        self.assertEqual([p.name for p in self.dir.iterdir() if p.name.endswith('.tmp')], [])
+
+    def test_deleting_a_section_leaves_no_blank_line(self):
+        # B13: the deleted entry's indentation stayed behind on a line of its own, one more per deletion
+        text = SONG_BLOCK + 'sections:\n  Intro: [0, 1]  # the start\n  Main: [1, 2]\n'
+        one = arrangement.sections_text(text, {'Intro': [0, 1]})
+        self.assertEqual(one, SONG_BLOCK + 'sections:\n  Intro: [0, 1]  # the start\n')
+        self.assertEqual(arrangement.sections_text(SONG_BLOCK + 'sections:\n  Intro: [0, 1]\n  Main: [1, 2]\n', {}),
+                         SONG_BLOCK + 'sections:\n')
+        self.assertIsNone(api.from_yaml(SONG_BLOCK + 'sections:\n').get('sections'))
+
+    def test_a_job_that_raises_fails_alone_and_the_worker_goes_on(self):
+        # A5: an exception outside a job's own catch list (a RECIPE entry `chord: []`, IndexError) ended the State's only
+        # worker; every later render, build and export stayed queued
+        st = self.state()
+        rec = {'wav': str(self.dir / 'a.wav'), 'recipe': str(self.dir / 'kit.yaml'), 'name': 'a', 'note': 'A-5'}
+        st.recipe_job = {'status': 'queued', 'error': None, 'log': [], 'file': None}
+        with mock.patch.object(synth, 'render_one', side_effect=IndexError('list index out of range')):
+            st._put(0, ('recipe', (rec, {}, 'chord: []', 1)))
+            self.assertTrue(wait_for(lambda: st.recipe_job['status'] == 'failed'))
+        self.assertIn('IndexError', st.recipe_job['error'])
+        st._put(0, ('build', False))
+        self.assertTrue(wait_for(lambda: st.build is not None))
+        self.assertEqual(st.build['status'], 'done')

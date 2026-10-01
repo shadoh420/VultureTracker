@@ -116,5 +116,47 @@ class TestFaustRender(unittest.TestCase):
             self.assertAlmostEqual(levels[2] / levels[0], 50 / 100, delta=0.02)
 
 
+# a voice that plays its gate times its gain: the frames a note sounds, and which note, read straight off the output
+GATE = 'process = button("gate") * hslider("gain", 1, 0, 1, 0.01);'
+
+
+@unittest.skipUnless(READY, "needs node and faustwasm (python -c \"from vulturetracker import faust; faust.fetch()\")")
+class TestFaustAudit100(unittest.TestCase):
+    def test_a_zero_length_note_is_released(self):
+        # A1: a key-off on its key-on's frame sorted first, found no voice and left the gate down to the end of the render
+        x, _ = faust.render(GATE, hold=0, tail=0.5, velocity=127)
+        self.assertEqual(np.nonzero(x[0] > 0.5)[0].tolist(), [0])  # one frame, as a note of any length gets at least
+        x, _ = faust.render(GATE, notes=[{"note": 60, "start": 0.0, "length": 2.0, "velocity": 127},
+                                         {"note": 60, "start": 0.5, "length": 0.0, "velocity": 30}], seconds=2.5)
+        self.assertAlmostEqual(float(x[0, 44100]), 1.0, places=3)  # the long note is not the one released at 0.5 s
+        self.assertEqual(float(x[0, round(2.1 * 44100)]), 0.0)
+
+    def test_an_effect_that_does_not_compile_is_an_error(self):
+        # A2: faustwasm compiled the voice alone when the effect failed, and the render went on without it
+        self.assertAlmostEqual(float(np.abs(faust.render(GATE + "\neffect = *(0.5);", hold=0.1, tail=0)[0]).max()),
+                               0.5 * 100 / 127, places=3)
+        with self.assertRaises(ValueError) as e:
+            faust.render(GATE + "\neffect = *(foo);", hold=0.1, tail=0)
+        self.assertIn("undefined symbol : foo", str(e.exception))
+        x, _ = faust.render(GATE + "\n// effect = *(0.5); left out", hold=0.1, tail=0)  # no effect is no error
+        self.assertAlmostEqual(float(np.abs(x).max()), 100 / 127, places=3)
+
+    def test_overlapping_notes_of_one_pitch_release_their_own_voice(self):
+        # A3: a key-off released the oldest voice of its pitch: B (1-2 s) ending let A (0-4 s) go, and B played on
+        x, _ = faust.render(GATE, notes=[{"note": 60, "start": 0.0, "length": 4.0, "velocity": 127},
+                                         {"note": 60, "start": 1.0, "length": 1.0, "velocity": 30}], seconds=4.5)
+        at = lambda t: float(x[0, round(t * 44100)])  # noqa: E731
+        self.assertEqual([round(at(t), 3) for t in (0.5, 1.5, 3.0, 4.2)], [1.0, round(1 + 30 / 127, 3), 1.0, 0.0])
+
+    def test_a_phrase_of_more_than_64_ringing_notes_never_steals(self):
+        # A9: offline renders had 64 voices: past them a note took a ringing voice and started at the next block's middle
+        ring = 'gate = button("gate"); process = (gate : max ~ *(0.99999)) * hslider("gain", 1, 0, 1, 0.01);'
+        notes = [{"note": 60 + i % 12, "start": i * 0.05 + 0.0003, "length": 0.01, "velocity": 127} for i in range(70)]
+        x, _ = faust.render(ring, notes=notes, seconds=3.6)
+        for n in notes[63:]:
+            at = round(n["start"] * 44100)
+            self.assertGreater(float(x[0, at] - x[0, at - 1]), 0.9, at)  # the note's full step, on its own frame
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -67,7 +67,7 @@ WAV beside the slot's (`<name>-r1.wav`, `-r2`, …, never over the recipe's own 
 background; WRITE TO RECIPE (click twice) writes the entry as it stands into the recipe file in place (a one-line
 entry stays one line with its comment). A candidate rendered this way remembers its entry, so after `U` the box shows
 it. Rendering needs what `synth` needs: pedalboard (inside the exe) and the synth. When Surge XT or Dexed is
-missing, the box offers GET SURGE XT (a 300 MB download) or GET DEXED (10 MB): the app unpacks it (the exe into
+missing, the box offers GET SURGE XT (a 300 MB download) or GET DEXED (10 MB): the app unpacks it (the exe and a pip install into
 `%LOCALAPPDATA%/VultureTracker/tools/`, a checkout into `tools/`) and renders the entry again; OB-Xd is an installer,
 linked from the message. The candidate
 you are listening to renders first; after a mute or fader change the old render keeps playing until the new one lands
@@ -110,8 +110,8 @@ octaves from OCT) preview the PREVIEW instrument: on the song while it plays, al
 they take the place of the app's letter keys (M, S, N, U, X), and the NOTE… button still drops notes.
 
 **Editing patterns.** Esc (or ● EDIT) turns on edit mode. In the note column the piano keys enter a note with the INS
-instrument (and preview it) and move the cursor down by STEP rows; 1 enters a note-off (`===`), ` a fade (`~~~`), \\ a
-cut (`^^^`). Digits type the instrument (two digits), the volume column takes a command letter (v p a b c d e f g h) and
+instrument (and preview it) and move the cursor down by STEP rows; `1` enters a note cut (`^^^`), `` ` `` a note-off
+(`===`), Shift+`` ` `` or `\` a fade (`~~~`), OpenMPT's IT-style keys (by their place on the keyboard). Digits type the instrument (two digits), the volume column takes a command letter (v p a b c d e f g h) and
 two digits, the effect columns an effect letter and two hex digits; values are clamped to their range. Delete or . clears
 the column under the cursor; Insert pushes the channel down from the cursor, Backspace pulls it up. Each change shows
 at once and is written into the song file in place: only that row's cell changes (the other cells, the row label, the
@@ -137,8 +137,8 @@ note. On the Faust tab they play the Faust code instead (see there). In edit mod
 enters its note at the cursor with the INS instrument, and with VEL→VOL its velocity as the volume column (v01-v64),
 then the cursor moves STEP rows. While the live engine plays the pattern on show, a key records instead: its note goes
 into the cursor's channel at the row playing when it went down, and the cursor follows (the piano keys on the
-computer keyboard record the same way). With CHORD checked, notes arriving within 50 ms are captured together,
-lowest first, across consecutive channels starting at the
+computer keyboard record the same way). With CHORD checked, a note arriving within 60 ms of the one before joins its chord (timed from each
+note, so a rolled chord stays one), and the chord is captured together, lowest first, across consecutive channels starting at the
 cursor, the computer's piano keys too; with Shift held (OpenMPT's chord modifier) every key struck joins the chord,
 written when Shift is let go, CHORD checked or not. The chord is one undo step and advances STEP only once. If it
 needs more channels than remain, nothing is written and the selection bar explains why. Uncheck CHORD for
@@ -146,6 +146,18 @@ one-note-at-a-time entry. The app serves its page from port 8723 when that is fr
 port) and keeps the window's browser profile in `%APPDATA%\VultureTracker\webview`, so the page's own settings (speed,
 latency, hex rows, MIDI) and the MIDI permission
 carry over from one launch to the next.
+
+**Following OpenMPT.** Where the app does something OpenMPT also does, it does it OpenMPT's way, checked against
+OpenMPT's source. The piano keys go by their place on the keyboard, not the letter printed on them, as OpenMPT's
+IT-style keys do (the bottom-left letter key is C on QWERTY, QWERTZ and AZERTY alike), and so do note cut (`1`),
+note-off (`` ` ``) and fade (Shift+`` ` `` or `\`). CHORD joins a note struck within
+60 ms of the one before (OpenMPT's Auto Chord Wait Time, 60 ms by default, timed from each note), and Shift is the chord
+modifier. COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
+hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
+import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. Deliberate
+differences: the MIDI import reads track names written as UTF-8 as UTF-8 (OpenMPT reads them as Latin-1, so they come
+out garbled there) and keeps the file's time signatures (OpenMPT imports every file as 4/4). Any other difference
+from OpenMPT is a bug.
 
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
 stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
@@ -167,8 +179,8 @@ block the way trackers do: the first channel from the column the selection start
 ends in, the channels between whole. Ctrl+A selects the pattern (the channels on show), Ctrl+L the cursor's channel; a
 plain move or click drops the selection. The SELECTION bar (and its keys) works on the selection, or on the cursor's
 cell when there is none: COPY (Ctrl+C; also puts the rows on the system clipboard in OpenMPT's format, so OpenMPT
-pastes them), CUT (Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overwrite; rows copied in OpenMPT from an IT
-or MPTM module paste too, the first pattern of several, values this notation lacks left empty and counted), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
+pastes them), CUT (Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overwrite; rows copied in OpenMPT from an IT,
+MPTM or S3M module paste too, the first pattern of several, values this notation lacks left empty and counted), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
 end of the pattern, e.g. one bar of hats over eight), CLEAR
 (Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
 cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
@@ -364,19 +376,22 @@ all voices (an `effect = ...;` in the code runs once on their sum). NOTE is a no
 note is the WAV's root), HOLD holds the gates down, TAIL goes on after their release, VELOCITY is the velocity. ▶ PREVIEW
 renders it and plays it; → NEW SLOT writes `faust-<name>.wav` beside the song as a new slot (its base note the first
 note; with an instrument in a song with instruments; one undo step), → CANDIDATE adds it to the tryout slot's
-candidates. Renders are made offline at 44100 Hz, a voice per note; one over full scale is scaled under it (the message
-says so).
+candidates. Renders are made offline at 44100 Hz, a voice per note (never stealing one); one over full scale is scaled under it
+(the message says so). Code that does not compile, an `effect` included, gives its error under the code; the keys and
+MIDI give it again rather than compiling the same code at every note.
 
 COMPILE also builds a live instrument from the code: the piano keys (Z to M and Q to U, two octaves from OCT) play it
-at their own pitch with VELOCITY, a voice per key held, released when the key is let go; a slider moved while notes
+at their own pitch with VELOCITY, a voice per key held (two keys on one pitch, a piano key and a MIDI key, each
+keep their own), released when the key is let go; a slider moved while notes
 sound acts on them at once. With MIDI on, a MIDI keyboard plays it while the Faust tab is open (and only then: elsewhere
 MIDI does what it always does): note on and off with its velocity (VEL→VOL off: VELOCITY), and the pitch wheel and
 controllers reach the controls the code maps with Faust's `[midi:pitchwheel]` and `[midi:ctrl n]` (the EXAMPLE's `bend`
-follows the wheel, two semitones). It has 16 voices unless the code declares others (`declare options
-"[nvoices:8]";`); a note beyond them takes the oldest voice in release, else the oldest sounding one. It runs at the
+follows the wheel, two semitones). A controller moves its control's slider too, so PREVIEW and the saves render
+what was heard; leaving the tab puts a pitch-wheel control back to its slider, wherever the wheel was let go. It has 16 voices unless the code declares others (`declare options
+"[nvoices:8]";`, 1 to 64); a note beyond them takes the oldest voice in release, else the oldest sounding one. It runs at the
 sound device's rate and the LATENCY setting of the live bar. ■ silences it at once; leaving the tab or the song lets its
 notes go. A COMPILE while notes sound lets them ring out on the old code. The compiler (faustwasm, LGPL-3.0, about 6
-MB) is fetched from npm on first use with GET FAUST, into `tools/faustwasm` (the exe:
+MB) is fetched from npm on first use with GET FAUST, into `tools/faustwasm` (the exe and a pip install:
 `%LOCALAPPDATA%/VultureTracker/tools/faustwasm`). A sample recipe renders the same code with `faust:` (SAMPLING.md; needs
 node), chords and phrases too.
 
@@ -465,11 +480,15 @@ app does not have open. Without an action they list (sections with their orders;
 counts; the phrase comparison with each alternative's cells). `sections SONG save|delete|move|duplicate NAME [orders]`
 (save takes FIRST END, move and duplicate the order boundary TO; `--shared`, `--as NAME`); `checkpoint SONG
 save|diff|restore|delete NAME`; `phrase SONG capture --order N --rows A-B --channels C[,D] [--count 2-4]`, then
-`phrase SONG set|diff|render|accept A-D|absent` (alternatives by place; set takes `--cells FILE` with one row per
+`phrase SONG set|diff|render|accept A-D|absent` (alternatives by place; set takes `--cells FILE` (`-` reads standard input) with one row per
 line and `|` between channels, `--name`, `--stars`, `--note`; render writes `-o FILE.wav`, replacing one only with `--replace`). Orders and rows count
 from 0, channels from 1, as the app shows them. Each change is an undo step in `<song>.history.json`, so the app
-opens on it and can undo it. While the app has the song open, the commands that write are refused: the app keeps the
-history and tryout settings in memory and would write over them. Listings, diffs and renders still work.
+opens on it and can undo it. While the app has the song open, or another command is changing it, the commands that write are refused (exit
+code 1): the app keeps the history and tryout settings in memory and would write over them. Listings, diffs and renders
+still work and leave the app's files alone. What the app would show as a notice (undo steps dropped after an external
+edit, a damaged history moved aside) the commands print as `note:` lines. The other way round, an app opening a song
+that a command is changing, or that another app window has open, waits a moment, then opens it read-only with a
+notice: it plays, but edits, checkpoints and settings are not saved.
 
 **Persistence and external files.** The YAML remains the musical source of truth, with comments, BOM and line endings
 retained by app writes. `<song>.tryout.json` holds audition settings, candidates and phrase choices;
@@ -606,7 +625,7 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
 
 ## Notes
 
-- Output is IT 2.14 format in instrument mode with uncompressed 8/16-bit samples, playable in
+- Output is IT 2.14 format (instrument mode when the song has `instruments:`, else sample mode) with uncompressed 8/16-bit samples, playable in
   OpenMPT, Schism Tracker, Impulse Tracker and anything built on libopenmpt.
 - Anti-aliasing. WAV renders are mixed at twice the output rate and band-limited back down with a windowed-sinc
   low-pass (`render --oversample 1` turns it off), so content the mixer produces above the output's Nyquist frequency

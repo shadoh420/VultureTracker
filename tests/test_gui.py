@@ -1,12 +1,17 @@
 """GUI state tests: measurement, the order/channel usage map, header patching, meters and the in-place YAML writes.
 No HTTP, no browser."""
+import importlib.util
 import json
 import math
+import shutil
+import subprocess
+import sys
 import struct
 import tempfile
 import textwrap
 import time
 import unittest
+import zipfile
 from unittest import mock
 from pathlib import Path
 
@@ -1449,6 +1454,24 @@ class TestGui(unittest.TestCase):
         st.song_edit([{"op": "sample_set", "num": 1, "entry": e}])
         st.song_edit([{"op": "sample_file", "num": 1, "file": str(p)}])
         self.assertEqual(st.song["samples"][1], {"file": "My_Drop.wav", "name": "My_Drop", "base_note": "E-5"})
+
+
+
+class TestPackage(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("setuptools"), "building a package needs setuptools")
+    def test_a_built_package_has_the_effect_help(self):
+        """A pip-installed package has SONG_FORMAT.md beside gui.html, as the exe has: the Pattern tab's effect help
+        reads its tables (setup.py)."""
+        root = Path(__file__).resolve().parent.parent
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "src"
+            shutil.copytree(root / "vulturetracker", src / "vulturetracker", ignore=shutil.ignore_patterns("__pycache__"))
+            for name in ("pyproject.toml", "setup.py", "MANIFEST.in", "SONG_FORMAT.md", "README.md", "LICENSE"):
+                shutil.copy(root / name, src / name)
+            subprocess.run([sys.executable, "-m", "pip", "wheel", str(src), "--no-deps", "--no-build-isolation", "-q",
+                            "-w", d], check=True, capture_output=True)
+            names = zipfile.ZipFile(next(Path(d).glob("*.whl"))).namelist()
+        self.assertIn("vulturetracker/SONG_FORMAT.md", names)
 
 
 if __name__ == "__main__":

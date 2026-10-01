@@ -1,5 +1,5 @@
 """Faust (GRAME's DSP language) as a sound source. The faustwasm package (the Faust compiler as WebAssembly with the Faust
-libraries in its .data file; LGPL-3.0) is fetched on demand from npm into tools/faustwasm (the exe:
+libraries in its .data file; LGPL-3.0) is fetched on demand from npm into tools/faustwasm (the exe and a pip install:
 %LOCALAPPDATA%/VultureTracker/tools/faustwasm), like the synths, and never shipped. web/faust-render.mjs compiles and
 renders notes offline, a voice each: under node for sample recipes (`faust:`, SAMPLING.md), in the page for the FAUST
 tab (which also plays the code live)."""

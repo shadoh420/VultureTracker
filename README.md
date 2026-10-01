@@ -70,7 +70,7 @@ pip install pyyaml pywebview numpy imageio-ffmpeg sounddevice
 Python 3.10+. Only PyYAML is required to compile songs. pywebview opens the app in its own window (without it, the app
 opens in the browser); numpy is needed for measurements, the spectrogram, the sample editor and resampling;
 imageio-ffmpeg provides the ffmpeg that the MP3 / OGG / FLAC export runs; sounddevice is the RECORD tab's audio input.
-Optional: `pip install pyguitarpro` for the Guitar Pro import, `pip install mido` for the MIDI import; node for `faust:` recipes on the command line.
+Optional: `pip install pedalboard mido` for `synth` and the app's RECIPE box (SAMPLING.md), `pip install pyguitarpro` for the Guitar Pro import, `pip install mido` for the MIDI import; node for `faust:` recipes on the command line.
 Windows x64 has libopenmpt in `vendor/`; elsewhere install libopenmpt or point `LIBOPENMPT` at it.
 `pip install pyinstaller && python tools/build_exe.py` builds `dist/vulturetracker.exe` with `dist/ffmpeg.exe` beside it.
 

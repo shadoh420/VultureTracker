@@ -203,7 +203,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="btn sm" id="lv-cur" onclick="lvPlayCursor()" title="play from the cursor (Space, F7; Space again stops)">▶ FROM CURSOR</span><span class="btn sm" onclick="lvPlay(0,0)" title="play the song from its start">▶ SONG</span><span class="btn sm" id="lv-pat" onclick="lvLoopPattern()" title="loop the pattern at the cursor (F6)">↻ PATTERN</span><span class="btn sm" onclick="lvStop()" title="stop (F8)">■</span>
         <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
         <span class="k" style="margin-left:8px">INS</span><select id="lv-ins" style="font:10px var(--mono);padding:1px 3px;max-width:190px" title="the instrument the piano keys play (preview) and enter (edit mode): Z to M and Q to U, two octaves from OCT"></select><span class="k">OCT</span><input id="lv-oct" type="number" min="0" max="8" value="5" style="width:36px;font:10px var(--mono);padding:1px 3px">
-        <span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes and the computer's piano keys within 50 ms; Shift held (OpenMPT's chord modifier) gathers any keys into one chord, written when Shift is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes and the computer's piano keys each within 60 ms of the one before; Shift held (OpenMPT's chord modifier) gathers any keys into one chord, written when Shift is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
         <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
         <span class="mono" id="lv-status" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right"></span>
       </div>
@@ -889,8 +889,10 @@ $('pat').addEventListener('mousedown',e=>{const c=cellAt(e.target);if(!c||e.butt
 $('pat').addEventListener('dblclick',e=>{const r=e.target.closest('.pt');if(r){setCursor(PAT.order,+r.dataset.r);lvPlay(CUR.o,CUR.row)}});
 // piano keys preview the instrument: on the song while it plays live, alone (a muted copy) while stopped
 const PIANO='zsxdcvgbhnjmq2w3er5t6y7u';
-// a piano key with Shift held too: Shift+2 types '@', its key is still the 2
-function pianoKey(e){const k=e.key.toLowerCase();return PIANO.includes(k)?k:/^Digit\d$/.test(e.code||'')&&PIANO.includes(e.code[5])?e.code[5]:k}
+// the key's place on the keyboard (e.code), as OpenMPT takes the piano keys: named by the QWERTY letter there, so the
+// bottom-left key is C on QWERTZ and AZERTY too, and Shift+2 ('@') is still the 2; an event without a code (a synthetic
+// one) goes by its character. A key outside the letters and digits gives ''
+function pianoKey(e){const m=/^(?:Key([A-Z])|Digit(\d))$/.exec(e.code||'');return m?(m[1]||m[2]).toLowerCase():e.code?'':(e.key||'').toLowerCase()}
 function pianoNote(k){return 12*Math.max(0,Math.min(8,Math.floor(+$('lv-oct').value)||0))+PIANO.indexOf(k)}  // OCT as typed, kept to 0-8
 async function lvNoteOn(k,insIdx,nt,vol){const id='k'+k;if(LV.held[id])return;const note=nt!=null?nt:pianoNote(k);if(note>119)return;LV.held[id]={pending:true};
   try{await lvStart()}catch(e){delete LV.held[id];return}LV.ctx.resume();LV.node.port.postMessage({type:'note',id,ins:insIdx!=null?insIdx:+$('lv-ins').value||0,note,vol:vol!=null?vol:1})}
@@ -945,10 +947,11 @@ function flushMidiChord(){clearTimeout(MIDI.timer);const b=MIDI.pending;MIDI.pen
   patEdit(changes);if(!b.live){CUR.row=b.row;patMove(Math.max(0,+$('lv-step').value||0))}}
 function captureMidiChord(n,vol){const live=!!(LV.playing&&LV.pos&&LV.oi===PAT.order),row=live?Math.min(PAT.rows.length-1,LV.pos.row):CUR.row;
   if(MIDI.pending&&(MIDI.pending.idx!==PAT.idx||!MIDI.pending.live&&MIDI.pending.row!==row))flushMidiChord();  // a live chord keeps its first note's row
-  if(!MIDI.pending){MIDI.pending={song:S.song.path,idx:PAT.idx,order:PAT.order,row,ch:CUR.ch,ins:insNum(),live,notes:new Map()};MIDI.timer=setTimeout(flushMidiChord,50)}
-  MIDI.pending.notes.set(n,vol)}
-// the computer's piano keys as OpenMPT takes them: with CHORD, keys struck within 50 ms go in as one chord, as MIDI
-// notes do; with Shift held (OpenMPT's chord modifier) every key struck joins the chord, written when Shift is let go
+  if(!MIDI.pending)MIDI.pending={song:S.song.path,idx:PAT.idx,order:PAT.order,row,ch:CUR.ch,ins:insNum(),live,notes:new Map()};
+  MIDI.pending.notes.set(n,vol);clearTimeout(MIDI.timer);if(!SHIFTCHORD)MIDI.timer=setTimeout(flushMidiChord,60)}  // OpenMPT's auto-chord wait, from each note
+// the computer's piano keys as OpenMPT takes them: with CHORD, a key struck within 60 ms of the one before joins its
+// chord (a rolled chord is one), as MIDI notes do; with Shift held (OpenMPT's chord modifier) every key struck joins the
+// chord, written when Shift is let go
 let SHIFTCHORD=false;
 function keyChord(note,shift){if(MIDI.pending&&SHIFTCHORD&&!shift)flushMidiChord();captureMidiChord(note,null);SHIFTCHORD=shift;if(shift)clearTimeout(MIDI.timer)}
 function shiftChordUp(){if(SHIFTCHORD){SHIFTCHORD=false;flushMidiChord()}}
@@ -962,13 +965,18 @@ function midiVel(v){MIDI.vel=v;try{localStorage.midivel=v?'1':'0'}catch(e){}}
 function renderMidi(){const ins=MIDI.access?[...MIDI.access.inputs.values()].filter(i=>i.state!=='disconnected'):[];$('midi-on').classList.toggle('on',MIDI.on&&ins.length>0);$('midi-vel').checked=MIDI.vel;
   $('midi-status').textContent=MIDI.err?'MIDI: '+MIDI.err:!MIDI.on?'off · click MIDI to play a keyboard':!MIDI.access?'asking for access…':ins.length?ins.map(i=>i.name).join(', '):'no MIDI input connected';$('midi-status').title=$('midi-status').textContent}
 if(MIDI.on)midiStart();else renderMidi();
+// note cut, note-off and fade on OpenMPT's IT-style keys, by the key's place (DefaultKeyBindings.h): 1 cuts (^^^), the key
+// left of it (`) is a note-off (===) and with Shift a fade (~~~), as is the key above Enter (\); an event without a code
+// (a synthetic one) goes by its character
+function noteKey(e){const c=e.code||{'1':'Digit1','`':'Backquote','~':'Backquote','\\':'Backslash','|':'Backslash'}[e.key];
+  return c==='Digit1'&&!e.shiftKey?'^^^':c==='Backquote'?(e.shiftKey?'~~~':'==='):c==='Backslash'?'~~~':null}
 function editKey(e,k){const p=cellOf(PAT.rows[CUR.row][CUR.ch]),col=CUR.col;
   if(e.key==='Delete'||k==='.'){if(col===0){p.n='...';p.i='..'}else if(col===1)p.i='..';else if(col===2)p.v='...';else p.e='...';putCell(p,true);return true}
   if(e.key==='Insert'){patShift(true);return true}
   if(e.key==='Backspace'){patShift(false);return true}
   if(col===0){const pk=pianoKey(e);if(PIANO.includes(pk)&&pk.length===1){const note=pianoNote(pk);if(note>119)return true;
       if(e.shiftKey||$('midi-chord').checked){if(!e.repeat)keyChord(note,e.shiftKey)}else enterNote(note);if(!e.repeat)lvNoteOn(pk);return true}
-    const sp={'1':'===','`':'~~~','\\':'^^^'}[k];if(sp){p.n=sp;putCell(p,true);return true}return false}
+    const sp=noteKey(e);if(sp){p.n=sp;putCell(p,true);return true}return false}
   if(col===1&&/^[0-9]$/.test(k)){const d=digit(k);p.i=d==='00'?'..':d;putCell(p,false);return true}
   if(col===2){if(VOLMAX[k]!=null&&k.length===1){p.v=k+pad(Math.min(VOLMAX[k],p.v==='...'?0:+p.v.slice(1)));putCell(p,false);return true}
     if(/^[0-9]$/.test(k)){const L=p.v==='...'?'v':p.v[0];p.v=L+pad(Math.min(VOLMAX[L],+digit(k)));putCell(p,false);return true}return false}
@@ -1245,7 +1253,11 @@ function fromModPlug(text){const h=/^ModPlug Tracker +(\w+)\r?\n/.exec(text||'')
   if(!['IT','MPT','S3M'].includes(h[1]))return {error:`OpenMPT rows in its ${h[1]} format use other effect letters: copy them from an IT or MPTM module`};
   const ok=[/^([A-G][-#]\d|===|\^\^\^|~~~|\.\.\.)$/,/^(\d\d|\.\.)$/,/^([vp](0\d|[1-5]\d|6[0-4])|[a-h]0\d|\.\.\.)$/,/^([A-Z][0-9A-F]{2}|\.\.\.)$/],rows=[];let bad=0;
   for(const l of text.split(/\r?\n/).slice(1)){if(l.startsWith('Rows:')&&rows.length)break;if(l[0]!=='|')continue;
-    rows.push(l.slice(1).split('|').map(s=>{const c={};[[0,3],[3,5],[5,8],[8,11]].forEach(([a,b],x)=>{let f=s.slice(a,b).padEnd(b-a);if(f[0]===' ')return;
+    // an MPTM parameter-control event (PC or PCs: plugin, parameter, value 000-999) becomes Zxx with the value scaled to
+    // 00-7F and the rest of the cell empty, as OpenMPT pastes it into an IT module (ModCommand::Convert)
+    rows.push(l.slice(1).split('|').map(s=>{if(/^PC[ s]/.test(s)){const v=/^\d{3}$/.test(s.slice(8,11))?Math.min(999,+s.slice(8,11)):0;
+      return {...EMP,e:'Z'+Math.floor(v*127/999).toString(16).toUpperCase().padStart(2,'0')}}
+      const c={};[[0,3],[3,5],[5,8],[8,11]].forEach(([a,b],x)=>{let f=s.slice(a,b).padEnd(b-a);if(f[0]===' ')return;
       if(x===3&&f[0]!=='.')f=f[0]+f.slice(1).replace(/\./g,'0');if(!ok[x].test(f)){bad++;f=EMP[FK[x]]}c[FK[x]]=f});return c}))}
   return {rows,bad}}
 // Ctrl+V: the browser's paste event that follows the key brings the system clipboard; OpenMPT rows there become the
@@ -1380,14 +1392,14 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
   if($('t-smp').classList.contains('on')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){const k=e.key.toLowerCase();
     if((e.ctrlKey||e.metaKey)&&(k==='z'||k==='y')){e.preventDefault();e.stopImmediatePropagation();patUndo(k==='y'||e.shiftKey);return}
     if(e.key==='Escape'&&W.sel){W.sel=null;drawWave();renderSmpInfo();return}
-    if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&k.length===1&&PIANO.includes(k)&&W.data&&W.data.player){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,W.data.player[0])}return}
+    const pk=pianoKey(e);if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&pk.length===1&&PIANO.includes(pk)&&W.data&&W.data.player){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(pk,W.data.player[0])}return}
   if((ptOn()||faOn())&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){
-    const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)pkPlay(k)}return}
+    const k=pianoKey(e);if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)pkPlay(k)}return}
   if($('t-ins').classList.contains('on')&&INS_SEL!=null&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){
-    const k=e.key.toLowerCase();if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,+INS_SEL-1)}return}
+    const k=pianoKey(e);if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,+INS_SEL-1)}return}
   if(!$('t-pattern').classList.contains('on')||!S||!S.song||!S.song.facts)return;
   if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||document.querySelector('.modal.on'))return;
-  const k=e.key.toLowerCase(),rows=PAT.rows?PAT.rows.length:64;let done=true;
+  const k=e.key.toLowerCase(),pk=pianoKey(e),rows=PAT.rows?PAT.rows.length:64;let done=true;
   if(e.ctrlKey||e.metaKey){if(k==='z'&&!e.shiftKey)patUndo(false);else if(k==='y'||(k==='z'&&e.shiftKey))patUndo(true);
     else if(k==='c')selCopy(false);else if(k==='x')selCopy(true);else if(k==='v'||e.code==='KeyV'&&e.altKey)return pasteKey(e);else if(k==='a')selectAll(false);else if(k==='l')selectAll(true);
     else if(e.key==='ArrowUp')selTranspose(e.shiftKey?12:1);else if(e.key==='ArrowDown')selTranspose(e.shiftKey?-12:-1);else if(k==='i')selInterpolate();else if(k==='f')toggleFind(true);else done=false}
@@ -1401,7 +1413,7 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
   else if(e.key==='Home')withSel(e.shiftKey,()=>patMove(-rows));else if(e.key==='End')withSel(e.shiftKey,()=>patMove(rows));
   else if(e.key==='ArrowRight')withSel(e.shiftKey,()=>patCol(1));else if(e.key==='ArrowLeft')withSel(e.shiftKey,()=>patCol(-1));else if(e.key==='Tab')patChan(e.shiftKey?-1:1);
   else if(EDIT&&PAT.rows&&CUR.o===PAT.order&&editKey(e,k)){}
-  else if(!EDIT&&PIANO.includes(k)&&k.length===1){if(!e.repeat)lvNoteOn(k)}
+  else if(!EDIT&&pk.length===1&&PIANO.includes(pk)){if(!e.repeat)lvNoteOn(pk)}
   else if(/^[0-9msnux]$/.test(k)){}  // the Tryout's keys (pick, alone/mix, note, apply, reject) never act from this tab
   else done=false;
   if(done){e.preventDefault();e.stopImmediatePropagation()}},true);
@@ -1604,7 +1616,7 @@ async function faLoad(){if(FA.F)return FA.F;if(!FA.loading)FA.loading=(async()=>
 function faCompile(){const code=$('fa-code').value;if(FA.cjob&&FA.cjob.code===code)return FA.cjob.p;$('fa-err').textContent='';
   const p=(async()=>{try{await faLoad();const gen=await FA.m.compileFaust(FA.F,code),outs=gen.getMeta().outputs;Object.assign(FA,{code,gen,ctrls:FA.m.controls(gen)});faCtrls();
       $('fa-state').textContent=`Faust ${FA.F.version} · compiled: ${outs} output${outs>1?'s':''}, ${FA.ctrls.length} controls`}
-    catch(e){$('fa-err').textContent=String(e.message||e);$('fa-state').textContent='the code does not compile (below)';throw e}
+    catch(e){if(FA.F)FA.failed={code,e};$('fa-err').textContent=String(e.message||e);$('fa-state').textContent='the code does not compile (below)';throw e}
     await faNode().catch(e=>{$('fa-msg').textContent='the live keys: '+(e.message||e)});return FA.gen})();
   FA.cjob={code,p};p.catch(()=>{}).finally(()=>{if(FA.cjob&&FA.cjob.p===p)FA.cjob=null});return p}
 // ---- the live node: faustwasm's poly AudioWorkletNode from the compiled code, in PK.ctx at the device's rate (the saves
@@ -1619,22 +1631,35 @@ function faNode(){const code=FA.code,gen=FA.gen;if(FA.njob&&FA.njob.code===code)
     node.connect(ctx.destination);const old=FA.node;Object.assign(FA,{node,nodeCode:code});
     if(old)old.allNotesOff(false),setTimeout(()=>{old.allNotesOff(true);old.disconnect();old.destroy()},3000);return node})();
   FA.njob={code,p};p.catch(()=>{}).finally(()=>{if(FA.njob&&FA.njob.p===p)FA.njob=null});return p}
-// the node for the code in the box: compiled again after an edit, built again after LATENCY
+// the node for the code in the box: compiled again after an edit (code that failed to compile gives its error again, not
+// another compile per key: COMPILE tries it again), built again after LATENCY
 async function faReady(){const code=$('fa-code').value;if(FA.node&&FA.nodeCode===code)return FA.node;
-  if(FA.gen&&FA.code===code)return faNode();await faCompile();if(FA.nodeCode!==code)throw new Error($('fa-msg').textContent);return FA.node}
+  if(FA.gen&&FA.code===code)return faNode();if(FA.failed&&FA.failed.code===code)throw FA.failed.e;await faCompile();if(FA.nodeCode!==code)throw new Error($('fa-msg').textContent);return FA.node}
 // a key (a piano key 'k…' or a MIDI note 'm…') down: a voice at its note; let go while the code compiles, it is released
-// as soon as it sounds
-async function faKeyOn(id,note,vel){if(FA.held[id])return;const h=FA.held[id]={pending:true};FA.played++;
+// as soon as it sounds. A key on a pitch another key holds plays it a millionth of a semitone higher: the node's key-off
+// goes by pitch and would let the older voice go, not this key's
+async function faKeyOn(id,note,vel){if(FA.held[id])return;while(Object.values(FA.held).some(h=>h.note===note))note+=1e-6;
+  const h=FA.held[id]={pending:true,note};FA.played++;
   try{const node=await faReady();pkCtx().resume();if(FA.held[id]!==h)return;if(!faOn()){delete FA.held[id];return}
-    node.keyOn(0,note,vel);Object.assign(h,{pending:false,node,note});if(h.release)faKeyOff(id)}
+    node.keyOn(0,note,vel);Object.assign(h,{pending:false,node});if(h.release)faKeyOff(id)}
   catch(e){if(FA.held[id]===h)delete FA.held[id];$('fa-msg').textContent=String(e.message||e)}}
 function faKeyOff(id){const h=FA.held[id];if(!h)return;if(h.pending){h.release=true;return}delete FA.held[id];h.node.keyOff(0,h.note,0)}
-function faLetGo(){const n=FA.node,at=FA.played;FA.held={};if(!n)return;n.allNotesOff(false);clearTimeout(FA.letT);FA.letT=setTimeout(()=>{if(FA.played===at)n.allNotesOff(true)},3000)}
+// leaving the tab or the song: the notes go, and a pitch wheel's control goes back to its slider (the wheel's return to
+// centre comes while another tab has the MIDI)
+function faLetGo(){const n=FA.node,at=FA.played;FA.held={};if(!n)return;n.allNotesOff(false);clearTimeout(FA.letT);FA.letT=setTimeout(()=>{if(FA.played===at)n.allNotesOff(true)},3000);
+  if(FA.nodeCode===FA.code)for(const c of FA.ctrls)if(/^pitchwheel/.test(c.midi))n.setParamValue(c.address,FA.vals[c.label]??c.init)}
 // MIDI on the FAUST tab: notes play the node (velocity, or VELOCITY with VEL→VOL off); the rest goes in as it came, so
-// pitch bend and CCs reach the controls the code maps with [midi:pitchwheel] / [midi:ctrl n] (CC 120/123: all notes off)
+// pitch bend and CCs reach the controls the code maps with [midi:pitchwheel] / [midi:ctrl n] (CC 120/123: all notes off).
+// A CC moves its controls' sliders too (faustwasm's mapping: 0-127 over the slider's range), so PREVIEW and the saves
+// render what is heard
 function faMidi(d){const t=d[0]&0xf0;if(t===0x90&&d[2]>0)return faKeyOn('m'+d[1],d[1],MIDI.vel?d[2]:+$('fa-vel').value||100);
-  if(t===0x80||t===0x90){lvNoteOff('m'+d[1]);return faKeyOff('m'+d[1])}if(FA.node)FA.node.midiMessage(Array.from(d))}  // a key held since another tab
+  if(t===0x80||t===0x90){lvNoteOff('m'+d[1]);return faKeyOff('m'+d[1])}  // a key held since another tab
+  if(t===0xb0)for(const c of FA.ctrls){const m=/^ctrl\s+(\d+)(?:\s+(\d+))?/.exec(c.midi||''),ch=m&&+(m[2]||0);if(m&&+m[1]===d[1]&&(!ch||ch===(d[0]&15)+1))faShow(c,c.min+d[2]/127*(c.max-c.min))}
+  if(FA.node)FA.node.midiMessage(Array.from(d))}
 function faSet(label,v){FA.vals[label]=v;const c=FA.ctrls.find(c=>c.label===label);if(FA.node&&c&&FA.nodeCode===FA.code)FA.node.setParamValue(c.address,v)}
+// a control moved from outside the slider (a CC): its value kept as the slider's, and the slider showing it
+function faShow(c,v){FA.vals[c.label]=v;const l=[...document.querySelectorAll('#fa-ctrls .vl')].find(e=>e.title===c.address),i=l&&l.nextElementSibling;
+  if(!i)return;if(i.type==='checkbox')i.checked=!!v;else{i.value=v;i.nextElementSibling.textContent=(+v).toPrecision(4)}}
 const faAuto=c=>/\/(freq|gate|gain)$/.test(c.address);  // set per voice by its note (Faust's polyphony)
 function faCtrls(){const cs=FA.ctrls.filter(c=>!faAuto(c));
   put('fa-ctrls',cs.length?cs.map(c=>{const v=FA.vals[c.label]!=null?FA.vals[c.label]:c.init,num=c.type==='button'||c.type==='checkbox';

@@ -11,6 +11,10 @@ import wave
 def atomic_write(path, data, *, replace=True):
     """Flush a sibling temporary file, then publish it; replace=False requires an unused path."""
     path = Path(path)
+    if path.is_dir():  # checked first: the errors would name the temporary file
+        raise IsADirectoryError(f'{path} is a folder: name a file to write')
+    if not path.parent.is_dir():
+        raise FileNotFoundError(f'{path.parent} does not exist: no folder to write {path.name} in')
     fd, name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
     tmp = Path(name)
     try:
@@ -39,7 +43,7 @@ def link_new(src, dst):
     try:
         os.link(src, dst)
     except FileExistsError:
-        raise
+        raise FileExistsError(f'{dst} exists already') from None
     except OSError:
         with open(src, 'rb') as s, open(dst, 'xb') as d:
             shutil.copyfileobj(s, d)

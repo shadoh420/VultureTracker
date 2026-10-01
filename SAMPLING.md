@@ -40,7 +40,8 @@ present are skipped, and `--list` shows the plan with sizes. CC0 needs no attrib
 libraries is good manners (see `samples/demo3/ATTRIBUTION.md`).
 
 On macOS or Linux, install Surge XT normally and set `SURGE_XT_DIR` to the folder containing
-`Surge XT.vst3` and `SurgeXTData`. Audio you render is yours to use. Surge itself is GPL-3 and
+`Surge XT.vst3` and `SurgeXTData`. `DEXED_VST3` and `OBXD_VST3` point at those plugins' `.vst3` bundles when they are
+not where the fetch scripts put them, and `FAUSTWASM_DIR` at a faustwasm other than the one GET FAUST fetches. Audio you render is yours to use. Surge itself is GPL-3 and
 is not committed to this repo.
 
 ## Workflow
@@ -121,15 +122,15 @@ samples:
 | `start`, `length` | 0, all | `file` and `resynth` (its target): seconds to skip, and seconds to keep (effects tails still ring past `length`) |
 | `note` | | `patch`: the key to play, in tracker names (`C-5` = MIDI 60 = middle C). `file`: the pitch recorded in the file (default `C-5`) |
 | `notes` | | a list of keys, rendering one file per key (for multisampled instruments) |
-| `chord` | | a list of keys played together as one sample (root = the first) |
-| `phrase` | | `{bpm, notes: [[note, start_beat, length_beats, velocity?], ...], length?, root?}`: a whole sequence as one sample, to chop in the song with `Oxx` |
-| `velocity` | 100 | MIDI velocity 1–127 |
-| `hold` | 1.0 | seconds the key is held |
+| `chord` | | a list of keys played together as one sample (root = the first; an empty one is an error) |
+| `phrase` | | `{bpm, notes: [[note, start_beat, length_beats, velocity?], ...], length?, root?}`: a whole sequence as one sample, to chop in the song with `Oxx` (`bpm` above 0 and one note at least, each of three or four values) |
+| `velocity` | 100 | MIDI velocity 1–127 (outside it, and in a phrase note, an error) |
+| `hold` | 1.0 | seconds the key is held (`0`: one sample frame) |
 | `tail` | 0.5 | seconds recorded after release (for release and effects tails) |
 | `root_offset` | 0 | semitones from the key played to the pitch heard (use -12 for patches that sound an octave down) |
 | `params` | | `{parameter_name: value}` plugin parameter overrides (Surge names: `surge-params`; Dexed uses DX7 names like `op1_output_level`, `algorithm`) |
 | `mono` | false | mix to mono (drums, basses, leads); keep stereo for pads |
-| `normalize` | none | peak level in dBFS (e.g. `-1.0`) |
+| `normalize` | none | peak level in dBFS (e.g. `-1.0`); without it, a render over full scale (a chord, `gain`) is scaled just under it, and the log says by how much |
 | `gain` | 0 | extra gain in dB after normalizing |
 | `trim` | true | cut leading silence and trailing silence below -60 dB |
 | `fade_out` | 0.01 | seconds of fade at the end (unlooped samples) |

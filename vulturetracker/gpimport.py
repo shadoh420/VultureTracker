@@ -62,12 +62,12 @@ def grid_for(times, quarter=QUARTER):
     return GRIDS[-1]
 
 
-def speed_tempo(bpm, rows_per_quarter):
+def speed_tempo(bpm, rows_per_quarter, top=31):
     """(speed, tempo) making a row last 60 / (bpm x rows) s: a row is speed ticks of 2.5 / tempo s, so tempo = bpm x
     rows x speed / 24. Prefers the speed that gives 24 ticks a quarter (tempo = bpm), then the most ticks a row (finer
-    slides) with the tempo in IT's 32-255, then the closest. Returns (speed, tempo, the tempo it should be)."""
+    slides, up to `top`) with the tempo in IT's 32-255, then the closest. Returns (speed, tempo, the tempo it should be)."""
     best = None
-    for s in range(1, 32):
+    for s in range(1, top + 1):
         exact = bpm * rows_per_quarter * s / 24
         t = max(32, min(255, round(exact)))
         err = abs(t - exact) / exact
@@ -249,6 +249,14 @@ def write_song(song_path, title, lanes, bars, ph, r, speed, tempo, ts, warnings,
 
 # ---------------------------------------------------------------- notes to cells
 
+def lane_name(base, label):
+    """A channel name: `base` then `label`, the base cut so that the label stays whole in IT's 20 characters once
+    transliterated (write_song: ß becomes ss)."""
+    while base and len(it_text(f"{base} {label}", 99)) > 20:
+        base = base[:-1]
+    return f"{base} {label}"
+
+
 class Lane:
     """One channel's cells over the whole played-out tab (absolute rows): note, instrument, volume, effect texts."""
 
@@ -408,10 +416,10 @@ def import_gp(src, song_path, samples_dir):
                         key = (0, vi * 16 + k) if drums else (1, note.string)
                         if drums:
                             pitch = note.value
-                        else:
-                            pitch = note.realValue
+                        else:  # frets count from the capo (track.offset): TuxGuitar plays offset + string + fret
+                            pitch = note.realValue + track.offset
                             if eff.harmonic is not None:
-                                pitch = (track.strings[note.string - 1].value + HARMONIC[note.value]
+                                pitch = (track.strings[note.string - 1].value + track.offset + HARMONIC[note.value]
                                          if eff.harmonic.type == 1 and note.value in HARMONIC else pitch + 12)
                         for flag, what in ((eff.isGrace, "grace notes"), (eff.isTrill, "trills"),
                                            (eff.isTremoloPicking, "tremolo picking")):
@@ -437,7 +445,7 @@ def import_gp(src, song_path, samples_dir):
         for key in sorted(by_lane):
             evs = sorted(by_lane[key], key=lambda e: e["row"])
             label = f"drum {key[1] + 1}" if drums else f"str {key[1]}"
-            ln = Lane(f"{track.name.strip()[:13]} {label}")
+            ln = Lane(lane_name(track.name.strip()[:13], label))
             # PyGuitarPro gives the mixer's 0-16 steps times 8: 0-128, balance 64 = centre
             ln.volume = min(64, round(track.channel.volume / 2))
             ln.pan = min(64, round(track.channel.balance / 2))

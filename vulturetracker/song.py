@@ -26,9 +26,9 @@ _LATIN = str.maketrans({"ß": "ss", "æ": "ae", "Æ": "AE", "ø": "o", "Ø": "O"
 
 def it_text(s, n):
     """`s` as IT stores a name: ASCII, at most `n` characters. Accented letters lose their accents (Böse -> Bose) and a
-    few others take their usual spelling (ß -> ss); what has no ASCII form becomes '?'."""
+    few others take their usual spelling (ß -> ss); control characters go; what has no ASCII form becomes '?'."""
     s = unicodedata.normalize("NFKD", str(s).translate(_LATIN))
-    return "".join(c for c in s if not unicodedata.combining(c)).encode("ascii", "replace").decode()[:n]
+    return "".join(c for c in s if c >= " " and not unicodedata.combining(c)).encode("ascii", "replace").decode()[:n]
 
 
 class SongError(Exception):

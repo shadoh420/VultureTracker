@@ -20,7 +20,7 @@ Read this first. It says what this repository is, what it is not, where things l
 
 A song is a YAML file (`SONG_FORMAT.md`); `python -m vulturetracker build song.yaml --render song.wav` compiles it to
 an Impulse Tracker `.it`, verifies it with libopenmpt and renders WAV. `synth` renders samples from free synths and
-recordings by recipe (`SAMPLING.md`), `import` turns an existing module (IT, XM, S3M, MOD) into a song file, and `gui` is the app
+recordings by recipe (`SAMPLING.md`), `import` turns an existing module (IT, XM, S3M, MOD), a Guitar Pro 3-5 tab or a MIDI file into a song file, and `gui` is the app
 (`GUIDE.md`): the tryout (candidate samples rendered inside the song, rated, written with `U`), the mixer, listening
 notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the pattern view, stems export.
 `python -m vulturetracker --help` lists the commands.
@@ -29,12 +29,12 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 
 | Path | What | In git? |
 |---|---|---|
-| `vulturetracker/` | the package: `song.py` + `model.py` + `itwriter.py` (compiler), `itreader.py` + `modreader.py` (import of IT, XM, S3M, MOD), `openmpt.py` (libopenmpt), `gui.py` + `gui.html` (the app), `web/` (the live engine: libopenmpt 0.8.9 as WebAssembly and its AudioWorklet; `tests/test_engine.py` checks it under node), `resample.py`, `synth.py`, `notation.py`, `wavload.py`, `api.py`, `compose.py` (the Pattern tab's GROOVE, EUCLID, CHORD, LAYERS), `dsp.py` (the Samples tab's onsets for SLICE, its EFFECTS, and a take's pitch, edges and loop), `record.py` (the RECORD tab: sounddevice input, `VT_FAKE_AUDIO=1` simulates a two-input interface), `library.py` (the sample index by timbre: features, the JSON index cached on file stamps, nearest sounds, the MAP tab's PCA; `index` and `tryout --like` on the command line), `mosaic.py` (the recipe source `resynth:`: a target rebuilt from blocks of a corpus), `spectral.py` (the PAINT tab: a picture played additively, or laid over a sample's spectrum as a filter), `gpimport.py` (Guitar Pro tabs through PyGuitarPro, optional), `faust.py` + `web/faust-render.mjs` (Faust code rendered by faustwasm, fetched into the ignored `tools/faustwasm`: under node for `faust:` recipes, in the page for the FAUST tab), `fileio.py` (atomic writes, output guards), `history.py` (persistent undo/redo, checkpoints, the save journal), `project.py` (PROJECT's Collect Samples), `arrangement.py` (named sections, order remapping), `phrases.py` (the PHRASES tab), `export.py` (the RENDER & EXPORT jobs) | yes |
+| `vulturetracker/` | the package: `song.py` + `model.py` + `itwriter.py` (compiler), `itreader.py` + `modreader.py` (import of IT, XM, S3M, MOD), `openmpt.py` (libopenmpt), `gui.py` + `gui.html` (the app), `web/` (the live engine: libopenmpt 0.8.9 as WebAssembly and its AudioWorklet; `tests/test_engine.py` checks it under node), `resample.py`, `synth.py`, `notation.py`, `wavload.py`, `api.py`, `compose.py` (the Pattern tab's GROOVE, EUCLID, CHORD, LAYERS), `dsp.py` (the Samples tab's onsets for SLICE, its EFFECTS, and a take's pitch, edges and loop), `record.py` (the RECORD tab: sounddevice input, `VT_FAKE_AUDIO=1` simulates a two-input interface), `library.py` (the sample index by timbre: features, the JSON index cached on file stamps, nearest sounds, the MAP tab's PCA; `index` and `tryout --like` on the command line), `mosaic.py` (the recipe source `resynth:`: a target rebuilt from blocks of a corpus), `spectral.py` (the PAINT tab: a picture played additively, or laid over a sample's spectrum as a filter), `gpimport.py` (Guitar Pro tabs through PyGuitarPro, optional), `midiimport.py` (MIDI files through mido, optional), `faust.py` + `web/faust-render.mjs` (Faust code rendered by faustwasm, fetched into the ignored `tools/faustwasm`: under node for `faust:` recipes, in the page for the FAUST tab), `fileio.py` (atomic writes, output guards), `history.py` (persistent undo/redo, checkpoints, the save journal), `project.py` (PROJECT's Collect Samples), `arrangement.py` (named sections, order remapping), `phrases.py` (the PHRASES tab), `export.py` (the RENDER & EXPORT jobs) | yes |
 | `tests/` | `python -m unittest tests.test_gui tests.test_pipeline tests.test_resample tests.test_engine tests.test_modimport tests.test_compose tests.test_record tests.test_library tests.test_mosaic tests.test_spectral tests.test_gpimport tests.test_midiimport tests.test_faust tests.test_workflow tests.test_release070 tests.test_release080 tests.test_release080_import tests.test_release080_dsp tests.test_import tests.test_synth` (about 100 s; `test_engine` needs node); `test_page`, `test_workflow_page`, `test_release070_page`, `test_release080_page` and `test_features080_page` drive the page in Playwright's Chromium (`VT_CHROMIUM` names another; on Windows Edge works); `test_synth`/`test_import` skip without the plugins and fixtures; `.github/workflows/tests.yml` runs both sets on Linux | yes (fixtures ignored) |
 | `demo/`, `demo2/`, `demo3/`, `demo4/` | the demo songs with their generators; `demo4/vantage.yaml` is the piece the owner likes best | yaml and scripts yes, `.it`/`.wav` ignored |
 | `suite/` | the UT99 tribute suite: `HANDOFF.md` (current state), `NEXT-PROMPT.md` (how the next piece is to be made), `nadir/` (the first piece) | yes, renders ignored |
 | `samples/` | committed samples per demo and piece with an `ATTRIBUTION.md` each; `samples/local/` is scratch and ignored | partly |
-| `tools/` | `build_exe.py`, `demo_video.py`, `bench.py` (times compile, render and an edit on the demos), `dmo_spike.py` (OpenMPT's DMO effects written into an .it and measured in both libopenmpt builds; not in the compiler), fetchers; `tools/cc0`, `tools/surge-xt`, `tools/synths`, `tools/royalty-free`, `tools/faustwasm` are downloaded and ignored | scripts yes |
+| `tools/` | `build_exe.py` (with `exe_entry.py`, the exe's launcher), `demo_video.py`, `bench.py` (times compile, render and an edit on the demos), `dmo_spike.py` (OpenMPT's DMO effects written into an .it and measured in both libopenmpt builds; not in the compiler), fetchers; `tools/cc0`, `tools/surge-xt`, `tools/synths`, `tools/royalty-free`, `tools/faustwasm`, `tools/libopenmpt-js` are downloaded and ignored | scripts yes |
 | `scratch/` | local only, never committed: `scratch/ut99-clean/` holds the extracted Unreal Tournament modules (copyright Epic) and the analysis scripts (`analyze.py`, `structure.py`, `compare.py`, `spectrogram.py`, `GROUPS.md`) | no |
 | `vendor/` | libopenmpt DLLs for Windows | yes |
 | `.claude/` | `hooks/session-start.sh`: cloud sessions install libopenmpt (Ubuntu's 0.7.x), numpy, pyyaml, Pillow, imageio-ffmpeg, PyGuitarPro and Playwright and set `VT_CHROMIUM`, so the tests run at once | yes |
@@ -81,6 +81,12 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   through under 20 kHz (about -20 dB for full-band content). `check` warns when a sample's lowest note leaves images
   within 60 dB of it; play it higher, add a lower multisample, or set `sample_rate: 88200`. The spectrogram check stays:
   nothing above the drums' ceiling. (Until 2026-09-22 the limit was about seven semitones above the root.)
+- **Follow OpenMPT (since 2026-10-01).** Where the app does something OpenMPT also does (note and chord entry, the
+  keyboard, the clipboard, what an effect means, how a module imports), it behaves as OpenMPT does, checked against
+  OpenMPT's source (github.com/OpenMPT/openmpt; local copies of `View_pat.cpp`, `PatternClipboard.cpp`,
+  `CommandSet.cpp` and `DefaultKeyBindings.h` in `scratch/080`), not from memory. GUIDE.md's "Following OpenMPT"
+  paragraph lists what has been matched: add to it when you match another behaviour, and name any deliberate
+  difference there.
 
 ## Working conventions and pitfalls
 
@@ -96,7 +102,7 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   `gui.html` is re-read per request, `gui.py` needs a restart. Delete any notes the harness made on a real song.
 - Release recipe: bump `version` in `pyproject.toml`, retitle CHANGELOG.md's Unreleased as the version, commit "Version X", `git tag -a vX`, push `main` and the tag,
   `python tools/build_exe.py`, smoke-test `dist/vulturetracker.exe gui demo2/iron_relay.yaml --no-browser --port 8766`
-  (poll `/api/state`, GET `/`), `sha256sum`, then `gh release create vX dist/vulturetracker.exe dist/ffmpeg.exe --title --notes-file
+  (poll `/api/state`, GET `/`), `sha256sum`, then `gh release create vX dist/vulturetracker-win64.zip dist/vulturetracker.exe dist/ffmpeg.exe --title --notes-file
   --latest` (the build copies ffmpeg beside the exe for the MP3/OGG/FLAC export; it ships as its own file). Write the notes file as UTF-8 without BOM from Python or an editor, never through PowerShell 5.1 text
   cmdlets (the 0.2.1 notes came out with "â†’" for "→" and a BOM that way), and check the published body with
   `gh api repos/shadoh420/VultureTracker/releases/tags/vX --jq .body`.
@@ -108,5 +114,5 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 
 1. `suite/HANDOFF.md` for the state of the music, then the task at hand.
 2. `GUIDE.md`, `SONG_FORMAT.md`, `SAMPLING.md` only when the task needs them.
-3. Before changing the app: run the three test modules; after changing `gui.py`/`gui.html`: tests plus a check in the
+3. Before changing the app: run the portable tests (the command in the layout table); after changing `gui.py`/`gui.html`: tests plus a check in the
    real window; before any commit: the owner's word.

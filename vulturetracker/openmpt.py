@@ -72,20 +72,48 @@ class OpenMPTError(Exception):
     pass
 
 
+class _Ctl(C.Structure):
+    _fields_ = [("ctl", C.c_char_p), ("value", C.c_char_p)]
+
+
+# libopenmpt computes a song's duration when asked, at the rate it mixes at (timed_at), not once at load at 48 kHz
+_INITIAL = (_Ctl * 2)(_Ctl(b"load.skip_subsongs_init", b"1"), _Ctl(None, None))
+
+
+def mix_rate(rate, oversample):
+    """The rate libopenmpt mixes at for a render at `rate`: `oversample` times it, when numpy is there to band-limit it
+    back down (LoadedModule.render)."""
+    try:
+        import numpy  # noqa: F401
+        from . import resample  # noqa: F401
+    except ImportError:
+        return rate
+    return rate * max(1, int(oversample))
+
+
 class LoadedModule:
     """A module loaded by libopenmpt. Use as a context manager."""
 
-    def __init__(self, data: bytes):
+    def __init__(self, data: bytes, rate=44100, oversample=2):
         self.log = []
         self._cb = _LOG_FUNC(lambda msg, _user: self.log.append(msg.decode("utf-8", "replace")))
         err = C.c_int(0)
         errmsg = C.c_char_p()
         self._buf = C.create_string_buffer(data, len(data))
         self._mod = _lib.openmpt_module_create_from_memory2(self._buf, len(data), self._cb, None, None, None,
-                                                            C.byref(err), C.byref(errmsg), None)
+                                                            C.byref(err), C.byref(errmsg), C.cast(_INITIAL, _P))
         if not self._mod:
             raise OpenMPTError(f"libopenmpt could not load module (error {err.value}): "
                                f"{errmsg.value.decode() if errmsg.value else ''} {' / '.join(self.log)}".strip())
+        self.timed_at(rate, oversample)
+
+    def timed_at(self, rate=44100, oversample=2):
+        """Positions and durations from here on as a render at `rate` (and `oversample`) plays them. libopenmpt counts each
+        tick in whole samples of the rate it mixes at and takes positions and durations at the last rate it mixed at
+        (48 kHz before any read): at most tempos (all but those dividing 1500) a position taken at another rate drifts
+        from the audio, by 0.07 % at tempo 137 (a game loop 114 frames short in 3.5 s). A read of no frames sets it."""
+        buf = (C.c_int16 * 2)()
+        _lib.openmpt_module_read_interleaved_stereo(self._mod, mix_rate(rate, oversample), 0, buf)
 
     @classmethod
     def from_file(cls, path):
@@ -117,7 +145,7 @@ class LoadedModule:
         return {"note": g(0), "instrument": g(1), "volume": g(4), "effect_text": text[-3:], "param": g(5), "text": text}
 
     def duration(self):
-        """Seconds one pass of the song plays for, as libopenmpt computes it."""
+        """Seconds one pass of the song plays for, as libopenmpt computes it (at the rate of timed_at)."""
         return _lib.openmpt_module_get_duration_seconds(self._mod)
 
     def order_start(self, order, row=0):
@@ -159,15 +187,10 @@ class LoadedModule:
         (samples played above their own rate, interpolation images) is removed instead of folding back into the audible
         range as aliasing. It needs numpy; without it the module is mixed at `rate` directly. The mixer's own
         interpolation is set to its longest filter (an 8-tap windowed sinc)."""
-        try:
-            import numpy as np
-            from .resample import decimate, lowpass_fir
-        except ImportError:
-            oversample = 1
         _lib.openmpt_module_set_render_param(self._mod, 3, 8)      # OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH
         _lib.openmpt_module_set_repeat_count(self._mod, repeat)
         _lib.openmpt_module_ctl_set_integer(self._mod, b"dither", dither)
-        mix_rate = rate * max(1, int(oversample))
+        mixed = mix_rate(rate, oversample)
         chunk = 4096
         buf = (C.c_int16 * (chunk * 2))()
         out = bytearray()
@@ -175,20 +198,22 @@ class LoadedModule:
             passes = repeat + 1 if repeat >= 0 else 0
             dur = _lib.openmpt_module_get_duration_seconds(self._mod)
             max_seconds = min(self.SAFETY_SECONDS, dur * passes + 10) if passes else self.ENDLESS_SECONDS
-        limit = int(mix_rate * max_seconds)
+        limit = int(mixed * max_seconds)
         frames = 0
         while frames < limit:
             if cancel is not None and cancel():
                 raise ValueError('Export cancelled')
-            n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mix_rate, chunk, buf)
+            n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mixed, chunk, buf)
             if n == 0:
                 break
             out += memoryview(buf)[: n * 2]
             frames += n
-        if mix_rate == rate:
+        if mixed == rate:
             return bytes(out)
-        # what resample(x, mix_rate, rate) does for a whole factor, both channels at once and at the output rate
-        y = decimate(np.frombuffer(out, dtype=np.int16).reshape(-1, 2), mix_rate // rate, lowpass_fir(0.45 * rate / mix_rate))
+        import numpy as np
+        from .resample import decimate, lowpass_fir
+        # what resample(x, mixed, rate) does for a whole factor, both channels at once and at the output rate
+        y = decimate(np.frombuffer(out, dtype=np.int16).reshape(-1, 2), mixed // rate, lowpass_fir(0.45 * rate / mixed))
         np.rint(y, out=y)
         np.clip(y, -32768, 32767, out=y)
         return y.astype("<i2").tobytes()

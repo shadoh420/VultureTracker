@@ -1,8 +1,11 @@
 """The page (vulturetracker/gui.html): values from the song that reach the markup stay text. The static check runs
 everywhere; the browser check drives the page in Playwright's Chromium (pip install playwright; VT_CHROMIUM names a
 browser to use instead of Playwright's own) and is skipped without one."""
+import contextlib
 import os
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -114,7 +117,7 @@ class TestPage(unittest.TestCase):
                     page.keyboard.press("Escape")  # edit mode
                     page.evaluate("$('lv-oct').value = 5; setCursor(0, 1, 0, 0)")
                     page.keyboard.press("x")       # D-5 on the piano keys, with INS 01
-                    page.wait_for_function("!MIDI.pending")  # with CHORD (the default) a key goes in 50 ms later, as MIDI does
+                    page.wait_for_function("!MIDI.pending")  # with CHORD (the default) a key goes in 60 ms later, as MIDI does
                     settle()
                     self.assertIn("      01: D-5 01 ... ... | ... .. ... ...\n", text())
                     page.keyboard.press("Control+l")           # the whole channel
@@ -377,6 +380,154 @@ class TestPage(unittest.TestCase):
                 srv.server_close()
                 gui.Handler.state = None
                 st.close()
+
+    @contextlib.contextmanager
+    def page_on(self, song_text):
+        """(page, State, page errors) on a disposable song served on a free port; the server goes afterwards."""
+        if sync_playwright is None:
+            self.skipTest("playwright not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            write_wav(d / "a.wav", RATE, [sine(440)])
+            write_wav(d / "b.wav", RATE, [sine(880)])
+            (d / "song.yaml").write_bytes(song_text.encode())
+            st = gui.Handler.state = gui.State(d / "song.yaml")
+            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            errors = []
+            try:
+                with sync_playwright() as p:
+                    exe = os.environ.get("VT_CHROMIUM")
+                    try:
+                        browser = p.chromium.launch(**({"executable_path": exe} if exe else {}))
+                    except PlaywrightError as e:
+                        self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
+                    page = browser.new_page(viewport={"width": 1400, "height": 900})
+                    page.on("pageerror", lambda e: errors.append(str(e)))
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
+                    yield page, st, errors
+                    browser.close()
+            finally:
+                srv.shutdown()
+                srv.server_close()
+                gui.Handler.state = None
+                st.close()
+                for _ in range(400):
+                    if not any(r["status"] == "rendering" for r in st.renders.values()):
+                        break
+                    time.sleep(0.05)
+
+    def test_faust_live_same_pitch_voices(self):
+        # audit-100 A3: two keys on one pitch: the live node's key-off went by pitch and let the older voice go
+        from vulturetracker import faust
+        if not faust.have():
+            self.skipTest("needs faustwasm")
+        gate = 'process = button("gate") * hslider("gain", 1, 0, 1, 0.01) <: _, _;'
+        level = "(()=>{const a=FA.an,x=new Float32Array(a.fftSize);a.getFloatTimeDomainData(x);let m=0;for(const v of x)m=Math.max(m,Math.abs(v));return m})()"
+        with self.page_on(SONG_INS) as (page, st, errors):
+            page.evaluate("code => { localStorage.removeItem('faustcode'); tab('faust'); $('fa-code').value = code; "
+                          "$('lv-oct').value = 5; MIDI.on = true; MIDI.vel = true; faCompile() }", gate)
+            page.wait_for_function("FA.node && FA.nodeCode === $('fa-code').value", timeout=30000)
+            page.evaluate("FA.an = PK.ctx.createAnalyser(); FA.node.connect(FA.an); document.activeElement.blur(); $('fa-vel').value = 100")
+            # A3: the piano's C-5 (velocity 100), then MIDI's C-5 (30) let go: the piano's voice sounds on, not MIDI's
+            page.keyboard.down("z")
+            page.evaluate("midiMsg([0x90, 60, 30])")
+            page.wait_for_function(f"{level} > 0.95", timeout=5000)
+            page.evaluate("midiMsg([0x80, 60, 0])")
+            time.sleep(0.3)
+            self.assertAlmostEqual(page.evaluate(level), 100 / 127, delta=0.01)
+            page.keyboard.up("z")
+            page.wait_for_function(f"{level} < 1e-4", timeout=5000)
+            self.assertEqual(errors, [])
+
+    def test_faust_live_controls_and_failed_code(self):
+        # audit-100 A6, A7, A8 on the FAUST tab's live node
+        from vulturetracker import faust
+        if not faust.have():
+            self.skipTest("needs faustwasm")
+        midi = ('import("stdfaust.lib");\nbend = hslider("bend[midi:pitchwheel]", 0, -2, 2, 0.01);\n'
+                'cutoff = hslider("cutoff[midi:ctrl 1]", 1800, 100, 8000, 1);\n'
+                'process = os.osc(hslider("freq", 440, 20, 4000, 0.01) * ba.semi2ratio(bend)) * button("gate") '
+                ': fi.lowpass(1, cutoff) <: _, _;')
+        with self.page_on(SONG_INS) as (page, st, errors):
+            page.evaluate("code => { localStorage.removeItem('faustcode'); tab('faust'); $('fa-code').value = code; "
+                          "MIDI.on = true; faCompile() }", midi)
+            page.wait_for_function("FA.node && FA.nodeCode === $('fa-code').value", timeout=30000)
+            page.evaluate("window.P = {}; FA.node.setInputParamHandler((p, v) => { window.P[p] = v })")
+            # A6: a CC the code maps moves the slider and what PREVIEW and the saves render, not only the live sound
+            page.evaluate("midiMsg([0xB0, 1, 127])")
+            page.wait_for_function("FA.vals.cutoff === 8000")
+            self.assertEqual(page.evaluate("[...document.querySelectorAll('#fa-ctrls .vrow')].find(r => "
+                                           "r.textContent.startsWith('cutoff')).querySelector('input').value"), "8000")
+            # A7: the wheel let go on another tab: leaving the FAUST tab puts the bend back
+            page.evaluate("midiMsg([0xE0, 0x7f, 0x7f])")
+            page.wait_for_function("Math.abs(P['/vt/bend'] - 2) < 0.01")
+            page.evaluate("tab('pattern'); midiMsg([0xE0, 0, 0x40]); tab('faust')")
+            page.wait_for_function("P['/vt/bend'] === 0", timeout=2000)
+            # A8: code that does not compile is compiled once, not again at every key or MIDI note
+            page.evaluate("""$('fa-code').value = 'process = foo;'; window.NC = 0; const c = FA.m.compileFaust;
+                             FA.m = {...FA.m, compileFaust: (...a) => { NC++; return c(...a) }}""")
+            for n in (60, 62, 64):
+                page.evaluate(f"midiMsg([0x90, {n}, 100]); midiMsg([0x80, {n}, 0])")
+                page.wait_for_function("!FA.cjob && $('fa-msg').textContent.includes('undefined symbol : foo')", timeout=30000)
+            self.assertEqual(page.evaluate("NC"), 1)
+            page.click("#t-faust span.btn:text-is('COMPILE')")  # COMPILE compiles it again
+            page.wait_for_function("NC === 2 && !FA.cjob", timeout=30000)
+            self.assertEqual(errors, [])
+
+    def test_piano_keys_by_position(self):
+        # audit-100 L1: the piano keys go by the key's place (e.code), as OpenMPT's do: QWERTZ's bottom-left key ('y')
+        # and AZERTY's ('w') are C like QWERTY's 'z'; Shift+2 ('@') is still the 2; an event without a code (the
+        # harness's) goes by its character. On every tab that plays them, and in edit mode
+        with self.page_on(SONG_INS) as (page, st, errors):
+            down = "(key, code, shift) => document.dispatchEvent(new KeyboardEvent('keydown', {key, code, shiftKey: !!shift, bubbles: true, cancelable: true}))"
+            page.evaluate("window.HIT = []; lvNoteOn = (k, ...a) => { HIT.push(k) }; pkPlay = k => { HIT.push(k) }; "
+                          "lvNoteOff = k => { HIT.push('-' + k) }; $('lv-oct').value = 5")
+            page.evaluate("tab('pattern')")
+            for key, code in (("y", "KeyZ"), ("w", "KeyZ"), ("z", "")):
+                page.evaluate(f"({down})('{key}', '{code}')")
+            page.evaluate("document.dispatchEvent(new KeyboardEvent('keyup', {key: 'y', code: 'KeyZ', bubbles: true}))")
+            for t in ("paint", "faust", "ins"):
+                page.evaluate(f"tab('{t}'); INS_SEL = '1'")
+                page.evaluate(f"({down})('y', 'KeyZ')")
+                page.evaluate(f"({down})('@', 'Digit2', true)")
+            self.assertEqual(page.evaluate("HIT"), ["z", "z", "z", "-z", "z", "2", "z", "2", "z", "2"])
+            page.evaluate("tab('pattern'); setEdit(true); $('midi-chord').checked = false; CUR.o = PAT.order; CUR.row = 0; "
+                          "CUR.ch = 0; CUR.col = 0; renderPat()")
+            page.evaluate(f"({down})('y', 'KeyZ')")
+            page.wait_for_function("!EDQ.n && PAT.rows[0][0].startsWith('C-5')")
+            self.assertIn("C-5 01", st.song_path.read_text())  # the server took it
+            self.assertEqual(errors, [])
+
+    def test_note_cut_off_and_fade_keys_are_openmpts(self):
+        # the owner's call 2026-10-01: OpenMPT's IT-style keys (DefaultKeyBindings.h), by the key's place: 1 cuts, the
+        # key left of it is a note-off and with Shift a fade, as is the key above Enter; AZERTY's 1 key types '&'
+        with self.page_on(SONG_INS) as (page, st, errors):
+            page.evaluate("tab('pattern'); setEdit(true); $('midi-chord').checked = false; $('lv-step').value = 1; "
+                          "CUR.o = PAT.order; CUR.row = 0; CUR.ch = 0; CUR.col = 0; renderPat()")
+            down = "([key, code, shift]) => document.dispatchEvent(new KeyboardEvent('keydown', {key, code, shiftKey: shift, bubbles: true, cancelable: true}))"
+            got = []
+            for ev in (("1", "Digit1", False), ("`", "Backquote", False), ("~", "Backquote", True), ("\\", "Backslash", False),
+                       ("&", "Digit1", False), ("`", "", False)):
+                page.evaluate("CUR.row = 0; renderPat()")
+                page.evaluate(down, list(ev))
+                page.wait_for_function("!EDQ.n")
+                got.append(page.evaluate("PAT.rows[0][0].slice(0, 3)"))
+                self.assertIn(got[-1] + " ", st.song_path.read_text())  # the server took it
+            self.assertEqual(got, ["^^^", "===", "~~~", "~~~", "^^^", "==="])
+            self.assertEqual(errors, [])
+
+    def test_page_modules_skip_without_playwright(self):
+        # audit-100 D1: three page modules imported Playwright unguarded: `unittest discover tests` errored without it
+        code = ("import sys, unittest; sys.modules['playwright'] = sys.modules['playwright.sync_api'] = None; "
+                "r = unittest.main(module=None, argv=['x', 'tests.test_features080_page', 'tests.test_release070_page', "
+                "'tests.test_release080_page', 'tests.test_workflow_page'], exit=False).result; "
+                "print(len(r.errors), len(r.failures), len(r.skipped), r.testsRun)")
+        out = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).resolve().parent.parent, capture_output=True,
+                             text=True, timeout=120)
+        errors, failures, skipped, run = map(int, out.stdout.split())
+        self.assertEqual((errors, failures, skipped == run, run > 3), (0, 0, True, True), out.stderr[-800:])
 
     @mock.patch.dict(os.environ, {"VT_FAKE_AUDIO": "1"})
     def test_record_tab_controls_hold_between_polls(self):

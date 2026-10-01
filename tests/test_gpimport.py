@@ -100,6 +100,7 @@ class TestPlaceholders(unittest.TestCase):
             self.assertLess(abs(1200 * np.log2(f[m][s[m].argmax()] / hz)), 2, hz)  # measured, in cents
 
 
+@unittest.skipIf(guitarpro is None, "PyGuitarPro not installed (pip install pyguitarpro)")
 class TestGpImport(unittest.TestCase):
     def test_a_tab_becomes_a_song(self):
         import numpy as np
@@ -164,6 +165,44 @@ class TestGpImport(unittest.TestCase):
             self.assertTrue((d / "riff_samples" / "kit_kick.wav").exists())
             out2, _ = gui.import_beside(d / "riff.gp5")
             self.assertEqual(out2.name, "riff-2.yaml")                        # nothing replaced
+
+    # ---- the 0.9.0 audit (scratch/audit-100, agentC)
+
+    def one_beat(self, d, name="Gtr", capo=0, notes=((5, 3),), harmonic=False):
+        """A one-measure tab: a whole note of `notes` ((string, fret), ...) on a track called `name` with a capo at `capo`;
+        imported, it returns the song."""
+        song = M.Song()
+        h = M.MeasureHeader(number=1, start=960)
+        song.measureHeaders = [h]
+        g = song.tracks[0]
+        g.name, g.offset = name, capo
+        g.measures = [M.Measure(g, h)]
+        v = g.measures[0].voices[0]
+        b = M.Beat(v, duration=M.Duration(value=1), start=960, status=M.BeatStatus.normal)
+        for string, fret in notes:
+            n = M.Note(b, value=fret, string=string, type=M.NoteType.normal, velocity=M.Velocities.forte)
+            if harmonic:
+                n.effect.harmonic = M.NaturalHarmonic()
+            b.notes.append(n)
+        v.beats.append(b)
+        guitarpro.write(song, str(d / "t.gp5"))
+        return gpimport.import_gp(d / "t.gp5", d / "t.yaml", d / "t_samples")[0]
+
+    def test_a_capo_raises_the_pitch(self):
+        # Guitar Pro writes frets from the capo; TuxGuitar sounds track offset + fret + string (MidiSequenceParser)
+        with tempfile.TemporaryDirectory() as tmp:
+            for capo, harmonic, want in ((0, False, "C-4"), (2, False, "D-4"), (2, True, "B-4")):
+                song = self.one_beat(Path(tmp), capo=capo, notes=((5, 12 if harmonic else 3),), harmonic=harmonic)
+                with self.subTest(capo=capo, harmonic=harmonic):
+                    self.assertEqual(song["patterns"]["m1"]["data"].split()[1], want)  # A string (A-3): fret 3, or the octave harmonic
+
+    def test_a_long_track_name_keeps_its_string_numbers(self):
+        # "Großgroß..." grows by two letters when transliterated: the cut fell on " str N" and every string had one name
+        with tempfile.TemporaryDirectory() as tmp:
+            song = self.one_beat(Path(tmp), name="Großgroßgitarre", notes=((1, 0), (2, 0), (3, 0)))
+            names = [c["name"] for c in song["module"]["channels"]]
+            self.assertEqual([n[-5:] for n in names], ["str 1", "str 2", "str 3"])
+            self.assertTrue(all(len(n) <= 20 and n.isascii() for n in names), names)
 
 
 if __name__ == "__main__":

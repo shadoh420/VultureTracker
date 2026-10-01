@@ -1,9 +1,11 @@
 """CLI: python -m vulturetracker {check,build,render,info,import,synth,audition,tryout,index,export,collect,sections,
-checkpoint,phrase,gui} ..."""
+checkpoint,phrase,gui,surge-params} ..."""
 import argparse
 import json
 import sys
 from pathlib import Path
+
+import yaml
 
 from . import api
 from .song import SongError
@@ -22,30 +24,64 @@ def _print_info(d):
         print(f"  libopenmpt: {w}")
 
 
-def _say(text):
+def _say(text, file=None):
     """A line that may hold what was typed in the app (names, notes): what the console cannot show becomes ?."""
-    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
-    print(str(text).encode(enc, "replace").decode(enc))
+    file = file or sys.stdout
+    enc = getattr(file, "encoding", None) or "utf-8"
+    print(str(text).encode(enc, "replace").decode(enc), file=file)
 
 
 WRITES = {"sections": ("save", "delete", "move", "duplicate"), "checkpoint": ("save", "restore", "delete"),
           "phrase": ("capture", "set", "accept")}
 
 
+def _open_song(song, write):
+    """(the song opened headless, its lock or None); what the opening noticed goes to stderr. A command that writes holds
+    the song's lock (gui.app_lock_path) to its end, so an app opening the song meanwhile waits for it or opens it
+    read-only, and it is refused while an app or another command holds the lock. One that reads holds it while the song
+    is read; a song open in the app is read as it is (an interrupted save's journal or a file that does not parse is the
+    app's to reconcile)."""
+    from .fileio import lock_file, unlock_file
+    from .gui import LOCKS, State, app_lock_path
+    LOCKS.mkdir(parents=True, exist_ok=True)
+    lock = lock_file(app_lock_path(song))
+    if write and lock is None:
+        raise ValueError(f"{Path(song).name} is open in VultureTracker or being changed by another command; the app keeps "
+                         f"its history and tryout settings and would write them over this change: make it in the app, or "
+                         f"open another song there (or let the command finish) first")
+    try:
+        st = State(song, headless=True, passive=lock is None)
+    except BaseException:
+        if lock:
+            unlock_file(lock)
+        raise
+    if lock and not write:
+        unlock_file(lock)
+    for line in st.notices:
+        _say(f"note: {line}", sys.stderr)
+    return st, lock if write else None
+
+
 def _song_tool(args):
     """sections, checkpoint and phrase: the app's own methods on the song opened headless. What they change goes into
     the song's history (.history.json) and tryout settings (.tryout.json) as in the app, so the app must not have the
     song open: it would write its own over them."""
+    from .fileio import unlock_file
+    st, lock = _open_song(args.song, args.action in WRITES[args.cmd])
+    seen = len(st.notices)
+    try:
+        return _song_command(args, st)
+    finally:
+        for line in st.notices[seen:]:
+            _say(f"note: {line}", sys.stderr)
+        if lock:
+            unlock_file(lock)
+
+
+def _song_command(args, st):
     from . import phrases
     from .export import sources
     from .fileio import atomic_write, protect_outputs
-    from .gui import State, open_in_app
-    if args.action in WRITES[args.cmd] and open_in_app(args.song):
-        print(f"error: {Path(args.song).name} is open in VultureTracker, which keeps its history and tryout settings and "
-              f"would write them over this change: {args.action} it in the app, or open another song there first",
-              file=sys.stderr)
-        return 1
-    st = State(args.song, headless=True)
     for line in st.error or []:
         print(line)
     if st.error and args.cmd != "checkpoint":  # a checkpoint can bring back a song that no longer compiles
@@ -167,7 +203,7 @@ def main(argv=None):
     p.add_argument("module")
     p.add_argument("-o", "--output", required=True, help="output song .yaml")
     p.add_argument("--samples-dir", help="where to write WAVs (default: <output stem>_samples next to the song)")
-    p = sub.add_parser("synth", help="render the samples in a Surge XT sample recipe (see SAMPLING.md)")
+    p = sub.add_parser("synth", help="render the samples in a sample recipe: Surge XT, Dexed and OB-Xd patches, recordings, Faust code, resynthesis (see SAMPLING.md)")
     p.add_argument("recipe")
     p.add_argument("--only", help="render only samples whose name matches this glob")
     p = sub.add_parser("audition", help="play every Surge patch (or audio file) matching a glob into one WAV to compare them")
@@ -362,8 +398,8 @@ def main(argv=None):
             return serve(args.song, args.port, not args.no_browser, window=not (args.browser or args.no_browser))
 
         if args.cmd in ("export", "collect"):
-            from .gui import State, _encode
-            st = State(args.song, headless=True)
+            from .gui import _encode
+            st = _open_song(args.song, False)[0]
             for line in st.error or []:
                 print(line)
             if st.error:
@@ -420,7 +456,7 @@ def main(argv=None):
             print(line)
         print(f"{len(e.errors)} error(s)")
         return 1
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, yaml.YAMLError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

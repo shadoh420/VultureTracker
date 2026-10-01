@@ -8,12 +8,16 @@ from pathlib import Path
 from unittest import mock
 from urllib.parse import quote
 
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover
+    sync_playwright = None
 from vulturetracker import api, gui, record
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
 
+@unittest.skipIf(sync_playwright is None, 'playwright not installed')
 class TestRelease070Page(unittest.TestCase):
     @mock.patch.dict(os.environ, {'VT_FAKE_AUDIO': '1'})
     def test_chords_spacing_conversion_recording_and_switch(self):

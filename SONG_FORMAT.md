@@ -1,6 +1,6 @@
 # VultureTracker song format (v1)
 
-A song is one YAML file that compiles to an Impulse Tracker module (`.it`, instrument mode). This
+A song is one YAML file that compiles to an Impulse Tracker module (`.it`; instrument mode when it has `instruments:`, sample mode without). This
 document is the complete reference: everything the compiler accepts is described here.
 
 ```
@@ -87,7 +87,7 @@ Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
 | key | range | default | meaning |
 |---|---|---|---|
-| `name` | ≤20 chars | `""` | label for humans (not stored in the .it) |
+| `name` | ≤20 ASCII chars | `""` | label for humans (not stored in the .it) |
 | `pan` | 0–64 or `surround` | 32 | initial pan: 0 = hard left, 32 = centre, 64 = hard right |
 | `volume` | 0–64 | 64 | initial channel volume (the `M` effect changes it) |
 | `muted` | bool | false | channel starts muted |
@@ -160,7 +160,7 @@ instruments:
 
 | key | range | default | meaning |
 |---|---|---|---|
-| `name` | ≤25 chars | `""` | instrument name |
+| `name` | ≤25 ASCII chars | `""` | instrument name |
 | `sample` | number or name | none | shorthand: every note plays this sample at its own pitch |
 | `keymap` | list | none | multisample map (below). Without `sample` or `keymap` the instrument maps no notes and is silent. |
 | `fadeout` | 0–256 | 0 | fade speed after note-off or a fade action; 0 = never fades out. A note's fade level starts at 1024 and loses `fadeout` per tick, so 256 takes 4 ticks and 16 takes 64 ticks. |
@@ -322,6 +322,9 @@ For `a` to `f`, `00` repeats the previous value. The volume column and the effec
 | `SDx` | delay the note by x ticks |
 | `SEx` | repeat this row x extra times (pattern delay) |
 | `SFx` | select the parameterised MIDI macro (`SF0` = filter cutoff, the default) |
+
+Values these tables leave out (`S0x`, `S2x`, `S7D`, `S7E`, `S92`–`S9F`, `Z90`–`ZFF`) compile into the .it unchanged;
+libopenmpt plays them as OpenMPT does (most are OpenMPT extensions, or do nothing in Impulse Tracker).
 
 ## 7. `orders`
 

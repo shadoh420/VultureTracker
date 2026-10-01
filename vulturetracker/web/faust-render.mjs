@@ -22,13 +22,15 @@ export async function loadFaust(base) {
   return {lib, compiler, version: compiler.version()};
 }
 
-// the DSP's controls: [{address, label, type, init, min, max, step}]
+// the DSP's controls: [{address, label, type, init, min, max, step, midi}], midi the [midi:...] mapping ('ctrl 1',
+// 'pitchwheel') or ''
 export function controls(proc) {
   const out = [];
   const walk = items => items.forEach(it => {
     if (it.items) walk(it.items);
     else if (it.address) out.push({address: it.address, label: it.label, type: it.type, init: it.init ?? 0,
-                                   min: it.min ?? 0, max: it.max ?? 1, step: it.step ?? 0});
+                                   min: it.min ?? 0, max: it.max ?? 1, step: it.step ?? 0,
+                                   midi: ((it.meta || []).find(m => m.midi) || {midi: ''}).midi.trim()});
   });
   walk(proc.getUI());
   return out;
@@ -38,30 +40,42 @@ export function controls(proc) {
 export async function compileFaust(F, code) {
   const gen = new F.lib.FaustPolyDspGenerator();
   try {
-    if (await gen.compile(F.compiler, 'vt', code, '-ftz 2')) return gen;
+    if (!await gen.compile(F.compiler, 'vt', code, '-ftz 2')) throw new Error('the Faust code did not compile');
+    // faustwasm compiles the voice alone when `effect` fails, whatever the reason: compiled as faustwasm tries it (on the
+    // code's first line, so the error's line numbers are the code's), anything but "no effect" is the code's error
+    if (!gen.effectFactory && /\beffect\b/.test(code)) {
+      try {
+        await F.compiler.createPolyDSPFactory('vt', `dsp_code = environment{${code}\n};\nprocess = dsp_code.effect;`, '-ftz 2');
+      } catch (e) {
+        if (!/undefined symbol : effect\b/.test(e.message)) throw e;
+      }
+    }
+    return gen;
   } catch (e) {
     throw new Error(String(F.compiler.getErrorMessage() || e.message || e).trim());
   }
-  throw new Error(String(F.compiler.getErrorMessage() || 'the Faust code did not compile').trim());
 }
 
 // notes [{note, start, length, velocity}] (note as MIDI, C-5 = 60, fractional between keys; start and length in seconds),
-// a voice each, keyed on and off at their frames; `seconds` long (default: the last key-off plus `tail`).
-// Returns {channels: Float32Array[], controls}
+// a voice each (as many voices as notes: a render never steals one), keyed on and off at their frames, at least one frame
+// apart; `seconds` long (default: the last key-off plus `tail`). Returns {channels: Float32Array[], controls}
 export async function renderNotes(gen, {notes, seconds, tail = 0.5, params = {}, rate = 44100}) {
-  const proc = await gen.createOfflineProcessor(rate, 128, Math.max(1, Math.min(64, notes.length)));
+  const proc = await gen.createOfflineProcessor(rate, 128, Math.max(1, notes.length));
   const cs = controls(proc), find = name => cs.find(c => c.label.toLowerCase() === String(name).toLowerCase() || c.address === name);
   for (const [k, v] of Object.entries(params)) {
     const c = find(k);
     if (!c) throw new Error(`the Faust code has no control named "${k}" (it has: ${cs.map(c => c.label).join(', ') || 'none'})`);
     proc.setParamValue(c.address, +v);
   }
-  // faustwasm 0.18.5 (pinned): a poly DSP's compute(inputs, outputs, events) applies {frame, apply} at its frame in the block
+  // faustwasm 0.18.5 (pinned): a poly DSP's compute(inputs, outputs, events) applies {frame, apply} at its frame in the
+  // block. A note takes its voice as the DSP's keyOn would (getFreeVoice) and its key-off releases that voice: the DSP's
+  // keyOff goes by pitch and would release the oldest voice of it, another note's when two of one pitch overlap
   const dsp = proc.fDSPCode, B = 128, ev = [];
   for (const n of notes) {
     const on = Math.round(n.start * rate);
-    ev.push({at: on, off: 0, apply: () => dsp.keyOn(0, n.note, n.velocity)},
-            {at: Math.max(on, Math.round((n.start + n.length) * rate)), off: 1, apply: () => dsp.keyOff(0, n.note, 0)});
+    let v;
+    ev.push({at: on, off: 0, apply: () => { v = dsp.fVoiceTable[dsp.getFreeVoice()]; v.keyOn(n.note, n.velocity) }},
+            {at: Math.max(on + 1, Math.round((n.start + n.length) * rate)), off: 1, apply: () => v.keyOff()});
   }
   ev.sort((a, b) => a.at - b.at || b.off - a.off);
   const total = Math.max(1, Math.round((seconds ?? Math.max(...notes.map(n => n.start + n.length)) + tail) * rate));

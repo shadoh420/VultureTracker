@@ -9,14 +9,25 @@ placeholder sounds (gpimport), so the file plays at once and every sound can be 
   than 12 rows a quarter) gets sixteenths at speed 6, each note delayed (SDx) to the nearest of 24 ticks a quarter.
   A note ends with a note-off (===) at the row nearest its end.
 - Bars (from the time signatures, 4/4 without one) to patterns, identical bars sharing one; tempo changes to Txx on a
-  channel of their own; velocity to the volume column; a channel's volume (CC 7) and pan (CC 10) before its first note
-  to the channel's own.
+  channel of their own (of several on one tick or row, the last); velocity to the volume column; a channel's volume
+  (CC 7) and pan (CC 10) before its first note to the channel's own.
+- Track names: UTF-8 where they decode as UTF-8, else Latin-1 (OpenMPT reads Latin-1), up to a NUL as OpenMPT does.
 
 Left out (counted in the warnings): pitch bends, later volume, pan and other controller changes, the sustain pedal,
 notes outside C-0..B-9; past 64 channels, the least used."""
 from pathlib import Path
 
-from .gpimport import GM_DRUMS, Lane, Placeholders, grid_for, note_name, speed_tempo, write_song
+from .gpimport import GM_DRUMS, Lane, Placeholders, grid_for, lane_name, note_name, speed_tempo, write_song
+
+
+def _name(text):
+    """A track name as written: mido reads its bytes as Latin-1, while most files today hold UTF-8."""
+    text = text.split("\0", 1)[0]
+    try:
+        text = text.encode("latin-1").decode("utf-8")
+    except UnicodeError:
+        pass
+    return text.strip()
 
 
 def import_midi(src, song_path, samples_dir):
@@ -48,7 +59,7 @@ def import_midi(src, song_path, samples_dir):
             elif msg.type == "time_signature":
                 sigs.append((t, msg.numerator, msg.denominator))
             elif msg.type == "track_name" and not names[ti]:
-                names[ti] = msg.name.strip()
+                names[ti] = _name(msg.name)
             elif msg.type == "program_change":
                 program[msg.channel] = msg.program
             elif msg.type == "note_on" and msg.velocity:
@@ -69,7 +80,7 @@ def import_midi(src, song_path, samples_dir):
         raise ValueError("the file has no notes")
 
     end = max(n[4] for n in notes)
-    sigs.sort()
+    sigs.sort(key=lambda s: s[0])  # stable: of several on one tick, the last in the file counts
     if not sigs or sigs[0][0]:
         sigs.insert(0, (0, 4, 4))
     lines, k, num, den = [0], 0, 4, 4  # bar lines: a time signature change mid-bar starts a bar there
@@ -84,12 +95,15 @@ def import_midi(src, song_path, samples_dir):
         lines = lines[:256]
     times = {n[3] for n in notes} | set(lines)
     r = grid_for(times, q)
-    if any((x * r) % q for x in times) or r > 12:
+    delayed = any((x * r) % q for x in times) or r > 12
+    if delayed:
         r = 4  # played in (or 1/32 triplets): sixteenths, each note delayed to its tick (24 a quarter at speed 6)
         warnings.append("timing finer than 12 rows a quarter: 4 rows a quarter, notes delayed (SDx) to the nearest tick")
-    tempos.sort()
-    bpm = 60e6 / tempos[0][1] if tempos and tempos[0][0] == 0 else 120.0
-    speed, tempo, exact = speed_tempo(bpm, r)
+    tempos.sort(key=lambda t: t[0])  # stable, as the signatures
+    first = [us for tick, us in tempos if not tick]
+    bpm = 60e6 / first[-1] if first else 120.0
+    # SDx delays a note 0-15 ticks: 16 ticks a row at most (OpenMPT's MIDI import keeps 2-16 for the same reason)
+    speed, tempo, exact = speed_tempo(bpm, r, 16 if delayed else 31)
     if abs(tempo - exact) / exact > 0.005:
         warnings.append(f"{bpm:g} BPM at {r} rows a quarter needs tempo {exact:.1f}: {tempo} is used")
 
@@ -103,7 +117,7 @@ def import_midi(src, song_path, samples_dir):
     for tick, us in tempos:
         want = 60e6 / us * r * speed / 24
         if tick and row(tick) < row(lines[-1]) and round(want) != round(now):
-            tempo_lane.put(row(tick), fx=f"T{max(32, min(255, round(want))):02X}")
+            tempo_lane.put(row(tick), fx=f"T{max(32, min(255, round(want))):02X}", force=True)  # the last on a row
             if not 32 <= want <= 255:
                 warnings.append(f"tempo {60e6 / us:g} BPM is past IT's 32-255 at speed {speed}: clamped")
         now = want
@@ -121,12 +135,12 @@ def import_midi(src, song_path, samples_dir):
         ins = ph.instrument("drums" if drums else "bass" if 32 <= prog <= 39 else "pluck")
         base = names[ti][:10] or "ch"
         if drums:
-            ln = lanes.setdefault((ti, ch, 1, key), Lane(f"{base} {GM_DRUMS.get(key, note_name(key))}"))
+            ln = lanes.setdefault((ti, ch, 1, key), Lane(lane_name(base, GM_DRUMS.get(key, note_name(key)))))
         else:
             voices = [v for (t2, c2, d2, _), v in lanes.items() if (t2, c2, d2) == (ti, ch, 0)]
             ln = next((v for v in voices if v.free <= start), None)
             if ln is None:
-                ln = lanes[ti, ch, 0, len(voices)] = Lane(f"{base} {ch + 1}.{len(voices) + 1}")
+                ln = lanes[ti, ch, 0, len(voices)] = Lane(lane_name(base, f"{ch + 1}.{len(voices) + 1}"))
                 ln.ends = []
             ln.free = max(start + 1, row(b))
             ln.ends.append(ln.free)
@@ -151,5 +165,5 @@ def import_midi(src, song_path, samples_dir):
     title = names[0] if mid.type == 1 and names[0] else Path(src).stem
     head = (f"# Imported from {Path(src).name} by vulturetracker import (MIDI: placeholder sounds, swap them in the tryout)\n"
             f"# {bpm:g} BPM, {r} rows a quarter note: speed {speed}, tempo {tempo}\n")
-    song = write_song(song_path, title, lanes, bars, ph, r, speed, tempo, sigs[0][1:], warnings, head)
+    song = write_song(song_path, title, lanes, bars, ph, r, speed, tempo, [s[1:] for s in sigs if not s[0]][-1], warnings, head)
     return song, warnings

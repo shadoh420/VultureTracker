@@ -8,12 +8,16 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:  # pragma: no cover
+    sync_playwright = None
 from vulturetracker import gui
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
 
+@unittest.skipIf(sync_playwright is None, 'playwright not installed')
 class TestRelease080Page(unittest.TestCase):
     def test_tryout_keys_stay_out_of_the_pattern_tab_and_new_song_waits_for_edits(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(gui, 'remember_song'):

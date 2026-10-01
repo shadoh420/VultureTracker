@@ -51,7 +51,11 @@ def sections_text(text, sections):
         else:
             # Preserve comments inside the numeric span too; the trailing comment remains outside this edit.
             comments = re.findall(r'#[^\n]*', text[v.start_mark.index:v.end_mark.index])
-            edits.append((k.start_mark.index, v.end_mark.index, ('\n' + ind).join(comments) + ('\n' + ind if comments else '')))
+            a, b = k.start_mark.index, v.end_mark.index
+            line = text.rfind('\n', 0, a) + 1
+            if not comments and not text[line:a].strip() and not text[b:].split('\n', 1)[0].strip():
+                a, b = line, text.find('\n', b) + 1 or len(text)  # the whole line: no line of bare indentation stays
+            edits.append((a, b, ('\n' + ind).join(comments) + ('\n' + ind if comments else '')))
     end = node.end_mark.index
     added = ''.join(f'{ind}{json.dumps(n)}: {json.dumps(v)}\n' for n, v in sections.items() if n not in old)
     if added:

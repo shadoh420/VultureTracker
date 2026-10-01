@@ -1,5 +1,6 @@
 """Immutable render snapshots shared by phrase comparisons and export jobs."""
 import copy
+import glob
 import itertools
 import os
 from pathlib import Path
@@ -128,7 +129,11 @@ def render(snapshot, silenced=(), cancel=None):
 
 
 def sources(state):
-    paths = [state.song_path, *state.files, state.meta_path, state.history_store.path, state.notes_path]
+    """Every file an output must not replace: the song, its samples and candidates and the app's files beside it."""
+    paths = [state.song_path, *state.files, state.meta_path, state.history_store.path, state.history_store.journal,
+             state.notes_path, state.notes_path.with_suffix('.md')]
+    paths.extend(state.base_dir.glob(glob.escape(state.song_path.stem) + '.notes-*'))  # the notes archives
+    paths.extend((state.base_dir / (state.song_path.stem + '.phrases')).glob('*.json'))  # earlier phrase comparisons
     paths.extend(p for v in (state.meta.get('candidates') or {}).values() for p in v)
     paths.extend(state.base_dir / p for p in (state.meta.get('phrase') or {}).get('assets', {}))
     return paths

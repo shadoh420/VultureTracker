@@ -74,15 +74,18 @@ def _atomic_text(path, text):
     _atomic(path, text.replace("\n", os.linesep).encode("utf-8"))
 
 
-def _read_json(path, default, notices):
+def _read_json(path, default, notices, move=True):
     """A JSON file the app keeps beside the song, or `default` when there is none. One that does not parse (a write cut
-    short before writes were atomic, or a hand edit) is moved aside to `<name>.corrupt` and `default` is used, with a
-    notice for the page, so the song still opens."""
+    short before writes were atomic, or a hand edit) is moved aside to `<name>.corrupt` (unless not `move`: another app
+    has the song open) and `default` is used, with a notice for the page, so the song still opens."""
     if not path.exists():
         return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (ValueError, UnicodeDecodeError) as e:
+        if not move:
+            notices.append(f"{path.name} could not be read ({e}); left as it is")
+            return default
         bad = path.with_name(path.name + ".corrupt")
         os.replace(path, bad)
         notices.append(f"{path.name} could not be read ({e}); it was moved to {bad.name} and the app started it afresh")
@@ -882,26 +885,81 @@ def open_in_app(song_path):
     return False
 
 
+LOCK_WAITS = (0.1, 0.2, 0.4, 0.8, 1.5)  # seconds an app opening a song waits for a command that is changing it
+_HELD = {}  # app_lock_path -> [the locked file, how many of this process's States have the song open]
+_HELD_GUARD = threading.Lock()
+
+
+def take_app_lock(song_path):
+    """Lock the song for this process while a State has it open (the same song opened again shares the lock), waiting
+    LOCK_WAITS for a command that holds it; False when another app or a command holds it all that time."""
+    p = app_lock_path(song_path)
+    for wait in (*LOCK_WAITS, None):
+        with _HELD_GUARD:
+            if p in _HELD:
+                _HELD[p][1] += 1
+                return True
+            LOCKS.mkdir(parents=True, exist_ok=True)
+            f = lock_file(p)
+            if f:
+                _HELD[p] = [f, 1]
+                return True
+        if wait is None:
+            return False
+        time.sleep(wait)
+
+
+def release_app_lock(song_path):
+    p = app_lock_path(song_path)
+    with _HELD_GUARD:
+        held = _HELD.get(p)
+        if held and held[1] > 1:
+            held[1] -= 1
+        elif held:
+            del _HELD[p]
+            unlock_file(held[0])
+            try:
+                p.unlink()
+            except OSError:  # another app or a command took it this moment: it stays, unlocked
+                pass
+
+
 class State:
-    def __init__(self, song_path, headless=False):
-        """`headless` (the export and collect commands): no workers, no .tryout cache, notes left where they are."""
+    READ_ONLY = ("{name} is open in another VultureTracker window or being changed by a command-line tool, so it opened "
+                 "read-only: it plays, but edits, checkpoints and tryout settings are not saved. Close the other (or let "
+                 "the command finish), then open the song again to edit it.")
+
+    def __init__(self, song_path, headless=False, passive=False):
+        """`headless` (the command line): no workers, no .tryout cache, no lock, notes left where they are. `passive`:
+        another process has the song open; the files beside it are read as they are (an interrupted save's journal and a
+        file that does not parse are its to reconcile). An app that cannot take the song's lock opens it read-only."""
         self.song_path = Path(song_path).resolve()
+        self._app_lock = not headless and take_app_lock(self.song_path)  # the command line's tools see the song is open here
+        self.read_only = None if headless or self._app_lock else self.READ_ONLY.format(name=self.song_path.name)
+        try:
+            self._open(headless, passive or bool(self.read_only))
+        except BaseException:
+            self.release_lock()
+            raise
+
+    def _open(self, headless, passive):
         self.base_dir = self.song_path.parent
         self.headless = headless
         self.cache_dir = self.base_dir / ".tryout"
         self.meta_path = self.song_path.with_name(self.song_path.stem + ".tryout.json")
         self.meta = {"slot": 1, "orders": None, "candidates": {}, "ratings": {}, "muted": [], "solo": None, "mix": {}}
         self.closed = False
-        self._app_lock = None  # held while the app has the song open (open_in_app)
         self.notices = []     # what the page should tell once: a meta or notes file that could not be read
-        self.history_store = History(self.song_path, self.notices)
+        if self.read_only:
+            self.notices.append(self.read_only)
+        self.history_store = History(self.song_path, self.notices, passive)
         self.checkpoints = {}
         self._history_ready = False
         self._asset_hashes = {}
-        meta = _read_json(self.meta_path, {}, self.notices)
+        meta = _read_json(self.meta_path, {}, self.notices, move=not passive)
         self.meta.update(resolve_meta(meta, self.base_dir) if isinstance(meta, dict) else {})
         self.notes_path = self.song_path.with_name(self.song_path.stem + ".notes.json")
-        notes = _read_json(self.notes_path, [], self.notices)
+        notes = _read_json(self.notes_path, [], self.notices, move=not passive)
         self.notes = notes if isinstance(notes, list) else []
         self.lock = threading.RLock()
         self.jobs = queue.PriorityQueue()  # (priority, sequence, job): what is playing first, then the song, the rest, meters last
@@ -946,8 +1004,6 @@ class State:
         if headless:
             return
         self.cache_dir.mkdir(exist_ok=True)
-        LOCKS.mkdir(parents=True, exist_ok=True)
-        self._app_lock = lock_file(app_lock_path(self.song_path))  # the command line's tools see the song is open here
         for _ in range(WORKERS):
             threading.Thread(target=self._worker, daemon=True).start()
 
@@ -986,7 +1042,7 @@ class State:
             for sec in ("module", "samples", "instruments", "patterns"):  # the compiler reports one that is not a map
                 if sec in self.song and not isinstance(self.song[sec], dict):
                     self.song[sec] = {}
-            for sec in ("samples", "instruments"):  # a key written 08: reads as the string "08" here; the compiler reads 8
+            for sec in ("samples", "instruments"):  # a quoted key ('08', '8') reads as a string here; the compiler reads 8
                 if isinstance(self.song.get(sec), dict):
                     self.song[sec] = {int(k) if isinstance(k, str) and k.isdigit() else k: v for k, v in self.song[sec].items()}
             files = self.files = [str((self.base_dir / v["file"]).resolve()) for v in (self.song.get("samples") or {}).values()
@@ -997,7 +1053,7 @@ class State:
                 self.meta["slot"] = min(self.song.get("samples") or {1: 0})
             if archive:
                 self._archive_old_notes()
-                if self._history_ready:
+                if self._history_ready and not self.read_only:
                     _atomic(self.history_store.path, self.history_store.data(self._raw, self.history, self.future, self.checkpoints))
             if self.notes and not self.headless:
                 try:
@@ -1013,7 +1069,13 @@ class State:
             return True
 
     def save_meta(self):
+        if self.read_only:  # the settings stay in this window (the notice says so)
+            return
         _atomic_text(self.meta_path, json.dumps(relative_meta(self.meta, self.base_dir), indent=1))
+
+    def _writable(self):
+        if self.read_only:
+            raise ValueError(self.read_only)
 
     def write_song(self, text):
         """The song file, written with the line endings (and the byte-order mark) it had (write_text would turn every LF into
@@ -1226,36 +1288,36 @@ class State:
         """Another song replaced this one in the app: the worker stops after the job it is on (it would keep rendering
         into this song's cache and prune it against the new state's writes)."""
         self.closed = True
-        if self._app_lock:
-            unlock_file(self._app_lock)
-            self._app_lock = None
-            try:
-                app_lock_path(self.song_path).unlink()
-            except OSError:  # another window of the app has it open this moment: it stays, unlocked
-                pass
+        self.release_lock()
         for _ in range(WORKERS):
             self._put(-1, ("close",))
+
+    def release_lock(self):
+        """Give the song's lock back (another song replaced this one, or it failed to open)."""
+        if self._app_lock:
+            self._app_lock = False
+            release_app_lock(self.song_path)
 
     def _worker(self):
         while not self.closed:
             job = self.jobs.get()[2]
             if job[0] == "close":
                 return
-            if job[0] == 'export':
-                from .export import run
-                run(job[1], _encode)
-                continue
-            if job[0] == "build":
-                self._build(job[1])
-                continue
-            if job[0] == "meters":
-                self._meters(job[1])
-                continue
-            if job[0] == "recipe":
-                self._recipe_render(*job[1])
-                continue
-            if job[0] == "fetch":
-                self._fetch_synth(job[1])
+            if job[0] in ("export", "build", "meters", "recipe", "fetch"):
+                try:
+                    if job[0] == 'export':
+                        from .export import run
+                        run(job[1], _encode)
+                    elif job[0] == "build":
+                        self._build(job[1])
+                    elif job[0] == "meters":
+                        self._meters(job[1])
+                    elif job[0] == "recipe":
+                        self._recipe_render(*job[1])
+                    else:
+                        self._fetch_synth(job[1])
+                except Exception as e:  # noqa: BLE001 - what a job's own handler did not expect: it fails alone, the worker goes on
+                    self._job_failed(job, f"{type(e).__name__}: {e}")
                 continue
             k, cand = job
             with self.lock:
@@ -1277,6 +1339,20 @@ class State:
             except Exception as e:  # noqa: BLE001 - shown in the UI, worker must survive
                 with self.lock:
                     self.renders[k].update(status="failed", error=f"{type(e).__name__}: {e}")
+
+    def _job_failed(self, job, error):
+        """The job ends in its own failed state with the message, as the page shows it."""
+        import traceback
+        traceback.print_exc()
+        with self.lock:
+            if job[0] == "export":
+                job[1]["result"].update(status="failed", error=error)
+            elif job[0] == "build":
+                self.build = {"status": "failed", "error": error}
+            elif job[0] == "meters" and self.meters:
+                self.meters.update(status="failed", error=error)
+            elif job[0] in ("recipe", "fetch") and self.recipe_job:
+                self.recipe_job.update(status="failed", error=error)
 
     def _meters(self, mk):
         with self.lock:
@@ -1977,7 +2053,11 @@ class State:
 
     def _asset_paths(self, text, meta=None):
         paths = set()
-        doc = api.from_yaml(text)
+        try:
+            doc = api.from_yaml(text)
+        except yaml.YAMLError:  # a song that is no valid YAML (a checkpoint brings back one that is): no files to name
+            doc = None
+        doc = doc if isinstance(doc, dict) else {}
         for entry in (doc.get('samples') or {}).values():
             if not isinstance(entry, dict) or not entry.get('file'):
                 continue
@@ -2019,6 +2099,7 @@ class State:
                 raise ValueError(f'Cannot restore: source asset changed or is missing: {path}. Relink or restore the original asset first.')
 
     def _write_step(self, new, meta, history, future):
+        self._writable()
         if self.dirty():
             raise ValueError('the song changed on disk: compare and RELOAD first')
         raw = self._encoded(new)
@@ -2031,6 +2112,8 @@ class State:
             name = str(name).strip()
             if not name or len(name) > 80:
                 raise ValueError('Give the checkpoint a name of 1-80 characters')
+            if action != 'diff':
+                self._writable()
             if self.dirty():
                 raise ValueError('Compare and RELOAD external edits first')
             if action in ('diff', 'restore', 'delete') and name not in self.checkpoints:
@@ -2067,6 +2150,7 @@ class State:
 
     def trim_history(self, keep=0):
         with self.lock:
+            self._writable()
             if self.dirty():
                 raise ValueError('Compare and RELOAD external edits first')
             if not str(keep).strip():  # an emptied field is no 0: CLEAR UNDO / REDO is the way to drop every step
@@ -3604,11 +3688,9 @@ class Handler(BaseHTTPRequestHandler):
     def open_song(cls, path):
         if cls.recorder is not None and cls.recorder.recording:
             raise ValueError('Save or discard the recording before opening another song')
-        old, cls.state = cls.state, State(path)
+        old, cls.state = cls.state, State(path)  # the same song opened again shares the old state's lock
         if old is not None:
             old.close()
-            if cls.state._app_lock is None:  # the same song opened again: the old state held its lock until now
-                cls.state._app_lock = lock_file(app_lock_path(cls.state.song_path))
         remember_song(cls.state.song_path)
 
     @classmethod

@@ -15,9 +15,17 @@ from .fileio import protect_outputs
 from .wavload import write_wav
 
 ROOT = Path(__file__).resolve().parent.parent
-# the synths: tools/ of a checkout; the exe (no checkout) keeps them in %LOCALAPPDATA%/VultureTracker/tools (fetch_synth)
-TOOLS = (Path(os.environ.get("LOCALAPPDATA", Path.home())) / "VultureTracker" / "tools" if getattr(sys, "frozen", False)
-         else ROOT / "tools")
+
+
+def tools_dir(root):
+    """Where the synths and faustwasm go: tools/ of a checkout (its pyproject.toml beside the package); the exe and a pip
+    install keep them in %LOCALAPPDATA%/VultureTracker/tools (fetch_synth), never in site-packages."""
+    if getattr(sys, "frozen", False) or not (root / "pyproject.toml").is_file():
+        return Path(os.environ.get("LOCALAPPDATA", Path.home())) / "VultureTracker" / "tools"
+    return root / "tools"
+
+
+TOOLS = tools_dir(ROOT)
 DEFAULT_SURGE = TOOLS / "surge-xt" / "Surge Synth Team"
 RECIPE_KEYS = ["out_dir", "sample_rate", "defaults", "samples"]
 SAMPLE_KEYS = ["patch", "file", "resynth", "faust", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
@@ -34,7 +42,7 @@ class RecipeError(ValueError):
 
 
 class SynthMissing(RecipeError):
-    """A synth the recipe needs is not installed; `kind` is surge, dexed or obxd."""
+    """A synth the recipe needs is not installed; `kind` is surge, dexed, obxd or faust."""
 
     def __init__(self, kind, msg):
         super().__init__(msg)
@@ -292,21 +300,32 @@ def _note(value, where):
 
 def _events(spec, where):
     """Returns (events, seconds_to_render, root_note) for note / chord / phrase specs."""
-    vel = int(spec.get("velocity", 100))
+    def velocity(v):  # MIDI's note-on velocities (0 is a note-off)
+        if not 1 <= int(v) <= 127:
+            raise RecipeError(f"{where}: velocity {v} is outside 1-127")
+        return int(v)
+    vel = velocity(spec.get("velocity", 100))
     hold, tail = float(spec.get("hold", 1.0)), float(spec.get("tail", 0.5))
     if "phrase" in spec:
         ph = spec["phrase"]
-        bpm = float(ph["bpm"])
-        beat = 60.0 / bpm
+        if not isinstance(ph, dict) or not isinstance(ph.get("notes"), list) or not ph["notes"]:
+            raise RecipeError(f"{where}: phrase is {{bpm, notes: [[note, start, length], ...]}} with one note at least")
+        if float(ph.get("bpm") or 0) <= 0:
+            raise RecipeError(f"{where}: phrase needs bpm, above 0 (got {ph.get('bpm')})")
+        beat = 60.0 / float(ph["bpm"])
         events = []
         for item in ph["notes"]:
+            if not isinstance(item, (list, tuple)) or len(item) < 3:
+                raise RecipeError(f"{where}: phrase note {item} is [note, start, length] or [note, start, length, velocity]")
             note, start, length = item[0], float(item[1]), float(item[2])
-            v = int(item[3]) if len(item) > 3 else vel
+            v = velocity(item[3]) if len(item) > 3 else vel
             events.append((_note(note, where), v, start * beat, (start + length) * beat))
         length_beats = float(ph.get("length", max(e[3] for e in events) / beat))
         root = _note(ph.get("root", ph["notes"][0][0]), where)
         return events, length_beats * beat + tail, root
     if "chord" in spec:
+        if not isinstance(spec["chord"], list) or not spec["chord"]:
+            raise RecipeError(f"{where}: chord is a list of notes, e.g. [C-5, E-5, G-5] (got {spec['chord']!r})")
         notes = [_note(n, where) for n in spec["chord"]]
         return [(n, vel, 0.0, hold) for n in notes], hold + tail, notes[0]
     n = _note(spec["note"], where)
@@ -365,7 +384,7 @@ def fx_chain(fx, where="fx"):
     return pedalboard.Pedalboard(chain)
 
 
-def _post(audio, spec, rate):
+def _post(audio, spec, rate, log=lambda s: None):
     import numpy as np
     x = np.asarray(audio, dtype=np.float64)
     if spec.get("fx"):
@@ -413,6 +432,10 @@ def _post(audio, spec, rate):
     if spec.get("normalize") is not None and peak > 0:
         x *= 10 ** (float(spec["normalize"]) / 20) / peak
     x *= 10 ** (float(spec.get("gain", 0)) / 20)
+    peak = np.abs(x).max()
+    if spec.get("normalize") is None and peak > 1:  # voices summed past full scale: scaled under it, not clipped
+        x *= 0.999 / peak
+        log(f"  {20 * np.log10(peak / 0.999):.1f} dB down to stay under full scale")
     x = np.clip(np.round(x * 32767), -32768, 32767).astype(np.int16)
     return x, loop
 
@@ -565,7 +588,7 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
         surge.load(spec["patch"])
         surge.set_params(spec.get("params"))
         audio = surge.render(events, seconds)
-    pcm, loop = _post(audio, spec, rate)
+    pcm, loop = _post(audio, spec, rate, log)
     if not pcm.any():
         raise RecipeError(f"{where}: '{source}' rendered silence (try a longer hold or another note)")
     file = Path(file) if file else out_dir / f"{name}.wav"

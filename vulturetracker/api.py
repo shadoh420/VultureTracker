@@ -81,7 +81,7 @@ def load(path) -> dict:
 
 
 def save(song: dict, path):
-    Path(path).write_text(to_yaml(song), encoding="utf-8")
+    atomic_write(Path(path), to_yaml(song).encode("utf-8"))  # LF on every platform (write_text writes CRLF on Windows)
 
 
 # ---------------------------------------------------------------- editing

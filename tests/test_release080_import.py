@@ -264,6 +264,33 @@ class TestRelease080Import(unittest.TestCase):
         self.assertNotIn(b"\r\n", raw)
         self.assertTrue(raw.startswith(b"# Imported from m.it"))
 
+    # ---- the 0.9.0 audit (scratch/audit-100, agentC): jumps around a pattern split at 192 rows
+
+    def test_a_jump_past_the_orders_of_a_split_module_is_dropped(self):
+        # XM [p0 (256 rows), p1] with B02 on p1's last row: past the song, libopenmpt ignores it (the song loops whole);
+        # split, the order list grew to three and the jump landed on p1 itself
+        long = grid([(0, 0, (C4, 1, 0, 0, 0))], E_XM, rows=256)
+        short = grid([(0, 1, (C4 + 7, 1, 0, 0, 0)), (15, 0, (0, 0, 0, 0xB, 2))], E_XM, rows=16)
+        data = write_xm([XM_INS], [long, short], [0, 1], speed=2)
+        it, song, warnings = imported(data, "xm")
+        self.assertNotIn(" B02", song["patterns"]["p01"]["data"])
+        self.assertIn("a jump (Bxx) past the order list dropped (IT ignores it)", warnings)
+        self.assertEqual(len(pcm(it, 1)), len(pcm(data, 1)))  # played twice: the loop goes where the original's goes
+
+    def test_a_jump_and_break_into_a_split_pattern_land_on_the_row(self):
+        # IT [a (300 rows), b, c]; b's last row B00 + C FA: order 0, row 250, now part a_b's row 58. The break was read
+        # against the next order (c) and dropped as out of range
+        m = it_module(2)
+        a, b, c = ([[Cell(), Cell()] for _ in range(n)] for n in (300, 16, 16))
+        a[0][0], a[250][1] = Cell(note=60, instrument=1), Cell(note=72, instrument=1)
+        b[0][0], c[0][0] = Cell(note=64, instrument=1), Cell(note=67, instrument=1)
+        b[15][0], b[15][1] = Cell(effect=2, param=0), Cell(effect=3, param=250)
+        m.patterns, m.orders = [Pattern("a", a), Pattern("b", b), Pattern("c", c)], [0, 1, 2]
+        it, song, warnings = imported(write_it(m), "it")
+        self.assertEqual(song["patterns"][song["orders"][2]]["data"].splitlines()[15], "15: ... .. ... B01 | ... .. ... C3A")
+        self.assertFalse(any("out-of-range" in w for w in warnings), warnings)
+        self.assertEqual(len(pcm(it, 1)), len(pcm(write_it(m), 1)))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,6 +15,7 @@ from .song import load_song_text
 
 
 def _store(state, phrase):
+    state._writable()
     meta = dict(state.meta, phrase=phrase)
     atomic_write(state.meta_path, json_bytes(relative_meta(meta, state.base_dir)))
     state.meta = meta
@@ -26,6 +27,7 @@ def _control(cell):
 
 
 def capture(state, body):
+    state._writable()
     state._need_compiled()
     if state.dirty():
         raise ValueError('Compare and RELOAD external changes before capturing a phrase')
@@ -159,7 +161,9 @@ def action(state, body):
             if not variant['name'].strip() or len(variant['name']) > 80 or len(variant['note']) > 8000:
                 raise ValueError('Use a name up to 80 characters and a note up to 8000 characters')
             if 'stars' in body:
-                variant['stars'] = max(0, min(5, int(body['stars'])))
+                variant['stars'] = int(body['stars'])
+                if not 0 <= variant['stars'] <= 5:
+                    raise ValueError('Rate an alternative 0 to 5 stars')
             new = edited_text(state, phrase, index)
             load_song_text(new, state.base_dir)  # including sample/instrument references, before saving the draft
             _store(state, phrase)

@@ -45,6 +45,46 @@ class TestPost(unittest.TestCase):
         with self.assertRaises(RecipeError):
             list(expand({"samples": {"b": {"note": "C-3"}}}))
 
+    def test_a_render_over_full_scale_is_scaled_under_it_not_clipped(self):
+        # audit-100 A4: without normalize: a source over full scale (a chord's voices summed) was hard-clipped to 16 bits
+        rate, said = 1000, []
+        x = np.vstack([np.sin(2 * np.pi * 7.3 * np.arange(2000) / rate) * 2.0])
+        pcm, _ = _post(x.copy(), {"trim": False, "fade_out": 0}, rate, said.append)  # _post scales in place
+        self.assertEqual(int(np.abs(pcm).max()), round(0.999 * 32767))
+        self.assertTrue(np.allclose(pcm / 32767, x * 0.999 / np.abs(x).max(), atol=1e-4))  # the wave's shape, no plateau
+        self.assertEqual(said, ["  6.0 dB down to stay under full scale"])
+        pcm, _ = _post(x * 0.25, {"trim": False, "fade_out": 0}, rate, said.append)  # under full scale: as it was
+        self.assertEqual((int(np.abs(pcm).max()), len(said)), (round(np.abs(x * 0.25).max() * 32767), 1))
+        pcm, _ = _post(x, {"trim": False, "fade_out": 0, "normalize": -6}, rate, said.append)  # normalize: decides
+        self.assertEqual((int(np.abs(pcm).max()), len(said)), (round(10 ** (-6 / 20) * 32767), 1))
+
+
+class TestRecipeValues(unittest.TestCase):
+    def test_note_chord_and_phrase_values_are_refused_by_name(self):
+        # audit-100 A5: these crashed with IndexError, ZeroDivisionError or KeyError (the app's render worker with them),
+        # or rendered a velocity outside MIDI's (patches refuse above 127; velocity 0 is a note-off)
+        from vulturetracker.synth import _events
+        for spec, key in (({"chord": []}, "chord"), ({"chord": "C-5 E-5"}, "chord"),
+                          ({"phrase": {"bpm": 120, "notes": []}}, "phrase"), ({"phrase": {"notes": [["C-5", 0, 1]]}}, "bpm"),
+                          ({"phrase": {"bpm": 0, "notes": [["C-5", 0, 1]]}}, "bpm"),
+                          ({"phrase": {"bpm": 120, "notes": [["C-5", 0]]}}, "phrase"),
+                          ({"note": "C-5", "velocity": 0}, "velocity"), ({"note": "C-5", "velocity": 128}, "velocity"),
+                          ({"phrase": {"bpm": 120, "notes": [["C-5", 0, 1, 200]]}}, "velocity")):
+            with self.assertRaises(RecipeError, msg=spec) as e:
+                _events(spec, "sample 's'")
+            self.assertIn(key, str(e.exception))
+        self.assertEqual(_events({"chord": ["C-5", "E-5"], "velocity": 127}, "s")[0], [(60, 127, 0.0, 1.0), (64, 127, 0.0, 1.0)])
+        self.assertEqual(_events({"phrase": {"bpm": 120, "notes": [["C-5", 0, 1, 1]]}, "tail": 0}, "s"), ([(60, 1, 0.0, 0.5)], 0.5, 60))
+
+    def test_downloads_go_to_the_per_user_folder_outside_a_checkout(self):
+        # audit-100 D9: a pip install (no pyproject.toml beside the package) wrote Surge, Dexed and faustwasm into
+        # site-packages; a checkout keeps them in its tools/
+        from vulturetracker import synth
+        self.assertEqual(synth.tools_dir(synth.ROOT), synth.ROOT / "tools")
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(synth.tools_dir(Path(tmp)).parts[-2:], ("VultureTracker", "tools"))
+            self.assertNotEqual(synth.tools_dir(Path(tmp)).parent.parent, Path(tmp))
+
 
 try:
     import pedalboard

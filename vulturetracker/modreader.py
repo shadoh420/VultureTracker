@@ -495,9 +495,9 @@ def _restart(mod, restart, warn):
 
 def _split_long(mod, warn, size=192):
     """Patterns longer than IT's 200 rows as parts of `size` rows (a multiple of 16, so bars stay whole), played one after
-    the other: the order list follows, a jump (Bxx) goes to where its order now starts, and a break (Cxx) that leaves a
-    part early or lands past a part's end becomes a jump to the right part plus a break to the row in it (in a free effect
-    slot of the row). A part ends early, or late, where its cut would fall inside a pattern loop, and a loop no part
+    the other: the order list follows, a jump (Bxx) goes to where its order now starts (one past the song is dropped, as
+    IT ignores it), and a break (Cxx) that leaves a part early or lands past a part's end becomes a jump to the right part
+    plus a break to the row in it (in a free effect slot of the row; beside a jump, into the jump's order, that jump). A part ends early, or late, where its cut would fall inside a pattern loop, and a loop no part
     can hold is played out (_cuts)."""
     if all(len(p.rows) <= 200 for p in mod.patterns):
         return
@@ -518,29 +518,36 @@ def _split_long(mod, warn, size=192):
     for i in range(len(mod.patterns)):
         for k, pi in enumerate(parts[i]):
             for row in pats[pi].rows:
-                for cell in [c for c in row if c.effect in (fx("B"), fx("C"))]:  # not the breaks written below
-                    if cell.effect == fx("B") and cell.param < len(start):
-                        cell.param = start[cell.param]
-                    elif cell.effect == fx("C"):
-                        pos = where.get(i, [])
-                        nxt = (pos[0] + 1) % len(mod.orders) if len(pos) == 1 else None
-                        nc = cuts[mod.orders[nxt]] if nxt is not None and mod.orders[nxt] < ORDER_SKIP else [0]
-                        if nxt is not None and mod.orders[nxt] < ORDER_SKIP:  # the row in a pattern a loop was played out of
-                            cell.param = moved[mod.orders[nxt]](cell.param)
-                        into = sum(c <= cell.param for c in nc[1:])  # the part of the next pattern it lands in
-                        if k == len(parts[i]) - 1 and not into:
-                            continue
-                        if nxt is None:
-                            warn("a break in a split pattern played at several order positions kept as it is")
-                            continue
-                        target, r = start[nxt] + into, cell.param - nc[into]
-                        cell.effect, cell.param = fx("B"), target
-                        if r:
-                            free = next((c for c in row if not c.effect), None)
-                            if free is None:
-                                warn("a break into a split pattern lands on row 0 (no free effect slot for the row)")
-                            else:
-                                free.effect, free.param = fx("C"), r
+                jump, to = None, None  # the row's jump and the order it goes to: a break beside it lands there
+                for cell in [c for c in row if c.effect == fx("B")]:
+                    if cell.param < len(start):
+                        jump, to, cell.param = cell, cell.param, start[cell.param]
+                    else:  # past the song (IT ignores it): on the longer order list it would land on a part
+                        cell.effect = cell.param = 0
+                        warn("a jump (Bxx) past the order list dropped (IT ignores it)")
+                for cell in [c for c in row if c.effect == fx("C")]:  # not the breaks written below
+                    pos = where.get(i, [])
+                    nxt = to if jump is not None else (pos[0] + 1) % len(mod.orders) if len(pos) == 1 else None
+                    nc = cuts[mod.orders[nxt]] if nxt is not None and mod.orders[nxt] < ORDER_SKIP else [0]
+                    if nxt is not None and mod.orders[nxt] < ORDER_SKIP:  # the row in a pattern a loop was played out of
+                        cell.param = moved[mod.orders[nxt]](cell.param)
+                    into = sum(c <= cell.param for c in nc[1:])  # the part of the next pattern it lands in
+                    if (jump is not None or k == len(parts[i]) - 1) and not into:
+                        continue
+                    if nxt is None:
+                        warn("a break in a split pattern played at several order positions kept as it is")
+                        continue
+                    target, r = start[nxt] + into, cell.param - nc[into]
+                    if jump is not None:  # the jump goes to the part, the break to the row in it
+                        jump.param, cell.param = target, r
+                        continue
+                    cell.effect, cell.param = fx("B"), target
+                    if r:
+                        free = next((c for c in row if not c.effect), None)
+                        if free is None:
+                            warn("a break into a split pattern lands on row 0 (no free effect slot for the row)")
+                        else:
+                            free.effect, free.param = fx("C"), r
     warn(f"{sum(len(v) > 1 for v in parts.values())} patterns longer than 200 rows split into parts of {size}")
     mod.patterns, mod.orders = pats, orders
 

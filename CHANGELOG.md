@@ -11,7 +11,53 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   tab open a MIDI keyboard plays it, with velocity, and pitch bend and controllers reach the controls the code maps
   with `[midi:...]`. Recipes: `faust:` samples take `chord:` and `phrase:` like synth patches.
 
-Fixes: a Faust render's release no longer starts up to 127 samples late (a note's key-off now lands on its sample).
+- **Following OpenMPT** (GUIDE.md, "Following OpenMPT"; where the app does what OpenMPT does, it does it OpenMPT's
+  way): the piano keys go by their place on the keyboard, so QWERTZ and AZERTY play what QWERTY does; the edit keys are
+  OpenMPT's IT-style ones: `1` a note cut, `` ` `` a note-off, Shift+`` ` `` or `\` a fade (they were `1` note-off,
+  `` ` `` fade, `\` cut); CHORD joins a key
+  or MIDI note struck within 60 ms of the one before (OpenMPT's auto-chord wait; it was 50 ms from the first), so a
+  rolled chord stays on one row; an MPTM parameter-control (PC) event pastes as `Zxx`, as OpenMPT converts it (it
+  pasted its plugin number as an instrument).
+- **The command line and the app share a song safely.** `sections`, `checkpoint` and `phrase` hold the song's lock for
+  the whole command: a second command at the same time, or one while the app has the song open, is refused (exit 1)
+  instead of losing a change while saying it saved. An app opening a song that a command is changing, or that another
+  app window has open, waits a moment, then opens it read-only with a notice. Commands that only read leave the app's
+  files alone, and the commands print what the app would show as a notice as `note:` lines.
+
+Fixes, from an audit of 0.9.0 (36 bugs, each with a regression test): a background job that failed unexpectedly (a
+RECIPE entry `chord: []`) stopped every later render, build and export until a restart; it now fails alone. Game loops
+are frame-exact at every tempo (only tempos dividing 1500 were: at tempo 137 a 3.5 s loop was 114 frames short), and so
+are whole-song lengths and phrase renders. Checkpoints save and restore a song whose text is not valid YAML. A phrase
+render can no longer overwrite the notes report, its archives, the phrase comparisons or the recovery journal. Deleting
+a section no longer leaves a blank line. A phrase's stars outside 0-5 are refused, an output path that is a folder or in
+a missing folder is named in the error, and `api.save` writes LF in one atomic write.
+
+Recipes: a render over full scale is scaled just under it, and the log says so, instead of clipped (unless
+`normalize:` is set); an empty chord or phrase, a missing or zero `bpm`, a short phrase note or a velocity outside
+1-127 is an error naming the key (some stopped the command with a traceback). Faust: a render's release no longer starts
+up to 127 samples late; a note of zero length is released after one frame instead of sounding to the end; an `effect`
+that does not compile is an error instead of being dropped; two overlapping notes of one pitch each end on their own
+key-off; renders never steal a voice; on the FAUST tab a MIDI controller moves its slider (PREVIEW and the saves
+rendered the slider's old value), leaving the tab puts a pitch-wheel control back, and code that does not compile is
+not compiled again at every key.
+
+Imports: a MIDI file played in without a click and slower than about 90 BPM got note delays the format lacks (`SD10`
+and up) and did not compile; of several tempos or time signatures on one tick the last counts, and of tempo changes
+landing on one row the last stays; track names written as UTF-8 read as such ("Böse" became "BA?se"), a name ends at a
+NUL and names lose control characters. Guitar Pro: a capo raises the pitch (capo tabs imported too low, harmonics too),
+and long or transliterated track names keep their " str N" numbers. Modules with a pattern over 200 rows: a jump past
+the order list is dropped (it landed on a split part and changed the loop), and a jump and a break on one row land on
+the row they name.
+
+Install and tests: a pip-installed package has the Pattern tab's effect help and keeps the synth and Faust downloads in
+`%LOCALAPPDATA%/VultureTracker/tools`, not in site-packages; the page tests and the Guitar Pro tests skip without
+Playwright or PyGuitarPro; a test that failed about one run in 19 no longer does.
+
+**Upgrade note:** the note-off, note cut and fade keys moved to OpenMPT's (above). Song files, history and checkpoints
+are unchanged from 0.9.0, and so are renders. Song lengths are now
+taken at the rate the audio is mixed at, so a game loop's length and a song's reported length can differ from 0.9.0's
+by a few hundredths of a percent. A MIDI file played in under about 90 BPM imports at speed 16 or less. A recipe that
+clipped renders a little quieter, unclipped.
 
 ## 0.9.0 (2026-10-01)
 
