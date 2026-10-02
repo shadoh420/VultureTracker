@@ -110,6 +110,15 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 - Python 3.14 at `C:\Python314`; `pyyaml`, `numpy`, `pywebview`, `pywin32`, `Pillow`, `imageio-ffmpeg` (its ffmpeg
   makes the MP3s), `pedalboard` + `mido` (the synth host: sample generators and the RECIPE box; packed into the exe, which makes the exe GPL-3, THIRD_PARTY.md).
 
+## Reusable scripts
+
+- Check `tools/` for a suitable existing script before writing an ad-hoc script; prefer reuse where practical.
+- When a non-trivial ad-hoc script has a concrete likely future use, briefly offer at the end of the reply to retain it
+  in `tools/`, stating that use. Require explicit approval unless retention was already requested. Temporary task
+  scripts do not require this additional approval.
+- Retained scripts accept parameters for session-specific inputs, contain no embedded secrets, and provide usage help
+  and clear errors for invalid arguments. Keep generalization minimal.
+
 ## Where to start
 
 1. `suite/HANDOFF.md` for the state of the music, then the task at hand.
