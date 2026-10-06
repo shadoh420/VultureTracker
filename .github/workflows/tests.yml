@@ -34,7 +34,7 @@ jobs:
           tests.test_modimport tests.test_compose tests.test_record tests.test_library tests.test_mosaic
           tests.test_spectral tests.test_gpimport tests.test_midiimport tests.test_faust tests.test_workflow
           tests.test_release070 tests.test_release080 tests.test_release080_import tests.test_release080_dsp
-          tests.test_import tests.test_synth tests.test_release100
+          tests.test_import tests.test_synth tests.test_release100 tests.test_stems_to_song
       - name: Page tests
         run: >-
           python -m unittest tests.test_page tests.test_workflow_page tests.test_release070_page

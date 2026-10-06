@@ -8,6 +8,18 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   shows its spectrogram over the same span, its level matched to the song's, and DELTA the song minus the reference in
   each cell (red: louder in the song), with the mean |Δ| per order and the span's median. OFFSET (ms) and ALIGN (the
   onsets of both cross-correlated) line it up; a section is compared with the part of the reference it covers.
+- **Transcribing a recording** (`tools/transcribe_audio.py`, with `stems_to_midi.py`, `yourmt3_transcribe.py` and
+  `transcription_diff.py`): stems by demucs or a RoFormer model, notes by basic-pitch and/or YourMT3+ (each makes its own
+  song; the bass optionally by VultureTracker's YIN), drums by ADTOF, merged on the track's own beat grid into a MIDI
+  file, imported and rendered, and scored against the recording. The tools run in their own Python environments
+  (`--setup`, with `--cuda` for an NVIDIA card and `--yourmt3` for its model); `tools/transcribe_setup.cmd` and
+  `transcribe.cmd` set up and run it all on a Windows PC with nothing installed. `tools/stems_to_song.py` then plays such a
+  transcription on samples cut from the recording's own stems: drum hits sliced and grouped into types, notes on a sample
+  per pitch, or a stem itself in sections, with a tempo channel that keeps the render on the recording's grid.
+  `tools/tempo_check.py` says first whether a recording sits on a steady grid: its BPM, where row 0 falls, and how far
+  each stretch of it is off the grid. `tools/make_notes.py` writes the transcribed notes as a MIDI file and a Guitar Pro 5
+  tab on that grid, the bar lines on a given downbeat: guitar and bass on the standard tuning their lowest notes need,
+  frets chosen so the hand moves least, and the drums. Nothing is added to the app or the exe.
 - Fixed: under numpy 1.x on Windows the SPECTRUM view (and DELTA) went blank past about 40 s of a render: a 32-bit
   column index overflowed. The exe and numpy 2 were not affected.
 
