@@ -2,7 +2,10 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.1.0 (2026-10-05)
+
+A recording can sit under the song in the SPECTRUM tab, to compare the two cell by cell, and new tools outside the app
+turn a recording into a song, a MIDI file and a Guitar Pro tab.
 
 - **A reference in the SPECTRUM tab.** REFERENCE sets another recording (WAV, MP3, FLAC, OGG…) under what plays: REF
   shows its spectrogram over the same span, its level matched to the song's, and DELTA the song minus the reference in
@@ -22,6 +25,10 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   frets chosen so the hand moves least, and the drums. Nothing is added to the app or the exe.
 - Fixed: under numpy 1.x on Windows the SPECTRUM view (and DELTA) went blank past about 40 s of a render: a 32-bit
   column index overflowed. The exe and numpy 2 were not affected.
+
+**Upgrade note:** song files, history and checkpoints are unchanged from 1.0.0, and so are renders. The reference is
+kept with the tryout settings beside the song. The transcription tools are not in the exe: they run from a source
+checkout in their own Python environments (`python tools/transcribe_audio.py --setup`, 3 to 6 GB).
 
 ## 1.0.0 (2026-10-01)
 
