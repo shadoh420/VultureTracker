@@ -220,9 +220,15 @@ _JUCE_B64 = ".ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+"
 
 
 def _juce_base64(data: bytes) -> str:
-    """JUCE MemoryBlock::toBase64Encoding: '<size>.' + 6-bit little-endian chunks in JUCE's alphabet."""
-    n = int.from_bytes(data, "little")
-    return f"{len(data)}." + "".join(_JUCE_B64[(n >> (6 * i)) & 63] for i in range((len(data) * 8 + 5) // 6))
+    """JUCE MemoryBlock::toBase64Encoding: '<size>.' + 6-bit little-endian chunks in JUCE's alphabet. Three bytes are
+    exactly four chunks, so the blob goes three bytes at a time (one integer of the whole blob, shifted per chunk, costs
+    the square of its size: minutes for a 1 MB Surge patch); the last group may be 1 or 2 bytes, 2 or 3 chunks."""
+    chars = []
+    for i in range(0, len(data), 3):
+        group = data[i:i + 3]
+        n = int.from_bytes(group, "little")
+        chars += [_JUCE_B64[(n >> (6 * j)) & 63] for j in range((len(group) * 8 + 5) // 6)]
+    return f"{len(data)}." + "".join(chars)
 
 
 def _juce_xml_blob(xml: bytes) -> bytes:

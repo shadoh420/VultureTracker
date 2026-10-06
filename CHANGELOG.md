@@ -16,6 +16,8 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   note).
 - Fixed: `tools/yourmt3_transcribe.py` failed with a relative `--model-dir` (it changed into that folder before using
   the path).
+- Fixed: handing a large plugin state to the synth host (a Surge XT patch of about 1 MB) took minutes: its encoding
+  grew with the square of the size. It is linear now (1 MB in 0.16 s).
 
 ## 1.1.0 (2026-10-05)
 

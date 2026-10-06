@@ -1,4 +1,5 @@
 """Sampling workflow tests. The Surge render test is skipped when Surge XT / pedalboard are unavailable."""
+import random
 import tempfile
 import unittest
 from pathlib import Path
@@ -157,6 +158,17 @@ class TestDx7(unittest.TestCase):
         self.assertEqual(p["transpose"], (24, 48))
         self.assertEqual(len(p), 19 + 6 * 21)
         self.assertEqual(dx7_voice_names(cart)[3], "TEST VOICE")
+
+
+class TestJuceBase64(unittest.TestCase):
+    def test_matches_the_whole_blob_formula(self):
+        from vulturetracker.synth import _JUCE_B64, _juce_base64
+        rng = random.Random(1)
+        for size in (0, 1, 2, 3, 4, 5, 6, 7, 8, 100, 4097):  # every remainder mod 3, short and long
+            data = rng.randbytes(size)
+            n = int.from_bytes(data, "little")  # the original: one integer for the blob, shifted once per character
+            old = f"{size}." + "".join(_JUCE_B64[(n >> (6 * i)) & 63] for i in range((size * 8 + 5) // 6))
+            self.assertEqual(_juce_base64(data), old, size)
 
 
 class TestTryout(unittest.TestCase):
