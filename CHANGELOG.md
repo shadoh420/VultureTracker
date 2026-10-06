@@ -2,22 +2,30 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.2.0 (2026-10-06)
 
-- `tools/stems_to_song.py` and `tools/make_notes.py`: `--short-bar ROW` puts a 2/4 bar at a recording row, for a
-  recording that gains half a bar there: the bars after it start 8 rows later, the song has an 8-row pattern there, the
-  MIDI changes its time signature and the tab has a 2/4 measure.
-- `tools/make_notes.py`: the tab holds every part the MIDI does. The parts that are no guitar or bass (other, piano,
-  vocals) are notation tracks: 7 strings tuned in equal steps across the part's range, any frets, the MIDI's sound.
-- `tools/transcription_checks.py`: the checks a transcription run needs, in one tool: `downbeats` (beat_this's downbeats
-  on the tools' grid: K and its share, the runs of one phase, crashes on bar lines, a swing or triplet feel), `score` (each
-  transcriber's notes against their stem, the pick per stem and its make_notes.py arguments), `gp5` (the tab read back
-  against the MIDI), `it` (the exported .it's DELTA against the song's) and `missing` (rows where a stem sounds with no
-  note).
-- Fixed: `tools/yourmt3_transcribe.py` failed with a relative `--model-dir` (it changed into that folder before using
-  the path).
+The transcription tools follow a recording that gains half a bar, put every part in the Guitar Pro tab and check a run
+in one tool, and the synth host hands a large patch to its plugin in a fraction of a second.
+
+- **A 2/4 bar** (`tools/stems_to_song.py` and `tools/make_notes.py`, `--short-bar ROW`): for a recording that gains half
+  a bar at a row, the bars after it start 8 rows later: the song has an 8-row pattern there, the MIDI changes its time
+  signature and the tab has a 2/4 measure.
+- **Every part in the tab** (`tools/make_notes.py`): the parts that are no guitar or bass (other, piano, vocals) are
+  notation tracks: 7 strings tuned in equal steps across the part's range, any frets, the MIDI's sound.
+- **`tools/transcription_checks.py`**: the checks a transcription run needs, in one tool: `downbeats` (beat_this's
+  downbeats on the tools' grid: K and its share, the runs of one phase, crashes on bar lines, a swing or triplet feel),
+  `score` (each transcriber's notes against their stem, the pick per stem and its make_notes.py arguments), `gp5` (the
+  tab read back against the MIDI), `it` (the exported .it's DELTA against the song's) and `missing` (rows where a stem
+  sounds with no note).
 - Fixed: handing a large plugin state to the synth host (a Surge XT patch of about 1 MB) took minutes: its encoding
   grew with the square of the size. It is linear now (1 MB in 0.16 s).
+- Fixed: `tools/yourmt3_transcribe.py` failed with a relative `--model-dir` (it changed into that folder before using
+  the path).
+
+**Upgrade note:** song files, history and checkpoints are unchanged from 1.1.0, and so are renders. The transcription
+tools are not in the exe: they run from a source checkout in their own Python environments (`python
+tools/transcribe_audio.py --setup`); `transcription_checks.py downbeats` also needs beat_this in the torch environment
+(its error message gives the install line).
 
 ## 1.1.0 (2026-10-05)
 
