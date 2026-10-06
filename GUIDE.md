@@ -108,6 +108,16 @@ playing (the song or a candidate in it, with the mutes and the unwritten mix), c
 across with the order boundaries marked, aligned with the playhead (click or drag to seek), frequency up in Hz on a
 LOG axis (20 Hz to 22 kHz) or a LIN one (where imaging and aliasing near the top show), colour = level in dBFS from
 -100 to -10 (a full-scale sine is 0 dB); each band shows its loudest bin, so a narrow tone between bands is not lost.
+REFERENCE sets another recording under it (a WAV, MP3, FLAC, OGG or anything ffmpeg reads: a track being transcribed,
+or a mix to match), kept with the tryout settings. OFFSET is how much later the song starts than the reference, in ms
+(reference time = song time − offset; negative: earlier); ALIGN finds it by cross-correlating the onsets of what plays
+and of the reference within 30 s of the current offset (music repeats, so a beat or a bar off can score nearly as well:
+check by ear and nudge it). REF shows the reference over the span that plays (a section is cut from where it starts),
+its overall level matched to the song's; DELTA shows the song's level minus the reference's in each cell, −30 to +30 dB
+(red: louder in the song, blue: quieter, black: silent in both), with the mean |Δ| of each order at the top and the
+median of the whole span, the gain put on the reference and how much of the span it covers beside CLEAR. DELTA
+compares sound, not notes: placeholder or different sounds differ even where every note is right
+(`tools/transcription_diff.py` scores the notes).
 The Song Overview tab has a stems rail that is also a mixer: mute or solo channels, a volume and pan fader per
 channel, a MIX VOL master with the peak of what is playing, and a GAIN fader per sample slot in the slot table (click
 any fader's number, or an instrument-panel value, to type it: Enter applies it the way the fader would, clamped to the

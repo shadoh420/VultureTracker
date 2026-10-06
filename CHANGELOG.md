@@ -2,6 +2,15 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- **A reference in the SPECTRUM tab.** REFERENCE sets another recording (WAV, MP3, FLAC, OGG…) under what plays: REF
+  shows its spectrogram over the same span, its level matched to the song's, and DELTA the song minus the reference in
+  each cell (red: louder in the song), with the mean |Δ| per order and the span's median. OFFSET (ms) and ALIGN (the
+  onsets of both cross-correlated) line it up; a section is compared with the part of the reference it covers.
+- Fixed: under numpy 1.x on Windows the SPECTRUM view (and DELTA) went blank past about 40 s of a render: a 32-bit
+  column index overflowed. The exe and numpy 2 were not affected.
+
 ## 1.0.0 (2026-10-01)
 
 A song, its history and its exports stay right from version to version, and the first things a new user reaches for

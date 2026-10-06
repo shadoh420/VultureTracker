@@ -496,10 +496,20 @@ def spectrogram(path, scale="log", cols=1200, rows=256, n=4096):
     frames centred in each, so column c covers c/cols..(c+1)/cols of the duration) and per row (`rows` bands from 20 Hz,
     or 0 Hz when `scale` is "lin", up to the Nyquist frequency, log- or evenly spaced; the loudest bin in each band, so a
     narrow image between two bands is not lost). Returns (db [rows x cols], band edges in Hz), row 0 the lowest band."""
+    return _spectrogram_of(*_wav_mono(path), scale, cols, rows, n)
+
+
+def _wav_mono(path):
+    """A 16-bit WAV as (mono float32 array, rate)."""
     import numpy as np
     with wave.open(str(path), "rb") as w:
         rate, nch = w.getframerate(), w.getnchannels()
-        x = np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float32).reshape(-1, nch).mean(axis=1) / 32768
+        return np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float32).reshape(-1, nch).mean(axis=1) / 32768, rate
+
+
+def _spectrogram_of(x, rate, scale="log", cols=1200, rows=256, n=4096):
+    """spectrogram() of a mono float array."""
+    import numpy as np
     length = len(x)
     hop = max(64, min(n // 2, length // cols))
     x = np.concatenate([np.zeros(n // 2, np.float32), x, np.zeros(n, np.float32)])  # frame i is centred on sample i * hop
@@ -510,7 +520,7 @@ def spectrogram(path, scale="log", cols=1200, rows=256, n=4096):
     idx = np.minimum((edges[:-1] * n / rate).astype(int), n // 2)
     win = np.hanning(n).astype(np.float32)
     acc, cnt = np.zeros((cols, rows)), np.zeros(cols)
-    col_of = np.minimum(np.arange(frames) * hop * cols // max(length, 1), cols - 1)
+    col_of = np.minimum(np.arange(frames, dtype=np.int64) * hop * cols // max(length, 1), cols - 1)  # numpy 1 on Windows: int32 overflows past ~40 s
     for a in range(0, frames, 256):
         fr = np.lib.stride_tricks.sliding_window_view(x, n)[a * hop:(a + 256) * hop:hop][: frames - a]
         power = np.abs(np.fft.rfft(fr * win, axis=1)) ** 2
@@ -532,11 +542,98 @@ def png_rgb(rgb):
 @functools.lru_cache(maxsize=12)
 def spectrogram_png(path, stamp, scale="log"):
     """The spectrogram as a PNG, the highest band at the top (`stamp` keys the cache on the file's mtime and size)."""
-    import numpy as np
     db, _ = spectrogram(path, scale)
-    v = np.clip((db[::-1] - SPEC_DB[0]) / (SPEC_DB[1] - SPEC_DB[0]), 0, 1)
-    stops, pos = np.array(SPEC_STOPS, float), np.linspace(0, 1, len(SPEC_STOPS))
+    return _colour_png((db - SPEC_DB[0]) / (SPEC_DB[1] - SPEC_DB[0]), SPEC_STOPS)
+
+
+def _colour_png(v, stops):
+    """A PNG of `v` (rows x cols, 0..1, row 0 the lowest band, drawn at the bottom) through the colour `stops`."""
+    import numpy as np
+    v = np.clip(v[::-1], 0, 1)
+    stops, pos = np.array(stops, float), np.linspace(0, 1, len(stops))
     return png_rgb(np.stack([np.interp(v, pos, stops[:, k]) for k in range(3)], axis=-1).astype(np.uint8))
+
+
+# the reference: another recording (any sound file ffmpeg reads) set under the render that plays, for the SPECTRUM tab's
+# REF and DELTA views. The offset is how much later the song starts than the reference, in ms: reference time = song
+# time - offset. DELTA is the song's level minus the reference's in each cell, the reference's overall level matched to
+# the song's first; red = louder in the song, blue = quieter
+DELTA_DB = 30
+DELTA_STOPS = [[30, 80, 200], [120, 160, 225], [235, 235, 235], [230, 130, 110], [205, 35, 35]]
+DELTA_RANGE = 80  # cells more than this many dB under the loudest of both count as silence in both
+
+
+def reference_wav(src, folder):
+    """`src` decoded by ffmpeg to 16-bit stereo at RATE in `folder` (a WAV too: another depth or rate would not line up
+    with the render), decoded again when the source changes."""
+    src = Path(src).resolve()
+    st = src.stat()
+    out = Path(folder) / f"reference-{hashlib.sha1(f'{src}|{st.st_mtime}|{st.st_size}'.encode()).hexdigest()[:12]}.wav"
+    if not out.exists():
+        tmp = out.with_name(out.stem + ".part.wav")
+        r = subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src), "-map", "0:a:0", "-ac", "2", "-ar", str(RATE),
+                            "-c:a", "pcm_s16le", str(tmp)], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if r.returncode:
+            tmp.unlink(missing_ok=True)
+            raise ValueError(f"{src.name}: ffmpeg could not read it ({r.stderr.decode(errors='replace').strip()[-300:]})")
+        os.replace(tmp, out)
+    return out
+
+
+def _cut(y, length, start):
+    """`length` samples of `y` from sample `start`; silence where that runs outside it."""
+    import numpy as np
+    out = np.zeros(length, np.float32)
+    a, b = max(0, start), min(len(y), start + length)
+    if b > a:
+        out[a - start:b - start] = y[a:b]
+    return out
+
+
+@functools.lru_cache(maxsize=4)
+def reference_compare(render, rstamp, ref, fstamp, offset_ms, start, scale="log"):
+    """The render (a section `start` seconds into the song) against the reference cut to the same span: (song dB,
+    reference dB, delta dB, mean |delta| per column (None where both are silent), the gain put on the reference in dB,
+    the share of the render the reference covers). The stamps key the cache on the files' mtime and size."""
+    import numpy as np
+    x, rate = _wav_mono(render)
+    y, _ = _wav_mono(ref)
+    at = int(round((start - offset_ms / 1000) * rate))
+    a = max(0, -at)
+    b = max(a, min(len(x), len(y) - at))  # the part of the render the reference covers
+    y = _cut(y, len(x), at)
+    rx, ry = (float(np.sqrt(np.mean(v[a:b] ** 2))) if b > a else 0.0 for v in (x, y))
+    gain = rx / ry if rx > 0 and ry > 0 else 1.0
+    s, _ = _spectrogram_of(x, rate, scale)
+    r, _ = _spectrogram_of(y * gain, rate, scale)
+    floor = max(SPEC_DB[0], max(s.max(), r.max()) - DELTA_RANGE)
+    s, r = np.maximum(s, floor), np.maximum(r, floor)
+    d = s - r
+    live = (s > floor) | (r > floor)
+    n = live.sum(axis=0)
+    cols = [round(float(v), 1) if k else None for v, k in zip(np.abs(d * live).sum(axis=0) / np.maximum(n, 1), n)]
+    return s, r, np.where(live, d, np.nan), cols, round(20 * math.log10(gain), 1), round((b - a) / max(1, len(x)), 3)
+
+
+def reference_align(render, ref, offset_ms, start, reach=30.0):
+    """The offset (ms) that lines the reference up with the render: the onset strength (dsp.novelty) of both,
+    cross-correlated (by FFT, to the hop: 6 ms) within `reach` seconds of the current offset. Returns (offset_ms,
+    correlation 0-1). Music repeats, so a beat or a bar away can score nearly as well: check by ear, nudge OFFSET."""
+    import numpy as np
+    from .dsp import novelty
+    x, rate = _wav_mono(render)
+    y, _ = _wav_mono(ref)
+    pad = int(reach * rate)
+    at = int(round((start - offset_ms / 1000) * rate)) - pad  # the reference from `reach` before where the render sits now
+    fx, hop = novelty(x, rate)
+    fy, _ = novelty(_cut(y, len(x) + 2 * pad, at), rate)
+    fx, fy = fx - fx.mean(), fy - fy.mean()
+    size = 1 << int(np.ceil(np.log2(len(fy) + len(fx))))
+    c = np.fft.irfft(np.fft.rfft(fy, size) * np.conj(np.fft.rfft(fx, size)), size)[: len(fy) - len(fx) + 1]
+    k = int(np.argmax(c))
+    seg = fy[k:k + len(fx)]
+    corr = float(seg @ fx) / (float(np.linalg.norm(seg) * np.linalg.norm(fx)) or 1.0)
+    return round((start - (at + k * hop) / rate) * 1000), round(max(0.0, corr), 2)
 
 
 def worklet_js():
@@ -1167,6 +1264,59 @@ class State:
 
     def cands(self):
         return self.meta["candidates"].setdefault(str(self.slot), [])
+
+    # ---- the reference recording (SPECTRUM tab)
+
+    def section_start(self):
+        """Where the rendered section starts in the song, in seconds (the order times of the facts)."""
+        f, o = self.facts, self.orders
+        return f["orders"][o[0]]["start"] if f and o and o[0] < len(f["orders"]) else 0.0
+
+    def set_reference(self, path, body):
+        """The reference: `path` sets it (decoded once to check that ffmpeg reads it; the offset is kept), `offset` (ms)
+        moves it, `align` with the render `key` that plays sets the offset that lines it up, `clear` drops it."""
+        ref = dict(self.meta.get("reference") or {})
+        if body.get("clear"):
+            ref = None
+        if path:
+            src = (self.base_dir / Path(path).expanduser()).resolve()
+            if not src.is_file():
+                raise ValueError(f"no such file: {src}")
+            reference_wav(src, self.cache_dir)
+            ref = {"file": str(src), "offset_ms": ref.get("offset_ms", 0) if ref else 0}
+        if ref and body.get("offset") is not None:
+            ref["offset_ms"] = round(float(body["offset"]))
+        out = {}
+        if ref and body.get("align"):
+            r = self.renders.get(body.get("key") or "")
+            if not r or r["status"] != "ready":
+                raise ValueError("ALIGN needs a render that is playing: wait for it to finish")
+            ref["offset_ms"], out["corr"] = reference_align(r["file"], reference_wav(ref["file"], self.cache_dir), ref["offset_ms"],
+                                                            self.section_start())
+        with self.lock:
+            self.meta["reference"] = ref
+            self.save_meta()
+        return {"reference": ref, **out}
+
+    def reference_compare(self, key, scale="log"):
+        """reference_compare() for the render `key` against the reference; ValueError when either is missing."""
+        r, ref = self.renders.get(key), self.meta.get("reference")
+        if not ref:
+            raise ValueError("no reference set")
+        if not r or r["status"] != "ready":
+            raise ValueError("not rendered")
+        stamp = lambda f: f"{Path(f).stat().st_mtime}:{Path(f).stat().st_size}"  # noqa: E731
+        w = reference_wav(ref["file"], self.cache_dir)
+        return reference_compare(r["file"], stamp(r["file"]), str(w), stamp(w), ref["offset_ms"], self.section_start(), scale)
+
+    def reference_png(self, key, view, scale="log"):
+        s, r, d, *_ = self.reference_compare(key, scale)
+        if view == "delta":
+            import numpy as np
+            n = len(DELTA_STOPS)  # the colour stops below the scale's bottom: black, for cells silent in both
+            v = (np.clip((d + DELTA_DB) / (2 * DELTA_DB), 0, 1) * (n - 1) + 1) / n
+            return _colour_png(np.nan_to_num(v, nan=0.0), [[0, 0, 0]] + DELTA_STOPS)
+        return _colour_png((r - SPEC_DB[0]) / (SPEC_DB[1] - SPEC_DB[0]), SPEC_STOPS)
 
     def current_file(self):
         f = ((self.song.get("samples") or {}).get(self.slot) or {}).get("file")
@@ -3611,6 +3761,7 @@ class State:
                 "muted": sorted(set(self.meta.get("muted") or [])), "solo": self.meta.get("solo"),
                 "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak")},
                 "mix": self.mix(), "meters": self.meters, "voice": voice, "spec": {"db": SPEC_DB, "stops": SPEC_STOPS, "nyquist": RATE / 2},
+                "reference": self.meta.get("reference"), "delta": {"db": DELTA_DB, "stops": DELTA_STOPS},
                 "voice_range": VOICE_RANGE,
                 "candidates": cands, "build": self.build, "stems": self.stems, "export": self.export_result,
                 "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
@@ -4015,6 +4166,19 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ImportError, wave.Error, ValueError) as e:
                 return self._send(500, {"error": f"{type(e).__name__}: {e}"})
             return self._send(200, png, "image/png")
+        if path.startswith("/refspec/"):  # ?view=ref|delta&scale=log|lin
+            try:
+                png = st.reference_png(path[9:], "delta" if "view=delta" in self.path else "ref", "lin" if "scale=lin" in self.path else "log")
+            except (OSError, ImportError, wave.Error, ValueError) as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
+            return self._send(200, png, "image/png")
+        if path.startswith("/api/refdiff/"):
+            try:
+                *_, cols, gain, covered = st.reference_compare(path[13:])
+            except (OSError, ImportError, wave.Error, ValueError) as e:
+                return self._send(400, {"error": f"{type(e).__name__}: {e}"})
+            live = sorted(v for v in cols if v is not None)
+            return self._send(200, {"cols": cols, "median": live[len(live) // 2] if live else None, "gain_db": gain, "covered": covered})
         if path.startswith("/raw/"):
             try:
                 c = st.cands()[int(path[5:])]
@@ -4093,6 +4257,8 @@ class Handler(BaseHTTPRequestHandler):
                 st.queue_all()
             elif act == "loop":
                 st.set_loop(body)
+            elif act == "reference":  # path or browse sets it, offset (ms) moves it, align (with key) lines it up, clear
+                return self._send(200, st.set_reference(self.browse(wav=True) if body.get("browse") else body.get("path"), body))
             elif act == "mute":
                 st.meta["muted"] = sorted({int(i) for i in body.get("muted", [])})
                 st.meta["solo"] = None if body.get("solo") is None else int(body["solo"])

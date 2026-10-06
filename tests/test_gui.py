@@ -522,6 +522,52 @@ class TestGui(unittest.TestCase):
         self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
         self.assertEqual(struct.unpack(">II", png[16:24]), (1200, 256))  # width, height
 
+    def test_reference_compare_and_align(self):
+        import numpy as np
+        try:
+            gui.ffmpeg_exe()
+        except OSError:
+            self.skipTest("no ffmpeg (imageio-ffmpeg or PATH)")
+        # 8 s of irregular hits on a tone (no period, so one lag fits); the reference is the same 750 ms later, 6 dB down
+        rng = np.random.default_rng(1)
+        x = 0.1 * np.sin(2 * np.pi * 220 * np.arange(8 * RATE) / RATE)
+        for t in np.cumsum(rng.uniform(0.15, 0.6, 20)):
+            i = int(t * RATE)
+            x[i:i + 2000] += 0.6 * np.exp(-np.arange(len(x[i:i + 2000])) / 300) * rng.choice([-1, 1], len(x[i:i + 2000]))
+        pcm = lambda v: np.repeat(np.round(np.clip(v, -1, 1) * 32767).astype("<i2"), 2).tobytes()  # noqa: E731
+        gui._write_pcm(self.dir / "r.wav", pcm(x))
+        gui._write_pcm(self.dir / "late.wav", pcm(np.concatenate([np.zeros(int(0.75 * RATE)), x / 2])))
+        gui._write_pcm(self.dir / "sec.wav", pcm(x[3 * RATE:]))  # a section render starting 3 s into the song
+        same = gui.reference_wav(self.dir / "r.wav", self.dir)
+        late = gui.reference_wav(self.dir / "late.wav", self.dir)
+        med = lambda cols: sorted(c for c in cols if c is not None)[len([c for c in cols if c is not None]) // 2]  # noqa: E731
+        # a render against itself: no difference, no gain, all of it covered
+        *_, cols, gain, covered = gui.reference_compare(str(self.dir / "r.wav"), "1", str(same), "1", 0, 0.0)
+        self.assertLess(med(cols), 0.5)
+        self.assertEqual((abs(gain), covered), (0.0, 1.0))
+        # the late reference: ALIGN finds the offset (the song starts 750 ms earlier: -750), from either side
+        for start in (0, -2000, 1500):
+            off, corr = gui.reference_align(str(self.dir / "r.wav"), str(late), start, 0.0)
+            self.assertLessEqual(abs(off + 750), 12)
+            self.assertGreater(corr, 0.5)
+        *_, cols, gain, covered = gui.reference_compare(str(self.dir / "r.wav"), "1", str(late), "1", -750, 0.0)
+        self.assertLess(med(cols), 1.0)
+        self.assertAlmostEqual(gain, 6.0, delta=0.3)  # the reference's level matched to the song's
+        # a section: the reference is cut from where the section starts
+        *_, cols, gain, covered = gui.reference_compare(str(self.dir / "sec.wav"), "1", str(late), "1", -750, 3.0)
+        self.assertLess(med(cols), 1.0)
+        self.assertEqual(covered, 1.0)
+        # through the state: set, move, clear (kept in the tryout settings)
+        st = self.state()
+        self.assertEqual(st.set_reference(str(self.dir / "late.wav"), {})["reference"]["offset_ms"], 0)
+        self.assertEqual(st.set_reference(None, {"offset": -750})["reference"],
+                         {"file": str((self.dir / "late.wav").resolve()), "offset_ms": -750})
+        self.assertEqual(json.loads(st.meta_path.read_text())["reference"]["offset_ms"], -750)
+        self.assertEqual(st.snapshot()["reference"]["offset_ms"], -750)
+        self.assertIsNone(st.set_reference(None, {"clear": True})["reference"])
+        with self.assertRaises(ValueError):
+            st.set_reference(str(self.dir / "missing.mp3"), {})
+
 
     def test_typed_values_clamp_to_the_song_format(self):
         # a typed value goes through the fader's path (set_mix): out of range, it lands on the song format's limit
