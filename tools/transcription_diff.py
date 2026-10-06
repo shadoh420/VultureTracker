@@ -52,6 +52,20 @@ def main():
     score(args)
 
 
+def stem_peaks(y):
+    """A stem's constant-Q peaks (`y` at SR, frames of HOP, bins from MIDI LO): (the peaks within 15 dB of their frame's
+    loudest and over -45 dB, those of them that are no harmonic of a stronger one)."""
+    import librosa
+    import numpy as np
+    C = librosa.amplitude_to_db(np.abs(librosa.cqt(y, sr=SR, hop_length=HOP, fmin=librosa.midi_to_hz(LO), n_bins=NB)), ref=np.max)
+    fmax = C.max(axis=0, keepdims=True)
+    peak = (C >= np.maximum(np.roll(C, 1, 0), np.roll(C, -1, 0))) & (C > fmax - 15) & (C > -45)
+    harm = np.zeros_like(peak)  # a peak an octave or a twelfth above a stronger peak is its harmonic, not a note
+    harm[12:] |= peak[:-12] & (C[:-12] > C[12:])
+    harm[19:] |= peak[:-19] & (C[:-19] > C[19:])
+    return peak, peak & ~harm
+
+
 def score(args):
     import librosa
     import matplotlib
@@ -98,13 +112,8 @@ def score(args):
                     all_bar[k] += 1
                     hits_bar[k] += near(t, ref)
         else:
-            C = librosa.amplitude_to_db(np.abs(librosa.cqt(y, sr=SR, hop_length=HOP, fmin=librosa.midi_to_hz(LO), n_bins=NB)), ref=np.max)
-            fmax = C.max(axis=0, keepdims=True)
-            peak = (C >= np.maximum(np.roll(C, 1, 0), np.roll(C, -1, 0))) & (C > fmax - 15) & (C > -45)
-            harm = np.zeros_like(peak)  # a peak an octave or a twelfth above a stronger peak is its harmonic, not a note
-            harm[12:] |= peak[:-12] & (C[:-12] > C[12:])
-            harm[19:] |= peak[:-19] & (C[:-19] > C[19:])
-            ref, roll, ok, tot = peak & ~harm, np.zeros_like(peak), 0, 0
+            peak, ref = stem_peaks(y)
+            roll, ok, tot = np.zeros_like(peak), 0, 0
             for nt in inst.notes:
                 i, j, k = int((nt.start - off) * fps), int((nt.end - off) * fps), nt.pitch - LO
                 if not 0 <= k < NB or j <= max(0, i):

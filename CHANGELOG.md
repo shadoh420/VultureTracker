@@ -2,6 +2,21 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- `tools/stems_to_song.py` and `tools/make_notes.py`: `--short-bar ROW` puts a 2/4 bar at a recording row, for a
+  recording that gains half a bar there: the bars after it start 8 rows later, the song has an 8-row pattern there, the
+  MIDI changes its time signature and the tab has a 2/4 measure.
+- `tools/make_notes.py`: the tab holds every part the MIDI does. The parts that are no guitar or bass (other, piano,
+  vocals) are notation tracks: 7 strings tuned in equal steps across the part's range, any frets, the MIDI's sound.
+- `tools/transcription_checks.py`: the checks a transcription run needs, in one tool: `downbeats` (beat_this's downbeats
+  on the tools' grid: K and its share, the runs of one phase, crashes on bar lines, a swing or triplet feel), `score` (each
+  transcriber's notes against their stem, the pick per stem and its make_notes.py arguments), `gp5` (the tab read back
+  against the MIDI), `it` (the exported .it's DELTA against the song's) and `missing` (rows where a stem sounds with no
+  note).
+- Fixed: `tools/yourmt3_transcribe.py` failed with a relative `--model-dir` (it changed into that folder before using
+  the path).
+
 ## 1.1.0 (2026-10-05)
 
 A recording can sit under the song in the SPECTRUM tab, to compare the two cell by cell, and new tools outside the app

@@ -4,24 +4,29 @@ its downbeats.
 Runs in the basic-pitch environment that tools/transcribe_audio.py --setup makes (pretty_midi, soundfile, PyGuitarPro):
 
   <env>/bp/Scripts/python tools/make_notes.py WORK [--notes basic-pitch] [--part STEM=FILE ...] [--keep-quiet STEM ...]
-                                               [--downbeat-row 0] [--tempo BPM] [--out NAME]
+                                               [--downbeat-row 0] [--short-bar ROW] [--tempo BPM] [--out NAME]
 
 WORK is a folder made by transcribe_audio.py: stems/<model>/<stem>.wav, midi/<stem>_<notes>.mid (each pitched stem's
 notes), midi/drums_adtof.mid when ADTOF ran, and <name>-<notes>.json (the BPM). The grid is stems_to_song.py's: that BPM,
 row 0 where the drum stem's level rises fold. --downbeat-row is a recording row where a bar starts (0 when the recording
 starts on a downbeat; a downbeat tracker such as beat_this tells), and the MIDI begins at the bar line at or before the
-recording. Each pitched stem louder than -50 dBFS plays its notes (--part STEM=FILE takes them from another MIDI, such as
-basic-pitch run again with --minimum-note-length 58: its default, about 128 ms, is longer than a 16th above 117 BPM);
+recording. --short-bar ROW makes the bar starting at that recording row a 2/4 bar, for a recording that gains half a bar
+there (stems_to_song.py's option of that name): the MIDI changes its time signature, the tab has a 2/4 measure. Each
+pitched stem louder than -50 dBFS plays its notes (--part STEM=FILE takes them from another MIDI, such as basic-pitch run
+again with --minimum-note-length 58: its default, about 128 ms, is longer than a 16th above 117 BPM);
 basic-pitch's quiet notes (velocity under 45, under 40 for "other") are dropped as stems_to_midi.py drops them, except for
 the stems named with --keep-quiet. Drums: ADTOF's hits in General MIDI keys.
 
-The tab holds the guitar and bass stems and the drums (the other stems are in the MIDI only): each on the standard-family
-tuning whose lowest string takes its lowest note that occurs three times or more, frets by a Viterbi path (a chord on
-distinct strings, a higher note on a higher string, within 4 frets or else 5, the hand moving least); notes no fingering
-fits are dropped and counted. In the tab a note lasts to the next onset at most (the MIDI keeps the lengths). The tab is
+The tab holds every part the MIDI does. Guitar and bass: each on the standard-family tuning whose lowest string takes its
+lowest note that occurs three times or more, frets by a Viterbi path (a chord on distinct strings, a higher note on a
+higher string, within 4 frets or else 5, the hand moving least). The other pitched stems (other, piano, vocals) are
+notation tracks: 7 strings in equal steps from the part's lowest note (a fourth to an octave apart, wide enough for its
+highest note at fret 24), any frets, a chord on distinct strings, the MIDI's instrument sound. Notes no fingering fits
+are dropped and counted. In the tab a note lasts to the next onset at most (the MIDI keeps the lengths). The tab is
 read back once written. Writes WORK/<out>.mid and .gp5 (default <name>-notes) and prints where bar 1 falls in the
 recording."""
 import argparse
+import bisect
 import json
 import sys
 from collections import Counter
@@ -29,10 +34,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stems_to_midi import GM_KIT  # noqa: E402
-from stems_to_song import grid_phase  # noqa: E402
+from stems_to_song import bar_starts, grid_phase  # noqa: E402
 
 PITCHED = ("guitar", "bass", "other", "piano", "vocals")
 PROGRAM = {"guitar": 30, "bass": 33, "other": 89, "piano": 0, "vocals": 52}  # General MIDI, as stems_to_midi.py's placeholders
+CHANNEL = {"guitar": 0, "bass": 2, "other": 4, "vocals": 6, "piano": 10}  # the tab's MIDI channels (9 is the drums')
 GUITAR = [("E standard", [64, 59, 55, 50, 45, 40]), ("Eb standard", [63, 58, 54, 49, 44, 39]),
           ("D standard", [62, 57, 53, 48, 43, 38]), ("C# standard", [61, 56, 52, 47, 42, 37]),
           ("C standard", [60, 55, 51, 46, 41, 36]), ("B standard", [59, 54, 50, 45, 40, 35])]
@@ -77,13 +83,21 @@ def fingerings(pitches, tuning, span):
     return out
 
 
-def playable(pitches, tuning):
+def notation_tuning(pitches):
+    """7 strings for a part that is no guitar or bass: from its lowest note up in equal steps, a fourth to an octave,
+    the narrowest that takes its highest note at fret 24 (string 1 first)."""
+    lo, hi = min(pitches), max(pitches)
+    step = min(12, max(5, -(-(hi - lo - FRETS) // 6)))
+    return [lo + step * i for i in range(6, -1, -1)]
+
+
+def playable(pitches, tuning, spans=(4, 5)):
     """The chord's notes that fit (out-of-range notes dropped, then its highest until a fingering exists) and their
-    fingerings: (pitches, fingerings, dropped)."""
+    fingerings within the first of `spans` frets that takes them: (pitches, fingerings, dropped)."""
     ps = [k for k in sorted(set(pitches)) if tuning[-1] <= k <= tuning[0] + FRETS]
     dropped = len(set(pitches)) - len(ps)
     while ps:
-        for span in (4, 5):
+        for span in spans:
             fs = fingerings(ps, tuning, span)
             if fs:
                 return ps, fs, dropped
@@ -132,9 +146,9 @@ def split(a, b):
     return out
 
 
-def tab_track(song, number, name, tuning, notes, channel, program, total, drums=False):
+def tab_track(song, number, name, tuning, notes, channel, program, total, drums=False, spans=(4, 5)):
     """A track of `song` (its measure headers made) holding `notes` (start row, end row, pitch, velocity) over `total`
-    rows; returns (notes written, notes dropped)."""
+    rows, chords within `spans` frets (playable); returns (notes written, notes dropped)."""
     import guitarpro as gp
     track = gp.Track(song, number=number, name=name, strings=[gp.GuitarString(i + 1, v) for i, v in enumerate(tuning)],
                      channel=gp.MidiChannel(channel=channel, effectChannel=channel if drums else channel + 1, instrument=program),
@@ -150,7 +164,7 @@ def tab_track(song, number, name, tuning, notes, channel, program, total, drums=
             dropped += len({k for _, k, _ in g}) - len(keys)
             ps, fs = keys, [tuple((i + 1, k) for i, k in enumerate(keys))]
         else:
-            ps, fs, d = playable([k for _, k, _ in g], tuning)
+            ps, fs, d = playable([k for _, k, _ in g], tuning, spans)
             dropped += d
         if ps:
             rows.append(a)
@@ -169,13 +183,14 @@ def tab_track(song, number, name, tuning, notes, channel, program, total, drums=
         t = nxt
     if t < total:
         segs.append((t, total, None))
+    starts = [(h.start - gp.Duration.quarterTime) // 240 for h in song.measureHeaders] + [total]  # rows where bars start
     written = 0
     for a, b, ns in segs:
         first = True
         while a < b:
-            bar = a // 16
-            e = min(b, (bar + 1) * 16)
-            for _, L in split(a - bar * 16, e - bar * 16):
+            bar = bisect.bisect_right(starts, a) - 1
+            e = min(b, starts[bar + 1])
+            for _, L in split(a - starts[bar], e - starts[bar]):
                 voice = track.measures[bar].voices[0]
                 beat = gp.Beat(voice, status=gp.BeatStatus.normal if ns else gp.BeatStatus.rest, duration=gp.Duration(*DUR[L]))
                 for string, fret, v in ns or []:
@@ -200,6 +215,7 @@ def main():
     ap.add_argument("--part", action="append", default=[], metavar="STEM=FILE", help="a stem's notes from another MIDI file")
     ap.add_argument("--keep-quiet", action="append", default=[], metavar="STEM", help="keep this stem's quiet notes")
     ap.add_argument("--downbeat-row", type=int, default=0, help="a recording row (16ths from the grid's row 0) where a bar starts")
+    ap.add_argument("--short-bar", type=int, metavar="ROW", help="a 2/4 bar at this recording row (where it gains half a bar)")
     ap.add_argument("--tempo", type=int, help="the tempo written (default: the measured BPM rounded)")
     ap.add_argument("--out", help="the files are WORK/<out>.mid and .gp5 (default <name>-notes)")
     args = ap.parse_args()
@@ -225,6 +241,8 @@ def main():
             ap.error(f"--keep-quiet {stem}: one of {', '.join(PITCHED)}")
     if args.tempo is not None and not 20 <= args.tempo <= 400:
         ap.error("--tempo must be between 20 and 400")
+    if args.short_bar is not None and (args.short_bar < 0 or (args.short_bar - args.downbeat_row) % 16):
+        ap.error("--short-bar must start a bar: 0 or more, a multiple of 16 rows from --downbeat-row")
     try:
         import guitarpro as gp
         import numpy as np
@@ -263,36 +281,45 @@ def main():
     notes = {k: v for k, v in notes.items() if v}
     if not notes:
         sys.exit("no notes to write")
-    total = (max(b for ns in notes.values() for _, b, _, _ in ns) + 15) // 16 * 16
+    short = None if args.short_bar is None else args.short_bar - b0
+    starts = bar_starts(max(b for ns in notes.values() for _, b, _, _ in ns), short)
+    total = starts[-1] + (8 if starts[-1] == short else 16)
     out = work / (args.out or f"{name}-notes")
 
     mid = pm.PrettyMIDI(initial_tempo=tempo)
-    mid.time_signature_changes.append(pm.TimeSignature(4, 4, 0))
     sec = 60 / tempo / 4
+    mid.time_signature_changes.append(pm.TimeSignature(4, 4, 0))
+    if short in starts:
+        mid.time_signature_changes += [pm.TimeSignature(2, 4, short * sec), pm.TimeSignature(4, 4, (short + 8) * sec)]
+        print(f"a 2/4 bar: bar {starts.index(short) + 1}, at {g0 + (short + b0) * p:.3f} s of the recording")
     for stem, ns in notes.items():
         inst = pm.Instrument(0 if stem == "drums" else PROGRAM[stem], is_drum=stem == "drums", name=stem)
         inst.notes = [pm.Note(int(v), int(k), a * sec, b * sec) for a, b, k, v in ns]
         mid.instruments.append(inst)
     mid.write(str(out.with_suffix(".mid")))
-    print(f"{out.name}.mid: {total // 16} bars; " + ", ".join(f"{s} {len(ns)} notes" for s, ns in notes.items()))
+    print(f"{out.name}.mid: {len(starts)} bars; " + ", ".join(f"{s} {len(ns)} notes" for s, ns in notes.items()))
 
     song = gp.Song(title=name, tempo=tempo)
     song.measureHeaders, song.tracks = [], []
-    for i in range(total // 16):
-        song.addMeasureHeader(gp.MeasureHeader(number=i + 1, start=gp.Duration.quarterTime * (1 + 4 * i)))
+    for i, a in enumerate(starts):
+        song.addMeasureHeader(gp.MeasureHeader(number=i + 1, start=gp.Duration.quarterTime * (4 + a) // 4,
+                                               **({"timeSignature": gp.TimeSignature(2, gp.Duration(4))} if a == short else {})))
     plan = []
-    for stem, family, ch, label in (("guitar", GUITAR, 0, "Guitar"), ("bass", BASS, 2, "Bass")):
-        if stem in notes:
-            counts = Counter(k for _, _, k, _ in notes[stem])
+    for stem in (s for s in PITCHED if s in notes):
+        label, ns = stem.capitalize(), notes[stem]
+        if stem in ("guitar", "bass"):
+            family = GUITAR if stem == "guitar" else BASS
+            counts = Counter(k for _, _, k, _ in ns)
             low = min([k for k, c in counts.items() if c >= 3] or counts)
             tname, tuning = next((t for t in family if t[1][-1] <= low), family[-1])
-            plan.append((f"{label} ({tname})", tuning, notes[stem], ch, PROGRAM[stem], False))
+            plan.append((f"{label} ({tname})", tuning, ns, CHANNEL[stem], PROGRAM[stem], False, (4, 5)))
+        else:
+            plan.append((f"{label} (notation)", notation_tuning([k for _, _, k, _ in ns]), ns, CHANNEL[stem], PROGRAM[stem],
+                         False, (FRETS,)))
     if "drums" in notes:
-        plan.append(("Drums", [0] * 6, notes["drums"], 9, 0, True))
-    if not plan:
-        sys.exit(f"{out.name}.mid written; no guitar, bass or drums for a tab")
-    for number, (tname, tuning, ns, ch, prog, drums) in enumerate(plan, 1):
-        written, dropped = tab_track(song, number, tname, tuning, ns, ch, prog, total, drums)
+        plan.append(("Drums", [0] * 6, notes["drums"], 9, 0, True, ()))
+    for number, (tname, tuning, ns, ch, prog, drums, spans) in enumerate(plan, 1):
+        written, dropped = tab_track(song, number, tname, tuning, ns, ch, prog, total, drums, spans)
         print(f"  {tname}: {written} notes in the tab, {dropped} dropped (no fingering, or out of range)")
     gp.write(song, str(out.with_suffix(".gp5")))
     back = gp.parse(str(out.with_suffix(".gp5")))

@@ -28,6 +28,7 @@ def main():
                     help="the YourMT3 space checkout with its checkpoint")
     ap.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     args = ap.parse_args()
+    args.model_dir = args.model_dir.resolve()  # used after the chdir below
     for f in args.audio:
         if not f.is_file():
             ap.error(f"no such file: {f}")

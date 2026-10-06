@@ -4,7 +4,8 @@ Runs in the basic-pitch environment that tools/transcribe_audio.py --setup makes
 pretty_midi, pyyaml):
 
   <env>/bp/Scripts/python tools/stems_to_song.py WORK [--notes basic-pitch] [--part STEM=MODE ...] [--legato]
-                                                 [--types 56] [--section-bars 4] [--row0 N] [--title sampled]
+                                                 [--types 56] [--section-bars 4] [--row0 N] [--short-bar ROW]
+                                                 [--title sampled]
 
 WORK is a folder made by transcribe_audio.py: <name>.wav (the recording), stems/<model>/<stem>.wav, <name>-<notes>.mid
 and .json (the merged notes, the BPM and the song's offset), midi/drums_adtof.mid when ADTOF ran. Each stem becomes a
@@ -19,7 +20,9 @@ part, played one of three ways (--part STEM=MODE; default drums=hits, every othe
             section is silent on that channel until the next section
 The recording's 16th grid is measured from the drum stem (level rises folded over a row); the recording's row 0 plays on
 song row --row0 (default: the transcription's offset rounded to a row; 0 puts the song's bar lines on the recording's
-when the recording starts on a downbeat, as a downbeat tracker can tell). A tempo channel keeps the render on
+when the recording starts on a downbeat, as a downbeat tracker can tell). --short-bar ROW puts a 2/4 bar (8 rows) at
+the recording's row ROW, for a recording that gains half a bar there: bars start every 16 rows from song row 0 up to it
+and 8 rows later after it (sections follow the bars). A tempo channel keeps the render on
 it: libopenmpt counts a tick in whole samples of its mixing rate (the app renders at 2 x 44.1 kHz), so at tempo 136 a
 row comes out 198 ppm short; a row one tempo slower goes in whenever the render runs 0.4 ms ahead.
 Writes <name>-<title>.yaml with its samples (<name>-<title>_samples), -song.wav, .mp3 (the song, lined up with the
@@ -45,12 +48,21 @@ MODES = ("hits", "notes", "sections")
 class Grid:
     """The recording's 16th grid and the song on it: recording row k sounds at g0 + k p; song row = k + r0."""
 
-    def __init__(self, bpm, g0, r0):
-        self.p, self.g0, self.r0 = 60 / bpm / 4, g0, r0
+    def __init__(self, bpm, g0, r0, short=None):
+        self.p, self.g0, self.r0, self.short = 60 / bpm / 4, g0, r0, short  # short: the song row of a 2/4 bar
         self.offset_ms = round((r0 * self.p - g0 + PRE) * 1000)
 
     def t(self, k):
         return self.g0 + k * self.p
+
+
+def bar_starts(total, short=None):
+    """The rows where bars start, before `total`: every 16 from row 0, with a 2/4 bar (8 rows) at row `short`."""
+    out, r = [], 0
+    while r < total:
+        out.append(r)
+        r += 8 if r == short else 16
+    return out
 
 
 def rises(x):
@@ -267,10 +279,11 @@ def sections_part(name, x, g, bars):
     """The stem itself, a sample every `bars` bars from song row 0, cross-faded over 2 PRE at the joins (NNA continue)."""
     n = int((len(x) / SR - g.g0) / g.p)
     part = Part(name, nna="continue")
-    for j, s in enumerate(range(-g.r0, n, 16 * bars)):
-        e = min(n, s + 16 * bars)
+    starts = bar_starts(n + g.r0, g.short)
+    cuts = [a - g.r0 for a in starts[::bars]] + [n]  # recording rows
+    for j, (s, e) in enumerate(zip(cuts, cuts[1:])):
         part.samples.append(cut(x, g.t(s) - PRE, g.t(e) + PRE, fade_in=2 * PRE, fade_out=2 * PRE))
-        part.names.append(f"{name} bars {(s + g.r0) // 16 + 1}-{(e + g.r0 + 15) // 16}"[:25])
+        part.names.append(f"{name} bars {j * bars + 1}-{min(len(starts), (j + 1) * bars)}"[:25])
         part.roots.append(None)
         part.loops.append(None)
         part.events.append((s + g.r0, j, 1.0, None, name, None))
@@ -346,7 +359,8 @@ def write(parts, g, song_path, tempo, gains=None):
         sys.exit(f"{len(samples)} samples and {len(lanes)} channels: IT holds 99 and 64 (lower --types, or use sections)")
     ph = type("Ph", (), {})()
     ph.samples, ph.instruments = samples, instruments
-    bars = [(f"b{i + 1}", a, min(16, total - a)) for i, a in enumerate(range(0, total, 16))]
+    starts = bar_starts(total, g.short)
+    bars = [(f"b{i + 1}", a, min(e, total) - a) for i, (a, e) in enumerate(zip(starts, starts[1:] + [starts[-1] + 16]))]
     head = (f"# Played on samples cut from the recording's stems by tools/stems_to_song.py: "
             f"{', '.join(f'{p.name} {mode_of(p)}' for p in parts)}\n# the song starts {g.offset_ms} ms after the "
             "recording (SPECTRUM REFERENCE OFFSET); the tempo channel keeps it on the recording's grid\n")
@@ -417,6 +431,7 @@ def main():
     ap.add_argument("--types", type=int, default=56, help="hit types for the drums (fewer when the 99 samples run short)")
     ap.add_argument("--section-bars", type=int, default=4, help="bars per sample for sections")
     ap.add_argument("--row0", type=int, help="the song row the recording's row 0 plays on (default: from the offset)")
+    ap.add_argument("--short-bar", type=int, metavar="ROW", help="a 2/4 bar at this recording row (where it gains half a bar)")
     ap.add_argument("--title", default="sampled", help="the song is <name>-<title>.yaml in WORK")
     args = ap.parse_args()
     work = args.work.resolve()
@@ -458,8 +473,12 @@ def main():
     meta = json.loads(side.read_text(encoding="utf-8"))
     bpm = meta["bpm"]
     g0 = grid_phase(stems.get("drums", next(iter(stems.values()))), 60 / bpm / 4)
-    g = Grid(bpm, g0, round((meta["offset_ms"] / 1000 + g0) / (60 / bpm / 4)) if args.row0 is None else args.row0)
-    print(f"grid: row 0 of the recording at {g0 * 1000:.1f} ms, song row {g.r0}; offset {g.offset_ms} ms")
+    r0 = round((meta["offset_ms"] / 1000 + g0) / (60 / bpm / 4)) if args.row0 is None else args.row0
+    g = Grid(bpm, g0, r0, None if args.short_bar is None else args.short_bar + r0)
+    if g.short is not None and (g.short < 0 or g.short % 16):
+        ap.error(f"--short-bar {args.short_bar} plays on song row {g.short}, which does not start a bar (every 16 rows from 0)")
+    print(f"grid: row 0 of the recording at {g0 * 1000:.1f} ms, song row {g.r0}; offset {g.offset_ms} ms"
+          + (f"; a 2/4 bar at song row {g.short} (bar {g.short // 16 + 1})" if g.short is not None else ""))
     mid = pm.PrettyMIDI(str(mids[0]))
     row = 60 / float(mid.get_tempo_changes()[1][0]) / 4
     notes = {i.name: sorted((round(n.start / row), max(round(n.end / row), round(n.start / row) + 1), n.pitch) for n in i.notes)
@@ -480,7 +499,7 @@ def main():
             print(f"{s}: no notes in {mids[0].name}, left out")
             del plan[s]
     rows_total = int((len(next(iter(stems.values()))) / SR - g.g0) / g.p) + g.r0
-    need = sum(-(-rows_total // (16 * args.section_bars)) if m == "sections" else len({n[2] for n in notes[s]}) if m == "notes" else 6
+    need = sum(-(-len(bar_starts(rows_total, g.short)) // args.section_bars) if m == "sections" else len({n[2] for n in notes[s]}) if m == "notes" else 6
                for s, m in plan.items() if not (m == "hits" and s == "drums"))
     parts = []
     for s, mode in plan.items():
