@@ -2,7 +2,11 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.3.0 (2026-10-07)
+
+OpenMPT's DMO effects and an effect rack, agents that work on the open song (from Claude Code over MCP, or a chat
+panel on your own Claude Code login, the API or a local model) without touching your levels or what you approved,
+loudness numbers, a piano roll, and undo in the Paint tab.
 
 - **Mix plugins and the RACK tab**: OpenMPT's nine built-in DMO effects (chorus, compressor, distortion, echo, flanger,
   gargle, I3DL2 reverb, parametric EQ, Waves reverb) in the song format (`module: plugins:`, a channel's `plugin:`,
