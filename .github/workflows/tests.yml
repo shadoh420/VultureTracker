@@ -40,3 +40,4 @@ jobs:
         run: >-
           python -m unittest tests.test_page tests.test_workflow_page tests.test_release070_page
           tests.test_release080_page tests.test_features080_page tests.test_release100_page
+          tests.test_features_page
