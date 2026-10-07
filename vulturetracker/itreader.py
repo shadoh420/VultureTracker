@@ -4,7 +4,7 @@ import re
 import struct
 from pathlib import Path
 
-from . import notation
+from . import notation, plugins
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
                     NOTE_FADE, ORDER_END, ORDER_SKIP)
 from .song import DCA, DCT, NNA, VIBRATO, it_text
@@ -161,8 +161,6 @@ def read_it(data: bytes):
         warnings.append(f"the MIDI pitch wheel depth ({pwd} semitones; for MIDI output) is not carried over")
     if flags & 4 and cmwt < 0x200:
         raise ITReadError("old (pre-IT 2.00) instrument format is not supported")
-    if flags & 0x80 or special & 8:
-        warnings.append("the module embeds MIDI macros; they are not carried over (Zxx/SFx use the default filter macros)")
     if cwtv >= 0x5000:
         warnings.append("saved by OpenMPT; OpenMPT-only extensions (swing, extra instrument properties, "
                         "playback compatibility flags) are not carried over")
@@ -182,10 +180,35 @@ def read_it(data: bytes):
     pos += 4 * smpnum
     pat_ptrs = struct.unpack_from(f"<{patnum}I", data, pos)
     pos += 4 * patnum
+    min_ptr = min([q for q in ins_ptrs + smp_ptrs + pat_ptrs if q] + ([msgoff] if special & 1 and msgoff else [])
+                  or [len(data)])
     if special & 2 and pos + 2 <= len(data):  # the edit history: what OpenMPT counts (a history past the first
         n = struct.unpack_from("<H", data, pos)[0]  # parapointer is a writer's stray flag, not data)
-        if n and pos + 2 + 8 * n <= min([q for q in ins_ptrs + smp_ptrs + pat_ptrs if q] or [len(data)]):
-            warnings.append(f"the edit history ({n} editing session{'s' if n != 1 else ''}) is not carried over")
+        if pos + 2 + 8 * n <= min_ptr:
+            if n:
+                warnings.append(f"the edit history ({n} editing session{'s' if n != 1 else ''}) is not carried over")
+            pos += 2 + 8 * n
+    # OpenMPT's extensions, in Load_it.cpp's order: the MIDI macro configuration, pattern names, channel names, the mix
+    # plugins (plugins.py), up to the first pointer
+    if (flags & 0x80 or special & 8) and pos + 4896 <= len(data):
+        sfx, fixed = plugins.read_macro_config(data[pos:pos + 4896])
+        mod.macros = sfx
+        if fixed:
+            warnings.append("the module's fixed Zxx macros (Z80-ZFF) differ from the default resonance macros; "
+                            "they are not carried over")
+        pos += 4896
+    channel_names = []
+    for magic in (b"PNAM", b"CNAM"):
+        if data[pos:pos + 4] == magic and pos + 8 <= len(data):
+            size = struct.unpack_from("<I", data, pos + 4)[0]
+            if magic == b"CNAM":
+                raw = data[pos + 8: pos + 8 + size]
+                channel_names = [_cstr(raw[i:i + 20], cs)[:20] for i in range(0, len(raw) - 19, 20)]
+            pos += 8 + size
+    channel_plugins = []
+    if pos < min_ptr:
+        mod.plugins, channel_plugins, w = plugins.read_chunks(data[pos:min_ptr])
+        warnings += w
 
     for p in smp_ptrs:
         smp = Sample()
@@ -308,8 +331,10 @@ def read_it(data: bytes):
             pat.rows = [r[:num_ch] for r in pat.rows]
     for ch in range(num_ch):
         pan = chnpan[ch]
-        mod.channels.append(Channel(f"Ch {ch + 1}", 100 if pan & 0x7F == 100 else min(pan & 0x7F, 64),
-                                    min(chnvol[ch], 64), bool(pan & 0x80)))
+        name = channel_names[ch] if ch < len(channel_names) and channel_names[ch] else f"Ch {ch + 1}"
+        plug = channel_plugins[ch] if ch < len(channel_plugins) else 0
+        mod.channels.append(Channel(name, 100 if pan & 0x7F == 100 else min(pan & 0x7F, 64),
+                                    min(chnvol[ch], 64), bool(pan & 0x80), plug if plug in mod.plugins else 0))
 
     jumps = {c.param for p in mod.patterns for row in p.rows for c in row if c.effect == ord("B") - 64}
     while orders and orders[-1] == ORDER_END and len(orders) - 1 not in jumps:  # a '---' a Bxx jumps to ends the song
@@ -486,7 +511,14 @@ def module_to_song(mod: Module, song_path, samples_dir) -> dict:
         if ch.muted:
             c["muted"] = True
         chans.append(c)
+    for c, ch in zip(chans, mod.channels):
+        if ch.plugin:
+            c["plugin"] = ch.plugin
     module["channels"] = chans
+    if mod.plugins:
+        module["plugins"] = plugins.to_song(mod.plugins)
+    if mod.macros:
+        module["macros"] = {f"SF{n:X}": t for n, t in sorted(mod.macros.items())}
     if mod.message:
         module["message"] = mod.message
 

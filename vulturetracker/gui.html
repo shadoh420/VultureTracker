@@ -16,7 +16,7 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .dirty{display:flex;align-items:center;gap:7px;padding:3px 8px;cursor:pointer;background:#1d1a12;box-shadow:inset 1px 1px 0 #332d1d;font-size:10.5px;color:#e0b664}.dirty i{width:6px;height:6px;border-radius:50%;background:var(--amber)}.dirty b{letter-spacing:.1em;font-size:10px;color:var(--amber)}
 .tabs{display:flex;align-items:stretch;gap:2px;height:28px;flex:none;padding:0 10px;background:var(--panel2);box-shadow:inset 0 -1px 0 #090b0c}
 .tab{padding:0 14px;display:flex;align-items:center;white-space:nowrap;font-size:10.5px;letter-spacing:.14em;font-weight:700;color:var(--dim);cursor:pointer}.tab.on{color:var(--acc);background:#14171a;box-shadow:inset 0 2px 0 var(--acc)}
-@media (max-width:1439px){.tab{padding:0 7px;letter-spacing:.1em}}
+@media (max-width:1439px){.tab{padding:0 7px;letter-spacing:.1em}}@media (max-width:1299px){.tab{padding:0 6px;letter-spacing:.08em}}
 .kbd{padding:2px 5px;font:9.5px/1 var(--mono);color:var(--acc);background:#0f1a12;box-shadow:inset 1px 1px 0 #24382a}
 .k{font-size:9.5px;letter-spacing:.14em;font-weight:700;color:var(--dim)}
 .main{flex:1;min-height:0;display:none;gap:2px;padding:2px;background:var(--bg)}.main.on{display:flex}
@@ -66,6 +66,28 @@ textarea{width:100%;background:var(--panel2);color:var(--ink);border:0;font:11px
 /* song overview: stems rail, pattern rail, resize handles */
 .handle{width:5px;flex:none;cursor:col-resize;display:flex;align-items:center;justify-content:center;background:#0d1012}.handle:hover{background:#1b2a20}.handle i{width:1px;height:26px;background:#2c3438}
 .stem{display:flex;align-items:center;gap:5px;padding:4px 4px 1px;font:9.5px/1 var(--mono);white-space:nowrap}.stem.off,.stem.off+.mix{opacity:.55}.stem.solo,.stem.solo+.mix{background:rgba(126,231,135,.07)}
+#agent{position:fixed;top:62px;right:0;bottom:0;width:380px;display:none;flex-direction:column;background:var(--panel);box-shadow:inset 1px 0 0 #2a3135,-6px 0 14px #0009;z-index:8}
+body.agent-on #agent{display:flex}body.agent-on .main,body.agent-on .bottom{margin-right:380px}
+#ag-msgs{flex:1;min-height:0;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:9px;font-size:11.5px}
+.agm{display:grid;grid-template-columns:46px 1fr;gap:6px}.agm>b{font:700 9px/1.7 var(--mono);letter-spacing:.1em;color:var(--dim)}
+.agm.you>b{color:var(--amber)}.agm.agent>b{color:var(--acc)}.agm .tx{white-space:pre-wrap;color:var(--ink);line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.agm.tool .tx{font:10px/1.5 var(--mono);color:var(--mid)}.agm.tool.err .tx,.agm.error .tx{color:var(--red)}.agm .cx{display:block;font:9.5px var(--mono);color:var(--dim);margin-top:2px}
+.agchips{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px}.agchips span{cursor:pointer;padding:3px 7px;font-size:10px;color:#c3cbcf;background:#0f1416;box-shadow:inset 1px 1px 0 #21272a}
+#ag-set label{display:block;margin:8px 0 2px;font-size:9.5px;letter-spacing:.1em;font-weight:700;color:var(--dim)}#ag-set input,#ag-set select{width:100%;padding:4px 6px;font:11px var(--mono)}
+.rnote{position:absolute;height:10px;border-radius:2px;background:var(--acc);box-shadow:inset 0 0 0 1px #0a0c0d;font:8px/10px var(--mono);color:#0c1a0f;padding-left:2px;overflow:hidden;white-space:nowrap;cursor:ns-resize}
+.rnote.ghost{background:#5f7d94;opacity:.28;pointer-events:none;color:transparent}.rlab{position:absolute;left:0;width:38px;font:8.5px/12px var(--mono);color:var(--dim);text-align:right;padding-right:3px}
+.rkchain{display:flex;align-items:flex-start;gap:0;padding:16px 14px;overflow-x:auto;min-height:100%}
+.rkdev{flex:none;width:250px;background:linear-gradient(#1d2327,#15191c);border-radius:4px;box-shadow:inset 0 1px 0 #2e363b,0 2px 6px #000a;border-top:3px solid var(--rkc,#5f7d94)}
+.rkdev.byp{opacity:.5}.rkdev .hd{display:flex;align-items:center;gap:4px;padding:7px 8px 6px;box-shadow:inset 0 -1px 0 #0a0c0d}
+.rkdev .hd b{font:700 10.5px/1 var(--mono);letter-spacing:.12em;color:var(--rkc,#c3cbcf)}.rkdev .hd .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:#c3cbcf;cursor:text}
+.rkdev .ps{display:grid;grid-template-columns:repeat(3,1fr);gap:8px 4px;padding:10px 8px 10px}
+.rkp{display:flex;flex-direction:column;align-items:center;gap:2px;font:9px/1.2 var(--mono);color:var(--dim);text-align:center}
+.rkp .v{color:#c3cbcf;cursor:text}.rkp .k{font-size:8px;letter-spacing:.06em}.rkp select{font:9.5px var(--mono);padding:1px 2px;max-width:76px}
+.rkp svg{cursor:ns-resize;display:block}.rkp .auto{cursor:pointer;color:#4a5255;font-size:8px}.rkp .auto.on{color:var(--amber)}
+.rkwire{flex:none;width:26px;height:2px;margin-top:40px;background:#3a4449}
+.rkend{flex:none;margin-top:28px;padding:6px 9px;font:700 9.5px/1 var(--mono);letter-spacing:.12em;color:var(--dim);background:#0f1416;box-shadow:inset 1px 1px 0 #21272a}
+.rkch{display:flex;align-items:center;gap:6px;padding:5px 6px;cursor:pointer;font:10px/1.2 var(--mono);color:#c3cbcf}.rkch.on{background:#1a2a1f;box-shadow:inset 2px 0 0 var(--acc)}
+.rkch .n{width:17px;flex:none;color:#5c6569}.rkch .c{flex:1;min-width:0;font-size:9px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
 .stem .fb{width:3px;height:13px;flex:none}.stem .n{width:17px;flex:none;color:#5c6569}.stem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;letter-spacing:.03em;color:#c3cbcf}.stem.off .nm{color:var(--dim)}
 .ms{width:15px;height:15px;flex:none;display:grid;place-items:center;cursor:pointer;font:700 8.5px/1 var(--mono);color:#6d777c;background:#1a1f21;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d}.ms:hover{color:var(--ink)}.ms.m{color:#0d1a11;background:var(--amber);box-shadow:none}.ms.s{color:#0d1a11;background:var(--acc);box-shadow:none}
 /* mixer rows under each stem: faders re-render the tryout, the meter is the channel soloed */
@@ -105,13 +127,37 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="dirty" id="dirty" style="display:none" onclick="compareExternal()"><i></i>song changed on disk <b>COMPARE / RELOAD</b></div>
   <span class="meta" id="queue"></span>
   <select class="uiscale" style="font:10px var(--mono);padding:1px 3px" onchange="setScale(this.value)" title="UI SCALE: the whole app larger or smaller (kept in this browser; the app window has no Ctrl+wheel zoom)"><option value="90">UI 90 %</option><option value="100">UI 100 %</option><option value="110">UI 110 %</option><option value="125">UI 125 %</option><option value="150">UI 150 %</option><option value="175">UI 175 %</option><option value="200">UI 200 %</option></select>
+  <span class="btn" id="agentbtn" onclick="agentToggle()" title="the agent panel: chat with a model that edits this song with the app's tools (optional: the Anthropic API or a local model), and what any agent did (also over MCP)">AGENT</span>
   <span class="btn" onclick="toggle('keys')">?</span>
+</div>
+<div id="agent">
+  <div class="ph" style="gap:6px"><span class="k" style="white-space:nowrap">AGENT <span id="ag-who" class="meta" style="letter-spacing:0;font-weight:400"></span></span><span style="display:flex;gap:2px"><span class="btn sm" id="ag-v-chat" onclick="AG.view='chat';renderAgent()">CHAT</span><span class="btn sm" id="ag-v-log" onclick="AG.view='log';renderAgent()" title="every tool call an agent made on this song: from this panel or over MCP (Claude Code)">ACTIVITY</span><span class="btn sm" id="ag-v-set" onclick="AG.view='set';renderAgent()">SETTINGS</span><span class="btn sm" onclick="act('chat',{clear:true})" title="start a new conversation">NEW</span></span></div>
+  <div id="ag-msgs"></div>
+  <div id="ag-set" class="pb" style="display:none;flex:1;overflow:auto;font-size:11px;line-height:1.5">
+    <label>PROVIDER</label><select id="ag-provider"><option value="">off</option><option value="claude_code">Claude Code (your subscription)</option><option value="anthropic">Anthropic API (Claude, billed per token)</option><option value="openai">local model (OpenAI-compatible server)</option></select>
+    <label>MODEL</label><input id="ag-model" placeholder="empty: Claude Code's default · claude-opus-5-5 · or a local model, e.g. qwen3:14b">
+    <label>SERVER URL (LOCAL MODEL)</label><input id="ag-base" placeholder="http://localhost:11434/v1 (Ollama) · :1234/v1 LM Studio · :8080/v1 llama.cpp">
+    <label>API KEY</label><input id="ag-key" type="password" autocomplete="off" placeholder="">
+    <label>EFFORT (ANTHROPIC)</label><select id="ag-effort"><option value="">medium (default)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select>
+    <div style="display:flex;gap:4px;margin-top:10px"><span class="btn" style="flex:1;text-align:center" onclick="agSave()">SAVE</span><span class="btn" onclick="act('chatsettings',{clear_key:true})" title="forget the stored key">FORGET KEY</span></div>
+    <p class="meta" style="margin-top:12px"><b style="color:#c3cbcf">Claude Code (your subscription)</b> runs the <span class="mono">claude</span> you are signed in to, headless, with this song's tools as its only tools: no API key, no per-token bill (it counts toward your plan's usage). Install Claude Code and sign in once in a terminal first.</p>
+    <p class="meta">The key is kept in your user folder (agent.json), never beside a song. With no key here, the Anthropic API uses ANTHROPIC_API_KEY or an <span class="mono">ant auth login</span> profile; the API bills per token. A local model needs a server with tool calling (Ollama, LM Studio, llama.cpp) and costs nothing.</p>
+    <p class="meta">Or work from Claude Code: <span class="mono" style="color:#c3cbcf">claude mcp add vulturetracker -- python -m vulturetracker mcp</span>, then ask it about the song open here. Its calls show under ACTIVITY.</p>
+    <p class="meta">The tools never move a fader or a level, leave anything marked approved (the ✓ in the SONG and SAMPLES tabs) alone, and offer sounds as tryout candidates for you to pick. Each edit is one undo step; patterns an agent writes are marked by: agent.</p>
+  </div>
+  <div id="ag-foot" style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d">
+    <div class="agchips" id="ag-chips"></div>
+    <div id="ag-ctx" class="mono" style="font-size:9.5px;color:var(--mid);margin-bottom:4px"></div>
+    <textarea id="ag-in" rows="3" placeholder="Ask, or say how it should feel" onkeydown="event.stopPropagation();if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();agSend()}"></textarea>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><span class="meta" style="font-size:9.5px">Enter sends · Shift+Enter: new line</span><span class="btn" onclick="agSend()">SEND</span></div>
+  </div>
 </div>
 <div class="tabs">
   <div class="tab on" data-t="tryout" onclick="tab('tryout')">TRYOUT</div>
   <div class="tab" data-t="overview" onclick="tab('overview')">SONG OVERVIEW</div>
   <div class="tab" data-t="pattern" onclick="tab('pattern')">PATTERN</div>
   <div class="tab" data-t="song" onclick="tab('song')">SONG</div>
+  <div class="tab" data-t="rack" onclick="tab('rack')">RACK</div>
   <div class="tab" data-t="ins" onclick="tab('ins')">INSTRUMENTS</div>
   <div class="tab" data-t="smp" onclick="tab('smp')">SAMPLES</div>
   <div class="tab" data-t="rec" onclick="tab('rec')">RECORD</div>
@@ -204,7 +250,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="btn sm" id="lv-cur" onclick="lvPlayCursor()" title="play from the cursor (Space, F7; Space again stops)">▶ FROM CURSOR</span><span class="btn sm" onclick="lvPlay(0,0)" title="play the song from its start">▶ SONG</span><span class="btn sm" id="lv-pat" onclick="lvLoopPattern()" title="loop the pattern at the cursor (F6)">↻ PATTERN</span><span class="btn sm" onclick="lvStop()" title="stop (F8)">■</span>
         <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
         <span class="k" style="margin-left:8px">INS</span><select id="lv-ins" style="font:10px var(--mono);padding:1px 3px;max-width:190px" title="the instrument the piano keys play (preview) and enter (edit mode): Z to M and Q to U, two octaves from OCT"></select><span class="k">OCT</span><input id="lv-oct" type="number" min="0" max="8" value="5" style="width:36px;font:10px var(--mono);padding:1px 3px">
-        <span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes and the computer's piano keys each within 60 ms of the one before; Shift held (OpenMPT's chord modifier) gathers any keys into one chord, written when Shift is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+        <span class="btn sm" id="roll-btn" onclick="rollToggle()" title="ROLL: the cursor's channel as a piano roll over the pattern's rows (the other channels' notes as ghosts, a lane for the volume column); a view of the same cells, edited the same way. OpenMPT has no piano roll: this one is VultureTracker's own">ROLL</span><span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes and the computer's piano keys each within 60 ms of the one before; Shift held (OpenMPT's chord modifier) gathers any keys into one chord, written when Shift is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
         <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
         <span class="mono" id="lv-status" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right"></span>
       </div>
@@ -226,6 +272,14 @@ option.hascand{color:var(--acc);font-weight:700}
       <div id="patctl" style="margin-top:6px"></div>
     </div>
     <div id="patscroll" style="flex:1;min-height:0;overflow:auto"><div id="pat"></div></div>
+    <div id="rollwrap" style="flex:1;min-height:0;display:none;flex-direction:column">
+      <div style="flex:none;display:flex;align-items:center;gap:6px;padding:4px 8px;font:9.5px var(--mono);color:var(--dim)"><span class="k" id="rolltitle" style="white-space:nowrap">ROLL</span>
+        <label title="the other channels' notes, dimmed"><input type="checkbox" id="roll-ghost" checked onchange="renderRoll()"> GHOSTS</label>
+        <label title="a click lands on the nearest note of the song's key (SONG tab: key)"><input type="checkbox" id="roll-lock" onchange="renderRoll()"> SCALE LOCK</label>
+        <span style="flex:1"></span><span id="rollhint">EDIT (Esc) on: click to place a note (drag right: its length, ending in a note-off) · drag a note up or down · right-click deletes · Shift+click: note-off · the lane below sets the volume column</span></div>
+      <div id="rollscroll" style="flex:1;min-height:0;overflow:auto;position:relative" onscroll="renderRoll()"><div id="roll" style="position:relative" onmousedown="rollDown(event)" oncontextmenu="event.preventDefault()"></div></div>
+      <div id="rollvel" style="flex:none;height:46px;position:relative;overflow:hidden;background:#0b0e0f;box-shadow:inset 0 1px 0 #21272a;cursor:ns-resize" onmousedown="rollVel(event)" title="the volume column of each note: click to set it (EDIT on)"></div>
+    </div>
   </div>
 </div>
 
@@ -310,6 +364,18 @@ option.hascand{color:var(--acc);font-weight:700}
   </div>
 </div>
 
+<div class="main" id="t-rack">
+  <div class="col" style="width:250px;flex:none">
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div class="ph"><span class="k">CHANNELS · CHAINS</span></div><div id="rk-chs" style="padding:4px 6px"></div></div>
+  </div>
+  <div class="col" style="flex:1;min-width:0">
+    <div class="panel" style="flex:none"><div class="ph" style="gap:8px"><span class="k" id="rk-title" style="white-space:nowrap">RACK</span><span id="rk-msg" class="mono" style="flex:1;min-width:0;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
+      <select id="rk-add" style="font:10px var(--mono);padding:2px 3px" title="an effect at the end of this channel's chain"></select><span class="btn sm" onclick="rkAdd()">+ ADD EFFECT</span></div>
+      <div class="pb meta" style="padding:6px 10px">OpenMPT's built-in DirectX effects, saved in the .it as OpenMPT saves them. OpenMPT and libopenmpt (this app, players built on it) play them; other trackers play these channels dry. Each change is one undo step; the faders stay the mixer's.</div></div>
+    <div class="panel" style="flex:1;min-height:0;overflow:auto"><div id="rk-chain" class="rkchain"></div></div>
+  </div>
+</div>
+
 <div class="main" id="t-map">
   <div class="panel col" style="flex:1;min-width:0">
     <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SAMPLE MAP</span><span class="mono" id="map-n" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><input id="map-q" placeholder="filter by name or folder" style="width:180px;padding:3px 6px;font:10.5px var(--mono)" oninput="drawMap()"><span id="map-leg" style="flex:1;min-width:0;display:flex;gap:8px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim);overflow:hidden;max-height:30px"></span><span class="btn sm" onclick="mapReset()" title="the whole map (double-click does the same)">FIT</span></div>
@@ -347,7 +413,7 @@ option.hascand{color:var(--acc);font-weight:700}
       <span class="k">BRIGHT</span><input id="pt-bright" type="range" min="1" max="100" value="80" style="width:80px;flex:none" title="the level painted: 100 full, 50 half the RANGE under it" oninput="ptSwatch()">
       <span class="k">PAN</span><input id="pt-pan" type="range" min="-100" max="100" value="0" style="width:80px;flex:none" title="red: left, yellow: centre, green: right" oninput="ptSwatch()"><i id="pt-swatch" style="display:inline-block;width:14px;height:14px"></i>
       <span class="btn sm" style="margin-left:8px" onclick="ptImage()" title="an image file drawn over the grid: its light is the level, red and green the pan (or drop an image on the canvas)">LOAD IMAGE…</span><input type="file" id="pt-file" accept="image/*" style="display:none" onchange="ptImageFile(this.files[0])">
-      <span class="btn sm" onclick="twice(this,ptClear)" title="click twice">CLEAR</span>
+      <span class="btn sm" onclick="twice(this,ptClear)" title="click twice">CLEAR</span><span class="btn sm dimb" id="pt-undo" onclick="ptUndo(false)" title="undo the last stroke, clear, image or resize (Ctrl+Z)">↶</span><span class="btn sm dimb" id="pt-redo" onclick="ptUndo(true)" title="redo (Ctrl+Y or Ctrl+Shift+Z)">↷</span>
       <span class="mono" id="pt-pos" style="flex:1;min-width:0;text-align:right;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden"></span>
     </div>
     <div id="pt-box" style="flex:1;min-height:0;position:relative;background:#050607" ondragover="event.preventDefault()" ondrop="event.preventDefault();const f=[...(event.dataTransfer.files||[])].find(f=>/^image\//.test(f.type));if(f)ptImageFile(f)">
@@ -544,7 +610,7 @@ option.hascand{color:var(--acc);font-weight:700}
 <div class="bottom">
   <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
   <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
-    <div class="nowrow" onmouseover="if(event.target.classList.contains('fit'))event.target.title=event.target.textContent"><span class="k">LOOPING</span><span class="mono fit" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span class="fit" id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span class="fit" id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
+    <div class="nowrow" onmouseover="if(event.target.classList.contains('fit'))event.target.title=event.target.textContent"><span class="k">LOOPING</span><span class="mono fit" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span class="fit" id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span class="fit" id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="btn sm" style="color:var(--red)" onclick="panic()" title="ALL OFF: stop every sound the app is making (the render, the live engine, previews, the FAUST tab's voices)">ALL OFF</span><span class="k">OUT</span><span class="mono" id="outnums" style="font-size:10.5px;color:#c3cbcf" title="the playing render, measured: integrated loudness (ITU-R BS.1770, LUFS), true peak (dBTP, 4x oversampled) and the stereo correlation of the part that sounds (1 mono, 0 unrelated, below 0 out of phase). Numbers, not a verdict: the ear decides">—</span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
     <div class="loopbar" id="loopbar" onmousedown="loopDrag(event)" title="playback loop: drag here to loop a span of what plays (snapped to rows) · click to clear it"><i id="loopfill"></i></div>
     <div class="prog" id="prog" onmousedown="seekDrag(event)" title="click or drag to seek"><i id="progfill"></i><b id="proghead"></b></div>
     <div style="display:flex;gap:8px;align-items:center;min-width:0"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><span class="k" style="white-space:nowrap" title="the channels sounding at the playhead, with the slot each plays (from the pattern: a looped tone until its note-off, a one-shot until its sample runs out) · click one to solo it">SOUNDING</span><div id="live" style="flex:1;min-width:0;display:flex;gap:3px;overflow:hidden"></div></div>
@@ -695,7 +761,7 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();renderFaust();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();renderRack();renderOut();renderAgent();if(S.cue&&S.cue.id!==AG.cue){const first=AG.cue===null;AG.cue=S.cue.id;if(!first)agCue(S.cue)}if(!S.cue&&AG.cue===null)AG.cue=0;if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();renderFaust();
   const L=S.library;if(L&&L.busy&&$('simmsg').style.display==='block')$('simmsg').textContent=`indexing the library: ${L.status.done}/${L.status.total}`;
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
@@ -816,8 +882,54 @@ function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const 
 function drumChannels(){return S.song.facts.channels.map((c,i)=>fam(c)===0?i:-1).filter(i=>i>=0)}
 function setHex(v){hexRows=v;try{localStorage.hexrows=v?'1':'0'}catch(e){}renderPat()}
 function setFocus(x){const n=S.song.facts.channels.length;if(x===null)focus=null;else if(x==='all')focus=[...Array(n).keys()];else if(x==='drums')focus=drumChannels();else{const f=(focus||PAT.active).slice(),k=f.indexOf(x);if(k>=0){if(f.length>1)f.splice(k,1)}else f.push(x);focus=f.sort((a,b)=>a-b)}renderPat()}
-function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL=f.highlight||[4,16];if(!o)return;
-  $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · ${EDIT?'EDITING':'VIEW'}`;$('pat').classList.toggle('editing',EDIT);
+// ---- ROLL: a piano roll of the cursor's channel over the pattern (rows across, pitches up): the same cells as the
+// tracker grid, edited through patEdit (EDIT mode, one undo step each). Not in OpenMPT (GUIDE: a deliberate difference)
+const ROLL={on:false,RW:14,PH:12,drag:null};
+const RMODES={major:[0,2,4,5,7,9,11],ionian:[0,2,4,5,7,9,11],dorian:[0,2,3,5,7,9,10],phrygian:[0,1,3,5,7,8,10],lydian:[0,2,4,6,7,9,11],mixolydian:[0,2,4,5,7,9,10],minor:[0,2,3,5,7,8,10],aeolian:[0,2,3,5,7,8,10],locrian:[0,1,3,5,6,8,10]};
+function rollScale(){const m=/^([A-Ga-g])([#b]?)\s+(\w+)$/.exec((S.song.facts.key||'').trim());if(!m||!RMODES[m[3].toLowerCase()])return null;
+  const root=({C:0,D:2,E:4,F:5,G:7,A:9,B:11}[m[1].toUpperCase()]+(m[2]==='#'?1:m[2]==='b'?-1:0)+12)%12;return new Set(RMODES[m[3].toLowerCase()].map(i=>(root+i)%12))}
+// noteNum and noteTxt (the instrument panel's, below) read and write a note's text
+const cellParts=c=>{const p=(c||'... .. ... ...').split(' ');while(p.length<4)p.push('...');return p};
+function rollToggle(){ROLL.on=!ROLL.on;$('roll-btn').classList.toggle('on',ROLL.on);$('patscroll').style.display=ROLL.on?'none':'';$('rollwrap').style.display=ROLL.on?'flex':'none';if(ROLL.on)renderRoll()}
+function rollNotes(ch){const rows=PAT.rows||[],out=[];let cur=null;
+  rows.forEach((r,i)=>{const t=cellParts(r[ch])[0];if(t==='...')return;if(cur){cur.end=i;out.push(cur);cur=null}const n=noteNum(t);if(n!=null){const p=cellParts(r[ch]);cur={row:i,n,ins:p[1],vol:p[2]}}});
+  if(cur){cur.end=rows.length;out.push(cur)}return out}
+function renderRoll(){if(!ROLL.on||!PAT.rows)return;const f=S.song.facts,ch=CUR.ch,rows=PAT.rows.length,{RW,PH}=ROLL,HL=f.highlight||[4,16],mine=rollNotes(ch),sc=rollScale();
+  const all=(f.channels||[]).map((_,c)=>c===ch?mine:$('roll-ghost').checked?rollNotes(c):[]),ns=all.flat().map(x=>x.n);
+  let lo=Math.max(0,Math.min(...(mine.length?mine.map(x=>x.n):[12*(+$('lv-oct').value||5)]))-7),hi=Math.min(119,Math.max(...(mine.length?mine.map(x=>x.n):[12*(+$('lv-oct').value||5)+12]))+7);
+  if(hi-lo<24){const add=24-(hi-lo);lo=Math.max(0,lo-Math.ceil(add/2));hi=Math.min(119,lo+24)}ROLL.lo=lo;ROLL.hi=hi;
+  $('rolltitle').textContent=`ROLL · ${pad(ch+1)} ${(f.channels[ch]||'').toUpperCase()} · ${mine.length} NOTES${sc?' · '+f.key.toUpperCase():''}`;
+  const W=40+rows*RW,H=(hi-lo+1)*PH,y=n=>(hi-n)*PH;let h='';
+  for(let n=lo;n<=hi;n++){const out=sc&&!sc.has(n%12),blk=[1,3,6,8,10].includes(n%12);h+=`<div style="position:absolute;left:40px;right:0;top:${y(n)}px;height:${PH}px;background:${out?'#0c0f10':blk?'#111518':'#14191c'};box-shadow:inset 0 -1px 0 #0a0c0d"></div>`;
+    if(n%12===0||(sc&&n%12===[...sc][0]))h+=`<div class="rlab" style="top:${y(n)}px">${noteTxt(n)}</div>`}
+  for(let r=0;r<=rows;r+=HL[0])h+=`<div style="position:absolute;top:0;height:${H}px;left:${40+r*RW}px;width:1px;background:${r%HL[1]===0?'#3a4449':'#1d2427'}"></div>`;
+  all.forEach((list,c)=>list.forEach(x=>{if(x.n<lo||x.n>hi)return;const g=c!==ch;
+    h+=`<div class="rnote ${g?'ghost':''}" style="left:${40+x.row*RW+1}px;top:${y(x.n)+1}px;width:${Math.max(3,(x.end-x.row)*RW-2)}px" ${g?'':`data-row="${x.row}" title="${noteTxt(x.n)} · row ${pad(x.row)} · ins ${x.ins} · ${x.vol==='...'?'default volume':x.vol}"`}>${g?'':noteTxt(x.n)}</div>`}));
+  if(LV.playing&&LV.oi===PAT.order&&LV.pos)h+=`<div style="position:absolute;top:0;height:${H}px;left:${40+LV.pos.row*RW}px;width:2px;background:var(--amber)"></div>`;
+  const el=$('roll');el.style.width=W+'px';el.style.height=H+'px';el.innerHTML=h;
+  $('rollvel').innerHTML=mine.map(x=>{const v=/^v(\d\d)$/.exec(x.vol),val=v?+v[1]:64;return `<div style="position:absolute;bottom:2px;left:${40+x.row*RW+3-$('rollscroll').scrollLeft}px;width:4px;height:${Math.round(val/64*38)}px;background:${v?'var(--acc)':'#3a4449'}" title="row ${pad(x.row)}: ${v?'v'+v[1]:'default volume (64 of the sample)'}"></div>`}).join('');
+  $('rollhint').style.color=EDIT?'var(--dim)':'var(--amber)'}
+function rollAt(e){const r=$('roll').getBoundingClientRect(),z=zf(),x=(e.clientX-r.left)/z-40,yy=(e.clientY-r.top)/z;
+  let n=ROLL.hi-Math.floor(yy/ROLL.PH);const sc=$('roll-lock').checked&&rollScale();if(sc&&!sc.has(n%12))n=sc.has((n+1)%12)?n+1:n-1;
+  return {row:Math.max(0,Math.min(PAT.rows.length-1,Math.floor(x/ROLL.RW))),n:Math.max(0,Math.min(119,n))}}
+function rollSet(row,parts){const ch=CUR.ch,p=cellParts(PAT.rows[row][ch]);parts.forEach((v,i)=>{if(v!=null)p[i]=v});return {row,ch,cell:p.join(' ')}}
+function rollDown(e){if(!PAT.rows||e.button>2)return;e.preventDefault();const at=rollAt(e),ch=CUR.ch,hit=e.target.dataset&&e.target.dataset.row!=null?+e.target.dataset.row:null;
+  if(!EDIT){$('rollhint').textContent='turn EDIT on (Esc, or ● EDIT) to draw in the roll';return}
+  if(e.button===2){if(hit!=null)patEdit([rollSet(hit,['...','..','...'])]);return}
+  if(e.shiftKey&&hit==null){patEdit([rollSet(at.row,['===','..','...'])]);return}
+  if(hit!=null){const x=rollNotes(ch).find(q=>q.row===hit);ROLL.drag={kind:'move',row:hit,n0:x.n,y0:e.clientY,n:x.n};}
+  else{const ins=pad(insNum());ROLL.drag={kind:'new',row:at.row,n:at.n,end:at.row+1,ins};lvNoteOn('roll',null,at.n)}
+  const mv=ev=>{const d=ROLL.drag;if(!d)return;const a=rollAt(ev);if(d.kind==='new')d.end=Math.max(d.row+1,a.row+1);else{d.n=Math.max(0,Math.min(119,d.n0+Math.round((d.y0-ev.clientY)/(ROLL.PH*zf()))));if($('roll-lock').checked){const sc=rollScale();if(sc&&!sc.has(d.n%12))d.n+=sc.has((d.n+1)%12)?1:-1}}},
+    up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);lvNoteOff('roll');const d=ROLL.drag;ROLL.drag=null;if(!d)return;
+      if(d.kind==='move'){if(d.n!==d.n0)patEdit([rollSet(d.row,[noteTxt(d.n)])]);return}
+      const ch2=[rollSet(d.row,[noteTxt(d.n),d.ins])],rows=PAT.rows.length;
+      if(d.end>d.row+1&&d.end<rows&&cellParts(PAT.rows[d.end][ch])[0]==='...')ch2.push(rollSet(d.end,['===']));patEdit(ch2)};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up)}
+function rollVel(e){if(!EDIT||!PAT.rows)return;const r=$('rollvel').getBoundingClientRect(),z=zf(),row=Math.floor(((e.clientX-r.left)/z+$('rollscroll').scrollLeft-40)/ROLL.RW),
+  x=rollNotes(CUR.ch).find(q=>q.row===row);if(!x)return;const v=Math.max(0,Math.min(64,Math.round((1-((e.clientY-r.top)/z-4)/38)*64)));patEdit([rollSet(row,[null,null,'v'+String(v).padStart(2,'0')])])}
+function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL=f.highlight||[4,16];if(!o)return;agSyncSel();if(ROLL.on)setTimeout(renderRoll);
+  const mk=((S.marks||{}).patterns||{})[o.pattern]||{};
+  $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · ${EDIT?'EDITING':'VIEW'}${mk.by?' · BY '+mk.by.toUpperCase():''}${mk.approved?' · APPROVED':''}`;$('pat').classList.toggle('editing',EDIT);
   if(!rows){put('pat','<div style="padding:30px;text-align:center;color:var(--dim)">loading…</div>');put('patctl','');$('patrow').textContent='';return}
   const n=f.channels.length,empty='... .. ... ...';PAT.active=f.channels.map((_,c)=>rows.some(r=>r[c]!==empty)?c:-1).filter(c=>c>=0);
   const drums=drumChannels(),fo=focus||(EDIT||!PAT.active.length?f.channels.map((_,c)=>c):PAT.active),fits=Math.max(1,Math.floor(($('patscroll').clientWidth-26-18)/86));
@@ -1151,7 +1263,7 @@ function smpLoopFromSel(k){if(!W.sel||W.sel[1]<=W.sel[0])return smpInfo('select 
 function renderSmp(){if(!$('smp-list')||!S||!S.song||!S.song.facts||!$('t-smp').classList.contains('on'))return;const f=S.song.facts,ents=S.song.sample_entries||{},nums=Object.keys(ents).sort((a,b)=>a-b);
   if(!EDQ.n&&(SMP_SEL==null||!ents[SMP_SEL]))SMP_SEL=ents[S.slot]?String(S.slot):nums[0]||null;
   $('smp-n').textContent=nums.length;
-  put('smp-list',nums.map(n=>{const e=ents[n]||{},s=f.samples.find(x=>x.num===+n);return `<div class="stem ${n===SMP_SEL?'solo':''}" style="cursor:pointer" onclick="SMP_SEL='${n}';renderSmp()" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>{SMP_SEL='${n}';songEdit([{op:'sample_file',num:${+n},file:p[0]}])})"><span class="n">${pad(+n)}</span><span class="nm">${esc(e.name||(e.file?String(e.file).split('/').pop():'empty'))}</span><span class="smp">${s?s.length.toFixed(2)+' s':''}${e.loop?' ⟲':''}${e.sustain_loop?' S':''}</span></div>`}).join(''));
+  put('smp-list',nums.map(n=>{const e=ents[n]||{},s=f.samples.find(x=>x.num===+n);return `<div class="stem ${n===SMP_SEL?'solo':''}" style="cursor:pointer" onclick="SMP_SEL='${n}';renderSmp()" ondragover="dragOver(event)" ondragleave="this.classList.remove('drop')" ondrop="dropWav(event,p=>{SMP_SEL='${n}';songEdit([{op:'sample_file',num:${+n},file:p[0]}])})"><span class="n">${pad(+n)}</span><span class="nm">${esc(e.name||(e.file?String(e.file).split('/').pop():'empty'))}</span><span class="smp">${s?s.length.toFixed(2)+' s':''}${e.loop?' ⟲':''}${e.sustain_loop?' S':''}</span>${e.file?`<span class="ms ${e.approved?'s':''}" onclick="event.stopPropagation();songEdit([{op:'mark',what:'sample',key:${+n},approved:${!e.approved}}])" title="approved: an agent's tools offer no other sounds for this slot">✓</span>`:''}</div>`}).join(''));
   $('smp-msg').style.color=EDQ.err?'var(--red)':SMP_MSG&&!EDQ.n?'var(--acc)':'var(--dim)';$('smp-msg').title=SMP_MSG;$('smp-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:EDQ.n?'writing…':SMP_MSG?SMP_MSG:LV.loading?'the live engine is swapping the new song in…':'written into the song file in place · edits of the audio go to new WAVs beside the song';
   const e=smpEntry();$('smp-title').textContent=e?`SAMPLE ${pad(+SMP_SEL)} · ${e.name||''}`:'SAMPLE';
   const id=`${SMP_SEL}|${e&&e.file}`;if(W.id!==id){if(W.id.split('|')[0]!==String(SMP_SEL)){W.a=0;W.b=0;W.sel=null;W.data=null;W.noise=null;SMP_MSG='';$('fx-noise').textContent='none learned'}else W.relen=W.data?W.data.frames:null;W.id=id}
@@ -1197,6 +1309,97 @@ function drawScope(){const cv=$('lv-scope');if(!cv||!LV.an||!$('t-pattern').clas
 // ---- the SONG tab: settings, the order list, patterns and channels; each change is one undoable step written into the
 // song text in place (POST songedit), in order with the pattern edits
 let ORD_SEL=-1;
+// ---- RACK: each channel's chain of OpenMPT's DMO effects (module.plugins: a channel plays through its plugin, a plugin
+// outputs to master or to the next one). Every change is a song edit, one undo step; a knob writes when it is let go.
+let RK_CH=0,RK_DRAG=null;
+const RK_COL={chorus:'#5fb3a8',compressor:'#d9a441',distortion:'#d7726a',echo:'#7ee787',flanger:'#9b8cd9',gargle:'#c79ad9',i3dl2_reverb:'#6f9fc7',param_eq:'#c3cbcf',waves_reverb:'#79b8e8'};
+const rkLabel=k=>k.replace(/_/g,' ').toUpperCase(),rkPlugs=()=>JSON.parse(JSON.stringify(S.song.facts.plugins||{}));
+function rkChain(f,ch){const out=[],P=f.plugins||{};let n=f.channel_plugins[ch];while(n&&P[n]&&!out.includes(+n)){out.push(+n);n=P[n].output}return out}
+function rkUsers(f,n){return f.channels.map((_,c)=>c).filter(c=>rkChain(f,c).includes(+n))}
+function rkSave(P,more){songEdit([{op:'plugins',plugins:P},...(more||[])])}
+function rkAdd(){const f=S.song.facts,e=$('rk-add').value;if(!f||!e)return;$('rk-add').value='';const P=rkPlugs(),n=Math.max(0,...Object.keys(P).map(Number))+1,c=rkChain(f,RK_CH);P[n]={effect:e};
+  if(c.length){P[c[c.length-1]].output=n;rkSave(P)}else rkSave(P,[{op:'channel_plugin',ch:RK_CH,plugin:n}])}
+function rkRemove(n){const f=S.song.facts,P=rkPlugs(),nx=P[n].output||0,ops=[];
+  for(const k in P)if(+P[k].output===+n){if(nx)P[k].output=nx;else delete P[k].output}
+  f.channel_plugins.forEach((p,c)=>{if(+p===+n)ops.push({op:'channel_plugin',ch:c,plugin:nx})});delete P[n];rkSave(P,ops)}
+function rkMove(i,d){const f=S.song.facts,c=rkChain(f,RK_CH),j=i+d;if(j<0||j>=c.length)return;[c[i],c[j]]=[c[j],c[i]];const P=rkPlugs();
+  c.forEach((n,k)=>{if(k<c.length-1)P[n].output=c[k+1];else delete P[n].output});rkSave(P,[{op:'channel_plugin',ch:RK_CH,plugin:c[0]}])}
+function rkSet(n,key,v){const P=rkPlugs(),s=(S.dmo[P[n].effect]||[]).find(x=>x.key===key);if(s&&!s.choices){v=parseFloat(v);if(!isFinite(v))return;v=Math.max(s.min,Math.min(s.max,v))}
+  if(key==='bypass'&&!v)delete P[n].bypass;else if(key==='name'&&!v)delete P[n].name;else P[n][key]=v;rkSave(P)}
+function rkFmt(v){const a=Math.abs(v);return a>=1000?Math.round(v)+'':a>=100?v.toFixed(0):a>=10?v.toFixed(1):v.toFixed(2)}
+// Zxx on a channel sets a parameter of the channel's own plugin (the chain's first) through an SFx macro, as in OpenMPT:
+// AUTO gives the parameter an SFx (SF1..SFF; SF0 stays the filter cutoff), a second click takes it away
+function rkAuto(n,idx){const f=S.song.facts,M={...(f.macros||{})},t='F0F'+(0x80+idx).toString(16).toUpperCase().padStart(3,'0')+'z',have=Object.keys(M).find(k=>M[k].toUpperCase()===t.toUpperCase());
+  if(have){delete M[have];songEdit([{op:'plugins',macros:M}]);return}
+  const free=[...Array(15)].map((_,i)=>'SF'+(i+1).toString(16).toUpperCase()).find(k=>!M[k]);if(!free){EDQ.err='all fifteen SFx macros are in use';renderRack();return}
+  M[free]=t;songEdit([{op:'plugins',macros:M}],null);$('rk-msg').textContent=`${free} then Zxx (Z00–Z7F) on the channel sets ${rkLabel((S.dmo[f.plugins[n].effect]||[])[idx].key)}`}
+function rkDrag(e,n,key,lo,hi,v){e.preventDefault();RK_DRAG={n,key,lo,hi,v,y:e.clientY,el:e.currentTarget.parentNode};
+  const mv=ev=>{const d=RK_DRAG;if(!d)return;const span=(d.hi-d.lo)*(ev.shiftKey?.002:.006);d.nv=Math.max(d.lo,Math.min(d.hi,d.v+(d.y-ev.clientY)*span));d.el.querySelector('.v').textContent=rkFmt(d.nv);d.el.querySelector('svg').innerHTML=rkArc((d.nv-d.lo)/(d.hi-d.lo))},
+    up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);const d=RK_DRAG;RK_DRAG=null;if(d&&d.nv!=null&&d.nv!==d.v)rkSet(d.n,d.key,+rkFmt(d.nv))};
+  addEventListener('mousemove',mv);addEventListener('mouseup',up)}
+function rkArc(t){const a=(-135+270*t)*Math.PI/180,p=(r,x)=>[17+r*Math.sin(x),17-r*Math.cos(x)],s=p(13,-135*Math.PI/180),e2=p(13,a),[lx,ly]=p(9,a);
+  return `<circle cx="17" cy="17" r="13" fill="#0b0e0f" stroke="#262d31" stroke-width="3"/>${t>0?`<path d="M${s[0]},${s[1]} A13,13 0 ${270*t>180?1:0} 1 ${e2[0]},${e2[1]}" fill="none" stroke="var(--rkc)" stroke-width="3"/>`:''}<circle cx="17" cy="17" r="9" fill="#2a3237"/><line x1="17" y1="17" x2="${lx}" y2="${ly}" stroke="#e4eaed" stroke-width="2" stroke-linecap="round"/>`}
+function rkParam(n,s,v,i,auto){const lab=`<span class="k">${rkLabel(s.key)}</span>`;
+  if(s.choices)return `<div class="rkp"><select onchange="rkSet(${n},'${s.key}',this.value)">${s.choices.map(c=>`<option ${String(c)===String(v)?'selected':''}>${esc(c)}</option>`).join('')}</select>${lab}</div>`;
+  const t=(v-s.min)/(s.max-s.min),M=S.song.facts.macros||{},t2='F0F'+(0x80+i).toString(16).toUpperCase().padStart(3,'0')+'Z',sf=Object.keys(M).find(k=>M[k].toUpperCase()===t2);
+  return `<div class="rkp" title="${rkLabel(s.key)}: ${s.min} to ${s.max} ${esc(s.unit)} · drag up or down (Shift: finer) · click the number to type"><svg width="34" height="34" viewBox="0 0 34 34" onmousedown="rkDrag(event,${n},'${s.key}',${s.min},${s.max},${v})">${rkArc(t)}</svg><span class="v" onclick="typeIn(this,${s.min},${s.max},x=>rkSet(${n},'${s.key}',x),${v},x=>x)">${rkFmt(v)}</span>${lab}<span class="k" style="font-size:7.5px">${esc(s.unit)}</span>${auto?`<span class="auto ${sf?'on':''}" onclick="rkAuto(${n},${i})" title="${sf?`${sf} then Zxx on this channel sets it (click to free ${sf})`:'automate it: give it an SFx macro, then SFx and Zxx (00-7F) in the channel set it per row'}">${sf?sf+' · Zxx':'AUTO'}</span>`:''}</div>`}
+function renderRack(){const f=S.song&&S.song.facts;if(!f||!S.dmo)return;if(RK_CH>=f.channels.length)RK_CH=0;
+  put('rk-add',`<option value="">effect…</option>`+Object.keys(S.dmo).map(e=>`<option value="${e}">${rkLabel(e)}</option>`).join(''));
+  put('rk-chs',f.channels.map((ch,c)=>{const k=rkChain(f,c);return `<div class="rkch ${c===RK_CH?'on':''}" onclick="RK_CH=${c};renderRack()"><span class="n">${pad(c+1)}</span><span style="flex:none">${esc(ch.toUpperCase())}</span><span class="c">${k.map(n=>rkLabel(f.plugins[n].effect)).join(' › ')||'—'}</span></div>`}).join(''));
+  const c=rkChain(f,RK_CH),shared=c.some(n=>rkUsers(f,n).length>1);$('rk-title').textContent=`RACK · ${pad(RK_CH+1)} ${f.channels[RK_CH].toUpperCase()}`;
+  if(EDQ.err)$('rk-msg').textContent=EDQ.err;
+  put('rk-chain',`<span class="rkend">${pad(RK_CH+1)} IN</span><i class="rkwire"></i>`+c.map((n,i)=>{const p=f.plugins[n],specs=S.dmo[p.effect]||[],others=rkUsers(f,n).filter(x=>x!==RK_CH);
+    return `<div class="rkdev ${p.bypass?'byp':''}" style="--rkc:${RK_COL[p.effect]||'#5f7d94'}"><div class="hd"><b>${rkLabel(p.effect)}</b><span class="nm" onclick="typeIn(this,0,0,v=>rkSet(${n},'name',String(v).slice(0,31)),${attr(p.name||'')},s=>s)" title="click to name it">${esc(p.name||'')}</span>
+      <span class="ms ${p.bypass?'m':''}" onclick="rkSet(${n},'bypass',${!p.bypass})" title="bypass">B</span>${shared?'':`<span class="ms" onclick="rkMove(${i},-1)" title="earlier in the chain">◀</span><span class="ms" onclick="rkMove(${i},1)" title="later in the chain">▶</span>`}<span class="ms" onclick="twice(this,()=>rkRemove(${n}))" title="remove it (click twice): the chain closes up">✕</span></div>
+      ${others.length?`<div class="meta" style="padding:4px 8px;font-size:9.5px;color:var(--amber)">shared with ${others.map(x=>pad(x+1)).join(', ')}: a change here changes theirs</div>`:''}
+      <div class="ps">${specs.map((s,k)=>rkParam(n,s,p[s.key]??s.default,k,i===0)).join('')}</div><div class="meta" style="padding:0 8px 7px;font-size:9px">plugin ${n}</div></div><i class="rkwire"></i>`}).join('')+
+    `<span class="rkend">${c.length?'MASTER':'NO EFFECTS · ADD ONE ABOVE'}</span>`)}
+function renderOut(){const n=sel!=null?S.chosen_numbers:S.own&&S.own.numbers,el=$('outnums');if(!el)return;
+  el.textContent=n&&n.lufs!=null?`${n.lufs.toFixed(1)} LUFS · TP ${n.true_peak_dbtp==null?'—':n.true_peak_dbtp.toFixed(1)} · CORR ${n.correlation==null?'—':n.correlation.toFixed(2)}`:'—';
+  el.style.color=n&&n.true_peak_dbtp!=null&&n.true_peak_dbtp>-0.1?'var(--red)':'#c3cbcf'}
+// the key: how the notes sit in it (per channel; drum channels on arbitrary keys read low) and the estimate from the
+// pitched channels, numbers for the owner to read, not a rule
+function keyLine(f){const r=f.key_report;if(!r||!r.estimate)return '';const low=(r.channels||[]).filter(c=>c.in_key!=null&&c.notes>=8&&c.in_key<.8);
+  return `<div class="row" title="${esc((r.channels||[]).filter(c=>c.notes).map(c=>`${pad(c.channel)} ${c.name}: ${c.notes} notes${c.in_key==null?'':', '+Math.round(c.in_key*100)+'% in key'}`).join('\n'))}"><span>${r.key?`notes in ${esc(r.key)}`:'estimated key'}</span><span>${r.key?Math.round((r.in_key||0)*100)+'% · ':''}${esc(r.estimate)} (r ${r.estimate_r})</span></div>`+
+    (r.key&&low.length?`<div class="meta" style="font-size:10px;padding:2px 0 4px">mostly outside it: ${low.map(c=>pad(c.channel)+' '+esc(c.name)).join(', ')}</div>`:'')}
+// ---- AGENT: the chat panel (optional: a model the owner configures), the activity of every agent (also over MCP), the
+// selection the page shares with the tools, and the places an agent cues (shown, and played when it asks)
+const AG={view:'chat',seen:0,sel:'',selT:null,cue:null};
+try{if(localStorage.agent==='1')document.body.classList.add('agent-on')}catch(e){}
+function agentToggle(){document.body.classList.toggle('agent-on');try{localStorage.agent=document.body.classList.contains('agent-on')?'1':'0'}catch(e){}renderAgent()}
+function agSelection(){const f=S.song&&S.song.facts;if(!f)return null;const o=f.orders[PAT.order];if(!o)return null;
+  const a=SEL&&SEL.o===PAT.order?SEL.a:{row:CUR.row,ch:CUR.ch},b=SEL&&SEL.o===PAT.order?(SEL.b||SEL.a):a;
+  return {order:PAT.order,pattern:o.pattern,rows:[Math.min(a.row,b.row),Math.max(a.row,b.row)],channels:[Math.min(a.ch,b.ch),Math.max(a.ch,b.ch)]}}
+function agSelText(s){if(!s)return '';const f=S.song.facts,ch=s.channels[0]===s.channels[1]?`${pad(s.channels[0]+1)} ${f.channels[s.channels[0]]||''}`:`channels ${pad(s.channels[0]+1)}–${pad(s.channels[1]+1)}`;
+  return `${ch} · pattern ${s.pattern} (order ${s.order}) · rows ${pad(s.rows[0])}–${pad(s.rows[1])}`}
+function agSyncSel(){const s=agSelection(),k=JSON.stringify(s);if(k===AG.sel)return;AG.sel=k;clearTimeout(AG.selT);
+  AG.selT=setTimeout(()=>fetch('/api/selection',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selection:s})}).catch(()=>{}),250);if(document.body.classList.contains('agent-on'))renderAgent()}
+function agSend(text){const t=(text||$('ag-in').value).trim();if(!t)return;const s=agSelection();if(!text)$('ag-in').value='';act('chat',{text:t,context:SEL?agSelText(s):null})}
+function agSave(){const b={provider:$('ag-provider').value,model:$('ag-model').value,base_url:$('ag-base').value,effort:$('ag-effort').value};if($('ag-key').value)b.api_key=$('ag-key').value;$('ag-key').value='';act('chatsettings',b);AG.view='chat'}
+const AG_CHIPS=['What is selected here?','Measure this','Make it darker','More space','Give me three options'];
+function renderAgent(){const on=document.body.classList.contains('agent-on');$('agentbtn').classList.toggle('on',on);if(!on||!S.song)return;
+  const c=S.chat||{messages:[],settings:{}},st=c.settings||{},v=AG.view;
+  ['chat','log','set'].forEach(k=>$('ag-v-'+k).classList.toggle('on',v===k));
+  $('ag-who').textContent=st.provider==='claude_code'?'· Claude Code'+(st.model?' · '+st.model:''):st.provider==='anthropic'?'· '+(st.model||'claude-opus-5-5'):st.provider==='openai'?'· '+(st.model||'local model'):'· chat off (SETTINGS)';
+  $('ag-set').style.display=v==='set'?'block':'none';$('ag-msgs').style.display=v==='set'?'none':'flex';$('ag-foot').style.display=v==='chat'?'block':'none';
+  if(v==='set'&&document.activeElement.parentNode!==$('ag-set')){$('ag-provider').value=st.provider||'';$('ag-model').value=st.model||'';$('ag-base').value=st.base_url||'';$('ag-effort').value=st.effort||'';$('ag-key').placeholder=st.has_key?'stored · type to replace':'none stored'}
+  const box=$('ag-msgs'),end=box.scrollTop+box.clientHeight>=box.scrollHeight-20;
+  if(v==='log')put('ag-msgs',(S.agent_log||[]).slice().reverse().map(l=>`<div class="agm tool ${l.error?'err':''}"><b>${new Date(l.time*1000).toTimeString().slice(0,5)}</b><span class="tx">${esc(l.tool)} ${esc(l.args)}\n→ ${esc(l.error||l.summary)}</span></div>`).join('')||'<div class="meta">No agent has used the tools on this song yet.</div>');
+  else put('ag-msgs',(c.messages||[]).map(m=>m.role==='tool'?`<div class="agm tool ${m.error?'err':''}"><b>TOOL</b><span class="tx">${esc(m.tool)} ${esc(m.args)}\n→ ${esc(m.text)}</span></div>`:
+      `<div class="agm ${m.role}"><b>${m.role==='you'?'YOU':m.role==='agent'?'AGENT':'!'}</b><span class="tx">${esc(m.text)}${m.context?`<span class="cx">on ${esc(m.context)}</span>`:''}</span></div>`).join('')+(c.busy?'<div class="agm agent"><b>AGENT</b><span class="tx" style="color:var(--dim)">working…</span></div>':'')||
+      `<div class="meta" style="line-height:1.6">${st.provider?'Ask about the song, or select rows in the PATTERN tab and say what they should do.':'The chat is off: choose a provider in SETTINGS (an API key, or a local model). Claude Code can work on this song over MCP without it.'}</div>`);
+  if(end||c.busy)box.scrollTop=box.scrollHeight;
+  put('ag-chips',AG_CHIPS.map(t=>`<span onclick="agSend(${attr(t)})">${esc(t)}</span>`).join(''));
+  $('ag-ctx').textContent=SEL?'on '+agSelText(agSelection()):''}
+function agCue(c){tab('pattern');CUR.o=c.order;CUR.row=c.row;if(c.channel!=null)CUR.ch=c.channel;showPattern(c.order);renderPat();if(c.play){lvPatLoop=false;lvPlay(c.order,c.row)}}
+// TAP: the beat tapped four times or more sets the tempo (for the song's speed and rows per beat) a moment after the last tap
+const TAP={t:[],timer:null};
+function tapTempo(){const now=performance.now();TAP.t=TAP.t.filter(x=>now-x<2500).concat(now).slice(-8);clearTimeout(TAP.timer);const el=$('taptb');
+  if(TAP.t.length<4){el.textContent=`TAP · ${4-TAP.t.length} MORE`;return}
+  const bpm=60000/((TAP.t[TAP.t.length-1]-TAP.t[0])/(TAP.t.length-1)),f=S.song.facts,tempo=Math.round(bpm*f.highlight[0]*f.speed/24);el.textContent=`TAP · ${bpm.toFixed(1)} BPM`;
+  TAP.timer=setTimeout(()=>{TAP.t=[];if(tempo<32||tempo>255){EDQ.err=`${bpm.toFixed(1)} BPM needs tempo ${tempo} at speed ${f.speed}: IT allows 32–255 (change the speed)`;renderSongTab();return}songEdit([{op:'module',key:'tempo',value:tempo}]);el.textContent='TAP'},1500)}
+// ALL OFF: every sound the app makes stops (the render playing, the live engine, previews, the FAUST tab's voices)
+function panic(){try{audio.pause()}catch(e){}try{lvStop()}catch(e){}try{pkStop()}catch(e){}}
 function songEdit(ops,onReport){EDQ.n++;renderSongTab();renderIns();renderSmp();
   EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/songedit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ops})})).json();
       EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null;if(j.report)(onReport||selInfo)(j.report);else if(['echoing…','writing…'].includes($('sel-msg').textContent))selInfo('')})
@@ -1224,15 +1427,15 @@ function renderClean(){const u=S.unused||{},ins=S.instruments||{},ents=S.song.sa
 function cleanAll(){const u=S.unused||{};const ops=[...(u.patterns||[]).map(name=>({op:'pattern_delete',name})),...(u.instruments||[]).map(n=>({op:'instrument_delete',num:+n})),...(u.samples||[]).map(n=>({op:'sample_delete',num:+n}))];if(ops.length)songEdit(ops)}
 function renderSongTab(){const st=S.structure;if(!st||!S.song.facts)return;renderClean();const f=S.song.facts,m=st.module,busy=EDQ.n>0;
   $('song-msg').style.color=EDQ.err?'var(--red)':'var(--dim)';$('song-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:busy?'writing…':'each change is written into the song file in place · Ctrl+Z in the Pattern tab (or ↶ there) undoes it';
-  const val=(k,lab,lo,hi,txt)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,${lo},${hi},v=>songEdit([{op:'module',key:'${k}',value:v}]),${attr(String(m[k]))}${txt?',s=>s':''})" title="click to type${txt?'':` ${lo}–${hi}`}">${esc(m[k])}</span></div>`;
-  put('song-mod',val('title','title',0,0,1)+val('tempo','tempo',32,255)+val('speed','speed (ticks per row)',1,255)+val('global_volume','global volume',0,128)+val('mix_volume','mix volume',0,128)+val('separation','stereo separation',0,128)+val('rows_per_beat','rows per beat',1,255)+val('rows_per_bar','rows per bar',1,255)+`<div class="row"><span>BPM (${f.highlight[0]} rows per beat)</span><span>${f.bpm}</span></div>`);
+  const val=(k,lab,lo,hi,txt)=>`<div class="row"><span>${lab}</span><span class="tv" onclick="typeIn(this,${lo},${hi},v=>songEdit([{op:'module',key:'${k}',value:v}]),${attr(String(m[k]))}${txt?',s=>s':''})" title="click to type${txt?'':` ${lo}–${hi}`}">${esc(m[k])||'—'}</span></div>`;
+  put('song-mod',val('title','title',0,0,1)+val('key','key (e.g. A minor)',0,0,1)+keyLine(f)+val('tempo','tempo',32,255)+`<div class="row"><span>tap the beat (4 or more taps set the tempo)</span><span><span class="btn sm" id="taptb" onclick="tapTempo()">TAP</span></span></div>`+val('speed','speed (ticks per row)',1,255)+val('global_volume','global volume',0,128)+val('mix_volume','mix volume',0,128)+val('separation','stereo separation',0,128)+val('rows_per_beat','rows per beat',1,255)+val('rows_per_bar','rows per bar',1,255)+`<div class="row"><span>BPM (${f.highlight[0]} rows per beat)</span><span>${f.bpm}</span></div>`);
   $('song-on').textContent=`${st.orders.length} ENTRIES`;if(ORD_SEL>=st.orders.length)ORD_SEL=st.orders.length-1;
   put('song-orders',st.orders.map((o,i)=>`<span class="chipc ${i===ORD_SEL?'on':''}" style="${isMark(o)?'color:var(--amber)':''}" onclick="ORD_SEL=${i};renderSongTab()" ondblclick="ORD_SEL=${i};ordEdit()" title="${isMark(o)?(o==='+++'?'skip marker':'end of song'):'double-click to edit it'}">${pad(i)} ${esc(o)}</span>`).join(''));
   put('song-pat',[...st.patterns.map(p=>p.name),'+++','---'].map(n=>`<option value="${esc(n)}">${esc(n)}${n==='+++'?' (skip)':n==='---'?' (end)':''}</option>`).join(''));
   $('song-pn').textContent=st.patterns.length;
-  put('song-pats',`<tr><th>NAME</th><th class="r">ROWS</th><th class="r">IN ORDERS</th><th></th></tr>`+st.patterns.map(p=>`<tr><td class="sans tv" onclick="typeIn(this,0,0,v=>songEdit([{op:'pattern_rename',old:${attr(p.name)},new:v}]),${attr(p.name)},s=>s)" title="click to rename (the order list follows)">${esc(p.name)}</td><td class="r tv" onclick="typeIn(this,1,200,v=>songEdit([{op:'pattern_rows',name:${attr(p.name)},rows:v}]),${p.rows})" title="click to type 1–200 (rows past a new end are removed)">${p.rows}</td><td class="r ${p.used?'':'dimc'}">${p.used||'unused'}</td><td style="text-align:right"><span class="btn sm" onclick="songEdit([{op:'pattern_clone',src:${attr(p.name)},name:uniqueName(${attr(p.name)}+'b')}])">CLONE</span> <span class="btn sm ${p.used?'dimb':''}" onclick="${p.used?`EDQ.err='take it out of the order list first';renderSongTab()`:`twice(this,()=>songEdit([{op:'pattern_delete',name:${attr(p.name)}}]))`}" title="${p.used?'in the order list: remove it there first':'delete it (click twice)'}">DELETE</span></td></tr>`).join(''));
+  put('song-pats',`<tr><th>NAME</th><th class="r">ROWS</th><th class="r">IN ORDERS</th><th title="who wrote it (marked when an agent writes it)">BY</th><th></th></tr>`+st.patterns.map(p=>`<tr><td class="sans tv" onclick="typeIn(this,0,0,v=>songEdit([{op:'pattern_rename',old:${attr(p.name)},new:v}]),${attr(p.name)},s=>s)" title="click to rename (the order list follows)">${esc(p.name)}</td><td class="r tv" onclick="typeIn(this,1,200,v=>songEdit([{op:'pattern_rows',name:${attr(p.name)},rows:v}]),${p.rows})" title="click to type 1–200 (rows past a new end are removed)">${p.rows}</td><td class="r ${p.used?'':'dimc'}">${p.used||'unused'}</td><td class="mono" style="font-size:10px;color:${(((S.marks||{}).patterns||{})[p.name]||{}).by?'var(--blue)':'var(--dim)'}">${esc((((S.marks||{}).patterns||{})[p.name]||{}).by||'')}</td><td style="text-align:right"><span class="ms ${(((S.marks||{}).patterns||{})[p.name]||{}).approved?'s':''}" style="display:inline-grid;vertical-align:middle" onclick="songEdit([{op:'mark',what:'pattern',key:${attr(p.name)},approved:${!(((S.marks||{}).patterns||{})[p.name]||{}).approved}}])" title="approved: an agent's tools leave this pattern alone">✓</span> <span class="btn sm" onclick="songEdit([{op:'pattern_clone',src:${attr(p.name)},name:uniqueName(${attr(p.name)}+'b')}])">CLONE</span> <span class="btn sm ${p.used?'dimb':''}" onclick="${p.used?`EDQ.err='take it out of the order list first';renderSongTab()`:`twice(this,()=>songEdit([{op:'pattern_delete',name:${attr(p.name)}}]))`}" title="${p.used?'in the order list: remove it there first':'delete it (click twice)'}">DELETE</span></td></tr>`).join(''));
   $('song-chn').textContent=`${f.channels.length} CHANNELS`;
-  put('song-ch',f.channels.map((c,i)=>`<div class="stem"><span class="n">${pad(i+1)}</span><i class="fb" style="background:${famCol(c)||'#333a3d'}"></i><span class="nm tv" onclick="typeIn(this,0,0,v=>songEdit([{op:'channel_rename',ch:${i},name:v}]),${attr(c)},s=>s)" title="click to rename (20 characters)">${esc(c)}</span><span class="ms" onclick="songEdit([{op:'channel_move',ch:${i},to:${i-1}}])" title="move up: its cells move in every pattern">▲</span><span class="ms" onclick="songEdit([{op:'channel_move',ch:${i},to:${i+1}}])" title="move down">▼</span><span class="btn sm" style="padding:2px 5px" onclick="twice(this,()=>songEdit([{op:'channel_remove',ch:${i}}]))" title="remove it and its cells in every pattern (click twice; Ctrl+Z in the Pattern tab brings it back)">✕</span></div>`).join(''))}
+  put('song-ch',f.channels.map((c,i)=>`<div class="stem"><span class="n">${pad(i+1)}</span><i class="fb" style="background:${famCol(c)||'#333a3d'}"></i><span class="nm tv" onclick="typeIn(this,0,0,v=>songEdit([{op:'channel_rename',ch:${i},name:v}]),${attr(c)},s=>s)" title="click to rename (20 characters)">${esc(c)}</span><span class="ms ${(S.marks.channels||[])[i]?'s':''}" onclick="songEdit([{op:'mark',what:'channel',key:${i},approved:${!(S.marks.channels||[])[i]}}])" title="approved: an agent's tools leave this channel alone (its cells and its effects)">✓</span><span class="ms" onclick="songEdit([{op:'channel_move',ch:${i},to:${i-1}}])" title="move up: its cells move in every pattern">▲</span><span class="ms" onclick="songEdit([{op:'channel_move',ch:${i},to:${i+1}}])" title="move down">▼</span><span class="btn sm" style="padding:2px 5px" onclick="twice(this,()=>songEdit([{op:'channel_remove',ch:${i}}]))" title="remove it and its cells in every pattern (click twice; Ctrl+Z in the Pattern tab brings it back)">✕</span></div>`).join(''))}
 // ---- selections: a block from an anchor to the cursor over rows, channels (in view order) and columns, the way
 // trackers select: the first channel from the anchor's column, the last up to the cursor's, the ones between whole.
 // Commands work on it (or on the cursor's cell): copy, cut, paste, mix-paste, clear, transpose, interpolate, amplify.
@@ -1402,6 +1605,8 @@ document.addEventListener('keydown',e=>{if(/^F[5-8]$/.test(e.key)&&S&&S.song&&S.
     if((e.ctrlKey||e.metaKey)&&(k==='z'||k==='y')){e.preventDefault();e.stopImmediatePropagation();patUndo(k==='y'||e.shiftKey);return}
     if(e.key==='Escape'&&W.sel){W.sel=null;drawWave();renderSmpInfo();return}
     const pk=pianoKey(e);if(!e.ctrlKey&&!e.altKey&&!e.metaKey&&pk.length===1&&PIANO.includes(pk)&&W.data&&W.data.player){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(pk,W.data.player[0])}return}
+  if(ptOn()&&(e.ctrlKey||e.metaKey)&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){const k=e.key.toLowerCase();
+    if(k==='z'||k==='y'){e.preventDefault();e.stopImmediatePropagation();ptUndo(k==='y'||e.shiftKey);return}}
   if((ptOn()||faOn())&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!document.querySelector('.modal.on')){
     const k=pianoKey(e);if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)pkPlay(k)}return}
   if($('t-ins').classList.contains('on')&&INS_SEL!=null&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){
@@ -1762,9 +1967,17 @@ const PTN=['C-','C#','D-','D#','E-','F-','F#','G-','G#','A-','A#','B-'];
 const ptNote=s=>{const m=/^([A-G])([-#])(\d)$/i.exec(String(s).trim());if(!m)return +s;return PTN.indexOf(m[1].toUpperCase()+m[2])+12*(+m[3])};
 function ptRange(){const n=$('pt-scale').value==='notes';return n?{scale:'notes',fmin:ptNote($('pt-low').value),fmax:ptNote($('pt-low').value)+PT.rows-1}:{scale:'log',fmin:+$('pt-low').value,fmax:+$('pt-high').value}}
 function ptFreq(r){const R=ptRange();return R.scale==='notes'?440*2**((R.fmin+r-69)/12):R.fmin*(R.fmax/R.fmin)**(r/Math.max(1,PT.rows-1))}
-function ptResize(){const r=Math.max(4,Math.min(256,+$('pt-rows').value||72)),c=Math.max(4,Math.min(1024,+$('pt-cols').value||128));if(r===PT.rows&&c===PT.cols)return;
+function ptResize(){const r=Math.max(4,Math.min(256,+$('pt-rows').value||72)),c=Math.max(4,Math.min(1024,+$('pt-cols').value||128));if(r===PT.rows&&c===PT.cols)return;ptPush();
   const oa=PT.amp,op=PT.pan,or=PT.rows,oc=PT.cols;ptNew(r,c);for(let y=0;y<r;y++)for(let x=0;x<c;x++){const i=Math.floor(y*or/r)*oc+Math.floor(x*oc/c);PT.amp[y*c+x]=oa[i];PT.pan[y*c+x]=op[i]}ptSave();ptDraw()}
-function ptClear(){PT.amp.fill(0);PT.pan.fill(0);ptSave();ptDraw()}
+function ptClear(){ptPush();PT.amp.fill(0);PT.pan.fill(0);ptSave();ptDraw()}
+// undo for the picture (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z, ↶ ↷): each stroke, CLEAR, LOAD IMAGE and resize is one step,
+// up to 60, kept while the tab's picture is this song's (the picture itself is kept in this browser, the steps are not)
+const PTH={undo:[],redo:[],key:null};
+const ptState=()=>({rows:PT.rows,cols:PT.cols,amp:PT.amp.slice(),pan:PT.pan.slice()});
+function ptPush(){if(PTH.key!==PT.key){PTH.undo=[];PTH.redo=[];PTH.key=PT.key}PTH.undo.push(ptState());if(PTH.undo.length>60)PTH.undo.shift();PTH.redo=[];ptUndoBtns()}
+function ptUndo(redo){if(PTH.key!==PT.key||!PT.amp)return;const from=redo?PTH.redo:PTH.undo,to=redo?PTH.undo:PTH.redo,s=from.pop();if(!s)return;to.push(ptState());
+  PT.rows=s.rows;PT.cols=s.cols;PT.amp=s.amp;PT.pan=s.pan;$('pt-rows').value=s.rows;$('pt-cols').value=s.cols;ptSave();ptDraw();ptUndoBtns()}
+function ptUndoBtns(){const k=PTH.key===PT.key;$('pt-undo').classList.toggle('dimb',!(k&&PTH.undo.length));$('pt-redo').classList.toggle('dimb',!(k&&PTH.redo.length))}
 function ptDraw(){const cv=$('pt-cv');if(!cv||!ptOn()||!PT.amp)return;const W=cv.clientWidth,H=cv.clientHeight,dpr=devicePixelRatio||1;cv.width=Math.round(W*dpr);cv.height=Math.round(H*dpr);
   const g=cv.getContext('2d'),img=g.createImageData(PT.cols,PT.rows);
   for(let y=0;y<PT.rows;y++)for(let x=0;x<PT.cols;x++){const i=y*PT.cols+x,a=PT.amp[i],p=PT.pan[i],o=((PT.rows-1-y)*PT.cols+x)*4;img.data[o]=(p<=0?1:1-p)*a*255;img.data[o+1]=(p>=0?1:1+p)*a*255;img.data[o+2]=a?0:14;img.data[o+3]=255}
@@ -1778,14 +1991,14 @@ function ptCell(ev){const r=$('pt-cv').getBoundingClientRect();return [Math.max(
 function ptDab(x,y,erase){const rad=Math.max(1,+$('pt-size').value||1)-1,a=+$('pt-bright').value/100,p=+$('pt-pan').value/100;
   for(let dy=-rad;dy<=rad;dy++)for(let dx=-rad;dx<=rad;dx++){if(dx*dx+dy*dy>rad*rad+rad)continue;const X=x+dx,Y=y+dy;if(X<0||Y<0||X>=PT.cols||Y>=PT.rows)continue;const i=Y*PT.cols+X;if(erase){PT.amp[i]=0;PT.pan[i]=0}else{PT.amp[i]=a;PT.pan[i]=p}}}
 function ptStroke(a,b,erase){const n=Math.max(Math.abs(b[0]-a[0]),Math.abs(b[1]-a[1]),1);for(let k=0;k<=n;k++)ptDab(Math.round(a[0]+(b[0]-a[0])*k/n),Math.round(a[1]+(b[1]-a[1])*k/n),erase)}
-function ptDown(ev){if(!PT.amp)return;ev.preventDefault();const erase=ev.button===2||PT.tool==='erase',c0=ptCell(ev);let last=c0;
+function ptDown(ev){if(!PT.amp)return;ev.preventDefault();ptPush();const erase=ev.button===2||PT.tool==='erase',c0=ptCell(ev);let last=c0;
   const snap=PT.tool==='line'&&!erase?[PT.amp.slice(),PT.pan.slice()]:null;if(!snap){ptDab(c0[0],c0[1],erase);ptDraw()}
   const mv=e=>{const c=ptCell(e);if(snap){PT.amp.set(snap[0]);PT.pan.set(snap[1]);ptStroke(c0,c,false)}else{ptStroke(last,c,erase);last=c}ptDraw();ptMove(e)};
   const up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);ptSave()};addEventListener('mousemove',mv);addEventListener('mouseup',up)}
 function ptMove(ev){if(!PT.amp)return;const [x,y]=ptCell(ev),f=ptFreq(y),R=ptRange(),secs=+$('pt-secs').value||0;
   $('pt-pos').textContent=`${(x*secs/PT.cols).toFixed(2)} s · ${R.scale==='notes'?PTN[(R.fmin+y)%12]+Math.floor((R.fmin+y)/12)+' · ':''}${f<1000?f.toFixed(1)+' Hz':(f/1000).toFixed(2)+' kHz'} · level ${Math.round(PT.amp[y*PT.cols+x]*100)}`}
 function ptImage(){$('pt-file').click()}
-function ptImageFile(f){if(!f)return;const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=PT.cols;c.height=PT.rows;const g=c.getContext('2d');g.drawImage(img,0,0,PT.cols,PT.rows);
+function ptImageFile(f){if(!f)return;const img=new Image();img.onload=()=>{ptPush();const c=document.createElement('canvas');c.width=PT.cols;c.height=PT.rows;const g=c.getContext('2d');g.drawImage(img,0,0,PT.cols,PT.rows);
   const d=g.getImageData(0,0,PT.cols,PT.rows).data;for(let y=0;y<PT.rows;y++)for(let x=0;x<PT.cols;x++){const o=((PT.rows-1-y)*PT.cols+x)*4,r=d[o]/255,gr=d[o+1]/255,b=d[o+2]/255,i=y*PT.cols+x;
     PT.amp[i]=Math.max(r,gr,b);PT.pan[i]=r+gr>0.02?(gr-r)/Math.max(r,gr):0}URL.revokeObjectURL(img.src);ptSave();ptDraw();$('pt-msg').textContent=`${f.name} drawn over the grid`};img.src=URL.createObjectURL(f)}
 function ptBody(action){const rows=[],pans=[];for(let y=0;y<PT.rows;y++){rows.push(Array.from(PT.amp.subarray(y*PT.cols,(y+1)*PT.cols),v=>Math.round(v*1000)/1000));pans.push(Array.from(PT.pan.subarray(y*PT.cols,(y+1)*PT.cols),v=>Math.round(v*1000)/1000))}

@@ -96,11 +96,13 @@ class Channel:
     pan: int = 32                  # 0..64, 100 = surround
     volume: int = 64               # 0..64
     muted: bool = False
+    plugin: int = 0                # the mix plugin it plays through (1.., Module.plugins), 0 none
 
 
 @dataclass
 class Module:
     title: str = ""
+    key: str = ""                  # the song's key, e.g. "A minor" (for people and agents; not stored in the .it)
     speed: int = 6
     tempo: int = 125
     global_volume: int = 128       # 0..128
@@ -116,3 +118,6 @@ class Module:
     orders: list[int] = field(default_factory=list)
     message: str = ""
     row_highlight: tuple[int, int] = (4, 16)
+    plugins: dict = field(default_factory=dict)   # {1..: {effect, params [0..1], name, output, bypass, gain, dry,
+    #                                               master}} (plugins.py); only OpenMPT and libopenmpt play them
+    macros: dict = field(default_factory=dict)    # {0..15: SFx macro text} over OpenMPT's defaults (SF0 = cutoff)

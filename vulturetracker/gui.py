@@ -37,7 +37,7 @@ from urllib.parse import unquote
 
 import yaml
 
-from . import __version__, api
+from . import __version__, agent, api, plugins
 from .fileio import atomic_write as _atomic, lock_file, protect_outputs, save_beside, unlock_file, user_dir, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
@@ -337,6 +337,18 @@ def song_facts(text, base_dir, name):
     return facts_of(*load_song_text(text, base_dir, name))
 
 
+DMO = plugins.describe()  # the rack's effects and their parameters
+
+
+def _key_report(mod):
+    try:
+        from .compose import key_report
+        return key_report(mod)
+    except (ImportError, ValueError):
+        return None
+CHAT = agent.Chat()       # the chat panel's conversation (one per app)
+
+
 def facts_of(mod, warnings, it=None):
     """`it`: the module's .it bytes, when the caller wrote them already."""
     rows_per_bar = mod.row_highlight[1] or 16
@@ -378,6 +390,9 @@ def facts_of(mod, warnings, it=None):
         "highlight": [mod.row_highlight[0] or 4, rows_per_bar],
         "channels": [c.name or f"Ch {i + 1}" for i, c in enumerate(mod.channels)],
         "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels], "mix_volume": mod.mix_volume,
+        "channel_plugins": [c.plugin for c in mod.channels], "plugins": plugins.to_song(mod.plugins),
+        "macros": {f"SF{n:X}": t for n, t in sorted(mod.macros.items())},
+        "key": mod.key, "key_report": _key_report(mod),
         "patterns": len(mod.patterns), "duration": duration, "orders": orders, "use": use,
         "instruments": [i.name for i in mod.instruments] if mod.instruments else [],
         "samples": [{"num": i + 1, "name": s.name, "c5_speed": s.c5_speed, "length": s.length / s.c5_speed if s.c5_speed else 0,
@@ -696,6 +711,24 @@ def _encode(path, pcm, fmt, loop=None):
                         *ENCODE[fmt], *tags, str(path)], input=pcm, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode:
         raise OSError(f"ffmpeg failed: {r.stderr.decode(errors='replace').strip()[-400:]}")
+
+
+@functools.lru_cache(maxsize=32)
+def _mix_numbers(path, stamp):
+    import numpy as np
+    from . import dsp
+    pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
+    return dsp.measure_mix(pcm, RATE)
+
+
+def mix_numbers(path):
+    """A render's loudness (LUFS), true peak, sample peak and stereo correlation (dsp.measure_mix), memoised per file
+    stamp; None when it cannot be read."""
+    try:
+        st = os.stat(path)
+        return _mix_numbers(str(path), (st.st_mtime_ns, st.st_size))
+    except (OSError, ValueError, ImportError):
+        return None
 
 
 def _peak(pcm):
@@ -1118,6 +1151,10 @@ class State:
         # cleared by U), as they were, or None}
         self.history, self.future = [], []
         self.takes = []       # this session's recorded takes, newest first (save_take)
+        self.selection = None  # the page's pattern selection or cursor: {order, pattern, rows [a, b], channels [a, b]}
+        self.cue = None        # an agent's request to show (and play) a place: {id, order, row, channel, play}
+        self.agent_log = []    # the agent tools' calls (agent.run): what an agent did, for the page
+        self.agent_measures = {}  # the last measure per scope, for the next one's change
         self.build = None     # last build/export result
         self.export_job = None
         self.export_result = None
@@ -1529,6 +1566,8 @@ class State:
                 _write_pcm(out, pcm)
                 with self.lock:
                     self.renders[k].update(status="ready", file=str(out), peak=_peak(pcm))
+                if cand is None or cand == self.want:
+                    mix_numbers(out)  # measured now, so the page's next poll does not wait for it
                 self._prune()
             except Exception as e:  # noqa: BLE001 - shown in the UI, worker must survive
                 with self.lock:
@@ -2180,10 +2219,11 @@ class State:
         place, as one undoable step (see edit_patterns)."""
         self.edit_patterns([(index, cells)])
 
-    def edit_patterns(self, groups):
+    def edit_patterns(self, groups, who=None):
         """Write each (pattern index, cells) of `groups` in place, all as one undoable step. The whole song is compiled
         first: an edit that breaks it is refused (SongError) and nothing is written. Refused too when the song changed on
-        disk since it was read (reload first)."""
+        disk since it was read (reload first). `who` "agent": the patterns are marked `by: agent` (one that had notes
+        and no mark becomes `you and agent`); the owner's edit of a pattern marked `agent` makes it `you and agent`."""
         with self.lock:
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the edit does not overwrite that change")
@@ -2191,7 +2231,45 @@ class State:
             lines = self.text.splitlines(keepends=True)
             for index, cells in groups:
                 self._edit_block(lines, int(index), cells)
+            for index in {int(i) for i, _ in groups}:
+                pat = self.mod.patterns[index]
+                cur = self.pattern_entry(pat.name).get("by")
+                if who == "agent":
+                    blank = all(c.is_empty() for row in pat.rows for c in row)
+                    new = "agent" if cur == "agent" or (cur is None and blank) else "you and agent"
+                else:
+                    new = "you and agent" if cur == "agent" else cur
+                if new != cur:
+                    try:
+                        self._pattern_mark(lines, pat.name, {"by": new})
+                    except ValueError:  # a pattern written as one block carries no marks
+                        pass
             self._commit("".join(lines))  # compiled first (SongError: nothing is written)
+
+    def pattern_entry(self, name):
+        """The song file's entry of pattern `name` as a dict ({} when it is written as one block)."""
+        pats = self.song.get("patterns") or {}
+        e = next((v for k, v in pats.items() if str(k) == str(name)), None)
+        return e if isinstance(e, dict) else {}
+
+    def _pattern_mark(self, lines, name, fields):
+        """Pattern `name`'s marks (`by`, `approved`) set in `lines`; a value of None or False removes the key."""
+        j = self._pattern_key(lines, name)
+        if lines[j].split("#")[0].split(":", 1)[1].strip():
+            raise ValueError(f"pattern '{name}' is written as one block: give it 'rows:' and 'data: |' to mark it")
+        kids = self._children(lines, j)
+        ind = " " * (self._ind(lines[kids[0][0]]) if kids else self._ind(lines[j]) + 2)
+        for key, value in fields.items():
+            at = next((i for i, k in self._children(lines, j) if k == key), None)
+            if value is None or value is False:
+                if at is not None:
+                    del lines[at]
+                continue
+            text = "true" if value is True else self._yname(str(value))
+            if at is not None:
+                lines[at] = f"{ind}{key}: {text}\n"
+            else:
+                lines.insert(j + 1, f"{ind}{key}: {text}\n")
 
     def materialize_pattern(self, index):
         """Make the compiled cells explicit; one undo restores the original pattern notation."""
@@ -2246,7 +2324,7 @@ class State:
     # layout the songs use: `orders: [..]` on one line, patterns as `name:` + `rows:` + `data: |`, channels one `- {..}`
     # per line, module settings as `key: value` lines); a batch of ops is one undo step, compiled before it is written
 
-    MODULE_KEYS = {"title": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
+    MODULE_KEYS = {"title": None, "key": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
                    "separation": (0, 128), "rows_per_beat": (1, 255), "rows_per_bar": (1, 255)}
 
     def _encoded(self, text, crlf=None, bom=None):
@@ -2743,6 +2821,58 @@ class State:
             if j is None:
                 raise ValueError(f"no instrument {num}")
             del lines[j:self._span(lines, j)]
+        elif kind == "plugins":  # module.plugins {number: entry} and/or module.macros {SFx: text}, each rewritten
+            #                        whole (empty or null removes it): the rack's edits
+            mod = self._top(lines, "module")
+            if lines[mod].split("#")[0].split(":", 1)[1].strip():
+                raise ValueError("module is written on one line: write it as a block to edit its plugins here")
+            for key in ("plugins", "macros"):
+                if key not in op:
+                    continue
+                value = op[key] or {}
+                if key == "plugins":
+                    value = {int(k): v for k, v in sorted(value.items(), key=lambda kv: int(kv[0]))}
+                kids = self._children(lines, mod)
+                ind = " " * (self._ind(lines[kids[0][0]]) if kids else 2)
+                block = [f"{ind}{key}:\n"] + [
+                    f"{ind}  {k}: " + (api.safe_dump(v, default_flow_style=True, width=10 ** 6, sort_keys=False).strip()
+                                      if isinstance(v, dict) else self._yname(str(v))) + "\n" for k, v in value.items()]
+                at = next((i for i, k in kids if k == key), None)
+                if at is not None:
+                    lines[at:self._span(lines, at)] = block if value else []
+                elif value:
+                    end = self._span(lines, mod)
+                    lines[end:end] = block
+        elif kind == "mark":  # `approved` (true/false) on a pattern, channel or sample (`what`, `key`); `by` on a pattern
+            what, key = op.get("what"), op.get("key")
+            if what == "pattern":
+                self._pattern_mark(lines, str(key), {k: op[k] for k in ("approved", "by") if k in op})
+            elif what == "channel":
+                head, items = self._channel_lines(lines)
+                i = int(key)
+                if op.get("approved"):
+                    self._redump(lines, items[i], self._entry(lines[items[i]], "-"), {"approved": "true"}, keys=("approved",))
+                else:
+                    lines[items[i]] = re.sub(r",\s*approved:\s*\w+|approved:\s*\w+\s*,?\s*", "", lines[items[i]], count=1)
+            elif what == "sample":
+                entry = dict((self.song.get("samples") or {}).get(int(key)) or {})
+                if not entry:
+                    raise ValueError(f"no sample {key}")
+                if op.get("approved"):
+                    entry["approved"] = True
+                else:
+                    entry.pop("approved", None)
+                self._song_op(lines, orders, {"op": "sample_set", "num": int(key), "entry": entry}, remap)
+            else:
+                raise ValueError("a mark goes on a pattern, a channel or a sample")
+        elif kind == "channel_plugin":  # the plugin a channel plays through (0: none)
+            head, items = self._channel_lines(lines)
+            i, num = int(op["ch"]), int(op.get("plugin") or 0)
+            m = self._entry(lines[items[i]], "-")
+            if num:
+                self._redump(lines, items[i], m, {"plugin": num}, keys=("plugin",))
+            else:
+                lines[items[i]] = re.sub(r",\s*plugin:\s*\d+|plugin:\s*\d+\s*,?\s*", "", lines[items[i]], count=1)
         elif kind == "module":
             key, value = str(op["key"]), op["value"]
             if key not in self.MODULE_KEYS:
@@ -3759,15 +3889,26 @@ class State:
                 "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref, "selected_candidate": self.want,
                 "orders": list(self.orders) if self.orders else None, "loop": self.meta.get("loop"),
                 "muted": sorted(set(self.meta.get("muted") or [])), "solo": self.meta.get("solo"),
-                "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak")},
+                "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak"),
+                        "numbers": mix_numbers(own["file"]) if own["status"] == "ready" else None},
+                "chosen_numbers": next((mix_numbers(self.renders[c["key"]]["file"]) for c in cands
+                                        if c["path"] == self.want and c["status"] == "ready"), None),
                 "mix": self.mix(), "meters": self.meters, "voice": voice, "spec": {"db": SPEC_DB, "stops": SPEC_STOPS, "nyquist": RATE / 2},
                 "reference": self.meta.get("reference"), "delta": {"db": DELTA_DB, "stops": DELTA_STOPS},
-                "voice_range": VOICE_RANGE,
+                "voice_range": VOICE_RANGE, "dmo": DMO,
                 "candidates": cands, "build": self.build, "stems": self.stems, "export": self.export_result,
                 "cand_counts": {k: len(v) for k, v in self.meta["candidates"].items() if v},
                 "notes": self.notes, "notes_path": str(self.notes_path), "version": self.version(),
                 "faust_code": self.meta.get("faust_code"),
                 "undo": len(self.history), "redo": len(self.future), "unused": self.unused(),
+                "cue": self.cue, "agent_log": self.agent_log[-40:], "chat": CHAT.snapshot(),
+                "marks": {"patterns": {p.name: {k: v for k, v in self.pattern_entry(p.name).items() if k in ("by", "approved")}
+                                       for p in (self.mod.patterns if self.mod else [])},
+                          "channels": [bool(isinstance(c, dict) and c.get("approved"))
+                                       for c in ((self.song.get("module") or {}).get("channels") or [])
+                                       ] if isinstance((self.song.get("module") or {}).get("channels"), list) else [],
+                          "samples": [int(k) for k, v in (self.song.get("samples") or {}).items()
+                                      if isinstance(v, dict) and v.get("approved")]},
                 "checkpoints": list(self.checkpoints),
                 "history_bytes": self.history_store.path.stat().st_size if self.history_store.path.exists() else 0,
                 "history_limit": HISTORY_BYTES,
@@ -4113,6 +4254,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file(f, "audio/wav")
         if path == "/api/effects":
             return self._send(200, effect_help())
+        if path == "/api/tools":  # the agent tools (agent.py), for the MCP server
+            return self._send(200, {"tools": agent.tool_list(), "song": str(self.state.song_path) if self.state else None})
         if path == "/api/start":
             return self._send(200, start_snapshot())
         if path == "/api/rec":
@@ -4240,6 +4383,10 @@ class Handler(BaseHTTPRequestHandler):
                     lib.set_roots(body["roots"])
                 res = lib.run(lib.scan, 0.5) if body.get("scan", True) else None
                 return self._send(200, {"result": res, **self.lib_snapshot()})
+            elif act == "tool":  # an agent tool run on the open song (the MCP server's calls)
+                return self._send(200, agent.run(st, str(body.get("name")), body.get("args") or {}))
+            elif act == "chatsettings":
+                return self._send(200, agent.save_settings(body))
             elif act == "browse":
                 p = self.browse()
                 if p:
@@ -4247,6 +4394,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": p})
             elif st is None:
                 return self._send(404, {"error": "no song open"})
+            elif act == "selection":
+                st.selection = body.get("selection")
+                return self._send(200, {"ok": True})
+            elif act == "chat":
+                if body.get("clear"):
+                    CHAT.clear()
+                else:
+                    CHAT.send(st, str(body.get("text") or "").strip(), body.get("context"))
             elif act == "slot":
                 st.meta["slot"] = int(body["slot"])
                 st.save_meta()
@@ -4407,6 +4562,7 @@ def serve(song_path=None, port=0, open_browser=True, window=True):
     srv = make_server(port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    agent.announce(srv.server_address[1])
     if window:
         try:
             import webview

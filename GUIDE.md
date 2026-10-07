@@ -190,13 +190,19 @@ note-off (`` ` ``) and fade (Shift+`` ` `` or `\`). CHORD joins a note struck wi
 modifier. COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
 hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
 import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. A FLAC, AIFF, OGG
-or MP3 sample keeps what OpenMPT's loaders keep from it (its loops; a FLAC's root note), above. Deliberate
+or MP3 sample keeps what OpenMPT's loaders keep from it (its loops; a FLAC's root note), above. The mix plugins
+(`module: plugins:`, the RACK tab) are OpenMPT's nine built-in DMO effects with OpenMPT's parameters, units and defaults
+(soundlib/plugins/dmo), saved in the .it as OpenMPT saves them (the FXnn and CHFX chunks of Load_it.cpp's
+SaveMixPlugins, each plugin's output routed to master or to the next plugin); `module: macros:` sets the SFx macros
+of the embedded MIDI configuration over OpenMPT's defaults (SF0 cutoff, Z80-Z8F resonance), and a plugin parameter's
+macro is OpenMPT's `F0F` + (0x80 + the parameter's index) + `z`. Deliberate
 differences: the MIDI import reads track names written as UTF-8 as UTF-8 (OpenMPT reads them as Latin-1, so they come
 out garbled there), keeps the file's time signatures (OpenMPT imports every file as 4/4), makes a marker a named
 section where OpenMPT names a pattern, and bends no drums (their keys are kit pieces here); its bends, pedal and the
 module import's name character sets are OpenMPT's (above); a sample's root note (a
 WAV's or a FLAC's `smpl` unity note) becomes the slot's `base_note` when the sample is put in a slot, where OpenMPT
-keeps it only as a label and plays every file at its own rate on C-5. Any other difference from OpenMPT is a bug.
+keeps it only as a label and plays every file at its own rate on C-5. The piano roll (ROLL) is VultureTracker's own:
+OpenMPT has none. Any other difference from OpenMPT is a bug.
 
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
 stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
@@ -411,7 +417,8 @@ as `paint-<name>.png` beside it) as a new slot (with an instrument in a song wit
 → CANDIDATE adds it to the tryout slot's candidates. AS A FILTER lays the same picture over a sample's spectrum instead:
 dark turns that frequency down at that moment (the columns spread over the whole sample, the phase kept); ▶ plays the
 slot through it and FILTER SLOT writes it as a new WAV (`<name>-spectral_mask.wav`) and points the slot at it (one undo
-step). The picture and its settings are kept in the browser per song.
+step). The picture and its settings are kept in the browser per song. Ctrl+Z undoes a stroke, CLEAR, LOAD IMAGE or a resize (↶ ↷ beside CLEAR; Ctrl+Y or Ctrl+Shift+Z redoes);
+the steps last while the app is open.
 
 **The Faust tab** takes [Faust](https://faust.grame.fr) code (EXAMPLE puts back a two-saw voice with a resonant
 filter) and compiles it in the page (COMPILE, or Ctrl+Enter; the compiler's message appears under the code). The code
@@ -465,6 +472,58 @@ at the end) for a collaborator who cannot listen; the NOTES tab lists and edits 
 Notes belong to the version of the song they were made against: when the song changes outside the app (a rebuild), the
 notes on the old version move to `<song>.notes-<hash>.json` and `.md` beside it and the NOTES tab starts empty; the
 app's own writes keep them, and the report marks their version.
+
+**The Rack tab** shows each channel's chain of mix plugins as devices: OpenMPT's nine built-in DirectX effects
+(chorus, compressor, distortion, echo, flanger, gargle, I3DL2 reverb, parametric EQ, Waves reverb; SONG_FORMAT.md
+section 3.1). Pick a channel on the left, + ADD EFFECT puts one at the end of its chain; a knob turns by dragging up or
+down (Shift: finer) and writes when let go, its number takes a typed value, B bypasses a device, ◀ ▶ move it in the
+chain, ✕ (twice) removes it and the chain closes up. A device fed by two channels is a bus: it says which channels share
+it, and a change there changes theirs. AUTO under a knob of a channel's first device gives that parameter an SFx macro:
+SFx and then Zxx (00-7F) in the channel set it row by row, as OpenMPT does. Each change is one undo step. Only OpenMPT
+and libopenmpt play the plugins; other trackers play those channels dry.
+
+**The piano roll.** ROLL in the live bar shows the cursor's channel as a piano roll over the pattern's rows (pitches
+up, rows across, bar and beat lines from the song's rows per beat and bar), the other channels' notes dimmed behind it
+(GHOSTS) and a lane under it for the volume column. It is the same cells as the tracker grid, edited the same way:
+with EDIT on, a click places a note with the INS instrument (dragging right gives it a length, ending in a note-off on
+a free row), dragging a note up or down transposes it, a right-click deletes it (its effect stays), Shift+click writes
+a note-off, and a click in the lane sets the note's volume. SCALE LOCK puts a click on the nearest note of the song's
+key and shades the pitches outside it.
+
+**Agents: the AGENT panel and MCP.** An agent works on the song open in the app through one set of tools
+(`vulturetracker/agent.py`): read the song and a pattern, read the owner's selection (the rows and channels selected in
+the Pattern tab, with what sounds there), write cells, set the order list, add a pattern, set the tempo, speed, title
+or key, set the rack's plugins, measure (below), cue a place in the app and play it, offer WAVs as tryout candidates,
+read the listening notes, check the key, undo. No tool moves a fader, a channel's volume or pan, or the mix volume, and
+an entry marked approved is refused. Every edit is one undo step, and a pattern an agent writes is marked `by: agent`
+(`you and agent` when it had notes before; the owner's later edit of an agent's pattern makes it that too). Two ways in:
+
+- **Claude Code (or any MCP client):** `claude mcp add vulturetracker -- python -m vulturetracker mcp`, then ask it
+  about the song open in the app. The MCP server finds the running app through `running.json` in the user folder
+  (`--port` names another). Its calls show in the AGENT panel's ACTIVITY.
+- **The AGENT panel** (top right): a chat with a model of your choice, optional. SETTINGS picks **Claude Code (your
+  subscription)**: the `claude` you are signed in to, run headless with this song's tools as its only tools (no API key,
+  no per-token bill; it counts toward your plan's usage; install Claude Code and sign in once first), or the Anthropic API
+  (Claude; a key stored in the user folder's `agent.json`, never beside a song, or ANTHROPIC_API_KEY, or an `ant auth
+  login` profile; billed per token; `pip install anthropic`) or a local model behind an OpenAI-compatible server with
+  tool calling (Ollama, LM Studio, llama.cpp's server: free). With rows selected in the Pattern tab, a message carries
+  them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points.
+
+**Approved and by.** ✓ beside a channel (SONG tab), a pattern (SONG tab's patterns) or a sample slot (SAMPLES tab)
+marks it `approved: true` in the song file: the agent tools leave it alone. The patterns table's BY column and the
+Pattern tab's title show who wrote a pattern. The marks change nothing in the module.
+
+**Loudness.** OUT in the bar under the player measures the render playing: integrated loudness (LUFS, ITU-R BS.1770-4:
+K-weighted, gated), true peak (dBTP, 4x oversampled; red at -0.1 and above) and the stereo correlation of the part that
+sounds. `python -m vulturetracker measure song.yaml [--channels 3,5] [--json]` measures a song, module or WAV the same
+way; the agents' measure tool also reports the change since its last measure of the same channels and orders. They are
+numbers, not a verdict.
+
+**Key, TAP and ALL OFF.** The SONG tab's `key` (e.g. `A minor`, `D dorian`; `module: key:`) is for people and agents:
+under it the tab shows the share of the notes in that key and an estimate from the channels that strike three or more
+pitches (Krumhansl-Kessler; a channel of drum hits on fixed keys reads low, and its hover lists every channel). TAP
+there, tapped four times or more, sets the tempo from the taps for the song's speed and rows per beat. ALL OFF in the
+bar under the player stops every sound the app is making.
 
 **Standalone binary:** `pip install pyinstaller && python tools/build_exe.py` produces `dist/vulturetracker.exe`,
 the whole CLI with libopenmpt bundled: `vulturetracker.exe gui song.yaml`. Double-clicking it opens the app on its
@@ -723,7 +782,9 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   controller changes are left out and counted in the warnings.
 - `import` keeps patterns, instruments, envelopes and samples, and names as written (IT, S3M and XM names read in CP437,
   or Windows-1252 when OpenMPT saved them, MOD names in the Amiga's Latin-1, as OpenMPT reads them; letters IT cannot
-  hold lose their accents, ß becomes ss). It drops embedded MIDI macros, OpenMPT-only extensions, an IT's edit history,
+  hold lose their accents, ß becomes ss). It keeps OpenMPT's mix plugins when they are its built-in DMO effects, the
+  SFx macros and OpenMPT's channel names; it drops other plugins, fixed Zxx macros other than the default resonance
+  ones, other OpenMPT-only extensions, an IT's edit history,
   its MIDI pitch wheel depth and its instruments' MIDI channel, program and bank (all for MIDI output), each with a
   warning. It also reads XM, S3M and 31-sample MOD files (`vulturetracker/modreader.py`,
   told apart by their headers; the app's start screen has IMPORT A MODULE, which writes `name.yaml` and `name_samples/`

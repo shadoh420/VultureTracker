@@ -222,6 +222,35 @@ def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None, oversample
     return len(pcm) / 4 / rate
 
 
+def measure(source, channels=None, orders=None, rate=44100, base_dir=None) -> dict:
+    """Loudness (LUFS), true peak, sample peak and stereo correlation (dsp.measure_mix) of a WAV, a module or a song
+    (compiled in memory and rendered as `render` does). `channels`: only these (0-based) play, the others disabled
+    with IT's channel-disable bit; `orders`: an order slice (start, stop) of a song."""
+    import numpy as np
+    from . import dsp
+    from .openmpt import LoadedModule
+    p = Path(str(source))
+    if isinstance(source, (str, Path)) and p.suffix.lower() == ".wav":
+        from .wavload import read_wav
+        w = read_wav(p)
+        x = np.array(w.channels, dtype=np.float64) / float(1 << (w.out_bits - 1))
+        return dsp.measure_mix(np.vstack([x, x]) if x.shape[0] == 1 else x, w.rate)
+    if isinstance(source, (str, Path)) and p.suffix.lower() in (".it", ".mod", ".xm", ".s3m", ".mptm"):
+        data = p.read_bytes()
+    else:
+        data = compile_song(tryout_song(source, orders) if orders else source, base_dir)[0]
+    if channels is not None:
+        d = bytearray(data)
+        for ch in range(64):
+            if ch not in channels:
+                d[0x40 + ch] |= 0x80
+        data = bytes(d)
+    with LoadedModule(data) as lm:
+        pcm = lm.render(rate, oversample=2)
+    x = np.frombuffer(pcm, "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
+    return dsp.measure_mix(x, rate)
+
+
 def tryout_song(song_or_path, orders=None) -> dict:
     """The song (a path, or a dict that is copied) cut to an order slice `(start, stop)`, or whole when `orders` is None."""
     import copy

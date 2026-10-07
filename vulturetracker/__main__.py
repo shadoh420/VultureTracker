@@ -227,6 +227,14 @@ def main(argv=None):
     p.add_argument("--rate", type=int, default=44100)
     p.add_argument("--oversample", type=int, default=2,
                    help="mix at this multiple of the rate and band-limit down, so nothing aliases (default 2; 1 = off)")
+    p = sub.add_parser("mcp", help="an MCP server on stdin/stdout for agents (Claude Code: claude mcp add vulturetracker "
+                                   "-- python -m vulturetracker mcp): the agent tools on the song open in the app")
+    p.add_argument("--port", type=int, help="the app's port (default: the running app's, from the user folder)")
+    p = sub.add_parser("measure", help="loudness (LUFS, BS.1770), true peak, peak and stereo correlation of a song, "
+                                       "module or WAV")
+    p.add_argument("source")
+    p.add_argument("--channels", help="only these channels play (1-based, e.g. 3,5)")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("info", help="load a module with libopenmpt and print its metadata")
     p.add_argument("module")
     p.add_argument("--json", action="store_true")
@@ -378,6 +386,25 @@ def main(argv=None):
             out = args.output or str(Path(args.module).with_suffix(".wav"))
             secs = api.render(args.module, out, repeat=args.repeat, rate=args.rate, oversample=args.oversample)
             print(f"rendered {out} ({secs:.2f} s)")
+            return 0
+
+        if args.cmd == "mcp":
+            from . import mcp
+            return mcp.serve(args.port)
+
+        if args.cmd == "measure":
+            chans = None
+            if args.channels:
+                try:
+                    chans = [int(c) - 1 for c in args.channels.split(",")]
+                except ValueError:
+                    raise SystemExit("--channels: channel numbers separated by commas, e.g. 3,5")
+            m = api.measure(args.source, chans)
+            if args.json:
+                print(json.dumps(m, indent=2))
+            else:
+                print(f"{m['lufs']} LUFS integrated, true peak {m['true_peak_dbtp']} dBTP, peak {m['peak_dbfs']} dBFS, "
+                      f"correlation {m['correlation']}, {m['seconds']} s")
             return 0
 
         if args.cmd == "info":

@@ -422,3 +422,70 @@ def find_loop(x, rate, hz=None, min_s=0.2):
             if best is None or score > best[0]:
                 best = (score, int(s), int(e))
     return (best[1], best[2]) if best else None
+
+
+# ---------------------------------------------------------------- loudness, as ITU-R BS.1770-4 and EBU R 128 measure it
+
+def _biquad_mag(f, b, a):
+    z = np.exp(-2j * np.pi * f)
+    return np.abs((b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z))
+
+
+def k_weighting(rate, taps=8191):
+    """BS.1770's K-weighting (a high shelf, +4 dB above about 1.7 kHz, then a high-pass near 38 Hz) as a linear-phase
+    FIR with the filters' magnitude at `rate`: the two biquads designed for any rate as pyloudnorm does (bilinear
+    transform of the analogue prototypes), their magnitude sampled and windowed. Block energies only need magnitude."""
+    G, f0, Q = 3.999843853973347, 1681.974450955533, 0.7071752369554196
+    K, Vh = np.tan(np.pi * f0 / rate), 10 ** (G / 20)
+    Vb = Vh ** 0.4996667741545416
+    a0 = 1 + K / Q + K * K
+    shelf = ([(Vh + Vb * K / Q + K * K) / a0, 2 * (K * K - Vh) / a0, (Vh - Vb * K / Q + K * K) / a0],
+             [1, 2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0])
+    f0, Q = 38.13547087602444, 0.5003270373238773
+    K = np.tan(np.pi * f0 / rate)
+    a0 = 1 + K / Q + K * K
+    hp = ([1, -2, 1], [1, 2 * (K * K - 1) / a0, (1 - K / Q + K * K) / a0])
+    f = np.fft.rfftfreq(taps + 1)
+    mag = _biquad_mag(f, *shelf) * _biquad_mag(f, *hp)
+    h = np.roll(np.fft.irfft(mag, taps + 1), taps // 2)[:taps] * np.blackman(taps)
+    return h
+
+
+def measure_mix(x, rate):
+    """A mix's numbers (`x`: channels x frames, full scale 1.0): integrated loudness in LUFS (BS.1770-4: K-weighted,
+    400 ms blocks every 100 ms, gated at -70 LUFS and 10 LU under the ungated mean), true peak in dBTP (4x
+    oversampled), sample peak in dBFS, and the stereo correlation of the sounding part (1 mono, 0 unrelated, -1 out of
+    phase). Measurements, not judgements: what they say about the sound is the listener's call."""
+    from .resample import fir_filter, lowpass_fir
+    x = np.atleast_2d(np.asarray(x, float))
+    h = k_weighting(rate)
+    ms = [fir_filter(c, h) ** 2 for c in x]
+    block, hop = int(0.4 * rate), int(0.1 * rate)
+    n = max(0, (x.shape[1] - block) // hop + 1)
+    if n:
+        cs = [np.concatenate([[0.0], np.cumsum(m)]) for m in ms]
+        starts = np.arange(n) * hop
+        z = sum((c[starts + block] - c[starts]) / block for c in cs)  # BS.1770's channel weights are 1 for L and R
+        lk = -0.691 + 10 * np.log10(np.maximum(z, 1e-20))
+        z = z[lk > -70]
+        lufs = None
+        if len(z):
+            rel = -0.691 + 10 * np.log10(z.mean()) - 10
+            z = z[-0.691 + 10 * np.log10(z) > rel]
+            lufs = round(float(-0.691 + 10 * np.log10(z.mean())), 2) if len(z) else None
+    else:
+        lufs = None
+    up = np.zeros((x.shape[0], x.shape[1] * 4))
+    up[:, ::4] = x
+    lp = lowpass_fir(0.125 * 0.98, 255) * 4
+    tp = max(float(np.abs(fir_filter(c, lp)).max()) for c in up) if x.shape[1] else 0.0
+    sp = float(np.abs(x).max()) if x.size else 0.0
+    corr = None
+    if x.shape[0] == 2:
+        loud = (np.abs(x[0]) + np.abs(x[1])) > 10 ** (-60 / 20)
+        a, b = x[0][loud], x[1][loud]
+        den = np.sqrt((a * a).sum() * (b * b).sum())
+        corr = round(float((a * b).sum() / den), 3) if den else None
+    db = lambda v: round(20 * float(np.log10(v)), 2) if v > 0 else None  # noqa: E731
+    return {"lufs": lufs, "true_peak_dbtp": db(tp), "peak_dbfs": db(sp), "correlation": corr,
+            "seconds": round(x.shape[1] / rate, 2)}

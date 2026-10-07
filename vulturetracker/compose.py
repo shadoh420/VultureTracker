@@ -189,3 +189,58 @@ def key_splits(notes, lo=0, hi=119):
         b = hi if j == len(ns) - 1 else (n + ns[j + 1]) // 2
         out.append((first[n], a, b))
     return out
+
+
+# ---------------------------------------------------------------- the song's key (the SONG tab, the agent's tools)
+
+MODES = {"major": (0, 2, 4, 5, 7, 9, 11), "ionian": (0, 2, 4, 5, 7, 9, 11), "dorian": (0, 2, 3, 5, 7, 9, 10),
+         "phrygian": (0, 1, 3, 5, 7, 8, 10), "lydian": (0, 2, 4, 6, 7, 9, 11), "mixolydian": (0, 2, 4, 5, 7, 9, 10),
+         "minor": (0, 2, 3, 5, 7, 8, 10), "aeolian": (0, 2, 3, 5, 7, 8, 10), "locrian": (0, 1, 3, 5, 6, 8, 10)}
+PITCH = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+# Krumhansl-Kessler key profiles (probe-tone ratings)
+KK = {"major": (6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88),
+      "minor": (6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17)}
+
+
+def scale_of(key):
+    """The pitch classes of a key like 'A minor', 'F# major' or 'D dorian'."""
+    from .song import KEY_RE
+    m = KEY_RE.fullmatch(str(key).strip())
+    if not m:
+        raise ValueError(f"a key like 'A minor' or 'D dorian', got {key!r}")
+    root = (PITCH[m.group(1).upper()] + {"#": 1, "b": -1}.get(m.group(2), 0)) % 12
+    return {(root + i) % 12 for i in MODES[m.group(3).lower()]}
+
+
+def key_report(mod, key=None):
+    """How the notes the song strikes sit in `key` (the module's own when None): per channel, the share of note onsets
+    whose pitch class is in the scale (a channel whose notes are drum hits on arbitrary keys reads low: the owner knows
+    which channels are pitched), and the best Krumhansl-Kessler estimate of the key from the onsets of the channels that strike three or more
+    pitch classes. Notes are counted
+    as written in the cells (an instrument's keymap can play another note)."""
+    import numpy as np
+    key = key or getattr(mod, "key", "") or None
+    scale = scale_of(key) if key else None
+    hist = np.zeros(12)
+    per = []
+    for ch in range(len(mod.channels)):
+        pcs = [c.note % 12 for o in mod.orders if o < 254 for row in mod.patterns[o].rows
+               if ch < len(row) for c in [row[ch]] if c.note is not None and c.note < 120]
+        if len(set(pcs)) >= 3:  # a channel striking one or two pitches is taken for drums: left out of the estimate
+            for p in pcs:
+                hist[p] += 1
+        inside = sum(p in scale for p in pcs) if scale else None
+        per.append({"channel": ch + 1, "name": mod.channels[ch].name or f"Ch {ch + 1}", "notes": len(pcs),
+                    "in_key": round(inside / len(pcs), 2) if scale and pcs else None})
+    best = None
+    if hist.sum():
+        for mode, prof in KK.items():
+            for r in range(12):
+                c = float(np.corrcoef(hist, np.roll(prof, r))[0, 1])
+                if best is None or c > best[0]:
+                    best = (c, f"{NAMES[r]} {mode}")
+    total = sum(c["notes"] for c in per)
+    inside = sum(round((c["in_key"] or 0) * c["notes"]) for c in per) if scale else None
+    return {"key": key, "in_key": round(inside / total, 2) if scale and total else None, "channels": per,
+            "estimate": best[1] if best else None, "estimate_r": round(best[0], 2) if best else None}

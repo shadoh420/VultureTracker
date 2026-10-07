@@ -3,6 +3,7 @@ import struct
 import sys
 from array import array
 
+from . import plugins
 from .model import Envelope, Loop, Module, ORDER_END
 
 HEADER_SIZE = 0xC0
@@ -145,8 +146,14 @@ def write_it(mod: Module) -> bytes:
     if len(message) > 65535:
         raise ValueError(f"the module message is {len(message)} bytes; IT stores at most 65535")
 
-    # Lay out the file: header, pointer tables, message, instruments, sample headers, patterns, sample data.
-    pos = HEADER_SIZE + len(orders) + 4 * (len(instruments) + len(mod.samples) + len(mod.patterns))
+    # Lay out the file: header, pointer tables, OpenMPT's extensions (the MIDI macro configuration, the mix plugins),
+    # message, instruments, sample headers, patterns, sample data.
+    extra = b""
+    if mod.macros:
+        extra += plugins.macro_config(mod.macros)
+    if mod.plugins:
+        extra += plugins.chunks(mod.plugins, [c.plugin for c in mod.channels])
+    pos = HEADER_SIZE + len(orders) + 4 * (len(instruments) + len(mod.samples) + len(mod.patterns)) + len(extra)
     msg_offset = pos if message else 0
     pos += len(message)
     ins_offsets = []
@@ -168,8 +175,9 @@ def write_it(mod: Module) -> bytes:
         pos += len(blob)
 
     flags = 1 | (4 if mod.instruments is not None else 0) | (8 if mod.linear_slides else 0) \
-        | (0x10 if mod.old_effects else 0) | (0x20 if mod.compatible_gxx else 0)
-    special = (1 if message else 0) | (4 if all(mod.row_highlight) else 0)  # 4: the highlight bytes are set
+        | (0x10 if mod.old_effects else 0) | (0x20 if mod.compatible_gxx else 0) | (0x80 if mod.macros else 0)
+    special = (1 if message else 0) | (4 if all(mod.row_highlight) else 0) | (8 if mod.macros else 0)  # 4: the
+    #                                     highlight bytes are set; 8 (and flag 0x80): the MIDI configuration is embedded
     chnpan = bytearray([32 | 0x80] * 64)
     chnvol = bytearray([64] * 64)
     for i, ch in enumerate(mod.channels):
@@ -187,6 +195,7 @@ def write_it(mod: Module) -> bytes:
     out += bytes(orders)
     for off in ins_offsets + smp_offsets + pat_offsets:
         out += struct.pack("<I", off)
+    out += extra
     out += message
     for blob in ins_blobs:
         out += blob

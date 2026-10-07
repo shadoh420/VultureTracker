@@ -2,6 +2,30 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- **Mix plugins and the RACK tab**: OpenMPT's nine built-in DMO effects (chorus, compressor, distortion, echo, flanger,
+  gargle, I3DL2 reverb, parametric EQ, Waves reverb) in the song format (`module: plugins:`, a channel's `plugin:`,
+  `module: macros:` for their Zxx automation), saved in the .it as OpenMPT saves them. The RACK tab shows each channel's
+  chain as devices with knobs: add, bypass, reorder, remove, and AUTO gives a parameter an SFx macro for Zxx. Only
+  OpenMPT and libopenmpt play them; other trackers play those channels dry. Importing an .it keeps OpenMPT's DMO
+  plugins, its SFx macros and its channel names.
+- **Agents**: one set of tools on the song open in the app (`vulturetracker/agent.py`: read the song, a pattern and the
+  owner's selection, write cells, orders, patterns, settings and the rack, measure, cue and play a place, offer tryout
+  candidates, read the listening notes, check the key, undo). No tool sets a level, and anything marked `approved` is
+  refused; every edit is one undo step and marks the pattern `by: agent`. Reached from Claude Code or any MCP client
+  (`python -m vulturetracker mcp`) or from the new AGENT panel, a chat with Claude Code on your own login (your
+  subscription, no API key), the Anthropic API, or a local model behind an OpenAI-compatible server (optional; set up in
+  its SETTINGS). ACTIVITY lists every call.
+- **Undo in the Paint tab**: Ctrl+Z / Ctrl+Y (and ↶ ↷) for strokes, CLEAR, LOAD IMAGE and resizes.
+- **Marks**: `approved: true` on a pattern, channel or sample (✓ in the SONG and SAMPLES tabs), `by:` on a pattern.
+- **Loudness**: OUT under the player shows the playing render's integrated loudness (LUFS, BS.1770), true peak and
+  stereo correlation; `python -m vulturetracker measure` does the same for a song, module or WAV.
+- **The piano roll** (ROLL in the Pattern tab's live bar): the cursor's channel over the pattern's rows, the other
+  channels as ghosts, a volume lane, and scale lock from the song's key.
+- **Key, TAP, ALL OFF**: `module: key:` (shown in the SONG tab with the share of notes in it and an estimate), tap
+  tempo in the SONG tab, and a button that stops every sound the app makes.
+
 ## 1.2.0 (2026-10-06)
 
 The transcription tools follow a recording that gains half a bar, put every part in the Guitar Pro tab and check a run

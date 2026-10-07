@@ -15,7 +15,7 @@ from vulturetracker.openmpt import LoadedModule
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 # Files whose libopenmpt render is random (random waveforms), or that use features the song format
-# does not carry (embedded MIDI macros, OpenMPT-only extensions). The importer warns about the latter.
+# does not carry (fixed Zxx macros, OpenMPT-only extensions). The importer warns about the latter.
 EXPECTED_DIFFERENT = {
     "RandomWaveform.it", "tremolo.it", "vibrato.it", "vibrato-oldfx.it", "gxsmp.it", "gxsmp2.it",
     "GlobalVolume-Macro.it", "MacroExtendedParam.it", "MultiZxx.it", "Volume-Macro-Letters.it",

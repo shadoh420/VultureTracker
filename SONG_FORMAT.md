@@ -83,6 +83,9 @@ a letter.
 | `channels` | 1–64, or list | required | channel count, or one entry per channel |
 | `message` | text | none | song message stored in the file (at most 65534 characters, IT's limit) |
 | `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points and `c5_speed` follow, and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
+| `plugins` | mapping | none | mix plugins: OpenMPT's built-in DMO effects (section 3.1) |
+| `macros` | mapping | none | SFx macros `SF0`..`SFF` of the embedded MIDI configuration, e.g. `SF1: F0F080z` (section 3.1) |
+| `key` | text | none | the song's key, e.g. `A minor`, `F# major`, `D dorian` (major, minor and the seven modes): for people and agents, not stored in the .it |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
@@ -92,10 +95,54 @@ Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 | `pan` | 0–64 or `surround` | 32 | initial pan: 0 = hard left, 32 = centre, 64 = hard right |
 | `volume` | 0–64 | 64 | initial channel volume (the `M` effect changes it) |
 | `muted` | bool | false | channel starts muted |
+| `plugin` | plugin number | none | the mix plugin the channel plays through (section 3.1) |
+| `approved` | bool | false | the owner's mark: the agent tools leave this channel alone |
 
 **Timing.** A tick lasts `2.5 / tempo` seconds. A row lasts `speed` ticks. With speed 6 and 4 rows
 per beat, BPM = tempo. In general `BPM = tempo × 24 / (speed × rows_per_beat)`. Envelopes and
 most effects run per tick.
+
+
+### 3.1 Mix plugins
+
+```yaml
+module:
+  channels:
+    - {name: Lead, plugin: 1}
+  plugins:
+    1: {effect: echo, left_delay: 375, feedback: 30, output: 2}
+    2: {effect: waves_reverb, reverb_time: 1500}
+  macros:
+    SF1: F0F080z      # SF1, then Zxx on the Lead channel, sets plugin 1's parameter 0 (wet_dry) to xx / 127
+```
+
+A channel plays through its `plugin`; a plugin passes its output to `output` (another plugin's number) or, without it,
+to the master mix. These are OpenMPT's nine built-in DirectX Media Object effects, with OpenMPT's parameters, units and
+defaults, written into the .it as OpenMPT saves them. **Only OpenMPT and libopenmpt play them** (this app and players
+built on libopenmpt); other trackers play the channels dry. The app's RACK tab edits them.
+
+Plugin keys: `effect` (required), `name` (≤31 characters), `output` (a plugin number; none = master), `bypass` (bool),
+`gain` (0.1–25.5, the plugin's output gain as a factor, default 1), `dry` (0–1, the dry signal mixed back in),
+`master` (bool, OpenMPT's "apply to master mix"), and the effect's parameters below (each optional, its default in
+brackets):
+
+| effect | OpenMPT's name | parameters |
+|---|---|---|
+| `chorus` | Chorus | `wet_dry` 0..100 % (50), `depth` 0..100 % (10), `frequency` 0..10 Hz (1.1), `waveform` square/sine (sine), `phase` -180/-90/0/90/180 (90), `feedback` -99..99 % (25), `delay` 0..20 ms (16) |
+| `compressor` | Compressor | `gain` -60..60 dB (0), `attack` 0.01..500 ms (10.01), `release` 50..3000 ms (200), `threshold` -60..0 dB (-20), `ratio` 1..100 :1 (2.98), `predelay` 0..4 ms (4) |
+| `distortion` | Distortion | `gain` -60..0 dB (-18), `edge` 0..100 % (15), `pre_lowpass` 100..8000 Hz (8000), `post_eq_center` 100..8000 Hz (2399), `post_eq_bandwidth` 100..8000 Hz (2399) |
+| `echo` | Echo | `wet_dry` 0..100 % (50), `feedback` 0..100 % (50), `left_delay` 1..2000 ms (500), `right_delay` 1..2000 ms (500), `pan_delay` no/yes (no) |
+| `flanger` | Flanger | `wet_dry` 0..100 % (50), `waveform` square/sine (sine), `frequency` 0..10 Hz (0.25), `depth` 0..100 % (100), `phase` -180/-90/0/90/180 (0), `feedback` -99..99 % (-50), `delay` 0..4 ms (2) |
+| `gargle` | Gargle | `rate` 1..1000 Hz (20.98), `waveform` triangle/square (triangle) |
+| `i3dl2_reverb` | I3DL2Reverb | `room` -10000..0 mB (-1000), `room_hf` -10000..0 mB (-100), `rolloff` 0..10 (0), `decay_time` 0.1..20 s (1.493), `decay_hf_ratio` 0.1..2 (0.83), `reflections` -10000..1000 mB (-2602), `reflections_delay` 0..0.3 s (0.07), `reverb` -10000..2000 mB (200), `reverb_delay` 0..0.1 s (0.011), `diffusion` 0..100 % (100), `density` 0..100 % (100), `hf_reference` 20..20000 Hz (5000), `quality` 0/1/2/3 (2) |
+| `param_eq` | ParamEq | `center` 80..16000 Hz (8000), `bandwidth` 1..36 semitones (12), `gain` -15..15 dB (0) |
+| `waves_reverb` | WavesReverb | `in_gain` -96..0 dB (0), `reverb_mix` -96..0 dB (0), `reverb_time` 0.001..3000 ms (1000), `high_freq_rt_ratio` 0.001..0.999 (0.001) |
+
+**Automation.** IT's `Zxx` (00–7F) runs the channel's active SFx macro; SF0 is the filter cutoff by default. A macro
+`F0F` + (128 + the parameter's index, three hex digits) + `z` sets that parameter of the channel's own plugin (not one
+further down its chain) to xx / 127 of its range: `F0F080z` is the first parameter, `F0F081z` the second. Select the
+macro with `SFx` in the channel, then write `Zxx`. A song that uses `plugins` or `macros` needs VultureTracker 1.3 or
+newer: say so with `requires: "1.3"`.
 
 ## 4. `samples`
 
@@ -229,6 +276,9 @@ Rules:
 - `;` starts a comment that runs to the end of the line. Comment-only and blank lines are not rows,
   so you can separate bars with `; bar 2`.
 - Use a literal block (`data: |`) so errors can report the exact line.
+- **Marks** (they change nothing in the module): `approved: true` on a pattern, a channel entry or a sample entry is
+  the owner's mark that the agent tools (GUIDE.md: Agents) leave it alone; `by:` on a pattern (`you`, `agent`, or
+  `you and agent`) says who wrote it, set by the app when an agent writes the pattern.
 
 ### 6.1 Cell
 

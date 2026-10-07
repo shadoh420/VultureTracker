@@ -223,8 +223,87 @@ def _numbered(ctx, m, where):
 # ---------------------------------------------------------------- sections
 
 MODULE_KEYS = ["title", "tempo", "speed", "global_volume", "mix_volume", "separation", "linear_slides",
-               "old_effects", "compatible_gxx", "channels", "message", "sample_rate", "rows_per_beat", "rows_per_bar"]
-CHANNEL_KEYS = ["name", "pan", "volume", "muted"]
+               "old_effects", "compatible_gxx", "channels", "message", "sample_rate", "rows_per_beat", "rows_per_bar",
+               "plugins", "macros", "key"]
+KEY_RE = re.compile(r"([A-Ga-g])([#b]?)\s+(major|minor|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian)", re.I)
+CHANNEL_KEYS = ["name", "pan", "volume", "muted", "plugin", "approved"]
+
+
+def _plugins(ctx, m, mod):
+    """`module: plugins:` {1..: {effect, name, output, bypass, gain, dry, master, and the effect's parameters in their
+    units}} and `module: macros:` {SF0..SFF: macro text} (plugins.py)."""
+    from . import plugins as P
+    spec = m.get("plugins")
+    if spec is not None:
+        try:
+            entries = _map(ctx, spec, _line(m, "plugins"), "module.plugins")
+        except _Bad:
+            entries = LMap()
+        for key, p in entries.items():
+            line = _line(entries, key)
+            num = key if isinstance(key, int) and not isinstance(key, bool) else None
+            if num is None or not 1 <= num <= P.MAX_PLUGINS:
+                ctx.error(line, f"module.plugins: plugin numbers are 1..{P.MAX_PLUGINS}, got {key!r}")
+                continue
+            w = f"plugin {num}"
+            try:
+                p = _map(ctx, p, line, w)
+                effect = p.get("effect")
+                if effect not in P.EFFECTS:
+                    ctx.error(_line(p, "effect") or line, f"{w}: 'effect' must be one of {', '.join(P.EFFECTS)}, got {effect!r}")
+                    continue
+                specs = P.params_of(effect)
+                _check_keys(ctx, p, P.PLUGIN_KEYS + [s[0] for s in specs], f"{w} ({effect})")
+                d = {"effect": effect, "params": [s[4] for s in specs]}
+                for i, s in enumerate(specs):
+                    if s[0] in p:
+                        try:
+                            d["params"][i] = P.from_unit(s, p[s[0]])
+                        except ValueError as e:
+                            ctx.error(_line(p, s[0]), f"{w}: {e}")
+                d["name"] = _text(ctx, p, "name", "", 31, w)
+                out = p.get("output", "master")
+                if out != "master":
+                    if isinstance(out, bool) or not isinstance(out, int) or not 1 <= out <= P.MAX_PLUGINS or out == num:
+                        ctx.error(_line(p, "output"), f"{w}: 'output' is master or another plugin's number, got {out!r}")
+                    else:
+                        d["output"] = out
+                d["bypass"] = _bool(ctx, p, "bypass", False, w)
+                d["master"] = _bool(ctx, p, "master", False, w)
+                for key, lo, hi, default in (("gain", 0.1, 25.5, 1.0), ("dry", 0.0, 1.0, 0.0)):
+                    v = p.get(key, default)
+                    if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+                        ctx.error(_line(p, key), f"{w}: '{key}' must be a number {lo}..{hi}, got {v!r}")
+                    else:
+                        d[key] = float(v)
+                mod.plugins[num] = d
+            except _Bad:
+                pass
+        for num, d in mod.plugins.items():
+            seen, nxt = {num}, d.get("output")
+            while nxt:
+                if nxt not in mod.plugins:
+                    ctx.error(_line(entries, num), f"plugin {num}: 'output' {nxt} is not a plugin of this song")
+                    break
+                if nxt in seen:
+                    ctx.error(_line(entries, num), f"plugin {num}: its outputs loop back to plugin {nxt}")
+                    break
+                seen.add(nxt)
+                nxt = mod.plugins[nxt].get("output")
+    spec = m.get("macros")
+    if spec is not None:
+        try:
+            macros = _map(ctx, spec, _line(m, "macros"), "module.macros")
+        except _Bad:
+            macros = LMap()
+        for key, text in macros.items():
+            mt = re.fullmatch(r"SF([0-9A-Fa-f])", str(key))
+            if not mt:
+                ctx.error(_line(macros, key), f"module.macros: keys are SF0..SFF, got {key!r}")
+            elif not isinstance(text, str) or not P.MACRO_RE.match(text):
+                ctx.error(_line(macros, key), f"module.macros: {key} must be MIDI macro text like F0F080z, got {text!r}")
+            else:
+                mod.macros[int(mt.group(1), 16)] = text
 
 
 def _module(ctx, m, mod):
@@ -251,6 +330,11 @@ def _module(ctx, m, mod):
     mod.row_highlight = (beat, bar)
     msg = m.get("message")
     mod.message = str(msg) if msg else ""
+    if m.get("key") and not KEY_RE.fullmatch(str(m["key"]).strip()):
+        ctx.error(_line(m, "key"), f"module.key: a key like 'A minor', 'F# major' or 'D dorian', got {m['key']!r}")
+    elif m.get("key"):
+        mod.key = str(m["key"]).strip()
+    _plugins(ctx, m, mod)
     if any(ord(c) > 255 for c in mod.message):
         ctx.warn(_line(m, "message"), "module.message: characters outside Latin-1 are stored as ?")
     if len(mod.message.replace("\r\n", "\n")) + 1 > 65535:  # the writer's limit (IT's 16-bit length), one byte a character
@@ -282,13 +366,20 @@ def _module(ctx, m, mod):
                 ch.pan = _int(ctx, c, "pan", 0, 64, 32, w)
             ch.volume = _int(ctx, c, "volume", 0, 64, 64, w)
             ch.muted = _bool(ctx, c, "muted", False, w)
+            _marks(ctx, c, w)
+            plug = c.get("plugin", 0)
+            if plug:
+                if isinstance(plug, bool) or not isinstance(plug, int) or plug not in mod.plugins:
+                    ctx.error(_line(c, "plugin"), f"{w}: 'plugin' must be a plugin number from module.plugins, got {plug!r}")
+                else:
+                    ch.plugin = plug
         except _Bad:
             pass
         mod.channels.append(ch)
 
 
 SAMPLE_KEYS = ["file", "name", "volume", "global_volume", "pan", "base_note", "c5_speed", "loop",
-               "sustain_loop", "vibrato", "bits", "stereo"]
+               "sustain_loop", "vibrato", "bits", "stereo", "approved"]
 LOOP_KEYS = ["start", "end", "type"]
 VIBRATO_KEYS = ["type", "speed", "depth", "rate"]
 
@@ -367,6 +458,7 @@ def _sample(ctx, num, spec, line, base_dir):
     where = f"sample {num}"
     m = _map(ctx, spec, line, where)
     _check_keys(ctx, m, SAMPLE_KEYS, where)
+    _marks(ctx, m, where)
     if "file" not in m:
         if any(k != "name" for k in m):
             ctx.error(m.line, f"{where}: missing 'file' (path to a WAV, relative to the song file); "
@@ -594,6 +686,17 @@ def _instrument(ctx, num, spec, line, samples_by_name, sample_numbers):
 _ROW_PREFIX = re.compile(r"^\s*(\d+)\s*:(.*)$")
 
 
+MARKS_BY = ("you", "agent", "you and agent")
+
+
+def _marks(ctx, m, where, by=False):
+    """The marks an entry may carry (they change nothing in the module): `approved` (the owner's: an agent's tools leave
+    it alone) and, on a pattern, `by` (who wrote it: you, agent, or you and agent)."""
+    _soft(lambda: _bool(ctx, m, "approved", False, where))
+    if by and m.get("by") is not None and m.get("by") not in MARKS_BY:
+        ctx.error(_line(m, "by"), f"{where}: 'by' must be one of {', '.join(MARKS_BY)}, got {m.get('by')!r}")
+
+
 def _pattern(ctx, name, spec, line, num_channels):
     where = f"pattern '{name}'"
     if isinstance(spec, LStr):
@@ -601,7 +704,8 @@ def _pattern(ctx, name, spec, line, num_channels):
         m = None
     else:
         m = _map(ctx, spec, line, where)
-        _check_keys(ctx, m, ["rows", "data"], where)
+        _check_keys(ctx, m, ["rows", "data", "by", "approved"], where)
+        _marks(ctx, m, where, by=True)
         rows = _int(ctx, m, "rows", 1, MAX_ROWS, None, where) if "rows" in m else None
         data = m.get("data")
         if data is None:
