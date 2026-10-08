@@ -351,13 +351,18 @@ and verifies it with libopenmpt. Renders are cached in `<song dir>/.tryout/` (th
 the environment variable `VT_WORKERS=3` renders three at once (the same bytes, measured 15-20 % sooner for a song and six
 candidates, but edits made while they render reach the live engine later).
 
+**The Tuner tab** is a chromatic tuner on the input the Record tab chooses (INPUT, INPUTS, RATE; OPEN on either tab
+opens it): the nearest note in scientific pitch (a guitar's low string is E2, a five-string bass's low B is B0), the
+same note as a pattern names it (E-3, B-1), a needle from -50 to +50 cents with the green band within 5, and the
+frequency. A = 440 Hz; it reads 27 Hz to 4.2 kHz. Between notes the last reading stays, dimmed.
+
 **The Record tab** records from an audio input (an interface such as a Focusrite Scarlett 2i2, or any input Windows
 lists) into takes beside the song. INPUT lists the devices with their drivers (on Windows WASAPI, MME and DirectSound;
 tick ASIO to list ASIO drivers too, such as a Scarlett's Focusrite USB ASIO, the lowest latency: it takes effect when the
 app next starts), INPUTS picks what a take keeps (input 1, input 2, both as stereo, or both mixed to mono), RATE the
 sample rate, EXCLUSIVE WASAPI's exclusive mode (the app alone on the device, at its own rate). OPEN starts the meters
-(peak per input with a held peak, amber from -6 dBFS, CLIP when a sample reached full scale) and the TUNER (the note the
-chosen inputs hold, in cents, green within 5); the input is not played back: monitor through the interface itself (a
+(peak per input with a held peak, amber from -6 dBFS, CLIP when a sample reached full scale) and the tuner; the input is
+not played back: monitor through the interface itself (a
 Scarlett's DIRECT MONITOR switch), so there is no delay to hear. ● REC and ■ STOP make a take, with up to PRE-ROLL
 seconds from before the click. Each take is written as a 16-bit WAV in `takes/` beside the song (`<name>-01.wav`,
 numbered), its silent edges trimmed (TRIM SILENCE UNDER, keeping 10 ms before the first sound) and its note found (FIND
@@ -507,7 +512,8 @@ an entry marked approved is refused. Every edit is one undo step, and a pattern 
   (Claude; a key stored in the user folder's `agent.json`, never beside a song, or ANTHROPIC_API_KEY, or an `ant auth
   login` profile; billed per token; `pip install anthropic`) or a local model behind an OpenAI-compatible server with
   tool calling (Ollama, LM Studio, llama.cpp's server: free). With rows selected in the Pattern tab, a message carries
-  them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points.
+  them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points. The agent's replies show as
+  markdown (bold, code, lists, headings, tables); links show their address and are not clickable.
 
 **Approved and by.** ✓ beside a channel (SONG tab), a pattern (SONG tab's patterns) or a sample slot (SAMPLES tab)
 marks it `approved: true` in the song file: the agent tools leave it alone. The patterns table's BY column and the

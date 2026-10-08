@@ -16,7 +16,7 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .dirty{display:flex;align-items:center;gap:7px;padding:3px 8px;cursor:pointer;background:#1d1a12;box-shadow:inset 1px 1px 0 #332d1d;font-size:10.5px;color:#e0b664}.dirty i{width:6px;height:6px;border-radius:50%;background:var(--amber)}.dirty b{letter-spacing:.1em;font-size:10px;color:var(--amber)}
 .tabs{display:flex;align-items:stretch;gap:2px;height:28px;flex:none;padding:0 10px;background:var(--panel2);box-shadow:inset 0 -1px 0 #090b0c}
 .tab{padding:0 14px;display:flex;align-items:center;white-space:nowrap;font-size:10.5px;letter-spacing:.14em;font-weight:700;color:var(--dim);cursor:pointer}.tab.on{color:var(--acc);background:#14171a;box-shadow:inset 0 2px 0 var(--acc)}
-@media (max-width:1439px){.tab{padding:0 7px;letter-spacing:.1em}}@media (max-width:1299px){.tab{padding:0 6px;letter-spacing:.08em}}
+@media (max-width:1539px){.tab{padding:0 7px;letter-spacing:.1em}}@media (max-width:1299px){.tab{padding:0 5px;letter-spacing:.08em}}
 .kbd{padding:2px 5px;font:9.5px/1 var(--mono);color:var(--acc);background:#0f1a12;box-shadow:inset 1px 1px 0 #24382a}
 .k{font-size:9.5px;letter-spacing:.14em;font-weight:700;color:var(--dim)}
 .main{flex:1;min-height:0;display:none;gap:2px;padding:2px;background:var(--bg)}.main.on{display:flex}
@@ -71,7 +71,8 @@ body.agent-on #agent{display:flex}body.agent-on .main,body.agent-on .bottom{marg
 #ag-msgs{flex:1;min-height:0;overflow:auto;padding:10px 12px;display:flex;flex-direction:column;gap:9px;font-size:11.5px}
 .agm{display:grid;grid-template-columns:46px 1fr;gap:6px}.agm>b{font:700 9px/1.7 var(--mono);letter-spacing:.1em;color:var(--dim)}
 .agm.you>b{color:var(--amber)}.agm.agent>b{color:var(--acc)}.agm .tx{white-space:pre-wrap;color:var(--ink);line-height:1.5;min-width:0;overflow-wrap:anywhere}
-.agm.tool .tx{font:10px/1.5 var(--mono);color:var(--mid)}.agm.tool.err .tx,.agm.error .tx{color:var(--red)}.agm .cx{display:block;font:9.5px var(--mono);color:var(--dim);margin-top:2px}
+.agm.tool .tx{font:10px/1.5 var(--mono);color:var(--mid)}.agm .tx code,.agm .tx pre{font:10.5px var(--mono);background:#0b0e0f;padding:0 3px}.agm .tx pre{display:block;padding:6px 8px;margin:4px 0;overflow-x:auto;white-space:pre;overflow-wrap:normal}
+.agm .tx table{border-collapse:collapse;margin:4px 0;font-size:10.5px;white-space:normal}.agm .tx th,.agm .tx td{border:1px solid #2a3135;padding:2px 5px;text-align:left;vertical-align:top}.agm .tx .mh{color:#e6ecef}.agm .tx .mq{display:block;border-left:2px solid #2a3135;padding-left:7px;color:var(--mid)}.agm .tx hr{border:0;border-top:1px solid #2a3135;margin:6px 0}.agm.tool.err .tx,.agm.error .tx{color:var(--red)}.agm .cx{display:block;font:9.5px var(--mono);color:var(--dim);margin-top:2px}
 .agchips{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px}.agchips span{cursor:pointer;padding:3px 7px;font-size:10px;color:#c3cbcf;background:#0f1416;box-shadow:inset 1px 1px 0 #21272a}
 #ag-set label{display:block;margin:8px 0 2px;font-size:9.5px;letter-spacing:.1em;font-weight:700;color:var(--dim)}#ag-set input,#ag-set select{width:100%;padding:4px 6px;font:11px var(--mono)}
 .rnote{position:absolute;height:10px;border-radius:2px;background:var(--acc);box-shadow:inset 0 0 0 1px #0a0c0d;font:8px/10px var(--mono);color:#0c1a0f;padding-left:2px;overflow:hidden;white-space:nowrap;cursor:ns-resize}
@@ -160,6 +161,7 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="tab" data-t="rack" onclick="tab('rack')">RACK</div>
   <div class="tab" data-t="ins" onclick="tab('ins')">INSTRUMENTS</div>
   <div class="tab" data-t="smp" onclick="tab('smp')">SAMPLES</div>
+  <div class="tab" data-t="tuner" onclick="tab('tuner')">TUNER</div>
   <div class="tab" data-t="rec" onclick="tab('rec')">RECORD</div>
   <div class="tab" data-t="map" onclick="tab('map')">MAP</div>
   <div class="tab" data-t="paint" onclick="tab('paint')">PAINT</div>
@@ -486,6 +488,26 @@ option.hascand{color:var(--acc);font-weight:700}
   </div>
 </div>
 
+<div class="main" id="t-tuner">
+  <div class="panel" style="flex:1;overflow:auto">
+    <div class="ph"><span class="k">TUNER</span><span class="meta" style="margin-left:10px">chromatic · A = 440 Hz · 27 Hz to 4.2 kHz (a five-string bass's low B and up)</span></div>
+    <div class="pb">
+      <div style="display:flex;align-items:center;gap:8px"><span class="btn sm" id="tu-open" onclick="recOpen()" title="open the input chosen on the RECORD tab (INPUT, INPUTS, RATE)">OPEN</span><span id="tu-dev" class="mono" style="font-size:10.5px;color:var(--dim)"></span></div>
+      <div id="tu-dial" style="max-width:560px;margin:36px auto 0;text-align:center;opacity:.35">
+        <div id="tu-note" class="mono" style="font-size:84px;line-height:1;color:#c3cbcf">–</div>
+        <div id="tu-app" class="mono" style="font-size:11px;color:var(--dim);margin-top:6px" title="the note as the song format and the pattern name it (C-5 = middle C)"></div>
+        <div style="position:relative;height:38px;margin:26px 0 6px;background:#0b0e0f;border:1px solid #242a2e">
+          <div style="position:absolute;left:45%;width:10%;top:0;bottom:0;background:rgba(126,231,135,.13)"></div>
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#555f64"></div>
+          <div id="tu-needle" style="position:absolute;left:50%;top:-5px;bottom:-5px;width:4px;margin-left:-2px;background:#c3cbcf;transition:left .12s"></div>
+        </div>
+        <div class="mono" style="display:flex;justify-content:space-between;font-size:10px;color:var(--dim)"><span>−50</span><span>−25</span><span>0</span><span>+25</span><span>+50</span></div>
+        <div id="tu-cents" class="mono" style="font-size:14px;margin-top:12px;color:#c3cbcf"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="main" id="t-rec">
   <div class="panel" style="flex:1;overflow:auto">
     <div class="ph"><span class="k">RECORD</span><span id="rec-msg" class="mono" style="font-size:10px;color:var(--amber);margin-left:10px"></span></div>
@@ -499,7 +521,6 @@ option.hascand{color:var(--acc);font-weight:700}
         <span class="btn sm" id="rec-open" onclick="recOpen()">OPEN</span>
       </div>
       <div id="rec-meters" style="margin-top:14px;max-width:720px"></div>
-      <div style="display:flex;align-items:baseline;gap:14px;margin-top:10px"><span class="k">TUNER</span><span id="rec-tuner" class="mono" style="font-size:22px;color:#c3cbcf;min-width:110px">–</span><span id="rec-cents" class="mono" style="font-size:11px;color:var(--dim)"></span></div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:16px;flex-wrap:wrap">
         <span class="btn big" id="rec-go" onclick="recGo()" title="start and stop a take">● REC</span><span class="mono" id="rec-time" style="font-size:16px;min-width:64px">0:00.0</span>
         <span class="k">NAME</span><input id="rec-name" value="take" style="width:110px;font:10.5px var(--mono);padding:1px 3px">
@@ -693,7 +714,7 @@ async function importModule(pick){const path=$('imppath').value.trim();if(!pick&
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(pick?{browse:true}:{path})})).json();
   if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function browse(){await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}}
-function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen();else faLetGo()}
+function tab(t){document.querySelectorAll('.tab').forEach(e=>e.classList.toggle('on',e.dataset.t===t));document.querySelectorAll('.main').forEach(e=>e.classList.toggle('on',e.id==='t-'+t));if(t==='pattern'&&PAT.rows)renderPat();if(t==='spectrum'){shown.specgrid=null;renderSpec()}if(t==='smp')renderSmp();if(t==='rec'||t==='tuner')recPoll(!REC.devs);if(t==='map')mapOpen();if(t==='paint')ptOpen();if(t==='faust')faOpen();else faLetGo()}
 function toggle(m,on){const el=$(m+'modal');el.classList.toggle('on',on===undefined?!el.classList.contains('on'):on)}
 function setFilter(f){filter=f;render()}function setSort(s){sort=s;render()}
 function addCands(){const g=$('globs').value.trim();if(!g)return;$('globs').value='';act('add',{globs:g}).then(j=>{if(j.added&&!j.added.length)alert('no WAV files matched')})}
@@ -1386,11 +1407,25 @@ function renderAgent(){const on=document.body.classList.contains('agent-on');$('
   const box=$('ag-msgs'),end=box.scrollTop+box.clientHeight>=box.scrollHeight-20;
   if(v==='log')put('ag-msgs',(S.agent_log||[]).slice().reverse().map(l=>`<div class="agm tool ${l.error?'err':''}"><b>${new Date(l.time*1000).toTimeString().slice(0,5)}</b><span class="tx">${esc(l.tool)} ${esc(l.args)}\n→ ${esc(l.error||l.summary)}</span></div>`).join('')||'<div class="meta">No agent has used the tools on this song yet.</div>');
   else put('ag-msgs',(c.messages||[]).map(m=>m.role==='tool'?`<div class="agm tool ${m.error?'err':''}"><b>TOOL</b><span class="tx">${esc(m.tool)} ${esc(m.args)}\n→ ${esc(m.text)}</span></div>`:
-      `<div class="agm ${m.role}"><b>${m.role==='you'?'YOU':m.role==='agent'?'AGENT':'!'}</b><span class="tx">${esc(m.text)}${m.context?`<span class="cx">on ${esc(m.context)}</span>`:''}</span></div>`).join('')+(c.busy?'<div class="agm agent"><b>AGENT</b><span class="tx" style="color:var(--dim)">working…</span></div>':'')||
+      `<div class="agm ${m.role}"><b>${m.role==='you'?'YOU':m.role==='agent'?'AGENT':'!'}</b><span class="tx">${m.role==='agent'?md(m.text):esc(m.text)}${m.context?`<span class="cx">on ${esc(m.context)}</span>`:''}</span></div>`).join('')+(c.busy?'<div class="agm agent"><b>AGENT</b><span class="tx" style="color:var(--dim)">working…</span></div>':'')||
       `<div class="meta" style="line-height:1.6">${st.provider?'Ask about the song, or select rows in the PATTERN tab and say what they should do.':'The chat is off: choose a provider in SETTINGS (an API key, or a local model). Claude Code can work on this song over MCP without it.'}</div>`);
   if(end||c.busy)box.scrollTop=box.scrollHeight;
   put('ag-chips',AG_CHIPS.map(t=>`<span onclick="agSend(${attr(t)})">${esc(t)}</span>`).join(''));
   $('ag-ctx').textContent=SEL?'on '+agSelText(agSelection()):''}
+// the agent's replies as markdown: escaped first, then code blocks and spans, bold, italics, headings, lists, quotes, rules
+// and tables (.tx keeps the line breaks); links show their text and address, never a live href from the model
+function md(s){const inl=t=>t.split(/`([^`\n]+)`/).map((p,k)=>k%2?`<code>${p}</code>`:p.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[^\w*])[*_](?=\S)([^*_\n]*?\S)[*_](?![\w*])/g,'$1<i>$2</i>').replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,'$1 ($2)')).join(''),
+  cells=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>inl(c.trim())),L=esc(s).split('\n'),out=[];
+  for(let i=0;i<L.length;i++){const l=L[i];let m;
+    if(/^\s*```/.test(l)){const b=[];while(++i<L.length&&!/^\s*```/.test(L[i]))b.push(L[i]);out.push(`<pre>${b.join('\n')}</pre>`)}
+    else if(/\|/.test(l)&&/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(L[i+1]||'')&&L[i+1].includes('-')){const rows=[`<tr>${cells(l).map(c=>`<th>${c}</th>`).join('')}</tr>`];i++;
+      while(i+1<L.length&&/\|/.test(L[i+1])&&L[i+1].trim())rows.push(`<tr>${cells(L[++i]).map(c=>`<td>${c}</td>`).join('')}</tr>`);out.push(`<table>${rows.join('')}</table>`)}
+    else if(m=l.match(/^#{1,6}\s+(.*)/))out.push(`<b class="mh">${inl(m[1])}</b>`);
+    else if(m=l.match(/^(\s*)[-*+]\s+(.*)/))out.push(`${m[1]}• ${inl(m[2])}`);
+    else if(/^\s*([-*_])(\s*\1){2,}\s*$/.test(l))out.push('<hr>');
+    else if(m=l.match(/^&gt;\s?(.*)/))out.push(`<span class="mq">${inl(m[1])}</span>`);
+    else out.push(inl(l))}
+  return out.join('\n').replace(/\n?(<pre>|<table>|<hr>)/g,'$1').replace(/(<\/pre>|<\/table>|<hr>)\n?/g,'$1')}
 function agCue(c){tab('pattern');CUR.o=c.order;CUR.row=c.row;if(c.channel!=null)CUR.ch=c.channel;showPattern(c.order);renderPat();if(c.play){lvPatLoop=false;lvPlay(c.order,c.row)}}
 // TAP: the beat tapped four times or more sets the tempo (for the song's speed and rows per beat) a moment after the last tap
 const TAP={t:[],timer:null};
@@ -1531,11 +1566,11 @@ function selChord(){const s=selSpan();if(!s.cur&&!s.one)return selInfo('select r
   compOp({op:'chord',pattern:PAT.idx,ch:s.cur?CUR.ch:s.chans[0],r0:s.cur?CUR.row:s.r0,r1:s.cur?CUR.row:s.r1,shape:$('cmp-chord').value,inversion:+$('cmp-inv').value||0})}
 async function recMulti(){const r=await fetch('/api/rec',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({cmd:'multisample'})}),j=await r.json();
   $('rec-multi').style.color=j.error?'var(--red)':'var(--acc)';$('rec-multi').textContent=(j.error||j.report||'').replace(/^\w+: /,'');refresh()}
-// ---- the RECORD tab (record.py through /api/rec): an input opened for meters and the tuner, takes between REC and STOP
+// ---- the RECORD and TUNER tabs (record.py through /api/rec): an input opened for meters and the tuner, takes between REC and STOP
 // saved beside the song and sent to the slot's candidates or a new slot. Polled ten times a second while the tab is on.
 const REC={devs:null,st:null,timer:null,busy:false};
 const fmtNote=n=>NOTES[n%12]+Math.floor(n/12);
-function recOn(){return $('t-rec').classList.contains('on')}
+function recOn(){return $('t-rec').classList.contains('on')||$('t-tuner').classList.contains('on')}  // the TUNER tab polls the same input
 async function recPoll(devices){if(REC.busy)return;REC.busy=true;if(devices)REC.devs=true;try{const j=await (await fetch('/api/rec'+(devices?'?devices=1':''))).json();REC.st=j;renderRec()}catch(e){}finally{REC.busy=false}
   clearTimeout(REC.timer);if(recOn()||(REC.st&&REC.st.status.recording))REC.timer=setTimeout(()=>recPoll(false),100)}
 async function recCmd(body){const r=await (await fetch('/api/rec',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json();
@@ -1565,10 +1600,18 @@ function renderRec(){const j=REC.st;if(!j)return;const st=j.status,sel=(id,opts,
     return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span class="k" style="width:52px">INPUT ${i+1}</span><div style="position:relative;flex:1;height:12px;background:#0b0e0f;border:1px solid #242a2e">
       <div style="position:absolute;left:0;top:0;bottom:0;width:${w(p)}%;background:${p!=null&&p>-6?'var(--amber)':'#7ee787'}"></div><div style="position:absolute;top:0;bottom:0;left:${w(h)}%;width:2px;background:#c3cbcf"></div></div>
       <span class="mono" style="width:70px;font-size:10px;color:#c3cbcf">${p==null?'−∞':p.toFixed(1)} dB</span><span class="mono" style="font-size:10px;padding:0 5px;background:${c?'var(--red)':'#1b2023'};color:${c?'#0b0e0f':'#555f64'}">CLIP</span></div>`};
-  $('rec-meters').innerHTML=st.open?[...Array(st.inputs).keys()].map(bar).join('')+(st.overflows?`<div style="font-size:10px;color:var(--amber)">${st.overflows} input overflows: pick a larger buffer or close other audio programs</div>`:''):'<div style="font-size:10.5px;color:var(--dim)">OPEN an input to see its level and the tuner</div>';
-  const tu=st.tuner;$('rec-tuner').textContent=tu?fmtNote(tu.note):'–';$('rec-cents').textContent=tu?`${tu.cents>=0?'+':''}${tu.cents} cents · ${tu.hz} Hz`:'';$('rec-tuner').style.color=tu&&Math.abs(tu.cents)<=5?'#7ee787':'#c3cbcf';
+  $('rec-meters').innerHTML=st.open?[...Array(st.inputs).keys()].map(bar).join('')+(st.overflows?`<div style="font-size:10px;color:var(--amber)">${st.overflows} input overflows: pick a larger buffer or close other audio programs</div>`:''):'<div style="font-size:10.5px;color:var(--dim)">OPEN an input to see its level</div>';
+  renderTuner(st);
   const tk=$('rec-takes'),th=(j.takes||[]).length?`<table style="max-width:900px"><tr><th></th><th>FILE</th><th class="r">SECONDS</th><th>NOTE</th><th class="r">PEAK</th><th>WENT TO</th><th></th></tr>`+j.takes.map(t=>`<tr><td><span class="btn sm" onclick="recPlay(${attr(t.file)})">▶</span></td><td class="mono">${esc(t.file)}</td><td class="r">${t.seconds.toFixed(2)}</td><td>${t.note?`${esc(t.note)} ${t.cents>=0?'+':''}${t.cents}¢`:'–'}</td><td class="r" style="color:${t.clipped?'var(--red)':''}">${t.peak==null?'–':t.peak.toFixed(1)}${t.clipped?' CLIP':''}</td><td>${t.dest==='candidate'?'candidate of slot '+pad(t.slot):t.dest==='slot'?'slot '+pad(t.slot):t.dest==='multi'?'slot '+pad(t.slot)+' of instrument '+pad(t.instrument):'the list'}</td><td><span class="btn sm" onclick="recCmd({cmd:'send',file:${attr(t.file)},dest:'candidate'})">→ CANDIDATE</span><span class="btn sm" onclick="recCmd({cmd:'send',file:${attr(t.file)},dest:'slot'})">→ NEW SLOT</span></td></tr>`).join('')+'</table>':'<div style="font-size:10.5px;color:var(--dim)">none yet</div>';
   if(tk.dataset.html!==th){tk.dataset.html=th;tk.innerHTML=th}}  // rebuilt only when the takes change: a rebuild on every poll swallowed clicks on its buttons
+// the TUNER tab: the nearest note in scientific pitch (E2 for a guitar's low string), the needle in cents, green within 5;
+// between notes the last reading stays, dimmed
+function renderTuner(st){const tu=st.tuner;$('tu-open').textContent=st.open?'CLOSE':'OPEN';$('tu-open').classList.toggle('on',st.open);
+  $('tu-dev').textContent=st.open?$('rec-dev').selectedOptions[0]?.textContent||'':'OPEN the input chosen on the RECORD tab (INPUT, INPUTS)';
+  $('tu-dial').style.opacity=tu?1:.35;if(!tu)return;const col=Math.abs(tu.cents)<=5?'#7ee787':'#c3cbcf';
+  $('tu-note').textContent=NOTES[tu.note%12].replace('-','')+(Math.floor(tu.note/12)-1);$('tu-note').style.color=col;$('tu-app').textContent=fmtNote(tu.note)+' in a pattern';
+  $('tu-needle').style.left=(50+Math.max(-50,Math.min(50,tu.cents)))+'%';$('tu-needle').style.background=col;
+  $('tu-cents').textContent=`${tu.cents>=0?'+':''}${tu.cents} cents · ${tu.hz} Hz`}
 // the echo's targets: a new channel panned left, centre or right, or any channel of the song
 function renderEchoTo(){const el=$('echo-to');if(!el||!S||!S.song.facts)return;const ch=S.song.facts.channels,key=JSON.stringify(ch);if(el.dataset.key===key)return;
   const v=el.value;el.dataset.key=key;el.innerHTML=[['new:16','NEW · LEFT'],['new:32','NEW · CENTRE'],['new:48','NEW · RIGHT']].concat(ch.map((c,i)=>[String(i),`${pad(i+1)} ${c}`])).map(([k,l])=>`<option value="${esc(k)}">${esc(l)}</option>`).join('');

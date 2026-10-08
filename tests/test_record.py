@@ -77,6 +77,11 @@ class TestRecorder(unittest.TestCase):
         self.assertGreater(st["peak"][0], -20)          # the pluck on input 1, decaying (-15 dBFS 0.5 s in)
         self.assertLess(st["peak"][1], -35)             # the hum on input 2, at -40 dBFS
         self.assertEqual(st["tuner"]["note"], 55)       # G-4, 196 Hz
+        t = np.arange(r.TUNER_FRAMES) / RATE            # a five-string bass's low B (30.87 Hz), its fundamental weak
+        r.tune[:] = sum(a * np.sin(2 * np.pi * 30.87 * k * t) for k, a in ((1, 0.1), (2, 0.3), (3, 0.2)))
+        self.assertEqual(r.status()["tuner"]["note"], 23)  # B-1 in the song format, B0 on the TUNER tab
+        r.tune[: r.TUNER_FRAMES // 2] = 0                  # a note just starting: no reading until the window is full of it
+        self.assertIsNone(r.status()["tuner"])
         r.start(preroll=0.2)
         r.stream.feed(1.0)
         x = r.stop()

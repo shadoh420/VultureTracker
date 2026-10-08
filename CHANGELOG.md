@@ -2,6 +2,12 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- **TUNER tab** (before RECORD): a chromatic tuner with a cents needle, on the RECORD tab's input. It now reaches a
+  five-string bass's low B (30.9 Hz); the tuner read nothing under 40 Hz before. It left the RECORD tab.
+- **The AGENT chat shows the agent's replies as markdown** instead of the raw `**` and `#` marks.
+
 ## 1.3.1 (2026-10-07)
 
 One fix: the app on a Windows PC without Microsoft's WebView2 runtime.

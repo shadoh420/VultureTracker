@@ -143,6 +143,20 @@ class TestFeaturesPage(unittest.TestCase):
             page.wait_for_function("S.chat.settings.provider==='openai'")
             self.assertTrue(page.evaluate("S.chat.settings.has_key"))
             self.assertNotIn('secret-test-key', json.dumps(page.evaluate("S")))
+            # the agent's replies are markdown, escaped first; the owner's own words stay as typed
+            html = page.evaluate(r"""(()=>{S.chat={messages:[{role:'you',text:'**as typed**'},{role:'agent',text:'## Done\n- **loud** `a_b`\n<img src=x>\n| a | b |\n|---|---|\n| 1 | 2 |'}],settings:{provider:'openai'}};
+                AG.view='chat';renderAgent();return $('ag-msgs').innerHTML})()""")
+            for part in ('**as typed**', '<b class="mh">Done</b>', '• <b>loud</b> <code>a_b</code>', '&lt;img src=x&gt;', '<td>1</td>'):
+                self.assertIn(part, html)
+
+    def test_tuner_tab(self):
+        with self.page() as (page, d):
+            page.click('.tab[data-t=tuner]')
+            page.wait_for_function("$('tu-dev').textContent.includes('OPEN the input')")  # drawn by the RECORD tab's poll
+            page.evaluate("renderTuner({open:true,tuner:{note:23,cents:-3,hz:30.82}})")  # a five-string's low B, 3 cents flat
+            self.assertEqual(page.text_content('#tu-note'), 'B0')
+            self.assertEqual(page.text_content('#tu-app'), 'B-1 in a pattern')
+            self.assertEqual(page.evaluate("$('tu-needle').style.left"), '47%')
 
 
 if __name__ == '__main__':

@@ -449,8 +449,12 @@ class Recorder:
                    "pass": min(self.backing['loops'], max(1, 1 + (self.frames-self.backing['head']) // len(self.backing['pcm']))) if self.backing else 0}
             tune = self.tune.copy()
         out["tuner"] = None
-        if out["open"] and np.abs(tune).max() > 0.01:
-            hz, conf = dsp.yin(tune, self.rate)
+        rms = lambda v: float(np.sqrt(np.mean(v * v)))  # noqa: E731
+        half = len(tune) // 2
+        # a note still starting (the window's first half much quieter than its second) is no reading: the attack read
+        # as 72 Hz or 1.3 kHz for the simulated 196 Hz pluck
+        if out["open"] and np.abs(tune).max() > 0.01 and rms(tune[:half]) > 0.3 * rms(tune[half:]):
+            hz, conf = dsp.yin(tune, self.rate, fmin=27.0)  # down to a five-string bass's low B (30.9 Hz) a little flat
             if hz and conf > 0.85:
                 note, cents = dsp.note_of(hz)
                 out["tuner"] = {"hz": round(hz, 2), "note": note, "cents": round(cents)}
