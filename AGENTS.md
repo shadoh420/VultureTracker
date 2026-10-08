@@ -100,12 +100,18 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   --no-browser --port 8765`, poll `/api/state`, then drive a pywebview window with `evaluate_js` (the page's globals are
   top-level `let`, so poll bare `S`, not `window.S`) and grab the client rect; `tools/demo_video.py` has the pieces.
   `gui.html` is re-read per request, `gui.py` needs a restart. Delete any notes the harness made on a real song.
-- Release recipe: bump `__version__` in `vulturetracker/__init__.py` (the one place; pyproject.toml reads it), retitle CHANGELOG.md's Unreleased as the version, commit "Version X", `git tag -a vX`, push `main` and the tag,
-  `python tools/build_exe.py`, smoke-test `dist/vulturetracker.exe gui demo2/iron_relay.yaml --no-browser --port 8766`
-  (poll `/api/state`, GET `/`), `sha256sum`, then `gh release create vX dist/vulturetracker-win64.zip dist/vulturetracker.exe dist/ffmpeg.exe --title --notes-file
-  --latest` (the build copies ffmpeg beside the exe for the MP3/OGG/FLAC export; it ships as its own file). Write the notes file as UTF-8 without BOM from Python or an editor, never through PowerShell 5.1 text
-  cmdlets (the 0.2.1 notes came out with "â†’" for "→" and a BOM that way), and check the published body with
-  `gh api repos/shadoh420/VultureTracker/releases/tags/vX --jq .body`.
+- Release recipe: write the release's entry under `## Unreleased` in CHANGELOG.md, then run `python tools/release.py X.Y.Z`
+  and follow its printed commands in order. It bumps `__version__` in `vulturetracker/__init__.py` (the one place;
+  pyproject.toml reads it), retitles that section as the version with the date, and writes `dist/release-notes-X.Y.Z.md`
+  itself, from Python as UTF-8 without BOM: never make or touch that file with PowerShell 5.1 text cmdlets (the 0.2.1
+  notes came out with "â†’" for "→" and a BOM that way). It never commits, tags, pushes, builds or publishes: those are
+  the printed commands (commit "Version X.Y.Z", `git tag -a vX.Y.Z`, push `main` and the tag, `python tools/build_exe.py`,
+  which copies ffmpeg beside the exe for the MP3/OGG/FLAC export, shipped as its own file). `python tools/exe_check.py
+  dist/vulturetracker.exe` replaces the manual smoke test: it starts the exe headless on `demo2/iron_relay.yaml`, waits for
+  `/api/state` and the page, then runs the exe's `--selfcheck` (every packed module and data file, one line each).
+  `release.py X.Y.Z --digests` puts the three SHA-256 digests into the notes file after the build; after `gh release
+  create` (its command is printed too), `release.py X.Y.Z --check` fetches the published body and verifies the digests
+  against `dist/`. `--dry-run` prints without writing.
 - Windows PowerShell 5.1 is the host shell: no `&&`, no `??`; Git Bash is available for POSIX syntax.
 - Python 3.14 at `C:\Python314`; `pyyaml`, `numpy`, `pywebview`, `pywin32`, `Pillow`, `imageio-ffmpeg` (its ffmpeg
   makes the MP3s), `pedalboard` + `mido` (the synth host: sample generators and the RECIPE box; packed into the exe, which makes the exe GPL-3, THIRD_PARTY.md).
