@@ -20,6 +20,7 @@ sound can be swapped in the tryout.
 
 Left out (counted in the warnings): grace notes, trills, tremolo picking, mix-table volume and pan changes, the
 triplet feel, lyrics."""
+import io
 import math
 import os
 from pathlib import Path
@@ -355,11 +356,16 @@ def import_gp(src, song_path, samples_dir):
         import guitarpro
     except ImportError:
         raise ValueError("Guitar Pro import needs PyGuitarPro: pip install pyguitarpro (LGPL-3)")
-    try:
-        gp = guitarpro.parse(str(src))
+    try:  # from memory: a size-prefixed read on a file preallocates what a bad header claims (gigabytes)
+        gp = guitarpro.parse(io.BytesIO(Path(src).read_bytes()))
     except Exception as e:  # noqa: BLE001 - PyGuitarPro raises what its reader hits (GPException, struct.error, ...)
         raise ValueError(f"{src}: not a readable Guitar Pro 3-5 file ({type(e).__name__}: {e})") from e
     warnings, skipped = [], {}
+    if not gp.measureHeaders:
+        raise ValueError(f"{src}: the tab has no measures")
+    if not gp.tempo > 0:
+        warnings.append(f"the tab's tempo is {gp.tempo}: 120 BPM is used")
+        gp.tempo = 120
 
     def skip(what):
         skipped[what] = skipped.get(what, 0) + 1
@@ -422,7 +428,8 @@ def import_gp(src, song_path, samples_dir):
                             pitch = note.realValue + track.offset
                             if eff.harmonic is not None:
                                 pitch = (track.strings[note.string - 1].value + track.offset + HARMONIC[note.value]
-                                         if eff.harmonic.type == 1 and note.value in HARMONIC else pitch + 12)
+                                         if eff.harmonic.type == 1 and note.value in HARMONIC
+                                         and 1 <= note.string <= len(track.strings) else pitch + 12)
                         for flag, what in ((eff.isGrace, "grace notes"), (eff.isTrill, "trills"),
                                            (eff.isTremoloPicking, "tremolo picking")):
                             if flag:

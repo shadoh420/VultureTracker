@@ -8,7 +8,7 @@ import math
 import struct
 from dataclasses import replace
 
-from .itreader import ITReadError, _cstr, _sanitize
+from .itreader import ITReadError, MAX_CELLS, MAX_FRAMES, MAX_INSTRUMENTS, MAX_SAMPLES, _cstr, _sanitize
 from .model import (Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample,
                     NOTE_CUT, NOTE_OFF, ORDER_SKIP)
 
@@ -216,6 +216,9 @@ def read_s3m(data: bytes):
     chset = data[0x40:0x60]
     used = [c for c in range(32) if chset[c] < 16]
     nch = max(used) + 1 if used else 1
+    if nins > MAX_SAMPLES or npat * 64 * nch > MAX_CELLS:
+        raise ModReadError(f"the header claims {nins} instruments and {npat} patterns of {nch} channels: more than "
+                           f"the reader holds ({MAX_SAMPLES} samples, {MAX_CELLS // 1_000_000} million cells)")
     cs = "cp1252" if (cwt & 0xF000) == 0x5000 else "cp437"  # OpenMPT: CP437, or Windows-1252 when an OpenMPT saved it
     mod = _module(_cstr(data[:28], cs), nch, "s3m")
     mod.global_volume, mod.speed = min(128, 2 * gv), speed or 6
@@ -235,6 +238,7 @@ def read_s3m(data: bytes):
             ch.pan = round((pans[c] & 15) * 64 / 15)
         else:
             ch.pan = round((3 if chset[c] < 8 else 12) * 64 / 15) if stereo else 32
+    frames = 0
     for i, ptr in enumerate(insptr):
         o = 16 * ptr
         smp = Sample()
@@ -257,6 +261,10 @@ def read_s3m(data: bytes):
         is16, st = bool(sflags & 4), bool(sflags & 2)
         width = 2 if is16 else 1
         off = 16 * seg
+        frames += min(length, len(data)) * (2 if st else 1)
+        if frames > MAX_FRAMES:
+            raise ModReadError(f"the instrument headers claim over {MAX_FRAMES // 1_000_000} million frames of sample "
+                               f"data (instrument {i + 1}): more than the reader holds")
         chans = []
         for k in range(2 if st else 1):
             raw = data[off + k * length * width: off + (k + 1) * length * width]
@@ -364,6 +372,8 @@ def read_xm(data: bytes):
         raise ModReadError(f"XM version {ver >> 8}.{ver & 255:02d}: only 1.04 files (FastTracker 2.0x on) are read")
     hsize = struct.unpack_from("<I", data, 60)[0]
     slen, restart, nch, npat, nins, flags, speed, bpm = struct.unpack_from("<8H", data, 64)
+    if nins > MAX_INSTRUMENTS:
+        raise ModReadError(f"the header claims {nins} instruments; FastTracker 2 holds 128 (the reader stops at {MAX_INSTRUMENTS})")
     # OpenMPT: CP437, or Windows-1252 when OpenMPT or MadTracker saved it (Load_xm.cpp)
     cs = "cp1252" if data[38:46] == b"OpenMPT " or data[38:52] == b"MadTracker 2.0" else "cp437"
     mod = _module(_cstr(data[17:37], cs), max(1, min(64, nch)), "xm")
@@ -372,6 +382,7 @@ def read_xm(data: bytes):
     mod.speed, mod.tempo = min(255, speed or 6), max(32, min(255, bpm or 125))
     table = data[80:80 + min(256, slen)]
     pos = 60 + hsize
+    cells = 0
     for p in range(npat):
         plen, _pack, nrows, psize = struct.unpack_from("<IBHH", data, pos)
         pd = data[pos + plen: pos + plen + psize]
@@ -379,6 +390,10 @@ def read_xm(data: bytes):
         if nrows > 1024:  # no tracker plays it (FT2 stops at 256, libopenmpt at 1024): left empty, not allocated
             warn("patterns with more than 1024 rows dropped (left empty)")
             nrows, pd = 64, b""
+        cells += max(1, nrows) * len(mod.channels)
+        if cells > MAX_CELLS:
+            raise ModReadError(f"the pattern headers claim over {MAX_CELLS // 1_000_000} million cells (pattern {p}): "
+                               f"more than the reader holds")
         rows = [[Cell() for _ in range(len(mod.channels))] for _ in range(max(1, nrows))]
         i = 0
         for r in range(nrows):
@@ -411,6 +426,9 @@ def read_xm(data: bytes):
             ins.keymap = [(k, 0) for k in range(120)]
             pos += isize
             continue
+        if len(mod.samples) + nsmp > MAX_SAMPLES:
+            raise ModReadError(f"instrument {n + 1} claims {nsmp} samples, {len(mod.samples) + nsmp} in all; FastTracker 2 "
+                               f"holds 16 an instrument (the reader stops at {MAX_SAMPLES})")
         shsize = struct.unpack_from("<I", data, pos + 29)[0]
         o = pos
         keys = data[o + 33:o + 129]

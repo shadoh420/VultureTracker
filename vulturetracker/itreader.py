@@ -15,6 +15,15 @@ class ITReadError(ValueError):
     pass
 
 
+# What a reader holds at most, so a header claiming thousands of patterns or samples over the same bytes is refused
+# instead of taking minutes and gigabytes (a cell is about 120 bytes and 0.6 us to make): a 255-order song of 200-row
+# patterns on 64 channels is 3.3 M cells, and 16 M sample frames are a 32 MB module's worth.
+MAX_CELLS = 4_000_000
+MAX_FRAMES = 16_000_000
+MAX_INSTRUMENTS = 255  # IT holds 99 (the song format too); OpenMPT reads to 255; past that it is not a module
+MAX_SAMPLES = 4096  # an XM's 255 instruments of 16
+
+
 def _cstr(raw, charset="cp437"):
     """A name as the module stores it, in `charset` (OpenMPT's: CP437 for IT, S3M and XM, Windows-1252 for those an
     OpenMPT saved, Latin-1 for MOD), transliterated as song.it_text writes names (Böse -> Bose, ? where none fits)."""
@@ -161,6 +170,9 @@ def read_it(data: bytes):
         warnings.append(f"the MIDI pitch wheel depth ({pwd} semitones; for MIDI output) is not carried over")
     if flags & 4 and cmwt < 0x200:
         raise ITReadError("old (pre-IT 2.00) instrument format is not supported")
+    if insnum > MAX_INSTRUMENTS or smpnum > MAX_SAMPLES:
+        raise ITReadError(f"the header claims {insnum} instruments and {smpnum} samples; IT holds 99 of each "
+                          f"(the reader stops at {MAX_INSTRUMENTS} and {MAX_SAMPLES})")
     if cwtv >= 0x5000:
         warnings.append("saved by OpenMPT; OpenMPT-only extensions (swing, extra instrument properties, "
                         "playback compatibility flags) are not carried over")
@@ -210,6 +222,7 @@ def read_it(data: bytes):
         mod.plugins, channel_plugins, w = plugins.read_chunks(data[pos:min_ptr])
         warnings += w
 
+    frames = 0
     for p in smp_ptrs:
         smp = Sample()
         if p == 0 or p + 0x50 > len(data):
@@ -229,6 +242,10 @@ def read_it(data: bytes):
         smp.c5_speed = c5 if c5 >= 256 else 8363
         if sflags & 1 and length:
             smp.bits = 16 if sflags & 2 else 8
+            frames += min(length, len(data)) * (2 if sflags & 4 else 1)  # a read stops at the file's end
+            if frames > MAX_FRAMES:
+                raise ITReadError(f"the sample headers claim over {MAX_FRAMES // 1_000_000} million frames of sample data "
+                                  f"(sample {len(mod.samples) + 1}): more than the reader holds")
             try:
                 smp.data = _read_samples_data(data, ptr, length, sflags, cvt)
             except (ITReadError, struct.error) as e:
@@ -272,6 +289,13 @@ def read_it(data: bytes):
             ins.pitch_envelope = _read_envelope(data, p + 0x1D4, True)
             mod.instruments.append(ins)
 
+    # the grid every pattern will take (64 wide while reading; a zero pointer or a bad row count an empty 64-row one),
+    # summed before any is made so a header claiming thousands is refused at once
+    claimed = sum(64 * (rows if 1 <= rows <= 1024 else 64)
+                  for rows in (struct.unpack_from("<H", data, p + 2)[0] if p else 64 for p in pat_ptrs))
+    if claimed > MAX_CELLS:
+        raise ITReadError(f"the pattern headers claim over {MAX_CELLS // 1_000_000} million cells "
+                          f"({len(pat_ptrs)} patterns): more than the reader holds")
     max_ch = 0
     for p in pat_ptrs:
         if p == 0:
@@ -620,8 +644,13 @@ def import_it(it_path, song_path, samples_dir):
     data = Path(it_path).read_bytes()
     mod, warnings = read_module(data)
     if data[:4] != b"IMPM":
+        from .openmpt import OpenMPTError  # here, so an .it imports without libopenmpt
         want = mod.mix_volume
-        diff = match_level(mod, data)
+        try:
+            diff = match_level(mod, data)
+        except OpenMPTError as e:  # the reader read what libopenmpt refuses: the song is written, its level unmatched
+            diff = None
+            warnings.append(f"libopenmpt cannot load the original, so the level was not matched ({e})")
         if diff is not None and abs(diff) > 0.5 and mod.mix_volume in (1, 128):
             warnings.append(f"the level is {diff:+.1f} dB from libopenmpt's and the mix volume stops at {mod.mix_volume}")
         elif diff is not None and mod.mix_volume != want:

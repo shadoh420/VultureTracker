@@ -23,6 +23,7 @@ placeholder sounds (gpimport), so the file plays at once and every sound can be 
 Left out (counted in the warnings): later volume, pan and other controller changes, notes outside C-0..B-9; past 64
 channels, the least used."""
 import bisect
+import io
 import math
 from pathlib import Path
 
@@ -66,13 +67,15 @@ def import_midi(src, song_path, samples_dir):
         import mido
     except ImportError:
         raise ValueError("MIDI import needs mido: pip install mido")
-    try:
-        mid = mido.MidiFile(str(src))
+    try:  # from memory: mido reads a chunk by its claimed size, which on a file preallocates up to 4 GB for a bad header
+        mid = mido.MidiFile(file=io.BytesIO(Path(src).read_bytes()))
     except Exception as e:  # noqa: BLE001 - mido raises what its reader hits (OSError, EOFError, KeyError, ...)
         raise ValueError(f"{src}: not a readable MIDI file ({type(e).__name__}: {e})") from e
     if mid.type == 2:
         raise ValueError(f"{src}: a type 2 MIDI file (independent sequences) is not supported")
     q = mid.ticks_per_beat
+    if q <= 0:
+        raise ValueError(f"{src}: the time division is {q} (SMPTE timing or a broken header); ticks a quarter note are needed")
     warnings, skipped = [], {}
 
     def skip(what):
@@ -84,7 +87,7 @@ def import_midi(src, song_path, samples_dir):
         names.append("")
         for msg in track:
             t += msg.time
-            if msg.type == "set_tempo":
+            if msg.type == "set_tempo" and msg.tempo > 0:  # a tempo of 0 us a quarter is no tempo
                 tempos.append((t, msg.tempo))
             elif msg.type == "time_signature":
                 sigs.append((t, msg.numerator, msg.denominator))
@@ -156,7 +159,7 @@ def import_midi(src, song_path, samples_dir):
     if not sigs or sigs[0][0]:
         sigs.insert(0, (0, 4, 4))
     lines, k, num, den = [0], 0, 4, 4  # bar lines: a time signature change mid-bar starts a bar there
-    while lines[-1] < end or len(lines) < 2:
+    while (lines[-1] < end or len(lines) < 2) and len(lines) <= 256:  # past 256 bars the cut below applies anyway
         while k < len(sigs) and sigs[k][0] <= lines[-1]:
             num, den = sigs[k][1:]
             k += 1
