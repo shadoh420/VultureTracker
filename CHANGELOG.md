@@ -2,7 +2,9 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.3.1 (2026-10-07)
+
+One fix: the app on a Windows PC without Microsoft's WebView2 runtime.
 
 - **A PC without WebView2**: the app opened in Internet Explorer's engine there (white boxes, no song screen). It now
   opens in the browser instead and says where to get WebView2; OK on that message quits the app.
