@@ -2,6 +2,30 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+Hardening after the 2026-10-08 audit of the repository: nothing changes for songs or modules.
+
+- **Downloads are verified**: Surge XT, Dexed, faustwasm, OB-Xd's installer and the MusicRadar pack are checked
+  against a SHA-256 pinned beside each URL before anything is unpacked or run; a mismatch deletes the file and says
+  which asset from which URL did not match.
+- **The chat panel's API key** goes to the OS credential store (Windows Credential Manager, the macOS Keychain, a Linux
+  secret service) when the `keyring` package is installed, under the provider's name; a key already in `agent.json`
+  moves there on the next read. Without keyring it stays in the file as before. The panel says which, and warns when
+  the server URL is remote and not https: the key would travel in clear.
+- **Malformed modules, MIDI files and Guitar Pro tabs** are refused with one error instead of taking minutes or
+  gigabytes (a header claiming 65535 instruments or patterns, a chunk size of 4 GB, a tempo of zero); an XM or S3M
+  the reader accepts but libopenmpt refuses imports with its level unmatched and a warning. `tools/fuzz_import.py`
+  found them and reruns after a reader changes.
+- **The app's write paths**: a negative pattern, candidate or channel index no longer picks from the end of the list, a
+  muted or mixed channel past 63 no longer writes into the module header, a section, slot, Euclidean step count and
+  request size are bounded.
+- **CI** runs the portable tests on Windows (Python 3.14, the vendored libopenmpt 0.8.9) and on Linux with Python 3.10
+  and 3.14; `pip install -e .` works again.
+- **Releases**: `tools/release.py X.Y.Z` does the mechanical steps and prints the commands; `tools/exe_check.py`
+  starts a built exe headless and runs its new `--selfcheck` (every packed module and data file).
+- SECURITY.md, and README's privacy and download-check paragraphs.
+
 ## 1.3.2 (2026-10-08)
 
 A tuner tab, and the agent chat shows markdown.
