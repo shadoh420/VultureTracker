@@ -95,30 +95,27 @@ def surge_paths():
 
 
 # the Windows downloads fetch_synth unpacks into TOOLS (tools/fetch_surge.py and fetch_instruments.py do the same for a
-# checkout); OB-Xd has only an installer: https://www.discodsp.com/obxd/
+# checkout), each (url, its SHA-256, folder): the digest is checked before anything is unpacked (fileio.fetch_verified);
+# to bump a version, download the new asset, hash it (certutil -hashfile / sha256sum) and update both. OB-Xd has only an
+# installer: https://www.discodsp.com/obxd/
 FETCH = {"surge": ("https://github.com/surge-synthesizer/releases-xt/releases/download/1.3.4/"
-                   "surge-xt-win64-1.3.4-portable-install.zip", TOOLS / "surge-xt"),
+                   "surge-xt-win64-1.3.4-portable-install.zip",
+                   "a5f2376702ad218c0382640ed0c7b9ebb222ba2410a210879899c0f726859d8e", TOOLS / "surge-xt"),
          "dexed": ("https://github.com/asb2m10/dexed/releases/download/v1.0.1/Dexed-1.0.1-win.zip",
-                   TOOLS / "synths" / "dexed")}
+                   "1f118445f2c5c411636bb41ddf8b456db09af74cd38f9ede8a93a01020505f05", TOOLS / "synths" / "dexed")}
 
 
 def fetch_synth(kind, progress=lambda done, total: None):
-    """Download a synth (FETCH) and unpack it into its folder; the folder appears only once it is whole."""
+    """Download a synth (FETCH), verify its digest and unpack it into its folder; the folder appears only once it is
+    whole."""
     import shutil
     import tempfile
-    import urllib.request
     import zipfile
-    url, dest = FETCH[kind]
+    from .fileio import fetch_verified
+    url, sha256, dest = FETCH[kind]
     dest.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=dest.parent) as tmp:
-        z, done = Path(tmp) / "download.zip", 0
-        req = urllib.request.Request(url, headers={"User-Agent": "vulturetracker"})
-        with urllib.request.urlopen(req) as r, open(z, "wb") as f:
-            total = int(r.headers.get("Content-Length") or 0)
-            while chunk := r.read(1 << 20):
-                f.write(chunk)
-                done += len(chunk)
-                progress(done, total)
+        z = fetch_verified(url, sha256, Path(tmp) / "download.zip", progress)
         with zipfile.ZipFile(z) as zf:
             zf.extractall(Path(tmp) / "x")
         if dest.exists():

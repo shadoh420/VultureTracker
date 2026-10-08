@@ -39,6 +39,24 @@ class TestFaustFetch(unittest.TestCase):
                 faust.extract(d / "bad.tgz", d / "faustwasm")
             self.assertTrue((out / "package.json").exists())  # a failed extract leaves the old folder as it was
 
+    def test_fetch_verified_checks_the_digest(self):
+        # a file:// URL stands in for the network: the digest pinned beside each download URL must match or nothing stays
+        import hashlib
+        from vulturetracker.fileio import fetch_verified
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp) / "asset.tgz", Path(tmp) / "got.tgz"
+            src.write_bytes(b"faustwasm" * 1000)
+            with self.assertRaises(ValueError) as e:
+                fetch_verified(src.as_uri(), "0" * 64, dest)
+            self.assertIn("asset.tgz from file:", str(e.exception))
+            self.assertIn("does not match the expected digest", str(e.exception))
+            self.assertFalse(dest.exists())
+            seen = []
+            got = fetch_verified(src.as_uri(), hashlib.sha256(src.read_bytes()).hexdigest(), dest,
+                                 lambda done, total: seen.append((done, total)))
+            self.assertEqual((got, dest.read_bytes()), (dest, src.read_bytes()))
+            self.assertEqual(seen, [(9000, 9000)])
+
 
 @unittest.skipUnless(READY, "needs node and faustwasm (python -c \"from vulturetracker import faust; faust.fetch()\")")
 class TestFaustRender(unittest.TestCase):

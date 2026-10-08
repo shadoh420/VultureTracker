@@ -15,6 +15,7 @@ import numpy as np
 
 VERSION = "0.18.5"
 URL = f"https://registry.npmjs.org/@grame/faustwasm/-/faustwasm-{VERSION}.tgz"
+SHA256 = "89fbdd4222c9b914b1edb7fb35c32793cd272a68d622ea3bf3304877f8f2a911"  # of the tarball; bump it with VERSION
 KEEP = ("package/package.json", "package/COPYING.txt", "package/README.md", "package/dist/esm/index.js",
         "package/libfaust-wasm/libfaust-wasm.js", "package/libfaust-wasm/libfaust-wasm.wasm",
         "package/libfaust-wasm/libfaust-wasm.data")
@@ -54,20 +55,13 @@ def extract(tgz, dest):
 
 
 def fetch(progress=lambda done, total: None):
-    """Download faustwasm from npm and keep what renders need (about 6 MB of the 25 MB package)."""
-    import urllib.request
+    """Download faustwasm from npm, verify its digest (SHA256) and keep what renders need (about 6 MB of the 25 MB
+    package)."""
+    from .fileio import fetch_verified
     d = faust_dir()
     d.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=d.parent) as tmp:
-        tgz = Path(tmp) / "faustwasm.tgz"
-        req = urllib.request.Request(URL, headers={"User-Agent": "vulturetracker"})
-        with urllib.request.urlopen(req) as r, open(tgz, "wb") as f:
-            total, done = int(r.headers.get("Content-Length") or 0), 0
-            while chunk := r.read(1 << 20):
-                f.write(chunk)
-                done += len(chunk)
-                progress(done, total)
-        return extract(tgz, d)
+        return extract(fetch_verified(URL, SHA256, Path(tmp) / "faustwasm.tgz", progress), d)
 
 
 class FaustMissing(ValueError):

@@ -31,6 +31,12 @@ Their terms allow any use in your music but forbid redistributing the samples, s
 write to `samples/local/` (gitignored), and modules built from them (which embed their samples) shouldn't be
 published. The synths are free; audio you render from them is yours.
 
+Every download (Surge XT, Dexed, OB-Xd's installer, the MusicRadar zip, faustwasm) is verified against a SHA-256
+digest pinned beside its URL (`synth.FETCH`, `faust.SHA256`, the constants in `tools/fetch_instruments.py`) before it
+is unpacked or run; a mismatch deletes the file and reports it. To bump a version, download the new asset, hash it
+(`certutil -hashfile <file> SHA256` or `sha256sum`) and update the digest with the URL. MusicRadar's zip is
+unversioned, so its digest may need refreshing when they republish it.
+
 For recorded samples, `python tools/fetch_cc0.py` downloads a curated selection (~630 MB) of three CC0
 (public domain) libraries into `tools/cc0/` (gitignored): Big Rusty Drums by Karoryfer Samples (drum kit),
 VSCO 2 Community Edition (orchestra, percussion, sound effects) and the Versilian Community Sample Library

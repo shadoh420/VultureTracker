@@ -80,6 +80,31 @@ def link_new(src, dst):
             shutil.copyfileobj(s, d)
 
 
+def fetch_verified(url, sha256, dest, progress=lambda done, total: None):
+    """`url` streamed into `dest` in 1 MiB chunks and hashed on the way (never whole in memory), then checked against
+    the SHA-256 pinned beside the URL: a mismatch (or a failed download) deletes `dest` and raises. Returns `dest`."""
+    import hashlib
+    import urllib.request
+    dest, h, done = Path(dest), hashlib.sha256(), 0
+    req = urllib.request.Request(url, headers={'User-Agent': 'vulturetracker'})
+    try:
+        with urllib.request.urlopen(req) as r, open(dest, 'wb') as f:
+            total = int(r.headers.get('Content-Length') or 0)
+            while chunk := r.read(1 << 20):
+                f.write(chunk)
+                h.update(chunk)
+                done += len(chunk)
+                progress(done, total)
+        if h.hexdigest() != sha256:
+            name = url.rsplit('/', 1)[-1]
+            raise ValueError(f'{name} from {url} does not match the expected digest; the download may be corrupt or '
+                             'the release replaced')
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return dest
+
+
 DEVICES = {'CON', 'PRN', 'AUX', 'NUL', *(f'COM{i}' for i in range(1, 10)), *(f'LPT{i}' for i in range(1, 10))}
 
 
