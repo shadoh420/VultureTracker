@@ -37,6 +37,30 @@ class Fake(BaseHTTPRequestHandler):
         pass
 
 
+class FakeKeyring:
+    """A dict-backed stand-in for the keyring module. `broken` raises on every call (Linux without a secret service);
+    `dropping` accepts a key and forgets it (the null backend)."""
+
+    def __init__(self, broken=False, dropping=False):
+        self.store, self.broken, self.dropping = {}, broken, dropping
+
+    def get_password(self, service, account):
+        if self.broken:
+            raise RuntimeError("No recommended backend was available")
+        return self.store.get((service, account))
+
+    def set_password(self, service, account, password):
+        if self.broken:
+            raise RuntimeError("No recommended backend was available")
+        if not self.dropping:
+            self.store[(service, account)] = password
+
+    def delete_password(self, service, account):
+        if self.broken or (service, account) not in self.store:
+            raise RuntimeError("PasswordDeleteError")
+        del self.store[(service, account)]
+
+
 class AgentTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -45,11 +69,12 @@ class AgentTests(unittest.TestCase):
         write_wav(self.dir / "b.wav", RATE, [sine(880)])
         (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
         self.states = []
-        self._settings = agent.settings_path
+        self._settings, self._keyring = agent.settings_path, agent.keyring
         agent.settings_path = lambda: self.dir / "agent.json"   # never the user's own settings
+        agent.keyring = None                                    # nor the user's own credential store
 
     def tearDown(self):
-        agent.settings_path = self._settings
+        agent.settings_path, agent.keyring = self._settings, self._keyring
         from tests.test_gui import TestGui
         TestGui.tearDown(self)
 
@@ -236,6 +261,53 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--resume") + 1], "s1")
         finally:
             agent.claude_command, agent.PORT = old
+
+    def file(self):
+        return json.loads((self.dir / "agent.json").read_text(encoding="utf-8"))
+
+    def test_settings_key_in_file_without_keyring(self):
+        pub = agent.save_settings({"provider": "anthropic", "api_key": " k1 "})
+        self.assertEqual((pub["key_store"], pub["has_key"]), ("file", True))
+        self.assertEqual(self.file()["api_key"], "k1")
+        self.assertEqual(agent.load_settings()["api_key"], "k1")
+        pub = agent.save_settings({"clear_key": True})
+        self.assertFalse(pub["has_key"])
+        self.assertNotIn("api_key", self.file())
+
+    def test_settings_key_in_keyring(self):
+        agent.keyring = fake = FakeKeyring()
+        pub = agent.save_settings({"provider": "openai", "api_key": "k2"})
+        self.assertEqual((pub["key_store"], pub["has_key"]), ("keyring", True))
+        self.assertEqual(fake.store, {("VultureTracker", "openai"): "k2"})
+        self.assertNotIn("api_key", self.file())
+        self.assertEqual(agent.load_settings()["api_key"], "k2")   # what the chat's readers see
+        agent.save_settings({"model": "m"})                        # a later save never copies it back
+        self.assertNotIn("api_key", self.file())
+        self.assertEqual(self.file()["model"], "m")
+        # a key saved before keyring was installed moves into the store on the next load
+        fake.store.clear()
+        (self.dir / "agent.json").write_text(json.dumps({"provider": "openai", "api_key": "legacy"}), encoding="utf-8")
+        self.assertEqual(agent.load_settings()["api_key"], "legacy")
+        self.assertEqual(fake.store[("VultureTracker", "openai")], "legacy")
+        self.assertNotIn("api_key", self.file())
+        pub = agent.save_settings({"clear_key": True})
+        self.assertEqual((pub["has_key"], fake.store), (False, {}))
+        agent.save_settings({"clear_key": True})                   # nothing stored: no error
+        self.assertFalse(agent.public_settings()["has_key"])
+
+    def test_settings_keyring_failures_fall_back_to_the_file(self):
+        agent.keyring = FakeKeyring(broken=True)
+        pub = agent.save_settings({"provider": "anthropic", "api_key": "k3"})
+        self.assertEqual((pub["key_store"], pub["has_key"], self.file()["api_key"]), ("file", True, "k3"))
+        agent.keyring = FakeKeyring(dropping=True)
+        pub = agent.save_settings({"api_key": "k4"})
+        self.assertEqual((pub["key_store"], pub["has_key"], self.file()["api_key"]), ("file", True, "k4"))
+
+    def test_base_url_warning(self):
+        warn = "the key would travel in clear: base_url is neither localhost nor https"
+        for url, expect in [("http://10.0.0.5:11434/v1", warn), ("http://localhost:11434/v1", ""),
+                            ("http://[::1]:8080/v1", ""), ("https://api.example.com/v1", ""), ("", "")]:
+            self.assertEqual(agent.save_settings({"base_url": url})["base_url_warning"], expect, url)
 
     def test_chat_local_model(self):
         st = self.state()

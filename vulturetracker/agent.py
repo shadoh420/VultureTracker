@@ -16,6 +16,7 @@ import threading
 import time
 from pathlib import Path
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from . import __version__, plugins
@@ -378,37 +379,113 @@ reference track.
 when the owner asks for ideas."""
 
 
+try:
+    import keyring  # optional: the OS credential store for the API key
+except ImportError:
+    keyring = None
+
+KEYRING_SERVICE = "VultureTracker"
+
+
 def settings_path():
     return user_dir() / "agent.json"
 
 
-def load_settings():
+def _read_file():
     try:
         return json.loads(settings_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
 
 
+def _write_file(s):
+    settings_path().parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(settings_path(), json.dumps(s, indent=2).encode("utf-8"))
+
+
+def _account(s):
+    return s.get("provider") or "anthropic"
+
+
+def _keyring_get(account):
+    """(key, store): the key under the OS credential store and "keyring", or (None, "file") when the keyring package
+    is missing or has no working backend (Linux without a secret service raises)."""
+    if keyring is not None:
+        try:
+            return keyring.get_password(KEYRING_SERVICE, account), "keyring"
+        except Exception:
+            pass
+    return None, "file"
+
+
+def _keyring_set(account, key):
+    """True when the key is in the store and reads back (the null backend drops it without a word)."""
+    try:
+        keyring.set_password(KEYRING_SERVICE, account, key)
+        return keyring.get_password(KEYRING_SERVICE, account) == key
+    except Exception:
+        return False
+
+
+def load_settings():
+    """The file's settings with the API key from the OS credential store when keyring works here (a key still in the
+    file moves there on first load, the store's own wins), else the file's own; `key_store` says which."""
+    s = _read_file()
+    acct = _account(s)
+    key, store = _keyring_get(acct)
+    if store == "keyring" and s.get("api_key"):
+        if key or _keyring_set(acct, s["api_key"]):
+            key = key or s["api_key"]
+            del s["api_key"]
+            _write_file(s)
+        else:
+            store = "file"  # a backend that drops the key: the file keeps it
+    if key:
+        s["api_key"] = key
+    s["key_store"] = store
+    return s
+
+
 def save_settings(new):
-    """The chat panel's provider settings, kept in the user's folder (never beside a song). An empty api_key keeps the
+    """The chat panel's provider settings, kept in the user's folder (never beside a song); the key goes to the OS
+    credential store under the provider's name when keyring works here, else into the file. An empty api_key keeps the
     stored one; `clear_key` drops it."""
-    cur = load_settings()
+    cur = _read_file()
     for k in ("provider", "model", "base_url", "effort"):
         if k in new:
             cur[k] = str(new[k] or "").strip()
-    if new.get("api_key"):
-        cur["api_key"] = str(new["api_key"]).strip()
+    acct = _account(cur)
+    _, store = _keyring_get(acct)
     if new.get("clear_key"):
         cur.pop("api_key", None)
-    settings_path().parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(settings_path(), json.dumps(cur, indent=2).encode("utf-8"))
+        if store == "keyring":
+            try:
+                keyring.delete_password(KEYRING_SERVICE, acct)
+            except Exception:
+                pass  # nothing stored under it
+    elif new.get("api_key"):
+        key = str(new["api_key"]).strip()
+        if store == "keyring" and _keyring_set(acct, key):
+            cur.pop("api_key", None)
+        else:
+            cur["api_key"] = key
+    _write_file(cur)
     return public_settings()
+
+
+def base_url_warning(base_url):
+    """The panel's warning when a key would be sent in clear: a base_url that is neither local nor https."""
+    u = urllib.parse.urlsplit(base_url or "")
+    if not base_url or u.scheme == "https" or u.hostname in ("localhost", "127.0.0.1", "::1"):
+        return ""
+    return "the key would travel in clear: base_url is neither localhost nor https"
 
 
 def public_settings():
     s = load_settings()
     return {"provider": s.get("provider", ""), "model": s.get("model", ""), "base_url": s.get("base_url", ""),
-            "effort": s.get("effort", ""), "has_key": bool(s.get("api_key"))}
+            "effort": s.get("effort", ""), "has_key": bool(s.get("api_key")), "key_store": s["key_store"],
+            "base_url_warning": base_url_warning(s.get("base_url", ""))}
 
 
 class Chat:

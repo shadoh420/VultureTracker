@@ -509,9 +509,13 @@ an entry marked approved is refused. Every edit is one undo step, and a pattern 
 - **The AGENT panel** (top right): a chat with a model of your choice, optional. SETTINGS picks **Claude Code (your
   subscription)**: the `claude` you are signed in to, run headless with this song's tools as its only tools (no API key,
   no per-token bill; it counts toward your plan's usage; install Claude Code and sign in once first), or the Anthropic API
-  (Claude; a key stored in the user folder's `agent.json`, never beside a song, or ANTHROPIC_API_KEY, or an `ant auth
-  login` profile; billed per token; `pip install anthropic`) or a local model behind an OpenAI-compatible server with
-  tool calling (Ollama, LM Studio, llama.cpp's server: free). With rows selected in the Pattern tab, a message carries
+  (Claude; a stored key, or ANTHROPIC_API_KEY, or an `ant auth login` profile; billed per token; `pip install
+  anthropic`) or a local model behind an OpenAI-compatible server with tool calling (Ollama, LM Studio, llama.cpp's
+  server: free). A key you enter is kept in the OS credential store (Windows Credential Manager, macOS Keychain, a
+  Linux secret service) under the provider's name when the `keyring` package is installed (`pip install keyring`);
+  otherwise it sits in plain text in `agent.json` in the user folder, never beside a song, and moves into the store
+  the next time the app reads it after keyring is installed. The panel says which. It warns when the base URL is
+  remote and not https: the key would travel in clear. With rows selected in the Pattern tab, a message carries
   them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points. The agent's replies show as
   markdown (bold, code, lists, headings, tables); links show their address and are not clickable.
 
