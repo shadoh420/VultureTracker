@@ -1501,6 +1501,137 @@ class TestGui(unittest.TestCase):
         st.song_edit([{"op": "sample_file", "num": 1, "file": str(p)}])
         self.assertEqual(st.song["samples"][1], {"file": "My_Drop.wav", "name": "My_Drop", "base_note": "E-5"})
 
+    # ---- the October 2026 audit's write-path review (package F): a request's index, count or size is checked at the request
+
+    def post(self, port, path, body):
+        return self.fetch(port, path, json.dumps(body).encode(), **{"Content-Type": "application/json"})[0]
+
+    def test_pattern_index_is_checked(self):
+        # a negative pattern index picked the last pattern (edit, materialize, the pattern view, euclid)
+        st = self.state()
+        port, stop = self.serve(st)
+        try:
+            cell = [{"row": 0, "ch": 0, "cell": "D-5 01 ... ..."}]
+            self.assertEqual(self.post(port, "/api/edit", {"pattern": -1, "cells": cell}), 400)
+            self.assertEqual(self.post(port, "/api/edit", {"pattern": 2, "cells": cell}), 400)
+            self.assertEqual(self.post(port, "/api/materialize", {"pattern": -1}), 400)
+            self.assertEqual(self.post(port, "/api/songedit", {"ops": [{"op": "euclid", "pattern": -1, "ch": 0, "r0": 0, "r1": 3, "hits": 1, "steps": 4}]}), 400)
+            self.assertEqual(self.fetch(port, "/api/pattern/-1")[0], 404)
+            self.assertEqual(self.fetch(port, "/api/pattern/1")[0], 200)
+            self.assertEqual((self.dir / "song.yaml").read_bytes(), SONG.encode("utf-8"))
+        finally:
+            stop()
+
+    def test_candidate_index_is_checked(self):
+        # id -1 applied the last candidate; /raw/-1 served it
+        st = self.state()
+        st.meta["slot"] = 1
+        st.add_candidates("cand.wav")
+        port, stop = self.serve(st)
+        try:
+            for act in ("apply", "remove", "retry", "want", "rate"):
+                self.assertEqual(self.post(port, f"/api/{act}", {"id": -1}), 400, act)
+                self.assertEqual(self.post(port, f"/api/{act}", {"id": 1}), 400, act)
+            self.assertEqual(self.fetch(port, "/raw/-1")[0], 404)
+            self.assertEqual(self.fetch(port, "/api/diff/-1")[0], 400)
+            self.assertEqual((self.dir / "song.yaml").read_bytes(), SONG.encode("utf-8"))
+            self.assertEqual(len(st.cands()), 1)
+        finally:
+            stop()
+
+    def test_channel_index_is_checked(self):
+        # channel_remove with ch -1 mangled every row (c[:-1] + c[0:]); rename, move, mark and plugin picked the last channel
+        st = self.state()
+        port, stop = self.serve(st)
+        try:
+            for op in ({"op": "channel_remove", "ch": -1}, {"op": "channel_rename", "ch": -1, "name": "x"},
+                       {"op": "channel_move", "ch": -1, "to": 0}, {"op": "mark", "what": "channel", "key": -1, "approved": True},
+                       {"op": "channel_plugin", "ch": -1, "plugin": 1}, {"op": "channel_remove", "ch": 2}):
+                self.assertEqual(self.post(port, "/api/songedit", {"ops": [op]}), 400, op)
+            self.assertEqual((self.dir / "song.yaml").read_bytes(), SONG.encode("utf-8"))
+        finally:
+            stop()
+
+    def test_mute_and_mix_channels_are_bounded(self):
+        # patch_it writes header bytes 0x40 + i and 0x80 + i: a channel past 63 wrote into the module
+        st = self.state()
+        port, stop = self.serve(st)
+        try:
+            self.assertEqual(self.post(port, "/api/mute", {"muted": [999]}), 400)
+            self.assertEqual(self.post(port, "/api/mute", {"muted": [-1]}), 400)
+            self.assertEqual(self.post(port, "/api/mute", {"solo": 999}), 400)
+            self.assertEqual(self.post(port, "/api/mute", {"muted": [1]}), 200)
+            self.assertEqual(self.post(port, "/api/mix", {"volume": {"200": 10}}), 400)
+            self.assertEqual(self.post(port, "/api/mix", {"pan": {"-1": 10}}), 400)
+            self.assertEqual(self.post(port, "/api/mix", {"volume": {"1": 10}}), 200)
+            self.assertEqual(st.meta["muted"], [1])
+        finally:
+            stop()
+
+    def test_section_and_slot_are_checked(self):
+        # orders was stored as sent (a string broke every later compile); a slot outside 1-99 was accepted
+        st = self.state()
+        port, stop = self.serve(st)
+        try:
+            for bad in ("ab", [1, 0], [0, 1, 2], [0.5, 1], [-1, 1]):
+                self.assertEqual(self.post(port, "/api/orders", {"orders": bad}), 400, bad)
+            self.assertEqual(self.post(port, "/api/orders", {"orders": [0, 1]}), 200)
+            self.assertEqual(st.orders, (0, 1))
+            self.assertEqual(self.post(port, "/api/orders", {"orders": None}), 200)
+            self.assertIsNone(st.orders)
+            for bad in (0, -1, 100):
+                self.assertEqual(self.post(port, "/api/slot", {"slot": bad}), 400, bad)
+            self.assertEqual(self.post(port, "/api/slot", {"slot": 2}), 200)
+            self.assertEqual(st.slot, 2)
+        finally:
+            stop()
+
+    def test_euclid_steps_are_bounded(self):
+        # compose.euclid builds a list of `steps` entries: 10**8 of them allocated before anything else was checked
+        st = self.state()
+        port, stop = self.serve(st)
+        try:
+            t0 = time.time()
+            op = {"op": "euclid", "pattern": 0, "ch": 0, "r0": 0, "r1": 3, "hits": 1, "steps": 10 ** 8}
+            self.assertEqual(self.post(port, "/api/songedit", {"ops": [op]}), 400)
+            self.assertLess(time.time() - t0, 5)
+            self.assertEqual(self.post(port, "/api/songedit", {"ops": [dict(op, steps=0)]}), 400)
+        finally:
+            stop()
+
+    def test_similar_wait_is_clamped(self):
+        # the request's `wait` is how long the handler blocks on the library: at most a minute
+        st = self.state()
+        st.meta["slot"] = 1
+        seen = []
+
+        class Lib:
+            status = {"message": ""}
+
+            def run(self, fn, wait):
+                seen.append(wait)
+                return {"added": [], "report": "none"}
+        port, stop = self.serve(st)
+        try:
+            with mock.patch.object(gui.Handler, "lib", classmethod(lambda cls: Lib())):
+                self.assertEqual(self.post(port, "/api/similar", {"wait": 10 ** 9}), 200)
+                self.assertEqual(self.post(port, "/api/similar", {"wait": -5}), 200)
+            self.assertEqual(seen, [60.0, 0.0])
+        finally:
+            stop()
+
+    def test_oversized_requests_are_refused(self):
+        # Content-Length is what rfile.read allocates: a claim over 512 MiB is answered with 413, not read
+        import socket
+        st = self.state()
+        port, stop = self.serve(st)
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=10) as s:
+                s.sendall(b"POST /api/slot HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 999999999999\r\n\r\n")
+                head = s.recv(200)
+            self.assertTrue(head.startswith(b"HTTP/1.0 413") or head.startswith(b"HTTP/1.1 413"), head)
+        finally:
+            stop()
 
 
 class TestPackage(unittest.TestCase):

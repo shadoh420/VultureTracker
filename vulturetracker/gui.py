@@ -44,7 +44,7 @@ from .itwriter import write_it
 from .history import SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
 from .project import collect, file_updates, replace_values, resolve_meta, relative_meta
 from .arrangement import section_renamed, sections_text, occurrence_map, reorder
-from .openmpt import LoadedModule, library_version
+from .openmpt import LoadedModule, OpenMPTError, library_version
 from .song import SongError, it_text, load_song_text
 from .wavload import SOUND_FILES, read_wav, to_wav
 
@@ -1302,6 +1302,28 @@ class State:
     def cands(self):
         return self.meta["candidates"].setdefault(str(self.slot), [])
 
+    def cand(self, i):
+        """Candidate `i` of the slot's list; a ValueError outside it (a negative index would pick from the end)."""
+        i = int(i)
+        if not 0 <= i < len(self.cands()):
+            raise ValueError(f"no candidate {i}")
+        return self.cands()[i]
+
+    def pattern_at(self, index):
+        """Pattern index `index` of the compiled module, checked (a negative one would pick from the end)."""
+        i = int(index)
+        if self.mod is None or not 0 <= i < len(self.mod.patterns):
+            raise ValueError(f"no pattern {i}")
+        return i
+
+    @staticmethod
+    def _chan(items, i):
+        """Channel index `i` of the song's channel lines, checked (a negative one would pick from the end)."""
+        i = int(i)
+        if not 0 <= i < len(items):
+            raise ValueError(f"no channel {i + 1}")
+        return i
+
     # ---- the reference recording (SPECTRUM tab)
 
     def section_start(self):
@@ -1375,6 +1397,8 @@ class State:
         for k, hi in (("volume", 64), ("pan", 64), ("sample_volume", 64)):
             d = {str(int(i)): "surround" if k == "pan" and v == "surround" else max(0, min(hi, int(v)))
                  for i, v in (m.get(k) or {}).items()}
+            if any(not 0 <= int(i) < 64 for i in d):
+                raise ValueError("a channel is 0-63")
             if d:
                 mix[k] = d
         if m.get("mix_volume") is not None:
@@ -2275,7 +2299,7 @@ class State:
         """Make the compiled cells explicit; one undo restores the original pattern notation."""
         with self.lock:
             self._need_compiled()
-            pat = self.mod.patterns[int(index)]
+            pat = self.mod.patterns[self.pattern_at(index)]
             lines = self.text.splitlines(keepends=True)
             data = ''.join(f"{r:02d}: {' | '.join(format_cell(c) for c in row)}\n"
                            for r, row in enumerate(pat.rows))
@@ -2300,7 +2324,7 @@ class State:
     def _edit_block(self, lines, index, cells, nch=None, pat=None):
         """`cells` written into pattern `index`'s rows in `lines` (in place). `nch`: the channel count when an edit of the
         same step added channels."""
-        pat = pat or self.mod.patterns[index]
+        pat = pat or self.mod.patterns[self.pattern_at(index)]
         nch, nrows = nch or len(self.mod.channels), len(pat.rows)
         first, end = self._pattern_block(lines, pat.name)
         rows = [i for i in range(first, end) if lines[i].split(";", 1)[0].strip()]
@@ -2641,7 +2665,7 @@ class State:
                 del lines[i]
         elif kind == "channel_rename":
             head, items = self._channel_lines(lines)
-            i, name = int(op["ch"]), str(op["name"]).strip()[:20]
+            i, name = self._chan(items, op["ch"]), str(op["name"]).strip()[:20]
             m = self._entry(lines[items[i]], "-")
             if not m or not m.group(4):
                 raise ValueError(f"channel {i + 1} is not a one-line '- {{...}}' entry: rename it in the YAML")
@@ -2657,7 +2681,7 @@ class State:
             lines.insert(at, f"{ind}- {{name: {self._yname(name)}{pan}}}\n")
         elif kind == "channel_remove":
             head, items = self._channel_lines(lines)
-            i = int(op["ch"])
+            i = self._chan(items, op["ch"])
             if len(items) < 2:
                 raise ValueError("a song needs a channel")
             self._map_rows(lines, lambda c: c[:i] + c[i + 1:])
@@ -2666,7 +2690,7 @@ class State:
             remap.append(lambda k: None if k == i else k - 1 if k > i else k)
         elif kind == "channel_move":
             head, items = self._channel_lines(lines)
-            a, b = int(op["ch"]), int(op["to"])
+            a, b = self._chan(items, op["ch"]), int(op["to"])
             if not (0 <= b < len(items)) or a == b:
                 return
             lo, hi = min(a, b), max(a, b)
@@ -2849,7 +2873,7 @@ class State:
                 self._pattern_mark(lines, str(key), {k: op[k] for k in ("approved", "by") if k in op})
             elif what == "channel":
                 head, items = self._channel_lines(lines)
-                i = int(key)
+                i = self._chan(items, key)
                 if op.get("approved"):
                     self._redump(lines, items[i], self._entry(lines[items[i]], "-"), {"approved": "true"}, keys=("approved",))
                 else:
@@ -2867,7 +2891,7 @@ class State:
                 raise ValueError("a mark goes on a pattern, a channel or a sample")
         elif kind == "channel_plugin":  # the plugin a channel plays through (0: none)
             head, items = self._channel_lines(lines)
-            i, num = int(op["ch"]), int(op.get("plugin") or 0)
+            i, num = self._chan(items, op["ch"]), int(op.get("plugin") or 0)
             m = self._entry(lines[items[i]], "-")
             if num:
                 self._redump(lines, items[i], m, {"plugin": num}, keys=("plugin",))
@@ -2956,7 +2980,7 @@ class State:
                 for row in mod.patterns[o].rows:
                     vol, last_ins = carry(row[src], vol, last_ins)
         written = past = skipped = lost = 0
-        idxs = [int(op["pattern"])] if op.get("pattern") is not None else range(len(mod.patterns))
+        idxs = [self.pattern_at(op["pattern"])] if op.get("pattern") is not None else range(len(mod.patterns))
         for idx in idxs:
             pat = mod.patterns[idx]
             n = len(pat.rows)
@@ -3228,7 +3252,7 @@ class State:
             return mod.samples[smp - 1].volume if 0 < smp <= len(mod.samples) else None
 
         written = skipped = 0
-        for idx in range(len(mod.patterns)) if whole else [int(op["pattern"])]:
+        for idx in range(len(mod.patterns)) if whole else [self.pattern_at(op["pattern"])]:
             rows = mod.patterns[idx].rows
             r0 = 0 if whole else max(0, int(op.get("r0") or 0))
             r1 = len(rows) - 1 if whole or op.get("r1") is None else min(len(rows) - 1, int(op["r1"]))
@@ -3236,6 +3260,8 @@ class State:
                 cells, s = compose.groove(rows, chans, r0, r1, op.get("ticks") or [], mod.speed)
                 skipped += s
             elif kind == "euclid":
+                if not 1 <= int(op["steps"]) <= 64:
+                    raise ValueError("a Euclidean rhythm has 1-64 steps")
                 cells = compose.euclid(rows, ch, r0, r1, int(op["hits"]), int(op["steps"]), int(op.get("rotate") or 0),
                                        int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)))
             elif kind == "chord":
@@ -3828,7 +3854,7 @@ class State:
 
     def pattern_rows(self, index):
         """One pattern as read-only tracker rows; each cell in the 'C-5 01 v64 A06' layout libopenmpt prints."""
-        pat = self.mod.patterns[index]
+        pat = self.mod.patterns[self.pattern_at(index)]
         return {"name": pat.name, "index": index, "rows": [[format_cell(c) for c in row] for row in pat.rows]}
 
     # ---- snapshot for the page
@@ -4324,19 +4350,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"cols": cols, "median": live[len(live) // 2] if live else None, "gain_db": gain, "covered": covered})
         if path.startswith("/raw/"):
             try:
-                c = st.cands()[int(path[5:])]
+                c = st.cand(path[5:])
             except (ValueError, IndexError):
                 return self._send(404, {"error": "no such candidate"})
             return self._send_file(c, "audio/wav")
         if path.startswith("/api/diff/") or path == "/api/mixdiff":
             try:
-                return self._send(200, st.mix_diff() if path == "/api/mixdiff" else st.diff(st.cands()[int(path[10:])]))
+                return self._send(200, st.mix_diff() if path == "/api/mixdiff" else st.diff(st.cand(path[10:])))
             except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError) as e:
                 return self._send(400, {"error": f"{type(e).__name__}: {e}"})
         if path == "/api/it":
             try:
                 return self._send(200, st.live_it(), "application/octet-stream")
-            except (SongError, OSError, ValueError) as e:
+            except (SongError, OSError, ValueError, OpenMPTError) as e:
                 return self._send(400, {"error": "\n".join(getattr(e, "errors", []) or [str(e)])})
         self._send(404, {"error": "not found"})
 
@@ -4346,13 +4372,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "not this app's page"})
         st = self.state
         n = int(self.headers.get("Content-Length") or 0)
+        if n > 512 << 20:  # a size from the request is what rfile.read allocates
+            return self._send(413, {"error": "the request is over 512 MiB"})
         act = self.path.split("?")[0].rsplit("/", 1)[-1]
         if act == "upload":  # raw WAV bytes, ?name=
             from urllib.parse import parse_qs
             try:
                 name = parse_qs(self.path.partition("?")[2]).get("name", ["dropped.wav"])[0]
                 return self._send(200, {"path": str(st.save_upload(name, self.rfile.read(n)))})
-            except (AttributeError, ValueError, OSError) as e:
+            except (AttributeError, ValueError, OSError, struct.error) as e:
                 return self._send(400, {"error": f"{type(e).__name__}: {e}"})
         try:
             body = json.loads(self.rfile.read(n) or b"{}")
@@ -4403,11 +4431,16 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     CHAT.send(st, str(body.get("text") or "").strip(), body.get("context"))
             elif act == "slot":
+                if not 1 <= int(body["slot"]) <= 99:
+                    raise ValueError("a slot is 1-99")
                 st.meta["slot"] = int(body["slot"])
                 st.save_meta()
                 st.queue_all()
             elif act == "orders":
-                st.meta["orders"] = body.get("orders")
+                o = body.get("orders")
+                if o is not None and not (isinstance(o, list) and len(o) == 2 and all(type(x) is int for x in o) and 0 <= o[0] < o[1]):
+                    raise ValueError("the section is null or [first order, last order + 1]")
+                st.meta["orders"] = o
                 st.save_meta()
                 st.queue_all()
             elif act == "loop":
@@ -4415,16 +4448,18 @@ class Handler(BaseHTTPRequestHandler):
             elif act == "reference":  # path or browse sets it, offset (ms) moves it, align (with key) lines it up, clear
                 return self._send(200, st.set_reference(self.browse(wav=True) if body.get("browse") else body.get("path"), body))
             elif act == "mute":
-                st.meta["muted"] = sorted({int(i) for i in body.get("muted", [])})
-                st.meta["solo"] = None if body.get("solo") is None else int(body["solo"])
+                muted, solo = sorted({int(i) for i in body.get("muted", [])}), None if body.get("solo") is None else int(body["solo"])
+                if any(not 0 <= i < 64 for i in muted + ([solo] if solo is not None else [])):  # patch_it writes header byte 0x40 + i
+                    raise ValueError("a channel is 0-63")
+                st.meta["muted"], st.meta["solo"] = muted, solo
                 st.save_meta()
                 st.queue_all()
             elif act == "add":
                 return self._send(200, {"added": st.add_candidates(body["globs"])})
             elif act == "remove":
-                st.remove_candidate(st.cands()[int(body["id"])])
+                st.remove_candidate(st.cand(body["id"]))
             elif act == "rate":
-                c = st.cands()[int(body["id"])]
+                c = st.cand(body["id"])
                 if "stars" in body and (type(body["stars"]) is not int or not 0 <= body["stars"] <= 5):
                     raise ValueError("stars are a whole number 0-5")
                 r = st.meta["ratings"].setdefault(c, {})
@@ -4433,11 +4468,11 @@ class Handler(BaseHTTPRequestHandler):
                         r[k] = kind(body[k])
                 st.save_meta()
             elif act == "similar":  # the slot's WAV, a candidate (id) or any WAV (path): its nearest become candidates
-                q = body.get("path") or (st.cands()[int(body["id"])] if body.get("id") is not None else st.current_file())
+                q = body.get("path") or (st.cand(body["id"]) if body.get("id") is not None else st.current_file())
                 if not q or not Path(q).exists():
                     raise ValueError("nothing to compare: the slot has no WAV on disk")
                 lib = self.lib()
-                res = lib.run(lambda: st.find_similar(lib, q, body.get("k") or 8), float(body.get("wait", 20)))
+                res = lib.run(lambda: st.find_similar(lib, q, body.get("k") or 8), max(0.0, min(60.0, float(body.get("wait", 20)))))
                 if res and res.get("error"):
                     return self._send(400, res)
                 return self._send(200, res or {"pending": True, "report": lib.status.get("message")})
@@ -4458,15 +4493,15 @@ class Handler(BaseHTTPRequestHandler):
                 st.meta["faust_code"] = str(body.get("code") or "")[:200000]
                 st.save_meta()
             elif act == "want":
-                st.set_want(st.cands()[int(body["id"])] if body.get("id") is not None else None)
+                st.set_want(st.cand(body["id"]) if body.get("id") is not None else None)
             elif act == "note":
                 return self._send(200, st.add_note(body))
             elif act == "noteedit":
                 st.edit_note(int(body["id"]), body)
             elif act == "retry":
-                st.retry(st.cands()[int(body["id"])])
+                st.retry(st.cand(body["id"]))
             elif act == "apply":
-                st.apply(st.cands()[int(body["id"])])
+                st.apply(st.cand(body["id"]))
             elif act == "mix":
                 st.set_mix(body)
             elif act == "edit":  # one pattern (pattern, cells) or several in one step (patterns: [{pattern, cells}])
@@ -4521,7 +4556,7 @@ class Handler(BaseHTTPRequestHandler):
                 st.request_stems(body.get("fmt", "wav"), body.get("song", False), body.get("stems", True))
             else:
                 return self._send(404, {"error": "unknown action"})
-        except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError, SongError) as e:
+        except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError, SongError, OpenMPTError, struct.error) as e:
             return self._send(400, {"error": f"{type(e).__name__}: {e}"})  # a bad request is answered, never dropped
         self._send(200, {"ok": True})
 

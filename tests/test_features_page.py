@@ -143,6 +143,18 @@ class TestFeaturesPage(unittest.TestCase):
             page.wait_for_function("S.chat.settings.provider==='openai'")
             self.assertTrue(page.evaluate("S.chat.settings.has_key"))
             self.assertNotIn('secret-test-key', json.dumps(page.evaluate("S")))
+            # the panel says which store holds the key, and warns when the key would travel in clear to a remote http URL
+            page.evaluate("AG.view='set'; renderAgent()")
+            store = page.evaluate("S.chat.settings.key_store")
+            self.assertIn(store, ('keyring', 'file'))
+            self.assertIn('credential store' if store == 'keyring' else 'plain text', page.text_content('#ag-store'))
+            self.assertFalse(page.is_visible('#ag-warn'))
+            page.fill('#ag-base', 'http://example.com/v1')
+            page.click("text=SAVE")
+            page.wait_for_function("S.chat.settings.base_url_warning")
+            page.evaluate("AG.view='set'; renderAgent()")
+            self.assertTrue(page.is_visible('#ag-warn'))
+            self.assertIn('in clear', page.text_content('#ag-warn'))
             # the agent's replies are markdown, escaped first; the owner's own words stay as typed
             html = page.evaluate(r"""(()=>{S.chat={messages:[{role:'you',text:'**as typed**'},{role:'agent',text:'## Done\n- **loud** `a_b`\n<img src=x>\n| a | b |\n|---|---|\n| 1 | 2 |'}],settings:{provider:'openai'}};
                 AG.view='chat';renderAgent();return $('ag-msgs').innerHTML})()""")
