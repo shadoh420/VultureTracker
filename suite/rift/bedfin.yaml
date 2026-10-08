@@ -1,0 +1,23 @@
+# Rift, step 2: the bed finalists of bed.yaml, chosen by measurement against the role's traits in BRIEF.md (a swell of
+# about a second or more, a centroid of 200-400 Hz, pure and steady, the lowest note at A-3 so nothing lands on the sub):
+# Alone, Worried, Endgame, Yeti Funeral and Still. A minor, A-3 E-4 C-5, looped, a room printed in, stored at the era's
+# 11 kHz; suite/rift/gen_cand.py beds then adds the noise floor.
+# Render: python -m vulturetracker synth suite/rift/bedfin.yaml && python suite/rift/gen_cand.py beds
+out_dir: ../../samples/local/rift-cand
+sample_rate: 44100
+defaults:
+  chord: [A-3, E-4, C-5]
+  hold: 7.0
+  tail: 1.5
+  normalize: -1.0
+  mono: true
+  velocity: 90
+  loop: {start: 3.0, end: 6.5, crossfade: 1.2}
+  fx: [{reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.35, dry_level: 0.7}}, {resample: {target_sample_rate: 11025}}]
+
+samples:
+  bed_alone:   {patch: "3rdparty/Altenberg/Pads/Alone"}
+  bed_worried: {patch: "Pads/Worried"}
+  bed_endgame: {patch: "Pads/Endgame"}
+  bed_yeti:    {patch: "Pads/Yeti Funeral"}
+  bed_still:   {patch: "Pads/Still"}

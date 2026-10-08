@@ -1,0 +1,31 @@
+# Rift, step 2: the bed screen. Dark Surge XT pads (not the ones Vantage and Nadir used), each holding the A minor bed
+# chord A-3 E-4 C-5 (the reference's bed was an open fifth; ours has the minor third), mono for the surround channel.
+# Measured against the role's traits in BRIEF.md (a slow swell, a centroid near 250 Hz, pure and steady), the finalists
+# get a loop, the era's 11 kHz rate and a floor. Render: python -m vulturetracker synth suite/rift/bed.yaml
+out_dir: ../../samples/local/rift-cand/bed
+sample_rate: 44100
+defaults: {chord: [A-3, E-4, C-5], hold: 4.0, tail: 1.0, normalize: -1.0, mono: true, velocity: 90}
+
+samples:
+  ghost:      {patch: "Pads/Ghost Pad"}
+  still:      {patch: "Pads/Still"}
+  winter:     {patch: "Pads/Winter Warmer"}
+  worried:    {patch: "Pads/Worried"}
+  yeti:       {patch: "Pads/Yeti Funeral"}
+  semihaunt:  {patch: "Pads/Semihaunt"}
+  endgame:    {patch: "Pads/Endgame"}
+  mks70:      {patch: "Pads/MKS-70 Warm Pad"}
+  verb:       {patch: "Pads/Verb Pad"}
+  well:       {patch: "Pads/Well"}
+  legacy:     {patch: "Pads/Legacy"}
+  hmm:        {patch: "Pads/Hmm..."}
+  alone:      {patch: "3rdparty/Altenberg/Pads/Alone"}
+  ghostpast:  {patch: "3rdparty/Altenberg/Pads/Ghost Past"}
+  quietlung:  {patch: "3rdparty/Databroth/Pads/Quiet Lung"}
+  warmbo:     {patch: "3rdparty/Databroth/Pads/Warmbo"}
+  deepspace1: {patch: "3rdparty/Inigo Kennedy/Pads/Deep Space 1"}
+  pure1:      {patch: "3rdparty/Inigo Kennedy/Pads/Pure 1"}
+  sorrowful:  {patch: "3rdparty/Nick Moritz/Pads/Sorrowful"}
+  coldness1:  {patch: "3rdparty/Zoozither/Pads/Coldness 1"}
+  cryo:       {patch: "3rdparty/TNMG/Pads/Cryo Chamber"}
+  darkfriday: {patch: "3rdparty/Dan Maurer/Pads/Dark Friday"}

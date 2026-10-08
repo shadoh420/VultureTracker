@@ -31,6 +31,10 @@ build/
 suite/*/*.it
 suite/*/*.wav
 suite/*/*.mp3
+suite/*/*.ogg
+suite/*/*/*.it
+suite/*/*/*.wav
+suite/*/*/*.mp3
 tools/faustwasm/
 tools/transcribe-env/
 tools/bin/

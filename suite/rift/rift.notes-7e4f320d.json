@@ -1,0 +1,361 @@
+[
+ {
+  "id": 1,
+  "when": "2026-09-22T15:16:45",
+  "version": {
+   "hash": "7e4f320d",
+   "mtime": "2026-09-22T15:13:22"
+  },
+  "order": 0,
+  "pattern": "loop",
+  "row": 36,
+  "time": 3.27,
+  "tag": "note",
+  "text": "too sparse and front loaded",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Break",
+    "sample": 1,
+    "note": "C-5",
+    "order": 0,
+    "loop": true,
+    "ago": 4
+   },
+   {
+    "ch": 1,
+    "name": "Hats",
+    "sample": 2,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 3,
+    "name": "Sub",
+    "sample": 4,
+    "note": "A-2",
+    "order": 0,
+    "loop": true,
+    "ago": 4
+   },
+   {
+    "ch": 5,
+    "name": "Bed",
+    "sample": 6,
+    "note": "A-3",
+    "order": 0,
+    "loop": true,
+    "ago": 36
+   },
+   {
+    "ch": 6,
+    "name": "Call",
+    "sample": 7,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 20
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "hook_two",
+   "slot": 7,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 2,
+  "when": "2026-09-22T15:17:12",
+  "version": {
+   "hash": "7e4f320d",
+   "mtime": "2026-09-22T15:13:22"
+  },
+  "order": 0,
+  "pattern": "loop",
+  "row": 56,
+  "time": 5.09,
+  "tag": "note",
+  "text": "the tone or timbre isn't right, but this is the closest one. still too front loaded",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Break",
+    "sample": 1,
+    "note": "C-5",
+    "order": 0,
+    "loop": true,
+    "ago": 8
+   },
+   {
+    "ch": 1,
+    "name": "Hats",
+    "sample": 2,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 0
+   },
+   {
+    "ch": 3,
+    "name": "Sub",
+    "sample": 4,
+    "note": "A-2",
+    "order": 0,
+    "loop": true,
+    "ago": 8
+   },
+   {
+    "ch": 5,
+    "name": "Bed",
+    "sample": 6,
+    "note": "A-3",
+    "order": 0,
+    "loop": true,
+    "ago": 56
+   },
+   {
+    "ch": 6,
+    "name": "Call",
+    "sample": 7,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 40
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "hook_fall",
+   "slot": 7,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 3,
+  "when": "2026-09-22T15:17:46",
+  "version": {
+   "hash": "7e4f320d",
+   "mtime": "2026-09-22T15:13:22"
+  },
+  "order": 1,
+  "pattern": "loop_b",
+  "row": 15,
+  "time": 7.18,
+  "tag": "note",
+  "text": "it's alright,  the tone is a bit too muddy and again, there's just one note at the beginning and then nothing",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Break",
+    "sample": 1,
+    "note": "C-5",
+    "order": 1,
+    "loop": true,
+    "ago": 15
+   },
+   {
+    "ch": 1,
+    "name": "Hats",
+    "sample": 2,
+    "note": "C-5",
+    "order": 1,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 3,
+    "name": "Sub",
+    "sample": 4,
+    "note": "A-2",
+    "order": 1,
+    "loop": true,
+    "ago": 5
+   },
+   {
+    "ch": 5,
+    "name": "Bed",
+    "sample": 6,
+    "note": "A-3",
+    "order": 1,
+    "loop": true,
+    "ago": 15
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "hook_chord",
+   "slot": 7,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 4,
+  "when": "2026-09-22T15:18:12",
+  "version": {
+   "hash": "7e4f320d",
+   "mtime": "2026-09-22T15:13:22"
+  },
+  "order": 0,
+  "pattern": "loop",
+  "row": 43,
+  "time": 3.91,
+  "tag": "note",
+  "text": "hate it.",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Break",
+    "sample": 1,
+    "note": "C-5",
+    "order": 0,
+    "loop": true,
+    "ago": 11
+   },
+   {
+    "ch": 1,
+    "name": "Hats",
+    "sample": 2,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 3,
+    "name": "Sub",
+    "sample": 4,
+    "note": "A-2",
+    "order": 0,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 4,
+    "name": "Stab",
+    "sample": 5,
+    "note": "A-3",
+    "order": 0,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 5,
+    "name": "Bed",
+    "sample": 6,
+    "note": "A-3",
+    "order": 0,
+    "loop": true,
+    "ago": 43
+   },
+   {
+    "ch": 6,
+    "name": "Call",
+    "sample": 7,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 27
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "hook_swell",
+   "slot": 7,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ },
+ {
+  "id": 5,
+  "when": "2026-09-22T15:18:26",
+  "version": {
+   "hash": "7e4f320d",
+   "mtime": "2026-09-22T15:13:22"
+  },
+  "order": 0,
+  "pattern": "loop",
+  "row": 43,
+  "time": 3.91,
+  "tag": "note",
+  "text": "mostly hate it.",
+  "channels": [],
+  "sounding": [
+   {
+    "ch": 0,
+    "name": "Break",
+    "sample": 1,
+    "note": "C-5",
+    "order": 0,
+    "loop": true,
+    "ago": 11
+   },
+   {
+    "ch": 1,
+    "name": "Hats",
+    "sample": 2,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 3,
+    "name": "Sub",
+    "sample": 4,
+    "note": "A-2",
+    "order": 0,
+    "loop": true,
+    "ago": 1
+   },
+   {
+    "ch": 4,
+    "name": "Stab",
+    "sample": 5,
+    "note": "A-3",
+    "order": 0,
+    "loop": false,
+    "ago": 1
+   },
+   {
+    "ch": 5,
+    "name": "Bed",
+    "sample": 6,
+    "note": "A-3",
+    "order": 0,
+    "loop": true,
+    "ago": 43
+   },
+   {
+    "ch": 6,
+    "name": "Call",
+    "sample": 7,
+    "note": "C-5",
+    "order": 0,
+    "loop": false,
+    "ago": 27
+   }
+  ],
+  "playing": {
+   "source": "candidate",
+   "candidate": "hook_vox",
+   "slot": 7,
+   "section": null,
+   "muted": [],
+   "mix": {}
+  }
+ }
+]

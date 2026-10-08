@@ -1,0 +1,27 @@
+# Rift, layer 1 of BRIEF.md's layer plan: the sequence voice. Raw sources for suite/rift/gen_seq.py, which turns them
+# into the slot-8 candidates the way Nether's sequence sample is made (measured with scratch/ut99-clean/melodic.py, as a
+# character class, never by comparing sounds): a near-pure short tone, 0.99 s, looped over its last 0.19 s from 0.80 s,
+# stored low (here E-3, 82 Hz) at a 22 kHz rate and played 19 to 36 semitones up, partials 2-10 well under the first,
+# a noise floor, no pitch or timbre movement. So every source is rendered here at E-3, held, dry.
+# Chosen from the inventory's near-pure class (h1 0.95 or more in suite/rift/screen.py's held-note screen; none offered
+# or rejected before). The wine glass (VCSL, CC0) is read by gen_seq.py directly.
+# Render: python -m vulturetracker synth suite/rift/seq.yaml && python suite/rift/gen_seq.py
+out_dir: ../../samples/local/rift-cand/seq/raw
+sample_rate: 44100
+defaults:
+  note: E-3
+  hold: 1.4
+  tail: 0.3
+  normalize: -1.0
+  mono: true
+  velocity: 100
+
+samples:
+  sine:       {patch: "Leads/Sine Lead"}                                             # Surge factory: a plain sine lead
+  calliope:   {patch: "dexed:SynprezFM_09/CALIOPE"}                                  # FM pipe: pure, a breathy onset
+  ghost:      {patch: "3rdparty/Malfunction/Leads/Ghost", note: E-2, root_offset: 12}   # pure, slightly detuned
+  theremin:   {patch: "3rdparty/LinnStrument MPE/Leads/Theremin", note: E-2, root_offset: 12}
+  circus:     {patch: "Keys/Circus 1", note: E-2, root_offset: 12}                  # organ-like, pure top
+  butter:     {patch: "Leads/Butter"}                                                # soft lead, a little second partial
+  horsehairs: {patch: "obxd:011 - Synth Poly/Horsehairs", note: E-2, root_offset: 12}    # OB-Xd, near-pure poly
+  nuage:      {patch: "dexed:SynprezFM_03/NuAgeDelys", note: E-2, root_offset: 12}  # FM, h1 0.95

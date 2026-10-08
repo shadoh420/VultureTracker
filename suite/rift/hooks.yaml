@@ -1,0 +1,34 @@
+# Rift, step 2, second line round: the long-note melody was "too melodic for a drum and bass track" and its five voices
+# "don't match the style", so the line becomes one short call per 8 bars. Each candidate is a whole figure rendered as one
+# sample (triggered at C-5, its root label), so the tryout compares figures and sounds together, from a little melodic
+# to not melodic: two notes, a three-note fall, an A minor chord stab with dub echoes, one noisy swell, one breathy vocal
+# texture. A minor pentatonic notes only, low (A-3..E-5), none of the rejected voices. Echo of our own: a dotted 8th at
+# 165 BPM (3 rows, 0.273 s), then a room; stored 11 kHz wide. suite/rift/gen_cand.py hooks adds the floor.
+# Render: python -m vulturetracker synth suite/rift/hooks.yaml && python suite/rift/gen_cand.py hooks
+out_dir: ../../samples/local/rift-cand
+sample_rate: 44100
+defaults:
+  mono: true
+  normalize: -1.0
+  velocity: 95
+  tail: 2.5
+  fx: [{delay: {delay_seconds: 0.2727, feedback: 0.4, mix: 0.3}}, {reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.3, dry_level: 0.75}}, {resample: {target_sample_rate: 22050}}]
+
+samples:
+  hook_two:    # two notes, A then E, a warm moving poly
+    patch: "Polysynths/Slow Poly MW"
+    phrase: {bpm: 165, root: C-5, length: 4, notes: [[A-4, 0, 1.5], [E-4, 1.5, 2.5]]}
+  hook_fall:   # E D A falling; the OB-Xd patch sounds an octave under the keys
+    patch: "obxd:006 - Lead Synth 1/3 voice Soft Lead"
+    phrase: {bpm: 165, root: C-5, length: 6, notes: [[E-6, 0, 1.5], [D-6, 1.5, 1.5], [A-5, 3, 3]]}
+  hook_chord:  # one short A minor stab, the echoes carry it
+    patch: "Pads/Semihaunt"
+    phrase: {bpm: 165, root: C-5, length: 1, notes: [[A-3, 0, 0.3], [C-4, 0, 0.3], [E-4, 0, 0.3]]}
+    fx: [{delay: {delay_seconds: 0.2727, feedback: 0.55, mix: 0.4}}, {reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.3, dry_level: 0.75}}, {resample: {target_sample_rate: 22050}}]
+  hook_swell:  # one A swelling in, noisy, no echo
+    patch: "Pads/Winter Warmer"
+    phrase: {bpm: 165, root: C-5, length: 6, notes: [[A-4, 0, 6]]}
+    fx: [{reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.3, dry_level: 0.75}}, {resample: {target_sample_rate: 22050}}]
+  hook_vox:    # one breathy vocal A; the patch sounds an octave under the key
+    patch: "3rdparty/Giana Brotherz/Pads/Dark Whisper"
+    phrase: {bpm: 165, root: C-5, length: 3, notes: [[A-5, 0, 3]]}

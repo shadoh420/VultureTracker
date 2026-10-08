@@ -1,6 +1,6 @@
 # VultureTracker backlog
 
-The focused 0.7.0 scope is: fixes for the 22 reproduced audit defects, bounded history,
+Historical (closed with 0.7.0, 2026-09-30): the focused 0.7.0 scope was fixes for the 22 reproduced audit defects, bounded history,
 recording alongside playback, MIDI chord capture, conversion to editable literal patterns,
 configurable beat spacing, and shared phrase-sample storage.
 
@@ -16,5 +16,6 @@ Done since (CHANGELOG.md, Unreleased): Faust polyphony, MIDI and the live node.
 
 ## Owner-declined proposals
 
-DMO/plugin hosting, phrase generation, automatic composition and quality scores were declined;
-they are recorded here to avoid proposing them again, not queued for implementation.
+Phrase generation, automatic composition and quality scores were declined (2026-09-25); they are recorded here to
+avoid proposing them again, not queued for implementation. DMO/plugin hosting was declined the same day, reversed on
+2026-10-07 and shipped in 1.3.0 (mix plugins and the RACK tab, CHANGELOG.md).

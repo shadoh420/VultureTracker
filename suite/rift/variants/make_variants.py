@@ -1,0 +1,397 @@
+"""Rift listening test: variants that each move ONE dimension away from Nether Animal and keep the rest of rift.yaml.
+
+Reads suite/rift/rift.yaml (never writes it) and writes, next to this file:
+  rift_v0_control.yaml   the song as it is (its .it must equal rift.it byte for byte: the maker's round trip check)
+  rift_v1_form.yaml      our own form: other sections, lengths, order, entries and arc, from the same layer columns
+  rift_v2_layers.yaml    another layer set: the hit, noise, strings, vocal pad and second line dropped; the bed carries
+                         the intro, the build and the peak (merged roles); the drone carries C alone
+  rift_v3_idioms.yaml    our own idioms: no sequence glides or per-pattern restarts, one echo 6 rows (a dotted quarter)
+                         later instead of the
+                         +2/+3-row copies; the lead's +4/+8 re-strikes and fades replaced by one +6-row echo on the other
+                         channel; the hit without its offset on beat 3 of bars 1 and 3; the noise on the last bar; the
+                         drone and vocal pad without their written swells; the second line without glides, echo +6 rows
+  rift_v4_sounds.yaml    other sound classes for three layers: the sequence a filtered saw, the lead an electric-guitar
+                         pluck, the hit an in-tune synth tom played from its start (the song's O0F offset skipped the
+                         bell's onset; on the tom it would skip the attack), levels matched on the part each plays
+                         (samples/local/rift-variants/, kit.yaml here)
+  rift_v5_groove.yaml    another tempo and groove: 147 BPM (tempo 98), the break played 2 semitones down and fine-tuned
+                         (c5_speed) so its bar fills the slower bar exactly, hats on the offbeat 8ths only at v16
+Run: python suite/rift/variants/make_variants.py [--build]   (--build compiles, renders WAV and MP3 for each)
+"""
+import copy
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+HERE = Path(__file__).resolve().parent
+RIFT = HERE.parent
+ROOT = RIFT.parent.parent
+SRC = RIFT / "rift.yaml"
+NCH = 26
+G = {"brk": [1], "hat": [2], "crs": [3], "sub": [4], "stb": [5], "bed": [6], "seq": [9, 10, 11], "lead": [12, 13],
+     "hit": [14, 15], "str": list(range(16, 22)), "drn": [22], "noi": [23], "voc": [24], "sec": [25, 26]}
+LOOPED = ["brk", "sub", "bed", "seq", "str", "drn", "voc", "sec"]      # these keep sounding past their last note
+NOTE = re.compile(r"^([A-G][-#]\d|\^\^\^|===|~~~)$")
+
+
+# ------------------------------------------------------------------------------------------------ cells and grids
+
+def cell(text):
+    """[note, instrument, volume, effect] from a cell's text (fields by position after the note)."""
+    t = text.split()
+    out = ["...", "..", "...", "..."]
+    if not t:
+        return out
+    i = 0
+    if NOTE.match(t[0]) or t[0] == "...":
+        out[0] = t[0]
+        i = 1
+    for tok in t[i:]:
+        if re.fullmatch(r"\d\d|\.\.", tok) and out[1] == "..":
+            out[1] = tok
+        elif re.fullmatch(r"[a-z]\d\d", tok):
+            out[2] = tok
+        elif re.fullmatch(r"[A-Z][0-9A-F]{2}", tok):
+            out[3] = tok
+    return out
+
+
+def fmt(c):
+    if c[1:] == ["..", "...", "..."]:
+        return c[0]
+    return " ".join(c)
+
+
+def parse(p):
+    g = [[["...", "..", "...", "..."] for _ in range(NCH)] for _ in range(p["rows"])]
+    for line in p["data"].splitlines():
+        m = re.match(r"\s*(\d+):(.*)", line)
+        if m:
+            for i, t in enumerate(m.group(2).split("|")):
+                g[int(m.group(1))][i] = cell(t.strip())
+    return g
+
+
+def has_note(c):
+    return bool(re.match(r"[A-G][-#]\d", c[0]))
+
+
+def empty(c):
+    return c == ["...", "..", "...", "..."]
+
+
+def blank(g, chans):
+    for row in g:
+        for ch in chans:
+            row[ch - 1] = ["...", "..", "...", "..."]
+
+
+def notes_in(g, chans):
+    return any(has_note(row[ch - 1]) for row in g for ch in chans)
+
+
+# ------------------------------------------------------------------------------------------------ writing
+
+def write(name, song, grids, header):
+    """grids: one grid per order; identical grids share a pattern."""
+    pats, order, seen = {}, [], {}
+    for g in grids:
+        key = "\n".join(" | ".join(fmt(c) for c in row) for row in g)
+        if key not in seen:
+            seen[key] = f"p{len(seen):02d}"
+            pats[seen[key]] = key
+        order.append(seen[key])
+    samples = copy.deepcopy(song["samples"])
+    for s in samples.values():
+        if "file" in s and not Path(s["file"]).is_absolute() and not s["file"].startswith(str(HERE)):
+            src = (RIFT / s["file"]).resolve() if not s.get("_here") else Path(s["file"])
+            s["file"] = os.path.relpath(src, HERE).replace("\\", "/")
+        s.pop("_here", None)
+    out = ["# " + line for line in header.strip().splitlines()]
+    out.append("# Generated by suite/rift/variants/make_variants.py from suite/rift/rift.yaml; a listening test, not the song.")
+    body = yaml.safe_dump({"module": song["module"], "samples": samples, "instruments": song["instruments"]},
+                          sort_keys=False, width=200, default_flow_style=None)
+    out.append(body.rstrip())
+    out.append("patterns:")
+    for pname, key in pats.items():
+        out.append(f"  {pname}:\n    rows: 64\n    data: |")
+        for r, line in enumerate(key.split("\n")):
+            out.append(f"      {r:02d}: {line}")
+    out.append("orders: [" + ", ".join(order) + "]")
+    (HERE / f"{name}.yaml").write_text("\n".join(out) + "\n", encoding="utf-8", newline="\n")
+    return len(pats), len(order)
+
+
+# ------------------------------------------------------------------------------------------------ helpers for variants
+
+def exits(grids, present):
+    """Where a looping group stops, fade it over rows 0-1 of the next order (D0F) and cut it on row 2, as the song does."""
+    for k in range(len(grids) - 1):
+        for grp in LOOPED:
+            if grp in present[k] and grp not in present[k + 1]:
+                for ch in G[grp]:
+                    col = [grids[k + 1][r][ch - 1] for r in range(3)]
+                    if all(empty(c) for c in col):
+                        grids[k + 1][0][ch - 1] = ["...", "..", "...", "D0F"]
+                        grids[k + 1][1][ch - 1] = ["...", "..", "...", "D0F"]
+                        grids[k + 1][2][ch - 1] = ["^^^", "..", "...", "..."]
+
+
+def compose(P, plan):
+    """plan: one dict per order {group: source pattern}; every group not named is silent."""
+    grids, present = [], []
+    for spec in plan:
+        g = [[["...", "..", "...", "..."] for _ in range(NCH)] for _ in range(64)]
+        for grp, src in spec.items():
+            for ch in G[grp]:
+                for r in range(64):
+                    g[r][ch - 1] = list(P[src][r][ch - 1])
+        grids.append(g)
+        present.append(set(spec))
+    exits(grids, present)
+    return grids
+
+
+def vol_of(c, default=64):
+    return int(c[2][1:]) if c[2].startswith("v") else default
+
+
+# ------------------------------------------------------------------------------------------------ the variants
+
+def v1_form(P):
+    drums = lambda src: {"brk": src, "hat": src, "crs": src}  # noqa: E731
+    low = lambda src: {"sub": src, "stb": src}  # noqa: E731
+    plan = []
+    # pads open: the drone's entry swell, the vocal pad over it, hats last (no hit, no noise)
+    plan += [{"drn": "break2_2"}, {"drn": "c_1"}, {"drn": "c_1", "voc": "c_6"}, {"drn": "c_1", "voc": "c_7", "hat": "intro_2"}]
+    # the groove arrives early with the sequence on it, the drone under
+    for d, s in zip(["a_1", "a_2", "a_1", "a_3", "a_1", "a_2", "a_1", "a_3"], ["break2_2", "c_3", "c_4", "c_5", "c_2", "c_3", "c_4", "c_5"]):
+        plan.append({**drums(d), **low(d), "seq": s, **({"drn": "c_1"} if len(plan) < 11 else {})})
+    # a short break: the bed and the tonal hit alone (their first appearance)
+    plan += [{"bed": "build_3", "hit": "intro_1", "hat": "intro_2"}, {"bed": "build_4", "hit": "intro_1", "noi": "intro_1"}]
+    # B: the lead's first entry over the drums and the bed
+    for d, lo, ld, bd in [("peak_1", "a_1", "b_1", "build_3"), ("peak_2", "a_2", "b_1", "build_4"), ("peak_1", "a_1", "b_2", "build_3"),
+                          ("peak_2", "a_2", "b_1", "build_4"), ("peak_1", "a_1", "b_1", "build_3"), ("peak_2", "a_3", "b_2", "build_5")]:
+        plan.append({**drums(d), **low(lo), "lead": ld, "bed": bd})
+    # the peak late in the song: everything at once, the sequence back, the strings
+    for d, s in zip(["peak_3", "peak_4", "peak_3", "peak_4"], ["break2_2", "c_3", "c_4", "c_5"]):
+        plan.append({**drums(d), **low(d), "str": d, "lead": d, "seq": s})
+    # second break: the strings close, the second line enters, the noise
+    plan += [{"str": "break2_1", "hat": "break2_1", "crs": "break2_1", "noi": "intro_1", "sec": "c_6"},
+             {"hat": "break2_2", "sec": "c_7", "hit": "intro_1"}]
+    # a last section: drums, sub, the lead and the second line over the drone, no sequence
+    for k, (d, sc) in enumerate(zip(["c_2", "c_3", "c_4", "c_5", "c_2", "c_3"], ["c_8", "c_9", "c_6", "c_7", "c_8", "c_9"])):
+        plan.append({**drums(d), "sub": d, "lead": d, "sec": sc, "drn": "break2_2" if k == 0 else "c_1"})
+    # outro on the pads: the drone with the hit and the noise, drums gone
+    plan += [{"drn": "c_1", "hit": "a_1", "noi": "intro_1", "hat": "intro_2"}, {"drn": "c_1", "hit": "a_1"}, {"drn": "outro_1", "hit": "a_1"}]
+    return compose(P, plan)
+
+
+def v2_layers(P, grids):
+    for g in grids:
+        for grp in ("hit", "noi", "str", "voc", "sec"):
+            blank(g, G[grp])
+    present = [set() for _ in grids]
+    for k, g in enumerate(grids):
+        if k <= 5:                                   # the bed takes the intro and the build's start (the hit and noise's place)
+            blank(g, G["bed"])
+            for r in range(64):
+                g[r][5] = list(P["build_3" if k % 2 == 0 else "build_4"][r][5])
+        if 26 <= k <= 29:                             # and the strings' place in the peak
+            blank(g, G["bed"])
+            for r in range(64):
+                g[r][5] = list(P["build_3" if k % 2 == 0 else "build_4"][r][5])
+        if notes_in(g, G["bed"]) or any(not empty(g[r][5]) for r in range(64)):
+            present[k].add("bed")
+    # the bed's own exits in the song stay (build_5's note-off, peak_1's fade); add one where the new peak bed stops
+    exits(grids, [p if k in (29, 30) else set() for k, p in enumerate(present)])
+    return grids
+
+
+def v3_idioms(grids):
+    n = len(grids)
+    # sequence: every note struck, accents on the beat, one echo a dotted 8th later on channel 11
+    for k, g in enumerate(grids):
+        if not notes_in(g, [9]):
+            continue
+        blank(g, [10, 11])
+    for k, g in enumerate(grids):
+        for r in range(64):
+            c = g[r][8]
+            if has_note(c):
+                g[r][8] = [c[0], "08", "v36" if r % 4 == 0 else "v26", "..."]
+                rr, kk = r + 6, k
+                if rr >= 64:
+                    rr, kk = rr - 64, k + 1
+                if kk < n and (kk == k or notes_in(grids[kk], [9])) and empty(grids[kk][rr][10]):
+                    grids[kk][rr][10] = [c[0], "08", "v16", "..."]
+            elif c[3].startswith("G"):
+                g[r][8] = [c[0], c[1], c[2], "..."]
+    # lead: drop the same-channel re-strikes and the D fades, echo each call note +6 rows on the other channel
+    for g in grids:
+        mains = []
+        for ch in (12, 13):
+            last = None
+            for r in range(64):
+                c = g[r][ch - 1]
+                if has_note(c):
+                    if last is not None and c[0] == last[1] and r - last[0] <= 8:
+                        g[r][ch - 1] = ["...", "..", "...", "..."]
+                        continue
+                    last = (r, c[0])
+                    mains.append((r, ch, c))
+                elif c[3].startswith("D"):
+                    g[r][ch - 1] = [c[0], c[1], c[2], "..."]
+        for r, ch, c in mains:
+            other = 13 if ch == 12 else 12
+            rr = r + 6
+            if rr < 32 and empty(g[rr][other - 1]):
+                g[rr][other - 1] = [c[0], "09", f"v{max(8, vol_of(c, 30) // 2):02d}", "..."]
+    # hit: no offset, beat 3 of bars 1 and 3
+    for g in grids:
+        hits = [g[r][ch - 1] for r in range(64) for ch in (14, 15) if has_note(g[r][ch - 1])]
+        if hits:
+            blank(g, [14, 15])
+            g[8][13] = [hits[0][0], "10", "v56", "..."]
+            g[40][14] = [hits[0][0], "10", "v56", "..."]
+    # noise: struck on the last bar, no pan command
+    for g in grids:
+        for r in range(64):
+            c = g[r][22]
+            if has_note(c):
+                g[r][22] = ["...", "..", "...", "..."]
+                g[48][22] = [c[0], c[1], "...", "..."]
+    # drone and vocal pad: no written swells (flat at their struck level), restatements and fades kept
+    for ch, level in ((22, "v30"), (24, "v20")):
+        for g in grids:
+            for r in range(64):
+                c = g[r][ch - 1]
+                if has_note(c):
+                    g[r][ch - 1] = [c[0], c[1], level, c[3]]
+                elif c[2].startswith("v") and c[3] == "...":
+                    g[r][ch - 1] = [c[0], c[1], "...", c[3]]
+    # second line: no glides, echo +6 rows at v20, each echo cut 4 rows on
+    for k, g in enumerate(grids):
+        if not notes_in(g, [25, 26]) and not any(not empty(g[r][25]) for r in range(64)):
+            continue
+        blank(g, [26])
+        for r in range(64):
+            c = g[r][24]
+            if has_note(c):
+                if c[3].startswith("G"):
+                    c = [c[0], "15", c[2], "..."]
+                    g[r][24] = c
+                elif c[1] == "..":
+                    g[r][24] = c = [c[0], "15", c[2], c[3]]
+                if r + 6 < 64:
+                    g[r + 6][25] = [c[0], "15", "v20", "..."]
+                    if r + 10 < 64 and empty(g[r + 10][25]):
+                        g[r + 10][25] = ["^^^", "..", "...", "..."]
+    return grids
+
+
+def v5_groove(grids):
+    for g in grids:
+        for r in range(64):
+            c = g[r][0]
+            if c[0] == "C-5":
+                g[r][0] = ["A#4"] + c[1:]
+            c = g[r][1]
+            if has_note(c):
+                g[r][1] = ["...", "..", "...", "..."] if r % 4 != 2 else [c[0], c[1], "v16", c[3]]
+    return grids
+
+
+def rms_of(path, seconds=1.0, skip=0):
+    sys.path.insert(0, str(ROOT))
+    from vulturetracker.wavload import read_wav
+    w = read_wav(path)
+    x = np.asarray(w.channels[0], float)[skip: skip + int(w.rate * seconds)]
+    return float(np.sqrt(np.mean(x ** 2)))
+
+
+def main(build):
+    song = yaml.safe_load(SRC.read_text(encoding="utf-8"))
+    P = {name: parse(p) for name, p in song["patterns"].items()}
+    base = [copy.deepcopy(P[name]) for name in song["orders"]]
+    made = {}
+
+    made["rift_v0_control"] = (song, copy.deepcopy(base), "Rift as it is (the control).")
+    s1 = copy.deepcopy(song)
+    s1["module"]["title"] = "Rift v1 form"
+    made["rift_v1_form"] = (s1, v1_form(P), "Variant 1, our own form: the same layer columns laid out in other sections, "
+                            "lengths, order, entries and arc (pads open; the groove and the sequence early; the lead later; "
+                            "the peak late with every figure; ends on the pads).")
+    s2 = copy.deepcopy(song)
+    s2["module"]["title"] = "Rift v2 layers"
+    made["rift_v2_layers"] = (s2, v2_layers(P, copy.deepcopy(base)), "Variant 2, another layer set: no tonal hit, noise, "
+                              "strings, vocal pad or second line; the bed carries the intro, the build and the peak; the "
+                              "drone carries C alone. Form, idioms, sounds and tempo as the song.")
+    s3 = copy.deepcopy(song)
+    s3["module"]["title"] = "Rift v3 idioms"
+    for c in s3["module"]["channels"]:
+        if c["name"] == "Seq":
+            c["pan"] = 24
+        if c["name"] == "Seq copy 3":
+            c["pan"] = 44
+    made["rift_v3_idioms"] = (s3, v3_idioms(copy.deepcopy(base)), "Variant 3, our own idioms (see make_variants.py's "
+                              "docstring). Form, layer set, sounds and tempo as the song.")
+    s4 = copy.deepcopy(song)
+    s4["module"]["title"] = "Rift v4 sounds"
+    new = {8: ("seq_saw", "E-5", True), 9: ("lead_gtr", "D-5", False), 10: ("hit_tom", "A-4", False)}
+    for slot, (stem, root, loop) in new.items():
+        old = (RIFT / song["samples"][slot]["file"]).resolve()
+        f = ROOT / "samples/local/rift-variants" / f"{stem}.wav"
+        skip = 0x0F * 256 if slot == 10 else 0          # the bell plays from O0F in most of its orders; the tom from its start
+        gv = int(round(64 * min(1.0, rms_of(old, skip=skip) / rms_of(f))))
+        s4["samples"][slot] = {"file": str(f), "_here": True, "base_note": root, "name": stem, "global_volume": gv,
+                               **({"loop": "from_wav"} if loop else {})}
+    g4 = copy.deepcopy(base)
+    for g in g4:
+        for r in range(64):
+            for ch in (14, 15):
+                c = g[r][ch - 1]
+                if c[3].startswith("O"):
+                    g[r][ch - 1] = [c[0], c[1], c[2], "..."]
+    made["rift_v4_sounds"] = (s4, g4, "Variant 4, other sound classes for three layers: the sequence a "
+                              "filtered saw, the lead an electric-guitar pluck, the hit an in-tune synth tom (their levels "
+                              "set to the replaced samples' RMS). Everything else as the song.")
+    s5 = copy.deepcopy(song)
+    s5["module"]["title"] = "Rift v5 groove"
+    s5["module"]["tempo"] = 98
+    # the break's bar-long loop, played 2 semitones down, lasts 1.63218 s; a bar at tempo 98 speed 4 is 16 * 4 ticks of
+    # 2.5/98 s = 1.63265 s: slow it by that ratio so the loop does not wrap just before each strike
+    # c5_speed at the WAV's own rate (22050); the compiler rescales it when it resamples to the module's sample_rate
+    s5["samples"][1]["c5_speed"] = round(22050 * (1.45415 * 2 ** (2 / 12)) / (64 * 2.5 / 98))
+    s5["samples"][1].pop("base_note", None)
+    made["rift_v5_groove"] = (s5, v5_groove(copy.deepcopy(base)), "Variant 5, another tempo and groove: 147 BPM (tempo 98 "
+                              "speed 4), the break 2 semitones down so its bar fills the slower bar, hats on the offbeat "
+                              "8ths only. Everything else as the song.")
+    for name, (sng, grids, header) in made.items():
+        npat, nord = write(name, sng, grids, header)
+        print(f"{name}: {nord} orders, {npat} patterns")
+    if build:
+        ff = subprocess.run([sys.executable, "-c", "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"],
+                            capture_output=True, text=True).stdout.strip()
+        procs = []
+        for name in made:
+            y = HERE / f"{name}.yaml"
+            cmd = f'"{sys.executable}" -m vulturetracker build "{y}" --render "{y.with_suffix(".wav")}" && ' \
+                  f'"{ff}" -y -loglevel error -i "{y.with_suffix(".wav")}" -b:a 192k "{y.with_suffix(".mp3")}"'
+            procs.append((name, subprocess.Popen(cmd, shell=True, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)))
+            if len([p for _, p in procs if p.poll() is None]) >= 3:
+                procs[-3][1].wait()
+        for name, p in procs:
+            out = p.communicate()[0]
+            print(name, "exit", p.returncode, out.strip().splitlines()[-1] if out.strip() else "")
+        a, b = (RIFT / "rift.it").read_bytes(), (HERE / "rift_v0_control.it").read_bytes()
+        print("control .it equals rift.it:", a == b, len(a), len(b))
+
+
+if __name__ == "__main__":
+    main("--build" in sys.argv)

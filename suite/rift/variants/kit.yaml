@@ -1,0 +1,15 @@
+# Rift listening test, variant "sounds": three layers in sound classes other than Nether Animal's for those roles
+# (its sequence a near-pure tone, its lead a long pure tone with vibrato, its hit a detuned bell-like one-shot).
+# Only for suite/rift/variants/rift_v4_sounds.yaml; the song keeps the owner's picks.
+# Render: python -m vulturetracker synth suite/rift/variants/kit.yaml
+out_dir: ../../../samples/local/rift-variants
+sample_rate: 44100
+defaults:
+  normalize: -1.0
+  mono: true
+  velocity: 100
+samples:
+  seq_saw:   {patch: "Leads/Moogy Saw", note: E-5, hold: 1.6, tail: 0.2, trim: true,       # plays A-4..E-6: 7 under to 12 over
+              fx: [{resample: {target_sample_rate: 10000}}], loop: {start: 0.6, end: 1.5, crossfade: 0.2}}   # 5 kHz wide, x2 = 10 kHz
+  lead_gtr:  {patch: "Plucks/E-Guitar", note: D-5, hold: 0.8, tail: 1.5, fx: [{lowpass_filter: {cutoff_frequency_hz: 6000}}]}
+  hit_tom:   {patch: "Percussion/Synth Tom 2", note: A-3, hold: 0.5, tail: 1.0}

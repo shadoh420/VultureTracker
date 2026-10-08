@@ -1,0 +1,41 @@
+# Rift, step 2: the line screen. Soft lead and poly voices from Surge XT, OB-Xd and Dexed (no flute, brass, bell, pluck,
+# saw or square patches, none of the leads rejected in Nadir), one held A-5 each (the middle of the line's C-5..C-6),
+# dry. Measured against the role's traits in BRIEF.md (pure, a soft attack, dark, steady); the finalists are rendered
+# looped with a room by linefin.yaml. Render: python -m vulturetracker synth suite/rift/line.yaml
+out_dir: ../../samples/local/rift-cand/line
+sample_rate: 44100
+defaults: {note: A-5, hold: 2.5, tail: 1.5, normalize: -1.0, mono: true, velocity: 90}
+
+samples:
+  sine:      {patch: "Leads/Sine Lead"}
+  hollow:    {patch: "Leads/Smoothy Hollow"}
+  distance:  {patch: "Leads/In The Distance"}
+  butter:    {patch: "Leads/Butter"}
+  fluff:     {patch: "Leads/Fluff"}
+  light:     {patch: "Leads/Light"}
+  later:     {patch: "Leads/Later"}
+  mundane:   {patch: "Leads/Mundane"}
+  simpler:   {patch: "Leads/Simpler Times"}
+  fundament: {patch: "Leads/Fundament"}
+  dome:      {patch: "Leads/Dome"}
+  koala:     {patch: "Leads/Koala 1"}
+  hippo:     {patch: "Leads/Hippo"}
+  scooped:   {patch: "Leads/Scooped"}
+  lera:      {patch: "Leads/Lera"}
+  playnice:  {patch: "Leads/Play Nice"}
+  smoothwc:  {patch: "Leads/Smoothness World Cup"}
+  photon:    {patch: "Leads/Photon"}
+  gentle:    {patch: "Polysynths/Gentle"}
+  ppgdreams: {patch: "Polysynths/PPG Dreams"}
+  pasttense: {patch: "Polysynths/Past Tense"}
+  waver:     {patch: "Polysynths/Waver"}
+  licht:     {patch: "Polysynths/Licht"}
+  slowpoly:  {patch: "Polysynths/Slow Poly MW"}
+  ob_soft:   {patch: "obxd:006 - Lead Synth 1/3 voice Soft Lead"}
+  ob_dreams: {patch: "obxd:005 - Keys/Poly Dreams OB-Xd"}
+  dx_soft:   {patch: "dexed:SynprezFM_09/SOFT SYNTH"}
+  dx_hollow: {patch: "dexed:SynprezFM_20/HOLLOWMOOG"}
+  dx_softee: {patch: "dexed:SynprezFM_13/Mr.Softee"}
+  dx_smooth: {patch: "dexed:SynprezFM_08/Smoothout"}
+  dx_sines:  {patch: "dexed:SynprezFM_16/Mute SINES"}
+  dx_touch:  {patch: "dexed:SynprezFM_22/SOFT TOUCH"}

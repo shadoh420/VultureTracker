@@ -1,0 +1,26 @@
+# Rift, step 1: the bass-stab screen. Surge XT factory basses with drive or noise in them, one short note each sounding
+# A-3 (110 Hz, an octave over the sub), dry. These patches sound an octave under the key, so A-4 is played
+# (root_offset -12); Behemoth and Static 1 sounded near E instead of A and are left out. suite/nadir/measure.py tabulates them; the finalists by measured character
+# (short, low, noisy: the reference role's traits, not its sample) go to the tryout with a floor from gen_cand.py.
+# Render: python -m vulturetracker synth suite/rift/cand.yaml
+out_dir: ../../samples/local/rift-cand/stab
+sample_rate: 44100
+defaults: {note: A-4, root_offset: -12, hold: 0.3, tail: 0.4, normalize: -1.0, mono: true, velocity: 110}
+
+samples:
+  crush:     {patch: "Basses/Crush Bass"}
+  dist1:     {patch: "Basses/Dist Bass 1"}
+  dist2:     {patch: "Basses/Dist Bass 2"}
+  distorted: {patch: "Basses/Distorted Bass"}
+  distfm:    {patch: "Basses/Distorted FM"}
+  distmw:    {patch: "Basses/Distorted MW"}
+  doomsday:  {patch: "Basses/Doomsday"}
+  rumble:    {patch: "Basses/Rumble"}
+  static2:   {patch: "Basses/Static 2"}
+  stone:     {patch: "Basses/Stone"}
+  evilous:   {patch: "Basses/Evilous"}
+  helmeto:   {patch: "Basses/Helmeto"}
+  deepend:   {patch: "Basses/Deep End"}
+  digibass:  {patch: "Basses/Digibass"}
+  tacky1:    {patch: "Basses/Tacky 1"}
+  rubber:    {patch: "Basses/Rubber Bass"}

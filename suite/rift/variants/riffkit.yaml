@@ -1,0 +1,19 @@
+# Rift 2, the riff's voice (slot 8): candidates for the low syncopated riff (E-3..E-4, mostly A-3 and C-4, two-row notes).
+# Picked to sit with the song's approved sounds: the stab's own patch (Helmeto), the lead's source (FmRhodes18), three
+# rounder bass voices. Rendered at A-3 (the riff's most played note), band-limited to 5 kHz (resampled through 10 kHz),
+# so the riff's lowest note, 5 under the root, leaves no images and its highest, 7 over, stays under 7.5 kHz.
+# make_rift2.py adds a floor (-26 dB, shaped like the sound) and tunes each to A-3.
+# Render: python -m vulturetracker synth suite/rift/variants/riffkit.yaml
+out_dir: ../../../samples/local/rift-variants/riff
+sample_rate: 44100
+defaults: {note: A-4, root_offset: -12, hold: 0.35, tail: 0.4, normalize: -1.0, mono: true, velocity: 105,
+           fx: [{resample: {target_sample_rate: 10000}}]}
+samples:
+  riff_helmeto: {patch: "Basses/Helmeto"}
+  riff_ebass:   {patch: "Basses/E-Bass"}
+  riff_fingered: {patch: "Basses/Fingered"}
+  riff_rubber:   {patch: "Basses/Rubber Bass"}
+# dropped after measuring: Mellow and FM Bass 2 (a partial a fifth off the harmonic series, sounding an octave or more
+# under the key), Piano Bass (sounds an octave under, partials at half steps of A-3), Smoothie (a near-pure sine: the
+# calliope's kind, which the owner found too different from the song)
+  riff_rhodes:  {patch: "dexed:SynprezFM_02/FmRhodes18"}

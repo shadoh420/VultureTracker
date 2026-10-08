@@ -1,0 +1,36 @@
+# Rift, step 2, the call voices for the figure that lives in the pattern (rift.yaml, channel 7 and its echo on 8).
+# Round 4 ("doesn't feel dynamic enough, both the melody and the sound"; jim, emu and retro rejected in the tryout, brass
+# and moog kept as rendered in round 3): three voices that move within a note, from `screen.py --motion` over the 124
+# patches of the zone below (level, timbre and pitch motion over the hold, and how bright the attack is), checked for
+# interval oscillators and built-in delays (Toto Brass and OB-Xd Warm Brass carry a sub-octave as strong as their top
+# partial, OB-Xd Complex Poly repeats 0.6 s after its release: out). Round 3: Five finalists of suite/rift/screen.py (1421 patches measured at a held C-5), chosen inside the zone the
+# notes point at: speaks within 30 ms, holds within 3 dB, not pure (fundamental under 55 % of the harmonic power; the
+# rejected leads were 80-100 %), not muddy (under-500 Hz within 9 dB of 1-4 kHz; the chord stab was +30), less nasal than
+# the soft lead of hook_fall (1-4 kHz under -5 dB of the total; it was -1.4), no buzz (above 4 kHz under -25 dB), some
+# grit (at least 3 % of the power off the harmonics), no tonal peak off the harmonic series (Kuniklo Mini, first
+# picked, carries oscillators a fifth up and a fourth down: on the call's E it adds a B against the bed's C; out), and
+# different from each other in roughness, odd/even balance, top and motion. One held C-5 each (the call plays G-4..E-5 from it: 5 under to 4 over), 1.1 s (the longest call note is
+# 12 rows), the hooks' room; stored 9 kHz wide (an 18 kHz rate), so E-5, 4 semitones over the root, stays under
+# 11.4 kHz (E-MU.II's FM top reaches 11 kHz: at 22 kHz it put the call at -32 dB above 12 kHz, over the hats' -52); no
+# printed delay (channel 8 is the echo, on the grid).
+# suite/rift/gen_cand.py calls adds the floor and tunes each to C-5.
+# Render: python -m vulturetracker synth suite/rift/callfin.yaml && python suite/rift/gen_cand.py calls
+out_dir: ../../samples/local/rift-cand
+sample_rate: 44100
+defaults:
+  note: C-5
+  hold: 1.1
+  tail: 1.2
+  normalize: -1.0
+  mono: true
+  velocity: 100
+  fx: [{reverb: {room_size: 0.7, damping: 0.5, wet_level: 0.3, dry_level: 0.75}}, {resample: {target_sample_rate: 18000}}]
+
+samples:
+  call_brass: {patch: "Brass/Synth Brass 1"}                           # breathy, even and odd alike, dark top, steady
+  call_moog:  {patch: "3rdparty/Luna/Leads/Moogy Staccato"}            # the roughest, warm, dark top, dry release
+  # round 3's call_jim (Surge Jim), call_emu (Dexed E-MU.II) and call_retro (Vospi Nice And Elegant Retro): rejected
+  # round 4, rendered alone with `synth --only "call_[eta]*"` so brass and moog stay as heard:
+  call_ebm:     {patch: "obxd:006 - Lead Synth 1/EBMLead", note: C-6, root_offset: -12}   # moving analog lead: a bright attack that darkens, vibrato, dry release
+  call_trumpet: {patch: "dexed:SynprezFM_29/BR TRUMPET"}                               # FM trumpet whose attack opens from dark, dry release
+  call_analyse: {patch: "Polysynths/Analyse", note: C-6, root_offset: -12}             # warm, dark, hollow; opens over its attack, a reverb tail
