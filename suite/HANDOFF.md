@@ -1,4 +1,6 @@
-# Suite handoff (2026-09-24, Nadir v6 = the last pass; Rift: nine layers picked, the full form laid out)
+# Suite handoff (2026-09-24, Nadir v6 = the last pass; Rift: nine layers picked, the full form laid out; updated 2026-10-08)
+
+Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
 The compact resume authority for the UT99 tribute suite, the anti-aliasing work and the mixer GUI. Read this first; the
 other docs (README, GUIDE, SONG_FORMAT, SAMPLING, PROVENANCE) hold the durable rules.
@@ -1918,3 +1920,50 @@ cell diff against a v4 copy. Everything v5 changed came from the notes report (`
    lowest note leaves interpolation images within 60 dB of it under 20 kHz (libopenmpt's 8-tap interpolator measured);
    no song in the repository warns. Its one sentence in AGENTS.md's anti-aliasing bullet stays uncommitted inside the
    owner's uncommitted rule rewrite there (one diff hunk; commit the two together when the owner says).
+
+## Since 2026-09-24 (written 2026-10-08)
+
+Everything above is the state on 2026-09-24 and stays as written. This section lists what happened after it, dated and
+tagged: (git) checked in the log or the tree, (file) read in a file, (notes) taken from the session memory notes and
+not re-run. Nothing here was listened to; the owner's ear decides the music.
+
+- 2026-09-24 (notes): the owner found Rift and Vantage read as tracings of their references (Rift's intro and its
+  passage from about 2:55 nearly identical to Nether Animal). (git, a4a1ee0) Six Rift variants, one dimension changed each,
+  `suite/rift/variants/rift_v0_control.yaml` .. `rift_v5_groove.yaml` with four v2 sequence sub-variants, their
+  `LISTENING.md`, `suite/TRACING-DIAGNOSIS.md` and `suite/METHOD-PROPOSAL.md`; `make_rift2.py` there wrote
+  `suite/rift/rift2.yaml` ("Rift 2", tempo 110 speed 4: round 1's v2 with the sequence section rewritten as a low riff).
+- 2026-09-26 (git, 0fea36c; AGENTS.md "Follow the reference, write our own lines"): one reference track per piece, its
+  tempo, groove, sound world, idioms and balance measured; every melodic line written from scratch and offered as two to
+  four rendered versions plus one without it, the owner picks; fewer roles than the reference where that frees the
+  piece (AGENTS.md: Rift 2 dropped five of Nether's); section lengths our own. This replaces the 2026-09-22 rule and
+  `METHOD-PROPOSAL.md` is background. `suite/NEXT-PROMPT.md` is the procedure; `NEXT-PROMPT-DRAFT.md` is a draft.
+- 2026-09-30 (git, c41e645): Nadir's v5 listening notes filed under their version (`suite/nadir/nadir.notes-*.json`).
+- 2026-10-05 (git, 53302b0, 42ddbd8; CHANGELOG 1.1.0): transcription tools outside the app: `tools/transcribe_audio.py`
+  (demucs stems, notes by basic-pitch or YourMT3+ via `yourmt3_transcribe.py`, ADTOF drums, merged by `stems_to_midi.py`,
+  scored by `transcription_diff.py`), `stems_to_song.py` (a transcription played on samples cut from the recording's own
+  stems, with a tempo channel against libopenmpt's tick drift), `tempo_check.py`, `make_notes.py` (MIDI + Guitar Pro 5
+  tab), `transcribe_setup.cmd` / `transcribe.cmd`; the SPECTRUM tab's REFERENCE, REF and DELTA. Released as 1.1.0
+  (1183464). (notes) Track06: the owner's target is a DELTA under 2 dB; "B-sections" (bass and melody as their own stems
+  every 4 bars, drum hits; 3.3 dB) heard as "way closer", the best so far. Track07 (130 BPM): B-sections rebuilt with
+  bars on the downbeats (OFFSET -40, DELTA 2.4/2.5). The recordings and their songs are local, not in the repository.
+- 2026-10-05 owner rules (notes): no paid software (Melodyne rejected), free and open tools only; no left/right A/B MP3s
+  for listening, link the new version's own MP3 lined up with the original (the tools write `<name>-<version>.mp3`).
+- 2026-10-06 (git, bc5b6e6; CHANGELOG 1.2.0): a 2/4 bar, every part in the tab as notation tracks,
+  `tools/transcription_checks.py` (downbeats by beat_this, transcribers against their stems, the tab read back, the .it's
+  DELTA, rows with sound but no note). (notes) Made on Tribes 2's "Ice" (fetched with yt-dlp): B-sections 2.2/2.3 dB at
+  OFFSET -32 with 8-bar sections, the owner's 2/4 bar at 2:27.7. Released as 1.2.0 (59b6561).
+- 2026-10-07 to 10-08 (git, tags): 1.3.0 (d538d42: OpenMPT's DMO plugins and the RACK tab, agent tools over MCP and the
+  AGENT chat panel, LUFS, `approved`/`by` marks, the piano roll, key/TAP/ALL OFF), 1.3.1 (c76d924: without WebView2 the
+  app opens in the browser), 1.3.2 (20ca076: the TUNER tab, markdown in the chat). The owner's 2026-09-25 "no DMO
+  plugins" decision was reversed on 2026-10-07 (BACKLOG.md).
+- 2026-10-08 (file, `scratch/audit-2026-10-08/AUDIT-REPORT.md`, local only, gitignored): an independent audit of the
+  repository at 20ca076, rating Good, 18 findings. F-03/F-04 closed in a4a1ee0 (git): Rift's source into git (song files,
+  generators, briefs, the listening notes `rift.notes.*` and `rift.notes-7e4f320d.*`, the variants; renders ignored, the
+  samples still in the ignored `samples/local/rift-cand/` and `rift-variants/`), BACKLOG.md corrected. The remaining
+  findings are being closed in the commits of 2026-10-08 (download digests, Windows and Python 3.10 CI, the API key in
+  the credential store, SECURITY.md, README's privacy and download-check paragraphs, this section).
+
+Music state, as far as the tree says (git): `suite/rift/rift.yaml` with `rift.tryout.json` and its notes files;
+`suite/rift/rift2.yaml` with `rift2.tryout.json` and no notes file of its own; Nadir unchanged since v6 above. Which
+of them plays next, and whether any line or sound is right, is the owner's call after listening: no verdict on Rift 2
+is recorded in the repository.
