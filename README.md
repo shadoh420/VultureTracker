@@ -45,6 +45,18 @@ python -m vulturetracker gui demo2/iron_relay.yaml
 
 [GUIDE.md](GUIDE.md#setup) says what each extra adds and what stays Windows-only.
 
+## Privacy and security
+
+The app is a local HTTP server bound to 127.0.0.1 only. It has no telemetry and makes no network call except the
+downloads you start (Surge XT, Dexed, faustwasm, verified against pinned SHA-256 digests) and the AGENT panel's chat,
+which sends the open song's text to the provider you chose (the Anthropic API, a local OpenAI-compatible server, or
+Claude Code on your own login). Its settings and any API key stay in your user folder (`%APPDATA%\VultureTracker` on
+Windows), never beside a song. [SECURITY.md](SECURITY.md) says how to report a vulnerability privately.
+
+**Verify the download:** each release's body lists the SHA-256 of `vulturetracker.exe`, `ffmpeg.exe` and
+`vulturetracker-win64.zip`. On Windows run `certutil -hashfile vulturetracker.exe SHA256`, elsewhere
+`sha256sum vulturetracker.exe`, and compare with the release page. The exe is not code-signed.
+
 ## Use
 
 ```
