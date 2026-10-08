@@ -7,6 +7,7 @@ from setuptools.command.build_py import build_py
 class BuildPy(build_py):
     def run(self):
         super().run()
+        self.mkpath(f"{self.build_lib}/vulturetracker")  # an editable build has not made it
         self.copy_file("SONG_FORMAT.md", f"{self.build_lib}/vulturetracker/SONG_FORMAT.md")
 
 

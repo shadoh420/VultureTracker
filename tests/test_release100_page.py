@@ -25,6 +25,12 @@ LEVEL = ("(()=>{const a=FA.an,x=new Float32Array(a.fftSize);a.getFloatTimeDomain
          "for(const v of x)m=Math.max(m,Math.abs(v));return m})()")
 
 
+def _tmpdir(self):  # TestCase.enterContext is 3.11+; the floor is 3.10
+    d = tempfile.TemporaryDirectory()
+    self.addCleanup(d.cleanup)
+    return d.name
+
+
 @unittest.skipIf(sync_playwright is None, 'playwright not installed')
 class TestRelease100Page(unittest.TestCase):
     @contextlib.contextmanager
@@ -105,7 +111,7 @@ class TestRelease100Page(unittest.TestCase):
         except OSError:
             self.skipTest('needs ffmpeg')
         with self.page() as (page, st, d):
-            src = Path(self.enterContext(tempfile.TemporaryDirectory())) / 'kick.flac'
+            src = Path(_tmpdir(self)) / 'kick.flac'
             subprocess.run([ffmpeg, '-loglevel', 'error', '-i', str(d / 'a.wav'), '-metadata', 'LOOPSTART=10',
                             '-metadata', 'LOOPLENGTH=90', str(src)], check=True)
             page.evaluate("tab('smp')")

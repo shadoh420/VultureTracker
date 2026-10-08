@@ -33,8 +33,8 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .
 **Windows:** download `vulturetracker-win64.zip` from the [latest release](https://github.com/shadoh420/VultureTracker/releases/latest),
 unzip it anywhere and run `vulturetracker.exe`. The start screen lists two demo songs.
 
-**From source** (Python 3.10+; Linux is tested on every push, macOS is untested; outside Windows install libopenmpt,
-e.g. `apt install libopenmpt0t64`):
+**From source** (Python 3.10+; every push runs the tests on Windows with Python 3.14 and on Linux with 3.10 and 3.14,
+macOS is untested; outside Windows install libopenmpt, e.g. `apt install libopenmpt0t64`):
 
 ```
 git clone https://github.com/shadoh420/VultureTracker.git

@@ -26,6 +26,12 @@ def note(ch, key, start, length, vel=100):
             (start + length, mido.Message("note_off", channel=ch, note=key))]
 
 
+def _tmpdir(self):  # TestCase.enterContext is 3.11+; the floor is 3.10
+    d = tempfile.TemporaryDirectory()
+    self.addCleanup(d.cleanup)
+    return d.name
+
+
 @unittest.skipIf(mido is None, "needs mido")
 class TestMidiImport(unittest.TestCase):
     def test_a_midi_file_becomes_a_song(self):
@@ -68,7 +74,7 @@ class TestMidiImport(unittest.TestCase):
         mid = mido.MidiFile(type=type, ticks_per_beat=480)
         for t in tracks:
             mid.tracks.append(track("", *t) if t and not isinstance(t, mido.MidiTrack) else t)
-        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        d = Path(_tmpdir(self))
         mid.save(d / "t.mid")
         out, warnings = gui.import_beside(d / "t.mid")
         self.assertEqual(api.check(out)["errors"], [])

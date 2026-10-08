@@ -37,6 +37,12 @@ def run_cli(*argv):
     return code, out.getvalue(), err.getvalue()
 
 
+def _tmpdir(self):  # TestCase.enterContext is 3.11+; the floor is 3.10
+    d = tempfile.TemporaryDirectory()
+    self.addCleanup(d.cleanup)
+    return d.name
+
+
 class TestVersion(unittest.TestCase):
     setUp = fixtures.TestGui.setUp
     tearDown = fixtures.TestGui.tearDown
@@ -411,7 +417,7 @@ class TestMidiImportKeeps(unittest.TestCase):
         mid = mido.MidiFile(type=1, ticks_per_beat=480)
         mid.tracks.append(track('Song', (0, mido.MetaMessage('time_signature', numerator=sig[0], denominator=sig[1]))))
         mid.tracks.append(track('Keys', *events))
-        d = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        d = Path(_tmpdir(self))
         mid.save(d / 't.mid')
         out, warnings = gui.import_beside(d / 't.mid')
         self.assertEqual(api.check(out)['errors'], [])
