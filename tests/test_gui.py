@@ -1523,5 +1523,30 @@ class TestPackage(unittest.TestCase):
         self.assertTrue(wheel.name.startswith(f"vulturetracker-{__version__}-"), wheel.name)  # pyproject reads __init__'s
 
 
+class TestNoWebView2(unittest.TestCase):
+    def test_internet_explorer_engine_means_the_browser(self):
+        import types
+        for renderer, want in (("mshtml", True), ("edgechromium", False)):
+            fake = types.SimpleNamespace(renderer=renderer)
+            mods = {"webview": types.SimpleNamespace(), "webview.platforms": types.SimpleNamespace(winforms=fake),
+                    "webview.platforms.winforms": fake}  # whether or not pywebview is installed (CI has none)
+            with mock.patch.dict(sys.modules, mods), mock.patch.object(sys, "platform", "win32"):
+                self.assertEqual(gui.no_webview2(), want, renderer)
+        with mock.patch.object(sys, "platform", "linux"):
+            self.assertFalse(gui.no_webview2())
+
+    def test_serve_opens_the_browser_and_quits_on_ok(self):
+        fake_webview = mock.MagicMock()
+        with mock.patch.dict(sys.modules, {"webview": fake_webview}), mock.patch.object(gui, "no_webview2", return_value=True), \
+                mock.patch.object(gui.webbrowser, "open") as op, mock.patch.object(gui, "make_server") as ms, \
+                mock.patch("ctypes.windll", create=True) as windll, mock.patch.object(gui.agent, "announce"), \
+                mock.patch.object(gui, "start_log"):
+            ms.return_value.server_address = ("127.0.0.1", 8799)
+            self.assertEqual(gui.serve(None, 8799), 0)
+        op.assert_called_once_with("http://127.0.0.1:8799/")
+        windll.user32.MessageBoxW.assert_called_once()
+        fake_webview.create_window.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

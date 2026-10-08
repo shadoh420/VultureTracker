@@ -4545,6 +4545,21 @@ def make_server(port=0):
     return _Server(("127.0.0.1", port), Handler)
 
 
+def no_webview2():
+    """True when pywebview would draw the window with Internet Explorer (Windows without the WebView2 runtime): that
+    engine cannot run the page (no CSS variables, no modern script), so the app opens in the browser instead."""
+    if sys.platform != "win32":
+        return False
+    try:
+        from webview.platforms import winforms
+    except Exception:
+        return False
+    return getattr(winforms, "renderer", "") == "mshtml"
+
+
+WEBVIEW2_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
+
+
 def serve(song_path=None, port=0, open_browser=True, window=True):
     """Serve the UI. With pywebview installed (and `window`), it opens in a native window; else the default
     browser. `song_path` may be None: the UI then starts on its open-a-song screen."""
@@ -4568,6 +4583,15 @@ def serve(song_path=None, port=0, open_browser=True, window=True):
             import webview
         except ImportError:
             webview = None
+        if webview and no_webview2():
+            msg = (f"This PC lacks Microsoft's WebView2 runtime, so VultureTracker opened in your browser:\n{url}\n\n"
+                   f"Install WebView2 for the app window (free, from Microsoft):\n{WEBVIEW2_URL}\n\n"
+                   "Click OK to quit VultureTracker.")
+            print(msg)
+            webbrowser.open(url)
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, msg, f"VultureTracker {__version__}", 0x40)  # the windowed exe's way to quit
+            return 0
         if webview:
             Handler.window = webview.create_window(f"VultureTracker {__version__}", url, width=1400, height=900, min_size=(1000, 600), background_color="#0a0c0d")
             webview.start(private_mode=False, storage_path=str(PROFILE))

@@ -2,6 +2,11 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- **A PC without WebView2**: the app opened in Internet Explorer's engine there (white boxes, no song screen). It now
+  opens in the browser instead and says where to get WebView2; OK on that message quits the app.
+
 ## 1.3.0 (2026-10-07)
 
 OpenMPT's DMO effects and an effect rack, agents that work on the open song (from Claude Code over MCP, or a chat
