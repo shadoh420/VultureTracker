@@ -29,7 +29,7 @@ env:
     tests.test_spectral tests.test_gpimport tests.test_midiimport tests.test_faust tests.test_workflow
     tests.test_release070 tests.test_release080 tests.test_release080_import tests.test_release080_dsp
     tests.test_import tests.test_synth tests.test_release100 tests.test_stems_to_song
-    tests.test_plugins tests.test_measure tests.test_agent
+    tests.test_plugins tests.test_measure tests.test_agent tests.test_malformed
 
 jobs:
   tests:
