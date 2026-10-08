@@ -8,9 +8,9 @@
 # Page tests run on Linux only: tests/test_page.py launches Playwright's Chromium (or VT_CHROMIUM) in a way that would
 # work on Windows too, but they were only ever run against Linux Chromium and Edge, and they take several minutes; the
 # Windows job checks the engine, the compiler and the app's server, not the browser.
-# Windows needs Python 3.14: with PyYAML's libyaml loader, a song that nests about 5000 levels deep overflows the C
-# stack on Windows (1 MB main thread) under 3.10-3.13 and kills the process, where 3.14 raises the RecursionError
-# song.py catches; tests/test_pipeline.py checks that case.
+# Windows runs the exe's Python 3.14. (Until 2026-10-08 it had to: with PyYAML's libyaml loader, a song nested about
+# 5000 levels deep overflowed the C stack on Windows (1 MB main thread) under 3.10-3.13 and killed the process; song.py's
+# BoundedLoader now refuses such text before composing it, and tests/test_pipeline.py checks that case.)
 # The synth and module-import tests skip everywhere (they need the plugins and the fixtures): the fixtures come from
 # tests/fetch_fixtures.py, which reads libxmp's master without a pinned commit or a digest, and Surge is a 300 MB
 # Windows-only plugin; neither is fetched in CI.

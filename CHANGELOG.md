@@ -17,6 +17,9 @@ Hardening after the 2026-10-08 audit of the repository: nothing changes for song
   gigabytes (a header claiming 65535 instruments or patterns, a chunk size of 4 GB, a tempo of zero); an XM or S3M
   the reader accepts but libopenmpt refuses imports with its level unmatched and a warning. `tools/fuzz_import.py`
   found them and reruns after a reader changes.
+- **A song nested more than 100 levels deep is refused with an error** instead of killing the process: with PyYAML's
+  libyaml loader on Windows under Python 3.10-3.13 (a source install; the exe's 3.14 was safe), such a file overflowed
+  the C stack. Recipes and every other YAML the app reads get the same guard.
 - **The app's write paths**: a negative pattern, candidate or channel index no longer picks from the end of the list, a
   muted or mixed channel past 63 no longer writes into the module header, a section, slot, Euclidean step count and
   request size are bounded.

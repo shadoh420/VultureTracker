@@ -982,8 +982,30 @@ def _check_images(ctx, mod, lowest):
                            f"(module sample_rate: 88200)")
 
 
-# libyaml's parser when PyYAML has it (about ten times faster; the same nodes, marks and styles, so the same module)
-class _LOADER(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+MAX_YAML_DEPTH = 100  # real songs nest six levels
+
+
+class BoundedLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+    """libyaml's loader when PyYAML has it (about ten times faster; the same nodes, marks and styles, so the same module),
+    refusing text nested deeper than MAX_YAML_DEPTH before composing it: libyaml's composer recurses on the C stack once
+    per level, and on Windows under Python 3.10-3.13 a song 5000 levels deep overflows the main thread's 1 MB stack and
+    kills the process before any RecursionError. Its parser does not recurse, so the depth is counted from its events."""
+
+    def __init__(self, stream):
+        if hasattr(yaml, "CSafeLoader") and isinstance(stream, (str, bytes)):  # pure Python raises RecursionError itself
+            depth = 0
+            for event in yaml.parse(stream, Loader=yaml.CSafeLoader):
+                if isinstance(event, (yaml.SequenceStartEvent, yaml.MappingStartEvent)):
+                    depth += 1
+                    if depth > MAX_YAML_DEPTH:
+                        raise yaml.composer.ComposerError(None, None, f"the YAML nests too deeply (more than "
+                                                          f"{MAX_YAML_DEPTH} levels)", event.start_mark)
+                elif isinstance(event, (yaml.SequenceEndEvent, yaml.MappingEndEvent)):
+                    depth -= 1
+        super().__init__(stream)
+
+
+class _LOADER(BoundedLoader):
     pass
 
 

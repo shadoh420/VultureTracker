@@ -9,7 +9,7 @@ import yaml
 
 from .itwriter import write_it
 from .fileio import atomic_write, protect_outputs, wav_bytes
-from .song import SongError, it_text, load_song_text, read_song_text
+from .song import BoundedLoader, SongError, it_text, load_song_text, read_song_text
 
 
 # ---------------------------------------------------------------- YAML round-trip
@@ -57,7 +57,7 @@ def to_yaml(song: dict) -> str:
     return yaml.dump(song, Dumper=_Dumper, sort_keys=False, width=120, allow_unicode=False)
 
 
-class _Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+class _Loader(BoundedLoader):
     pass
 
 

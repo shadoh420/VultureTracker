@@ -1654,7 +1654,7 @@ class State:
                     head = yaml.safe_load(p.read_text(encoding="utf-8"))
                     ok = isinstance(head, dict) and "samples" in head and "module" not in head
                     self._recipe_memo[key] = recipe_outputs(p) if ok else None
-                except (RecipeError, yaml.YAMLError, OSError, UnicodeDecodeError, ValueError, TypeError, KeyError, AttributeError):
+                except (RecipeError, yaml.YAMLError, RecursionError, OSError, UnicodeDecodeError, ValueError, TypeError, KeyError, AttributeError):
                     self._recipe_memo[key] = None
             if self._recipe_memo[key]:
                 out.append((p, self._recipe_memo[key]))
