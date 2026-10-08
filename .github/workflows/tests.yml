@@ -84,6 +84,11 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # the runner's %TEMP% is an 8.3 short path (C:\Users\RUNNER~1\...) while the app resolves paths to their long
+      # form (runneradmin): tests comparing a temp path with a resolved one failed on every first run. runner.temp is long.
+      TEMP: ${{ runner.temp }}
+      TMP: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
