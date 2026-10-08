@@ -2,7 +2,9 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.3.2 (2026-10-08)
+
+A tuner tab, and the agent chat shows markdown.
 
 - **TUNER tab** (before RECORD): a chromatic tuner with a cents needle, on the RECORD tab's input. It now reaches a
   five-string bass's low B (30.9 Hz); the tuner read nothing under 40 Hz before. It left the RECORD tab.
