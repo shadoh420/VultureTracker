@@ -9,6 +9,7 @@ volume (levels are the owner's); an entry marked `approved: true` (a pattern, a 
 are offered as tryout candidates, which the owner hears and picks. Every edit is one undo step in the app and marks the
 patterns it writes `by: agent`. The tools measure (LUFS, true peak, correlation); they cannot hear."""
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -451,6 +452,15 @@ def save_settings(new):
     credential store under the provider's name when keyring works here, else into the file. An empty api_key keeps the
     stored one; `clear_key` drops it."""
     cur = _read_file()
+    if "provider" in new and new["provider"] != cur.get("provider", ""):
+        # Keep inactive file-backed keys separate, just as the OS credential store does.
+        keys = cur.setdefault("provider_keys", {})
+        if cur.get("api_key"):
+            keys[_account(cur)] = cur.pop("api_key")
+        if new.get("provider") in keys:
+            cur["api_key"] = keys.pop(new["provider"])
+        for k in ("model", "base_url", "effort"):
+            cur.pop(k, None)
     for k in ("provider", "model", "base_url", "effort"):
         if k in new:
             cur[k] = str(new[k] or "").strip()
@@ -485,7 +495,112 @@ def public_settings():
     s = load_settings()
     return {"provider": s.get("provider", ""), "model": s.get("model", ""), "base_url": s.get("base_url", ""),
             "effort": s.get("effort", ""), "has_key": bool(s.get("api_key")), "key_store": s["key_store"],
-            "base_url_warning": base_url_warning(s.get("base_url", ""))}
+            "base_url_warning": base_url_warning(s.get("base_url", "")), "presets": PRESETS}
+
+
+PRESETS = {
+    "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "model": "gemini-3.8-flash"},
+    "ollama": {"base_url": "http://localhost:11434/v1", "model": ""},
+    "lmstudio": {"base_url": "http://localhost:1234/v1", "model": ""},
+    "openai": {"base_url": "http://localhost:11434/v1", "model": ""},
+}
+
+
+def connection(s):
+    provider = s.get("provider")
+    if provider not in PRESETS:
+        raise ValueError("choose Gemini, Ollama, LM Studio, or an OpenAI-compatible server")
+    preset = PRESETS[provider]
+    # Gemini always uses Google's endpoint, even if an older server URL is still saved.
+    base = (preset["base_url"] if provider == "gemini" else s.get("base_url") or preset["base_url"]).rstrip("/")
+    u = urllib.parse.urlsplit(base)
+    if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
+        raise ValueError("server URL must be an http(s) URL without credentials, query, or fragment")
+    key = s.get("api_key") or ""
+    if provider == "gemini":
+        key = key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or ""
+        if not key:
+            raise ValueError("Gemini needs an API key from aistudio.google.com/apikey; enter it in SETTINGS")
+    return base, s.get("model") or preset["model"], key
+
+
+def compatible_request(s, path, body=None, timeout=600):
+    base, _, key = connection(s)
+    req = urllib.request.Request(base + path, None if body is None else json.dumps(body).encode("utf-8"),
+                                 {"Content-Type": "application/json"})
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        code = e.code
+        detail = ""
+        try:
+            error = json.loads(e.read(8192))
+            if isinstance(error, list):
+                error = error[0] if error else {}
+            detail = str(error.get("error", {}).get("message", ""))
+            if key:
+                detail = detail.replace(key, "[redacted]")
+            detail = detail[:800]
+        except (ValueError, AttributeError, OSError):
+            pass
+        finally:
+            e.close()
+        if code == 429:
+            raise RuntimeError("rate limit or quota reached; wait and check your provider's quota. "
+                               "No paid fallback was used") from None
+        if code in (401, 403):
+            raise RuntimeError("provider refused access; check the API key and account permissions") from None
+        raise RuntimeError(f"provider returned HTTP {code}; check the model name and its tool-calling support"
+                           + (f": {detail}" if detail else "")) from None
+    except (urllib.error.URLError, TimeoutError):
+        raise RuntimeError("cannot reach the model server; start Ollama or LM Studio's Developer server, "
+                           "or check your server URL and internet connection") from None
+
+
+def discover_models(new):
+    """Read the selected server's model list without saving settings or sending song data."""
+    saved = load_settings()
+    s = {k: str(new.get(k) or "").strip() for k in ("provider", "base_url", "api_key")}
+    if s["provider"] not in ("ollama", "lmstudio", "openai"):
+        raise ValueError("model discovery is for Ollama, LM Studio, or a custom server")
+    if (not s["api_key"] and s["provider"] == saved.get("provider")
+            and connection(s)[0] == connection(saved)[0]):
+        s["api_key"] = saved.get("api_key", "")
+    out = compatible_request(s, "/models", timeout=5)
+    if not isinstance(out, dict) or not isinstance(out.get("data"), list):
+        raise ValueError("the server did not return an OpenAI-compatible model list")
+    models = sorted({m["id"] for m in out["data"] if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"]})
+    return {"models": models}
+
+
+def compatible_tools(provider):
+    tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
+                                               "parameters": t["input_schema"]}} for t in tool_list()]
+    if provider == "gemini":
+        # Google's schema subset uses anyOf for unions. Open-ended rack maps travel as JSON strings.
+        def schema(s):
+            out = dict(s)
+            if isinstance(out.get("type"), list):
+                out["anyOf"] = [{"type": t} for t in out.pop("type")]
+            if "properties" in out:
+                out["properties"] = {k: schema(v) for k, v in out["properties"].items()}
+            if "items" in out:
+                out["items"] = schema(out["items"])
+            if not out.get("required"):
+                out.pop("required", None)
+            return out
+        for t in tools:
+            f = t["function"]
+            f["parameters"] = schema(f["parameters"])
+            if f["name"] == "set_plugins":
+                f["parameters"]["properties"] = {k: {"type": "string", "description": "JSON-encoded object"}
+                                                  for k in f["parameters"]["properties"]}
+            if not f["parameters"].get("properties"):
+                del f["parameters"]
+    return tools
 
 
 class Chat:
@@ -514,9 +629,10 @@ class Chat:
         with self.lock:
             if self.busy:
                 raise ValueError("the agent is still working on the last message")
-            if self.provider not in (None, s["provider"]):
+            identity = (s["provider"], s.get("base_url", ""), s.get("model", ""))
+            if self.provider not in (None, identity):
                 self.history, self.session = [], None  # another provider: a new conversation (each its own format)
-            self.provider, self.busy = s["provider"], True
+            self.provider, self.busy = identity, True
         self.display.append({"role": "you", "text": text, "context": context})
         prompt = f"[the owner's selection: {context}]\n{text}" if context else text
         threading.Thread(target=self._run, args=(st, s, prompt), daemon=True).start()
@@ -644,22 +760,16 @@ class Chat:
     def _openai(self, st, s, prompt):
         """A local model through an OpenAI-compatible chat-completions server with function calling (Ollama:
         http://localhost:11434/v1, LM Studio: http://localhost:1234/v1, llama.cpp's server: http://localhost:8080/v1)."""
-        base = (s.get("base_url") or "http://localhost:11434/v1").rstrip("/")
-        tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                                                   "parameters": t["input_schema"]}} for t in tool_list()]
+        _, model, _ = connection(s)
+        if not model:
+            raise ValueError("choose a model in SETTINGS; use FIND MODELS for Ollama or LM Studio")
+        tools = compatible_tools(s["provider"])
         if not self.history:
             self.history.append({"role": "system", "content": SYSTEM})
         self.history.append({"role": "user", "content": prompt})
         for _ in range(40):
-            body = json.dumps({"model": s.get("model") or "", "messages": self.history, "tools": tools}).encode("utf-8")
-            req = urllib.request.Request(base + "/chat/completions", body, {"Content-Type": "application/json"})
-            if s.get("api_key"):
-                req.add_header("Authorization", "Bearer " + s["api_key"])
-            try:
-                with urllib.request.urlopen(req, timeout=600) as r:
-                    msg = json.loads(r.read())["choices"][0]["message"]
-            except urllib.error.URLError as e:
-                raise RuntimeError(f"no answer from {base} ({getattr(e, 'reason', e)}): is the model server running?")
+            msg = compatible_request(s, "/chat/completions", {"model": model, "messages": self.history,
+                                                            "tools": tools})["choices"][0]["message"]
             self.history.append({k: v for k, v in msg.items() if v is not None})
             self._say("agent", msg.get("content") or "")
             calls = msg.get("tool_calls") or []
@@ -668,8 +778,14 @@ class Chat:
             for c in calls:
                 try:
                     args = json.loads(c["function"].get("arguments") or "{}")
-                except ValueError:
-                    args = {}
+                    if not isinstance(args, dict):
+                        raise ValueError("tool arguments must be an object")
+                    if s["provider"] == "gemini" and c["function"]["name"] == "set_plugins":
+                        args = {k: json.loads(v) if isinstance(v, str) else v for k, v in args.items()}
+                except (ValueError, TypeError):
+                    self.history.append({"role": "tool", "tool_call_id": c.get("id", ""),
+                                         "content": json.dumps({"error": "invalid JSON object in tool arguments; nothing changed"})})
+                    continue
                 out = self._tool(st, c["function"]["name"], args)
                 self.history.append({"role": "tool", "tool_call_id": c.get("id", ""),
                                      "content": json.dumps(out, default=str)[:60000]})

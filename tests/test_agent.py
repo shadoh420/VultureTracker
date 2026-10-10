@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -21,11 +22,22 @@ from tests.test_gui import RATE, SONG_BLOCK, sine
 
 class Fake(BaseHTTPRequestHandler):
     """Answers POSTs with the next of `answers`, keeping the request bodies in `seen`."""
-    answers, seen = [], []
+    answers, seen, headers_seen = [], [], []
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         type(self).seen.append((self.path, body))
+        type(self).headers_seen.append(dict(self.headers))
+        out = json.dumps(type(self).answers.pop(0)).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def do_GET(self):
+        type(self).seen.append((self.path, None))
+        type(self).headers_seen.append(dict(self.headers))
         out = json.dumps(type(self).answers.pop(0)).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -162,7 +174,7 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(lines[1]["error"]["code"], -32700)
 
     def _fake(self, answers):
-        Fake.answers, Fake.seen = list(answers), []
+        Fake.answers, Fake.seen, Fake.headers_seen = list(answers), [], []
         srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close)
@@ -322,6 +334,106 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(Fake.seen[0][1]["messages"][0]["role"], "system")
         self.assertEqual(Fake.seen[1][1]["messages"][-1]["role"], "tool")
         self.assertEqual(json.loads(Fake.seen[1][1]["messages"][-1]["content"])["key"], "C major")
+
+    def test_compatible_providers_edit_refuse_and_undo(self):
+        for provider in ("gemini", "ollama", "lmstudio", "openai"):
+            with self.subTest(provider=provider):
+                st = self.state()
+                st.song_edit([{"op": "mark", "what": "pattern", "key": "p1", "approved": True}])
+                original = self.read()
+                def call(n, name, args):
+                    return {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [
+                        {"id": str(n), "type": "function", "function": {"name": name, "arguments": json.dumps(args)},
+                         "extra_content": {"google": {"thought_signature": "opaque-signature"}}}]}}]}
+                port = self._fake([
+                    call(1, "write_cells", {"pattern": "p2", "cells": [{"row": 1, "channel": 2, "cell": "E-5 02 v40 ..."}]}),
+                    call(2, "read_pattern", {"pattern": "p2", "from_row": 1, "to_row": 1}),
+                    call(3, "write_cells", {"pattern": "p1", "cells": [{"row": 0, "channel": 1, "cell": "D-5 01 ... ..."}]}),
+                    call(4, "undo", {}),
+                    {"choices": [{"message": {"role": "assistant", "content": "Edited, checked protection, then undone."}}]}])
+                # Keep the real HTTP serialization/tool loop; redirect only Google's fixed endpoint to our fixture.
+                real_connection = agent.connection
+                def local_connection(s):
+                    _, model, key = real_connection(s)
+                    return f"http://127.0.0.1:{port}/v1", model, key
+                agent.save_settings({"provider": provider, "model": "test-model", "api_key": "fixture-key"})
+                with mock.patch.object(agent, "connection", side_effect=local_connection):
+                    chat = self._chat(st, "Edit one note, check it, refuse approved notes, and undo")
+                self.assertFalse(chat.busy)
+                self.assertEqual(chat.display[-1]["text"], "Edited, checked protection, then undone.", chat.display)
+                self.assertEqual(len(Fake.seen), 5)
+                self.assertEqual(Fake.headers_seen[0]["Authorization"], "Bearer fixture-key")
+                result = lambda i: json.loads(Fake.seen[i][1]["messages"][-1]["content"])
+                self.assertTrue(result(1)["ok"])
+                self.assertIn("E-5 02 v40 ...", result(2)["rows"][0])
+                self.assertIn("approved", result(3)["error"])
+                self.assertEqual(self.read(), original)
+                self.assertEqual(Fake.seen[1][1]["messages"][-2]["tool_calls"][0]["extra_content"],
+                                 {"google": {"thought_signature": "opaque-signature"}})
+                self.assertTrue(any(m.get("error") for m in chat.display if m["role"] == "tool"))
+
+    def test_model_discovery_does_not_save_or_reuse_another_providers_key(self):
+        agent.save_settings({"provider": "gemini", "api_key": "private-key"})
+        before = self.file()
+        port = self._fake([{"data": [{"id": "local-b"}, {"id": "local-a"}, {"id": "local-a"}]}])
+        out = agent.discover_models({"provider": "ollama", "base_url": f"http://127.0.0.1:{port}/v1"})
+        self.assertEqual(out, {"models": ["local-a", "local-b"]})
+        self.assertEqual(Fake.seen, [("/v1/models", None)])
+        self.assertNotIn("Authorization", Fake.headers_seen[0])
+        self.assertEqual(self.file(), before)
+
+    def test_provider_switch_does_not_carry_file_key_or_endpoint(self):
+        agent.save_settings({"provider": "gemini", "api_key": "private-key", "base_url": "https://old.example/v1"})
+        agent.save_settings({"provider": "ollama"})
+        self.assertFalse(agent.public_settings()["has_key"])
+        self.assertEqual(agent.connection(agent.load_settings()), ("http://localhost:11434/v1", "", ""))
+        agent.save_settings({"provider": "gemini"})
+        self.assertEqual(agent.load_settings()["api_key"], "private-key")
+        agent.keyring = FakeKeyring()
+        agent.save_settings({"provider": "gemini", "api_key": "stored-key"})
+        agent.save_settings({"provider": "lmstudio"})
+        self.assertFalse(agent.public_settings()["has_key"])
+        agent.save_settings({"provider": "gemini"})
+        self.assertEqual(agent.load_settings()["api_key"], "stored-key")
+
+    def test_gemini_rack_maps_and_invalid_arguments(self):
+        st = self.state()
+        original = self.read()
+        def answer(name, args):
+            return {"choices": [{"message": {"role": "assistant", "tool_calls": [
+                {"id": name, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}}]}
+        replies = [answer("set_plugins", {"plugins": json.dumps({"1": {"effect": "echo"}}),
+                                          "channel_plugins": json.dumps({"1": 1})}),
+                   answer("undo", []),  # malformed arguments must not accidentally undo the edit
+                   answer("song_overview", {}), answer("undo", {}),
+                   {"choices": [{"message": {"role": "assistant", "content": "done"}}]}]
+        agent.save_settings({"provider": "gemini", "api_key": "fixture"})
+        with mock.patch.object(agent, "compatible_request", side_effect=replies) as request:
+            chat = self._chat(st, "change the rack then undo")
+        self.assertEqual(chat.display[-1]["text"], "done", chat.display)
+        self.assertEqual(self.read(), original)
+        results = [json.loads(m["content"]) for m in chat.history if m["role"] == "tool"]
+        self.assertTrue(results[0]["ok"])
+        self.assertIn("nothing changed", results[1]["error"])
+        self.assertEqual(results[2]["channels"][0]["effects"], ["echo"])
+        tools = {t["function"]["name"]: t["function"] for t in request.call_args.args[2]["tools"]}
+        self.assertNotIn("parameters", tools["song_overview"])
+        self.assertEqual(tools["set_module"]["parameters"]["properties"]["value"]["anyOf"],
+                         [{"type": "string"}, {"type": "integer"}])
+        self.assertEqual(agent.TOOLS["set_plugins"][1]["properties"]["plugins"], {"type": "object"})
+
+    def test_gemini_defaults_and_actionable_errors(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "API key"):
+                agent.connection({"provider": "gemini"})
+        s = {"provider": "gemini", "api_key": "secret", "base_url": "http://unrelated.example/v1"}
+        self.assertEqual(agent.connection(s), ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.8-flash", "secret"))
+        for code, text in [(429, "quota"), (401, "API key"), (400, "tool-calling")]:
+            with mock.patch.object(agent.urllib.request, "urlopen", side_effect=agent.urllib.error.HTTPError(
+                    "https://example.com", code, "bad", {}, io.BytesIO(b'secret'))):
+                with self.assertRaisesRegex(RuntimeError, text) as ctx:
+                    agent.compatible_request(s, "/chat/completions", {})
+                self.assertNotIn("secret", str(ctx.exception))
 
 
 if __name__ == "__main__":

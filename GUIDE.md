@@ -519,6 +519,29 @@ an entry marked approved is refused. Every edit is one undo step, and a pattern 
   them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points. The agent's replies show as
   markdown (bold, code, lists, headings, tables); links show their address and are not clickable.
 
+**Free cloud and local chat setup.** In AGENT → SETTINGS, the existing Claude Code, Anthropic API and custom
+OpenAI-compatible server choices remain available. The additional presets are:
+
+- **Gemini (free tier available):** create a key at https://aistudio.google.com/apikey, using a project on Google's
+  Free tier, paste it in API KEY and SAVE. The default model is `gemini-3.8-flash`; you can type another compatible
+  model. Availability and limits depend on Google's current model, region and project quota. Enabling billing on
+  that project can incur charges; this preset cannot force a paid project to be free. Google may use free-tier
+  inputs and outputs to improve its products. See https://ai.google.dev/gemini-api/docs/pricing. With no stored key,
+  the app uses `GOOGLE_API_KEY`, then `GEMINI_API_KEY`. Quota errors stop the request; there is no automatic paid fallback.
+- **Ollama:** install from https://ollama.com, download a local model that supports tool calling and start Ollama.
+  Select Ollama here, click FIND MODELS, choose a model and SAVE. The default URL is `http://localhost:11434/v1`.
+  Avoid cloud models if you want local-only operation. Local inference uses your computer's memory and processing power.
+- **LM Studio:** install from https://lmstudio.ai, download and load a model with tool calling, and start the server
+  in its Developer tab. Select LM Studio here, click FIND MODELS, choose a model and SAVE. The default URL is
+  `http://localhost:1234/v1`. No key is normally needed for either local server; enter one if server authentication
+  is enabled. Both URLs are editable. The custom server option still supports llama.cpp and other compatible servers.
+
+FIND MODELS reads the server's model list without sending song data, running inference or saving settings. It confirms
+connectivity, not the model's ability to edit correctly. Chat uses the same song tools, approved-content guards and
+undo as the other providers. Changing provider, model or server starts a fresh model conversation. Keys remain separate
+by provider in the OS credential store, or in the settings file when that store is unavailable. Draft settings stay in
+place while the app refreshes.
+
 **Approved and by.** ✓ beside a channel (SONG tab), a pattern (SONG tab's patterns) or a sample slot (SAMPLES tab)
 marks it `approved: true` in the song file: the agent tools leave it alone. The patterns table's BY column and the
 Pattern tab's title show who wrote a pattern. The marks change nothing in the module.

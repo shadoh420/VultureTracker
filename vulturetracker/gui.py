@@ -4415,6 +4415,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, agent.run(st, str(body.get("name")), body.get("args") or {}))
             elif act == "chatsettings":
                 return self._send(200, agent.save_settings(body))
+            elif act == "chatmodels":
+                return self._send(200, agent.discover_models(body))
             elif act == "browse":
                 p = self.browse()
                 if p:

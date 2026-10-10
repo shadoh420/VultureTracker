@@ -105,6 +105,23 @@ class TestRelease100Page(unittest.TestCase):
             page.wait_for_function("typeof S !== 'undefined' && S && S.song")
             self.assertEqual(page.evaluate("document.documentElement.style.zoom"), '1.5')
 
+    def test_transport_controls_stay_inside_the_bottom_panel(self):
+        with self.page() as (page, st, d):
+            for width, scale, agent_open in [(1400, 100, False), (1180, 100, False),
+                                              (1400, 100, True), (1180, 125, True), (1400, 150, True)]:
+                with self.subTest(width=width, scale=scale, agent=agent_open):
+                    page.set_viewport_size({'width': width, 'height': 900})
+                    failures = page.evaluate("""([scale,agentOpen])=>{
+                      setScale(scale);document.body.classList.toggle('agent-on',agentOpen);
+                      $('outnums').textContent='-24.0 LUFS · TP -15.7 · CORR 0.97';
+                      $('nowname').textContent='the song as it is';
+                      const panel=document.querySelector('.bottom').getBoundingClientRect();
+                      return [...document.querySelectorAll('.bottom .btn,.bottom select,.bottom .nowrow,.bottom .prog,.bottom #live')]
+                        .filter(el=>{const r=el.getBoundingClientRect();return r.top<panel.top-1||r.bottom>panel.bottom+1||r.left<panel.left-1||r.right>panel.right+1})
+                        .map(el=>el.id||el.textContent.trim());
+                    }""", [scale, agent_open])
+                    self.assertEqual(failures, [])
+
     def test_a_dropped_flac_becomes_a_slot(self):
         try:
             ffmpeg = gui.ffmpeg_exe()

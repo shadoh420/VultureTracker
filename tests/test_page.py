@@ -30,6 +30,83 @@ HTML = gui.HTML.read_text(encoding="utf-8")
 
 
 class TestPage(unittest.TestCase):
+    def test_agent_provider_setup_and_model_discovery(self):
+        if sync_playwright is None:
+            self.skipTest("playwright not installed")
+        from vulturetracker import agent
+        from tests.test_agent import AgentTests
+        fixture = AgentTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        self.addCleanup(fixture.doCleanups)
+        st = fixture.state()
+        port = fixture._fake([{"data": [{"id": "local-tool-model"}]}])
+        with mock.patch.object(gui.Handler, "state", st):
+            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                with sync_playwright() as p:
+                    exe = os.environ.get("VT_CHROMIUM")
+                    try:
+                        browser = p.chromium.launch(**({"executable_path": exe} if exe else {}))
+                    except PlaywrightError as e:
+                        self.skipTest(f"no browser: {str(e).splitlines()[0]}")
+                    try:
+                        page = browser.new_page()
+                        errors = []
+                        page.on("pageerror", lambda e: errors.append(str(e)))
+                        page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                        page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.chat")
+                        page.evaluate("document.body.classList.add('agent-on');AG.view='set';renderAgent()")
+                        self.assertEqual(page.locator("#ag-provider option").count(), 7)
+                        page.select_option("#ag-provider", "gemini")
+                        self.assertEqual(page.input_value("#ag-model"), "gemini-3.8-flash")
+                        self.assertTrue(page.is_disabled("#ag-base"))
+                        self.assertFalse(page.is_visible("#ag-find"))
+                        page.fill("#ag-key", "fixture-key")
+                        page.evaluate("document.activeElement.blur();renderAgent()")
+                        self.assertEqual(page.input_value("#ag-key"), "fixture-key")
+                        self.assertEqual(page.input_value("#ag-provider"), "gemini")
+                        page.evaluate("agSave()")
+                        self.assertEqual(agent.load_settings()["provider"], "gemini")
+                        page.click("#ag-v-set")
+                        page.select_option("#ag-provider", "lmstudio")
+                        self.assertEqual(page.input_value("#ag-base"), "http://localhost:1234/v1")
+                        self.assertEqual(page.input_value("#ag-key"), "")
+                        page.select_option("#ag-provider", "ollama")
+                        self.assertEqual(page.input_value("#ag-base"), "http://localhost:11434/v1")
+                        page.fill("#ag-base", f"http://127.0.0.1:{port}/v1")
+                        page.click("#ag-find")
+                        page.wait_for_function("document.getElementById('ag-model-status').textContent.startsWith('Connected')")
+                        self.assertEqual(page.input_value("#ag-model"), "local-tool-model")
+                        self.assertTrue(page.is_visible("#ag-model-pick"))
+                        page.evaluate("renderAgent()")
+                        self.assertEqual(page.input_value("#ag-provider"), "ollama")
+                        page.evaluate("agSave()")
+                        self.assertEqual(agent.load_settings()["model"], "local-tool-model")
+                        self.assertFalse(agent.public_settings()["has_key"])
+                        # A real Gemini reply: bold text spans an inline code fragment. Code must stay literal,
+                        # and model-authored HTML must remain inert while the surrounding emphasis renders.
+                        rendered = page.evaluate("""text=>{
+                          AG.view='chat';S.chat.messages=[{role:'agent',text}];renderAgent();
+                          const tx=document.querySelector('.agm.agent .tx');
+                          return {bold:[...tx.querySelectorAll('b')].map(x=>x.textContent),
+                            code:[...tx.querySelectorAll('code')].map(x=>x.textContent),
+                            italic:[...tx.querySelectorAll('i')].map(x=>x.textContent),
+                            images:tx.querySelectorAll('img').length,text:tx.textContent};
+                        }""", "1. **Initial read (`p2`, row 1)**: `**literal**`\n__Also bold__ and *italic*.\n<img src=x onerror=alert(1)>")
+                        self.assertEqual(rendered["bold"], ["Initial read (p2, row 1)", "Also bold"])
+                        self.assertEqual(rendered["code"], ["p2", "**literal**"])
+                        self.assertEqual(rendered["italic"], ["italic"])
+                        self.assertEqual(rendered["images"], 0)
+                        self.assertIn("<img src=x onerror=alert(1)>", rendered["text"])
+                        self.assertEqual(errors, [])
+                    finally:
+                        browser.close()
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
     def test_values_in_inline_handlers_go_through_attr(self):
         # a value inside an inline handler (onclick="typeIn(this,...,"<value>")") is HTML first and JavaScript second:
         # `&quot;` in a song title decodes to a quote that ends the JavaScript string. attr() escapes the & as well.

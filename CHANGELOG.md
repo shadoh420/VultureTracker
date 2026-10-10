@@ -2,7 +2,17 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.4.0 (2026-10-10)
+
+- **Playback bar layout:** status, ALL OFF and speed controls stay inside the panel. The status row spans the full
+  available width, and the panel grows when it needs to wrap, including with the Agent panel open or a larger UI scale.
+
+- **More chat providers:** Gemini with free-tier setup guidance, plus Ollama and LM Studio presets with local model
+  discovery. Existing Claude Code, Anthropic and custom OpenAI-compatible connections remain. Provider switches no
+  longer carry a file-backed API key into another provider; quota failures explain the limit without a paid fallback.
+  Chat settings keep unsaved input during refresh, and changing the model or server starts a fresh conversation.
+- **Chat formatting:** bold and italic text can contain inline code without leaving raw Markdown markers; underscore
+  bold and combined bold/italic render too. Code stays literal and model-authored HTML stays escaped.
 
 Hardening after the 2026-10-08 audit of the repository: nothing changes for songs or modules.
 

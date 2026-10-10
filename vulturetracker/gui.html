@@ -46,10 +46,11 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .note{flex:1;min-width:0;padding:5px 8px;font-size:11px}
 .bar{flex:1;height:5px;background:#0b0e0f}.bar i{display:block;height:100%;background:var(--acc);width:40%;animation:pulse 1s infinite alternate}@keyframes pulse{from{opacity:.4}to{opacity:1}}
 .fail{margin-top:8px;display:flex;align-items:flex-start;gap:8px;padding:7px 8px;background:#1d1414;font:10.5px/1.5 var(--mono);color:#e0a09a}.fail b{font-family:inherit;color:var(--red);letter-spacing:.1em;font-size:10px;flex:none}
-.bottom{flex:none;height:60px;display:flex;align-items:center;gap:14px;padding:0 12px;background:var(--bar);box-shadow:inset 0 1px 0 #2a3135}
-/* the transport's first row stays one line in the 60 px bar: the labels keep their size, the texts give way (the status
-   first) with an ellipsis and show in full on hover */
-.nowrow{display:flex;align-items:baseline;gap:10px;white-space:nowrap}.nowrow>*{flex:none}
+.bottom{flex:none;display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:6px 14px;padding:8px 12px;background:var(--bar);box-shadow:inset 0 1px 0 #2a3135}
+.bottom>.play{grid-row:1 / 3}.transport-track{display:flex;flex-direction:column;gap:5px;min-width:0}
+.playback-modes{display:flex;gap:2px;flex-wrap:wrap;justify-content:flex-end;max-width:420px}
+/* Status spans the progress and mode controls; wrapping grows the panel instead of escaping its top edge. */
+.nowrow{grid-column:2 / -1;display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;white-space:nowrap}.nowrow>*{flex:none}
 .nowrow>.fit{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}#looplabel2{flex-shrink:0;max-width:35%}#nowname{flex-shrink:0;max-width:30%}
 .play{width:36px;height:36px;display:grid;place-items:center;cursor:pointer;font-size:15px;color:#0c1a0f;background:var(--acc)}
 .loopbar{position:relative;height:6px;margin-bottom:2px;background:#0d1012;cursor:ew-resize}.loopbar i{position:absolute;top:0;bottom:0;background:var(--amber);opacity:.75}
@@ -75,6 +76,7 @@ body.agent-on #agent{display:flex}body.agent-on .main,body.agent-on .bottom{marg
 .agm .tx table{border-collapse:collapse;margin:4px 0;font-size:10.5px;white-space:normal}.agm .tx th,.agm .tx td{border:1px solid #2a3135;padding:2px 5px;text-align:left;vertical-align:top}.agm .tx .mh{color:#e6ecef}.agm .tx .mq{display:block;border-left:2px solid #2a3135;padding-left:7px;color:var(--mid)}.agm .tx hr{border:0;border-top:1px solid #2a3135;margin:6px 0}.agm.tool.err .tx,.agm.error .tx{color:var(--red)}.agm .cx{display:block;font:9.5px var(--mono);color:var(--dim);margin-top:2px}
 .agchips{display:flex;gap:3px;flex-wrap:wrap;margin-bottom:6px}.agchips span{cursor:pointer;padding:3px 7px;font-size:10px;color:#c3cbcf;background:#0f1416;box-shadow:inset 1px 1px 0 #21272a}
 #ag-set label{display:block;margin:8px 0 2px;font-size:9.5px;letter-spacing:.1em;font-weight:700;color:var(--dim)}#ag-set input,#ag-set select{width:100%;padding:4px 6px;font:11px var(--mono)}
+#ag-find[hidden],#ag-model-pick[hidden]{display:none}
 .rnote{position:absolute;height:10px;border-radius:2px;background:var(--acc);box-shadow:inset 0 0 0 1px #0a0c0d;font:8px/10px var(--mono);color:#0c1a0f;padding-left:2px;overflow:hidden;white-space:nowrap;cursor:ns-resize}
 .rnote.ghost{background:#5f7d94;opacity:.28;pointer-events:none;color:transparent}.rlab{position:absolute;left:0;width:38px;font:8.5px/12px var(--mono);color:var(--dim);text-align:right;padding-right:3px}
 .rkchain{display:flex;align-items:flex-start;gap:0;padding:16px 14px;overflow-x:auto;min-height:100%}
@@ -135,12 +137,16 @@ option.hascand{color:var(--acc);font-weight:700}
   <div class="ph" style="gap:6px"><span class="k" style="white-space:nowrap">AGENT <span id="ag-who" class="meta" style="letter-spacing:0;font-weight:400"></span></span><span style="display:flex;gap:2px"><span class="btn sm" id="ag-v-chat" onclick="AG.view='chat';renderAgent()">CHAT</span><span class="btn sm" id="ag-v-log" onclick="AG.view='log';renderAgent()" title="every tool call an agent made on this song: from this panel or over MCP (Claude Code)">ACTIVITY</span><span class="btn sm" id="ag-v-set" onclick="AG.view='set';renderAgent()">SETTINGS</span><span class="btn sm" onclick="act('chat',{clear:true})" title="start a new conversation">NEW</span></span></div>
   <div id="ag-msgs"></div>
   <div id="ag-set" class="pb" style="display:none;flex:1;overflow:auto;font-size:11px;line-height:1.5">
-    <label>PROVIDER</label><select id="ag-provider"><option value="">off</option><option value="claude_code">Claude Code (your subscription)</option><option value="anthropic">Anthropic API (Claude, billed per token)</option><option value="openai">local model (OpenAI-compatible server)</option></select>
+    <label for="ag-provider">PROVIDER</label><select id="ag-provider" onchange="agProvider()"><option value="">off</option><option value="claude_code">Claude Code (your subscription)</option><option value="anthropic">Anthropic API (Claude, billed per token)</option><option value="gemini">Gemini (free tier available)</option><option value="ollama">Ollama (local)</option><option value="lmstudio">LM Studio (local)</option><option value="openai">Custom / local OpenAI-compatible server</option></select>
+    <p class="meta" id="ag-help" style="white-space:pre-line"></p>
     <label>MODEL</label><input id="ag-model" placeholder="empty: Claude Code's default · claude-opus-5-5 · or a local model, e.g. qwen3:14b">
-    <label>SERVER URL (LOCAL MODEL)</label><input id="ag-base" placeholder="http://localhost:11434/v1 (Ollama) · :1234/v1 LM Studio · :8080/v1 llama.cpp">
+    <button class="btn" id="ag-find" type="button" onclick="agModels()">FIND MODELS</button>
+    <select id="ag-model-pick" aria-label="Available models" hidden onchange="$('ag-model').value=this.value"><option value="">Choose a model</option></select>
+    <p class="meta" id="ag-model-status" role="status"></p>
+    <label for="ag-base">SERVER URL</label><input id="ag-base" placeholder="http://localhost:11434/v1 (Ollama) · :1234/v1 LM Studio · :8080/v1 llama.cpp">
     <label>API KEY</label><input id="ag-key" type="password" autocomplete="off" placeholder="">
     <label>EFFORT (ANTHROPIC)</label><select id="ag-effort"><option value="">medium (default)</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select>
-    <div style="display:flex;gap:4px;margin-top:10px"><span class="btn" style="flex:1;text-align:center" onclick="agSave()">SAVE</span><span class="btn" onclick="act('chatsettings',{clear_key:true})" title="forget the stored key">FORGET KEY</span></div>
+    <div style="display:flex;gap:4px;margin-top:10px"><span class="btn" style="flex:1;text-align:center" onclick="agSave()">SAVE</span><span class="btn" onclick="agForget()" title="forget the selected provider's stored key">FORGET KEY</span></div>
     <p class="meta" style="margin-top:12px"><b style="color:#c3cbcf">Claude Code (your subscription)</b> runs the <span class="mono">claude</span> you are signed in to, headless, with this song's tools as its only tools: no API key, no per-token bill (it counts toward your plan's usage). Install Claude Code and sign in once in a terminal first.</p>
     <div class="err" id="ag-warn" style="display:none;margin-top:8px"></div>
     <p class="meta"><span id="ag-store"></span>, never beside a song. With no key here, the Anthropic API uses ANTHROPIC_API_KEY or an <span class="mono">ant auth login</span> profile; the API bills per token. A local model needs a server with tool calling (Ollama, LM Studio, llama.cpp) and costs nothing.</p>
@@ -631,13 +637,13 @@ option.hascand{color:var(--acc);font-weight:700}
 
 <div class="bottom">
   <div class="play" id="playbtn" onclick="togglePlay()">▶</div>
-  <div style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:0">
-    <div class="nowrow" onmouseover="if(event.target.classList.contains('fit'))event.target.title=event.target.textContent"><span class="k">LOOPING</span><span class="mono fit" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span class="fit" id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span class="fit" id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="btn sm" style="color:var(--red)" onclick="panic()" title="ALL OFF: stop every sound the app is making (the render, the live engine, previews, the FAUST tab's voices)">ALL OFF</span><span class="k">OUT</span><span class="mono" id="outnums" style="font-size:10.5px;color:#c3cbcf" title="the playing render, measured: integrated loudness (ITU-R BS.1770, LUFS), true peak (dBTP, 4x oversampled) and the stereo correlation of the part that sounds (1 mono, 0 unrelated, below 0 out of phase). Numbers, not a verdict: the ear decides">—</span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
+  <div class="nowrow" onmouseover="if(event.target.classList.contains('fit'))event.target.title=event.target.textContent"><span class="k">LOOPING</span><span class="mono fit" id="looplabel2" style="font-size:11px;color:#c3cbcf"></span><span class="k">NOW PLAYING</span><span class="fit" id="nowname" style="font-size:12px;font-weight:600;color:var(--hi)"></span><span class="fit" id="nowmode" style="font-size:10.5px;color:var(--dim)"></span><span style="flex:1"></span><span class="btn sm" style="color:var(--red)" onclick="panic()" title="ALL OFF: stop every sound the app is making (the render, the live engine, previews, the FAUST tab's voices)">ALL OFF</span><span class="k">OUT</span><span class="mono" id="outnums" style="font-size:10.5px;color:#c3cbcf" title="the playing render, measured: integrated loudness (ITU-R BS.1770, LUFS), true peak (dBTP, 4x oversampled) and the stereo correlation of the part that sounds (1 mono, 0 unrelated, below 0 out of phase). Numbers, not a verdict: the ear decides">—</span><span class="k">SPEED</span><select id="speed" onchange="if(this.value==='type'){this.value=String(speed);typeIn(this,10,200,v=>setSpeed(v/100),Math.round(speed*100))}else setSpeed(+this.value)" style="font:10px var(--mono);padding:1px 3px" title="playback speed; the pitch is kept"><option value="1">100 %</option><option value="0.75">75 %</option><option value="0.5">50 %</option><option value="0.33">33 %</option><option value="0.25">25 %</option><option value="0.2">20 %</option><option value="type">type…</option></select></div>
+  <div class="transport-track">
     <div class="loopbar" id="loopbar" onmousedown="loopDrag(event)" title="playback loop: drag here to loop a span of what plays (snapped to rows) · click to clear it"><i id="loopfill"></i></div>
     <div class="prog" id="prog" onmousedown="seekDrag(event)" title="click or drag to seek"><i id="progfill"></i><b id="proghead"></b></div>
     <div style="display:flex;gap:8px;align-items:center;min-width:0"><span class="mono" id="pos" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><span class="k" style="white-space:nowrap" title="the channels sounding at the playhead, with the slot each plays (from the pattern: a looped tone until its note-off, a one-shot until its sample runs out) · click one to solo it">SOUNDING</span><div id="live" style="flex:1;min-width:0;display:flex;gap:3px;overflow:hidden"></div></div>
   </div>
-  <div style="display:flex;gap:2px">
+  <div class="playback-modes">
     <span class="btn" id="m-song" onclick="pick(null)" title="play the song itself: nothing swapped, the faders applied">SONG</span>
     <span class="btn on" id="m-mix" onclick="setSolo(false)">IN MIX <span class="kbd">M</span></span>
     <span class="btn" id="m-solo" onclick="setSolo(true)" title="the candidate's WAV by itself, not in the song">SAMPLE ALONE <span class="kbd">S</span></span>
@@ -1386,7 +1392,7 @@ function keyLine(f){const r=f.key_report;if(!r||!r.estimate)return '';const low=
     (r.key&&low.length?`<div class="meta" style="font-size:10px;padding:2px 0 4px">mostly outside it: ${low.map(c=>pad(c.channel)+' '+esc(c.name)).join(', ')}</div>`:'')}
 // ---- AGENT: the chat panel (optional: a model the owner configures), the activity of every agent (also over MCP), the
 // selection the page shares with the tools, and the places an agent cues (shown, and played when it asks)
-const AG={view:'chat',seen:0,sel:'',selT:null,cue:null};
+const AG={view:'chat',seen:0,sel:'',selT:null,cue:null,editing:false,discovery:0};
 try{if(localStorage.agent==='1')document.body.classList.add('agent-on')}catch(e){}
 function agentToggle(){document.body.classList.toggle('agent-on');try{localStorage.agent=document.body.classList.contains('agent-on')?'1':'0'}catch(e){}renderAgent()}
 function agSelection(){const f=S.song&&S.song.facts;if(!f)return null;const o=f.orders[PAT.order];if(!o)return null;
@@ -1397,14 +1403,36 @@ function agSelText(s){if(!s)return '';const f=S.song.facts,ch=s.channels[0]===s.
 function agSyncSel(){const s=agSelection(),k=JSON.stringify(s);if(k===AG.sel)return;AG.sel=k;clearTimeout(AG.selT);
   AG.selT=setTimeout(()=>fetch('/api/selection',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selection:s})}).catch(()=>{}),250);if(document.body.classList.contains('agent-on'))renderAgent()}
 function agSend(text){const t=(text||$('ag-in').value).trim();if(!t)return;const s=agSelection();if(!text)$('ag-in').value='';act('chat',{text:t,context:SEL?agSelText(s):null})}
-function agSave(){const b={provider:$('ag-provider').value,model:$('ag-model').value,base_url:$('ag-base').value,effort:$('ag-effort').value};if($('ag-key').value)b.api_key=$('ag-key').value;$('ag-key').value='';act('chatsettings',b);AG.view='chat'}
+function agFields(){return {provider:$('ag-provider').value,model:$('ag-model').value,base_url:$('ag-base').value,effort:$('ag-effort').value}}
+async function agSave(){const b=agFields();if($('ag-key').value)b.api_key=$('ag-key').value;const r=await act('chatsettings',b);if(!r.error){$('ag-key').value='';AG.editing=false;AG.view='chat';renderAgent()}}
+async function agForget(){const r=await act('chatsettings',{...agFields(),clear_key:true});if(!r.error){$('ag-key').value='';$('ag-key').placeholder='none stored'}}
+function agProvider(){const p=$('ag-provider').value,d=(S.chat.settings.presets||{})[p]||{};
+  $('ag-base').value=d.base_url||'';$('ag-model').value=d.model||'';$('ag-effort').value='';$('ag-key').value='';
+  $('ag-key').placeholder=p===S.chat.settings.provider&&S.chat.settings.has_key?'stored · type to replace':'enter key if required';
+  AG.discovery++;$('ag-model-pick').hidden=true;$('ag-model-status').textContent='';$('ag-find').disabled=false;agSetup()}
+function agSetup(){const p=$('ag-provider').value,local=['ollama','lmstudio','openai'].includes(p);
+  $('ag-find').hidden=!local;$('ag-base').disabled=!local;
+  $('ag-help').textContent=({gemini:'Create a key at aistudio.google.com/apikey and keep its project on the Free tier. Paste the key below, then SAVE. Default: gemini-3.8-flash. Free availability and quotas vary; paid billing on your Google project can incur charges. Google may use free-tier data to improve its products. No automatic paid fallback.',
+    ollama:'Install Ollama from ollama.com and download a model with tool calling. Start Ollama, then FIND MODELS and choose one. Local models use your computer; no subscription or API key is normally needed. Avoid cloud models if you want local-only use.',
+    lmstudio:'Install LM Studio from lmstudio.ai, download and load a model with tool calling, then start the server in the Developer tab. Click FIND MODELS and choose one. No subscription or API key is normally needed; authenticated servers require a key.',
+    openai:'Enter your server URL, then FIND MODELS or type a model name. The model must support tool calling. Hosted providers may charge for use.'})[p]||''}
+async function agModels(){const ticket=++AG.discovery,b=agFields();if($('ag-key').value)b.api_key=$('ag-key').value;
+  $('ag-find').disabled=true;$('ag-model-status').textContent='Connecting…';
+  try{const r=await fetch('/api/chatmodels',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}),j=await r.json();
+    if(ticket!==AG.discovery||b.base_url!==$('ag-base').value)return;if(j.error)throw Error(j.error);
+    const models=j.models||[];
+    $('ag-model-pick').innerHTML='<option value="">Choose a model</option>'+models.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');$('ag-model-pick').hidden=!models.length;
+    if(models.length===1&&!$('ag-model').value)$('ag-model').value=models[0];$('ag-model-pick').value=$('ag-model').value;
+    $('ag-model-status').textContent=models.length?`Connected · ${models.length} model(s). Choose one with tool calling, then SAVE. Listing models does not test editing.`:'Connected, but no models found. Download/load a model in the server, then try again.';
+  }catch(e){if(ticket===AG.discovery)$('ag-model-status').textContent=e.message}finally{if(ticket===AG.discovery)$('ag-find').disabled=false}}
 const AG_CHIPS=['What is selected here?','Measure this','Make it darker','More space','Give me three options'];
 function renderAgent(){const on=document.body.classList.contains('agent-on');$('agentbtn').classList.toggle('on',on);if(!on||!S.song)return;
   const c=S.chat||{messages:[],settings:{}},st=c.settings||{},v=AG.view;
   ['chat','log','set'].forEach(k=>$('ag-v-'+k).classList.toggle('on',v===k));
-  $('ag-who').textContent=st.provider==='claude_code'?'· Claude Code'+(st.model?' · '+st.model:''):st.provider==='anthropic'?'· '+(st.model||'claude-opus-5-5'):st.provider==='openai'?'· '+(st.model||'local model'):'· chat off (SETTINGS)';
+  $('ag-who').textContent=st.provider==='claude_code'?'· Claude Code'+(st.model?' · '+st.model:''):st.provider==='anthropic'?'· '+(st.model||'claude-opus-5-5'):st.provider?'· '+({gemini:'Gemini',ollama:'Ollama',lmstudio:'LM Studio',openai:'Custom'}[st.provider]||st.provider)+(st.model?' · '+st.model:''):'· chat off (SETTINGS)';
   $('ag-set').style.display=v==='set'?'block':'none';$('ag-msgs').style.display=v==='set'?'none':'flex';$('ag-foot').style.display=v==='chat'?'block':'none';
-  if(v==='set'&&document.activeElement.parentNode!==$('ag-set')){$('ag-provider').value=st.provider||'';$('ag-model').value=st.model||'';$('ag-base').value=st.base_url||'';$('ag-effort').value=st.effort||'';$('ag-key').placeholder=st.has_key?'stored · type to replace':'none stored'}
+  if(v!=='set')AG.editing=false;
+  if(v==='set'&&!AG.editing){const d=(st.presets||{})[st.provider]||{};$('ag-provider').value=st.provider||'';$('ag-model').value=st.model||d.model||'';$('ag-base').value=st.base_url||d.base_url||'';$('ag-effort').value=st.effort||'';$('ag-key').placeholder=st.has_key?'stored · type to replace':'none stored';$('ag-key').value='';AG.editing=true;agSetup()}
   if(v==='set'){$('ag-store').textContent=st.key_store==='keyring'?'The key is kept in the OS credential store (keyring)':'The key is kept in agent.json in your user folder, in plain text';$('ag-warn').textContent=st.base_url_warning||'';$('ag-warn').style.display=st.base_url_warning?'block':'none'}
   const box=$('ag-msgs'),end=box.scrollTop+box.clientHeight>=box.scrollHeight-20;
   if(v==='log')put('ag-msgs',(S.agent_log||[]).slice().reverse().map(l=>`<div class="agm tool ${l.error?'err':''}"><b>${new Date(l.time*1000).toTimeString().slice(0,5)}</b><span class="tx">${esc(l.tool)} ${esc(l.args)}\n→ ${esc(l.error||l.summary)}</span></div>`).join('')||'<div class="meta">No agent has used the tools on this song yet.</div>');
@@ -1416,7 +1444,12 @@ function renderAgent(){const on=document.body.classList.contains('agent-on');$('
   $('ag-ctx').textContent=SEL?'on '+agSelText(agSelection()):''}
 // the agent's replies as markdown: escaped first, then code blocks and spans, bold, italics, headings, lists, quotes, rules
 // and tables (.tx keeps the line breaks); links show their text and address, never a live href from the model
-function md(s){const inl=t=>t.split(/`([^`\n]+)`/).map((p,k)=>k%2?`<code>${p}</code>`:p.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/(^|[^\w*])[*_](?=\S)([^*_\n]*?\S)[*_](?![\w*])/g,'$1<i>$2</i>').replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,'$1 ($2)')).join(''),
+function md(s){const inl=t=>{const code=[];
+    // Protect code while parsing emphasis across it (e.g. **read `p2` now**).
+    t=t.replace(/\x00/g,'\ufffd').replace(/(`+)(.+?)\1/g,(_,ticks,text)=>`\x00${code.push(`<code>${text}</code>`)-1}\x00`);
+    return t.replace(/(\*\*\*|___)(.+?)\1/g,'<b><i>$2</i></b>').replace(/(\*\*|__)(.+?)\1/g,'<b>$2</b>')
+      .replace(/(^|[^\w*])[*_](?=\S)([^*_\n]*?\S)[*_](?![\w*])/g,'$1<i>$2</i>')
+      .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g,'$1 ($2)').replace(/\x00(\d+)\x00/g,(_,n)=>code[+n])},
   cells=l=>l.trim().replace(/^\||\|$/g,'').split('|').map(c=>inl(c.trim())),L=esc(s).split('\n'),out=[];
   for(let i=0;i<L.length;i++){const l=L[i];let m;
     if(/^\s*```/.test(l)){const b=[];while(++i<L.length&&!/^\s*```/.test(L[i]))b.push(L[i]);out.push(`<pre>${b.join('\n')}</pre>`)}
