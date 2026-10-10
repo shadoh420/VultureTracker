@@ -1654,6 +1654,25 @@ class TestPackage(unittest.TestCase):
         self.assertTrue(wheel.name.startswith(f"vulturetracker-{__version__}-"), wheel.name)  # pyproject reads __init__'s
 
 
+class TestBrowse(unittest.TestCase):
+    @unittest.skipUnless(importlib.util.find_spec("webview"), "native filters need pywebview")
+    def test_native_filters_and_cancel(self):
+        from webview.util import parse_file_type
+
+        def dialog(kind, file_types):
+            for value in file_types:
+                parse_file_type(value)  # use the real validator, including its description restrictions
+            return chosen
+
+        window = mock.Mock()
+        window.create_file_dialog.side_effect = dialog
+        with mock.patch.object(gui.Handler, "window", window):
+            for flags in ({}, {"module": True}, {"wav": True}):
+                for chosen in (("C:/songs/chosen.it",), None):
+                    with self.subTest(flags=flags, chosen=chosen):
+                        self.assertEqual(gui.Handler.browse(**flags), chosen[0] if chosen else None)
+
+
 class TestNoWebView2(unittest.TestCase):
     def test_internet_explorer_engine_means_the_browser(self):
         import types

@@ -4128,7 +4128,7 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def browse(cls, wav=False, module=False):
         """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module) path or None."""
-        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Modules, tabs and MIDI", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("Song files", "*.yaml;*.yml")
+        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Module tab and MIDI files", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("Song files", "*.yaml;*.yml")
         if cls.window is not None:
             import webview
             r = cls.window.create_file_dialog(webview.OPEN_DIALOG, file_types=(f"{kind} ({pat})", "All files (*.*)"))

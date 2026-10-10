@@ -644,7 +644,7 @@ class Chat:
     def _tool(self, st, name, args):
         out = run(st, name, args)
         self.display.append({"role": "tool", "tool": name, "args": _short(args, 200),
-                             "text": out.get("error") or out.get("summary") or _short(out, 200), "error": "error" in out})
+                             "text": out.get("error") or out.get("summary") or _short(out, 200), "error": bool(out.get("error"))})
         return out
 
     def _run(self, st, s, prompt):
@@ -752,7 +752,7 @@ class Chat:
             for b in resp.content:
                 if b.type == "tool_use":
                     out = self._tool(st, b.name, b.input)
-                    results.append({"type": "tool_result", "tool_use_id": b.id, "is_error": "error" in out,
+                    results.append({"type": "tool_result", "tool_use_id": b.id, "is_error": bool(out.get("error")),
                                     "content": json.dumps(out, default=str)[:60000]})
             self.history.append({"role": "user", "content": results})
         self._say("error", "stopped after 40 tool rounds")

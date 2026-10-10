@@ -173,6 +173,33 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(lines[0], {"jsonrpc": "2.0", "id": 4, "result": {}})
         self.assertEqual(lines[1]["error"]["code"], -32700)
 
+    def test_check_error_flags(self):
+        from types import SimpleNamespace
+
+        st = self.state()
+        for error in (None, ["invalid song"]):
+            with self.subTest(error=error):
+                st.error = error
+                st.facts["warnings"] = ["unused pattern"]
+                chat = agent.Chat()
+                out = chat._tool(st, "check", {})
+                self.assertEqual(chat.display[-1]["error"], bool(error))
+                with mock.patch.object(mcp, "_http", return_value=out):
+                    result = mcp.handle({"id": 1, "method": "tools/call", "params": {"name": "check"}}, port=1)["result"]
+                self.assertEqual(result["isError"], bool(error))
+                self.assertEqual(json.loads(result["content"][0]["text"]), out)
+
+                client = mock.Mock()
+                client.beta.messages.create.side_effect = [
+                    SimpleNamespace(stop_reason="tool_use", content=[
+                        SimpleNamespace(type="tool_use", id="check1", name="check", input={})]),
+                    SimpleNamespace(stop_reason="end_turn", content=[])]
+                with mock.patch.dict(sys.modules, {"anthropic": SimpleNamespace(Anthropic=lambda **kw: client)}):
+                    chat._anthropic(st, {}, "check the song")
+                result = chat.history[-2]["content"][0]
+                self.assertEqual(result["is_error"], bool(error))
+                self.assertEqual(json.loads(result["content"])["warnings"], ["unused pattern"])
+
     def _fake(self, answers):
         Fake.answers, Fake.seen, Fake.headers_seen = list(answers), [], []
         srv = ThreadingHTTPServer(("127.0.0.1", 0), Fake)

@@ -65,7 +65,7 @@ def handle(msg, port=None):
             except RuntimeError as e:
                 out = {"error": str(e)}
             result = {"content": [{"type": "text", "text": json.dumps(out, indent=1, default=str)}],
-                      "isError": "error" in out}
+                      "isError": bool(out.get("error"))}
         elif method == "ping":
             result = {}
         else:
