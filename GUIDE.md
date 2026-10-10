@@ -650,13 +650,23 @@ edit is one undo step (audition settings and checkpoint saves are separate), and
   them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points. The agent's replies show as
   markdown (bold, code, lists, headings, tables); links show their address and are not clickable.
 
+  Chat loads tool definitions on demand: a small directory leads to the schemas for just the operations it needs.
+  Large tool results arrive in pages; older API tool outputs become retrievable references. The latest 32 saved
+  results remain available until NEW or a provider change. They are historical snapshots, so the agent must
+  re-read current song state before editing. External MCP clients retain the full public tool list.
+
+  Claude Code chat uses the app's music instructions, excludes personal/project instruction files and auto memory,
+  and disables session hooks and skills. Your normal Claude Code settings/files and login remain unchanged;
+  organization-managed policy still applies.
+
   **Context** shows an approximate token count for the conversation, system prompt and tools; hover for the last
   request's provider-reported input/output counts when available. Claude Code shows its last reported context instead,
   or unavailable until it reports usage. No model context-window limit is guessed. **STOP** interrupts the current
   turn and prevents further tool actions; an edit already underway finishes and remains undoable. A remote API request
   may still finish on the provider, but its late reply cannot edit the song. You can keep typing while it works; SEND
   becomes available when it stops. **COMPACT** asks the current model for a summary, keeping decisions, completed edits
-  and unfinished work for the next turn. The visible transcript stays. This uses a model request (normal provider
+  and unfinished work for the next turn. The summary stays private; the chat only says "Context compacted."
+  The visible transcript stays. This uses a model request (normal provider
   usage applies), with song tools disabled; failed, interrupted or unreduced API summaries leave the old context intact.
   **NEW** clears the conversation. Stop the agent before opening another song.
 

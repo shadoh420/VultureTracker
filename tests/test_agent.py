@@ -14,7 +14,7 @@ from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from vulturetracker import agent, api, gui, mcp
+from vulturetracker import agent, agent_context, api, gui, mcp
 from vulturetracker.wavload import write_wav
 
 from tests.test_gui import RATE, SONG_BLOCK, sine
@@ -1050,6 +1050,41 @@ class AgentTests(unittest.TestCase):
         self.assertIn('stopped',results[1]['error'])
         self.assertEqual(len(results),2)
 
+    def test_chat_discovers_tools_then_edits_and_undoes_through_wrapper(self):
+        st = self.state()
+        original = self.read()
+        agent.save_settings({'provider': 'openai', 'model': 'fixture'})
+        def call(name, args):
+            return {'choices': [{'message': {'role': 'assistant', 'tool_calls': [
+                {'id': name, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}}]}}]}
+        replies = [call('find_tools', {'names': ['set_module', 'undo']}),
+                   call('call_tool', {'name': 'set_module', 'arguments_json': '{"key":"key","value":"D major"}'}),
+                   call('call_tool', {'name': 'undo', 'arguments_json': '{}'}),
+                   {'choices': [{'message': {'role': 'assistant', 'content': 'Done'}}]}]
+        with mock.patch.object(agent, 'compatible_request', side_effect=replies) as request:
+            chat = self._chat(st, 'Try D major then undo')
+        self.assertEqual(self.read(), original)
+        self.assertEqual(chat.display[-1]['text'], 'Done')
+        self.assertEqual([m['tool'] for m in chat.display if m['role'] == 'tool'],
+                         ['find_tools', 'set_module', 'undo'])
+        for invocation in request.call_args_list:
+            self.assertEqual({t['function']['name'] for t in invocation.args[2]['tools']},
+                             {'find_tools', 'call_tool', 'read_tool_result'})
+        self.assertEqual([m['tool'] for m in st.agent_log[-2:]], ['set_module', 'undo'])
+
+    def test_wrapped_tool_keeps_stop_and_approved_pattern_guards(self):
+        st, chat = self.state(), agent.Chat()
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'approved': True}])
+        original = self.read()
+        args = {'name': 'write_cells', 'arguments_json': json.dumps(
+            {'pattern': 'p1', 'cells': [{'row': 0, 'channel': 1, 'cell': 'D-5 01 ... ...'}]})}
+        out = chat._tool(st, 'call_tool', args)
+        self.assertIn('approved', out['error'])
+        self.assertEqual(self.read(), original)
+        chat.busy, chat.run_id = True, 'active'
+        chat.cancel.set()
+        self.assertIn('stopped', chat.remote_tool(st, 'call_tool', {'name': 'undo', 'arguments_json': '{}'}, 'active')['error'])
+
     def test_compact_keeps_transcript_and_seeds_next_request_without_tools(self):
         st = self.state()
         agent.save_settings({'provider':'gemini','api_key':'fixture'})
@@ -1063,7 +1098,8 @@ class AgentTests(unittest.TestCase):
             self.wait_chat(chat)
             self.assertNotIn('tools',req.call_args.args[2])
         self.assertEqual(chat.display[:len(display)],display)
-        self.assertIn('Context compacted',chat.display[-1]['text'])
+        self.assertEqual(chat.display[-1]['text'], 'Context compacted.')
+        self.assertFalse(any('Owner approved drums' in m.get('text', '') for m in chat.display))
         self.assertLess(chat.snapshot()['context']['tokens'],before)
         with mock.patch.object(agent,'compatible_request',return_value=answer('Continuing')) as req:
             chat.send(st,'continue')
@@ -1270,6 +1306,12 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--effort") + 1], "low")
             self.assertEqual(argv[argv.index("--tools") + 1], "")            # no built-in tools: only the song's
             self.assertEqual(argv[argv.index("--allowedTools") + 1], "mcp__vulturetracker")
+            self.assertEqual(argv[argv.index("--system-prompt") + 1], agent.SYSTEM)
+            self.assertNotIn("--append-system-prompt", argv)
+            self.assertIn("--disable-slash-commands", argv)
+            self.assertEqual(argv[argv.index("--setting-sources") + 1], "user")
+            settings = json.loads(argv[argv.index("--settings") + 1])
+            self.assertEqual(settings, {"claudeMdExcludes": ["**"], "autoMemoryEnabled": False, "disableAllHooks": True})
             cfg = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["vulturetracker"]
             self.assertEqual(cfg["args"][-2:], ["--port", "8765"])
             self.assertNotIn("--resume", argv)
@@ -1289,6 +1331,7 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(json.loads(argv[argv.index('--mcp-config')+1]),{'mcpServers':{}})
             self.assertEqual(argv[argv.index('--allowedTools')+1],'')
             self.assertIsNone(chat.session)
+            self.assertEqual(chat.display[-1], {"role": "status", "text": "Context compacted."})
             chat.send(st,'continue after compaction')
             self.wait_chat(chat)
             got=json.loads(seen.read_text())
@@ -1473,7 +1516,9 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(results[0]["ok"])
         self.assertIn("nothing changed", results[1]["error"])
         self.assertEqual(results[2]["channels"][0]["effects"], ["echo"])
-        tools = {t["function"]["name"]: t["function"] for t in request.call_args.args[2]["tools"]}
+        self.assertEqual({t["function"]["name"] for t in request.call_args.args[2]["tools"]},
+                         {"find_tools", "call_tool", "read_tool_result"})
+        tools = {t["function"]["name"]: t["function"] for t in agent.compatible_tools("gemini")}
         self.assertNotIn("parameters", tools["song_overview"])
         self.assertEqual(tools["set_module"]["parameters"]["properties"]["value"]["anyOf"],
                          [{"type": "string"}, {"type": "integer"}])
@@ -1491,6 +1536,101 @@ class AgentTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, text) as ctx:
                     agent.compatible_request(s, "/chat/completions", {})
                 self.assertNotIn("secret", str(ctx.exception))
+
+
+class ContextTests(unittest.TestCase):
+    def test_directory_and_exact_schemas_cost_less_than_full_catalog(self):
+        compact = agent_context.tool_list()
+        self.assertLess(len(json.dumps(compact)), len(json.dumps(agent.tool_list())) // 5)
+        self.assertEqual({t['name'] for t in compact}, {'find_tools', 'call_tool', 'read_tool_result'})
+        context = agent_context.ToolContext()
+        directory = context.call(None, 'find_tools', {'query': 'pattern'})
+        self.assertIn('read_pattern', [t['name'] for t in directory['tools']])
+        schemas = context.call(None, 'find_tools', {'names': ['read_pattern', 'write_cells']})
+        self.assertEqual(schemas['tools'], [t for t in agent.tool_list() if t['name'] in ('read_pattern', 'write_cells')])
+        for name in agent.TOOLS:
+            self.assertIn(name, compact[0]['description'])
+        with mock.patch.object(agent, 'run') as run:
+            for args in ({'names': ['unknown']}, {'names': ['check'] * 5}, {'query': []}):
+                self.assertIn('error', context.call(None, 'find_tools', args))
+            run.assert_not_called()
+
+    def test_wrapped_edits_use_original_guards_and_invalid_args_do_not_execute(self):
+        context = agent_context.ToolContext()
+        with mock.patch.object(agent, 'run', return_value={'error': 'approved pattern'}) as run:
+            result = context.call(None, 'call_tool', {'name': 'write_cells', 'arguments_json': '{"pattern":"intro","cells":[]}'})
+            self.assertEqual(result, {'error': 'approved pattern'})
+            run.assert_called_once_with(None, 'write_cells', {'pattern': 'intro', 'cells': []})
+            run.reset_mock()
+            for args in ({'name': 'undo', 'arguments_json': '[]'}, {'name': 'undo', 'arguments_json': '{'},
+                         {'name': 'call_tool', 'arguments_json': '{}'}, {'name': 'undo', 'arguments_json': {}}, []):
+                self.assertIn('error', context.call(None, 'call_tool', args))
+            run.assert_not_called()
+
+    def test_paged_result_is_lossless_and_reading_it_never_repeats_an_edit(self):
+        context = agent_context.ToolContext()
+        original = {'ok': True, 'summary': 'edited sample', 'data': ['C-5 é' * 6000]}
+        with mock.patch.object(agent, 'run', return_value=original) as run:
+            first = context.call(None, 'call_tool', {'name': 'edit_sample', 'arguments_json': '{"number":1}'})
+            result, page = '', first
+            while True:
+                self.assertLessEqual(len(page['content']), agent_context.PAGE_CHARS)
+                result += page['content']
+                if page['next_offset'] is None:
+                    break
+                page = context.call(None, 'read_tool_result', {'result_id': first['result_id'], 'offset': page['next_offset']})
+            self.assertEqual(json.loads(result), original)
+            run.assert_called_once()
+            for args in ({'offset': -1}, {'offset': True}, {'limit': 0}, {'limit': 6001}):
+                self.assertIn('error', context.call(None, 'read_tool_result', {'result_id': first['result_id'], **args}))
+            context.clear()
+            self.assertIn('expired', context.call(None, 'read_tool_result', {'result_id': first['result_id']})['error'])
+
+    def test_old_outputs_shrink_and_keep_ids_errors_and_exact_snapshot(self):
+        context = agent_context.ToolContext()
+        raw = agent_context.dumps({'error': 'refused edit', 'usage': ['C-5'] * 400})
+        history = [{'role': 'user', 'content': 'Keep the drums.'},
+                   {'role': 'assistant', 'tool_calls': [{'id': 'one'}]},
+                   {'role': 'tool', 'tool_call_id': 'one', 'content': raw}]
+        recent = [{'role': 'tool', 'tool_call_id': str(i), 'content': raw} for i in range(4)]
+        history.extend(recent)
+        context.trim_history(history)
+        self.assertEqual(history[0]['content'], 'Keep the drums.')
+        self.assertEqual(history[2]['tool_call_id'], 'one')
+        brief = json.loads(history[2]['content'])
+        self.assertEqual(brief['error'], 'refused edit')
+        self.assertEqual(context.page(brief['result_id'])['content'], raw)
+        self.assertTrue(all(m['content'] == raw for m in recent))
+        self.assertLess(len(history[2]['content']), len(raw) // 3)
+        blocks = [{'type': 'tool_result', 'tool_use_id': str(i), 'content': raw, 'is_error': True} for i in range(6)]
+        history = [{'role': 'user', 'content': blocks}]
+        context.trim_history(history)
+        self.assertTrue(blocks[0]['is_error'])
+        self.assertEqual(blocks[0]['tool_use_id'], '0')
+        self.assertIn('result_id', json.loads(blocks[0]['content']))
+
+    def test_paged_history_keeps_original_reference_and_eviction_is_explicit(self):
+        context = agent_context.ToolContext()
+        first = context.pack({'data': 'z' * 16000})
+        second = context.page(first['result_id'], first['next_offset'])
+        history = [{'role': 'tool', 'content': agent_context.dumps(second)}]
+        history += [{'role': 'tool', 'content': '{}'} for _ in range(4)]
+        context.trim_history(history)
+        self.assertEqual(json.loads(history[0]['content'])['result_id'], first['result_id'])
+        for i in range(agent_context.KEEP_RESULTS):
+            context.remember(str(i))
+        self.assertLessEqual(len(context.results), agent_context.KEEP_RESULTS)
+        self.assertIn('expired', context.call(None, 'read_tool_result', {'result_id': first['result_id']})['error'])
+
+    def test_internal_mcp_advertises_only_directory_and_keeps_run_guard(self):
+        with mock.patch.dict('os.environ', {'VT_AGENT_RUN_ID': 'run-fixture'}), mock.patch.object(mcp, '_http', return_value={'ok': True}) as http:
+            listed = mcp.handle({'id': 1, 'method': 'tools/list'}, 8765)['result']['tools']
+            self.assertEqual({t['name'] for t in listed}, {'find_tools', 'call_tool', 'read_tool_result'})
+            args = {'name': 'check', 'arguments_json': '{}'}
+            out = mcp.handle({'id': 2, 'method': 'tools/call', 'params': {'name': 'call_tool', 'arguments': args}}, 8765)
+            self.assertFalse(out['result']['isError'])
+            self.assertEqual(http.call_args.args[2], {'name': 'call_tool', 'args': args, 'run_id': 'run-fixture'})
+
 
 
 if __name__ == "__main__":

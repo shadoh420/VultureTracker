@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import __version__, plugins
+from . import __version__, plugins, agent_context
 from .fileio import atomic_write, user_dir
 
 TOOLS = {}  # name -> (description, JSON schema of the arguments, function(state, args))
@@ -1416,6 +1416,15 @@ SYSTEM = """You work inside VultureTracker, an Impulse Tracker composer whose so
 played by libopenmpt. The owner is a musician who decides everything by ear. You have tools that read and edit the open \
 song; every edit is one undo step in the app.
 
+This is an in-app music session, not repository development. Work only through the song tools.
+Do not perform or discuss repository/wiki maintenance, coding-session handoffs or global instruction files.
+Only find_tools, call_tool and read_tool_result are directly callable. The names below describe song operations:
+use find_tools for their argument schemas, then call_tool with the name and arguments_json. Request only schemas
+needed now. Read only relevant pattern rows/channels; avoid repeated full overviews. Large outputs have a result_id
+and next_offset: use read_tool_result for more, never repeat an edit to retrieve its output. Saved results are
+historical snapshots; re-read current state before editing. Internal continuation summaries are private context;
+do not repeat them or narrate context management to the owner.
+
 How you work here:
 - You cannot hear. Report measurements (the measure tool) as measurements, never as how something sounds. Measure \
 before and after an edit to report what changed.
@@ -1669,9 +1678,10 @@ def discover_models(new):
     return {"models": models}
 
 
-def compatible_tools(provider):
+def compatible_tools(provider, *, compact=False):
+    catalog = agent_context.tool_list() if compact else tool_list()
     tools = [{"type": "function", "function": {"name": t["name"], "description": t["description"],
-                                               "parameters": t["input_schema"]}} for t in tool_list()]
+                                               "parameters": t["input_schema"]}} for t in catalog]
     if provider == "gemini":
         # Google's schema subset uses anyOf for unions. Open-ended rack maps travel as JSON strings.
         def schema(s):
@@ -1703,12 +1713,14 @@ class ChatStopped(Exception):
 COMPACT_PROMPT = """Summarize this conversation for continuing work on the same song. Preserve the owner's requests,
 decisions, approved sounds/levels, exact pattern/channel/row references, completed edits, failures and unfinished work.
 Distinguish measurements from guesses. Do not perform any actions or call tools. Return only a concise factual handoff,
-ideally under 1200 words. The next turn can read the song again for details."""
+ideally under 800 words. Omit repository/wiki duties, global instruction-file reminders and speculative future work.
+This is private continuation context, not a message to the owner. The next turn can read the song again for details."""
 
 
 class Chat:
     """One conversation with the configured model, its tools run on the State. The display list is what the panel
-    shows; the history is the provider's own message list, kept append-only (thinking blocks pass back unchanged)."""
+    shows; history preserves the provider's message structure (thinking blocks pass back unchanged). Older tool
+    outputs may become retrievable references; call IDs and error flags stay intact."""
 
     def __init__(self):
         self.display, self.history, self.busy, self.provider = [], [], False, None
@@ -1722,13 +1734,14 @@ class Chat:
         self.usage = {}
         self._summary_parts = []
         self.active_tools = 0
+        self.tools = agent_context.ToolContext()
         self.tool_done = threading.Condition(self.lock)
 
     def snapshot(self):
         with self.lock:
             code = self.provider and self.provider[0] == "claude_code"
             # A size estimate, not a tokenizer or a claim about the model's context-window limit.
-            payload = {"messages": self.history, "tools": tool_list(), "system": SYSTEM}
+            payload = {"messages": self.history, "tools": agent_context.tool_list(), "system": SYSTEM}
             size = len(json.dumps(payload, default=lambda x: x.model_dump() if hasattr(x, "model_dump") else str(x)))
             tokens = ((self.usage["input"] + self.usage["output"]) if self.usage else None) if code else (size + 3) // 4
             context = {"tokens": tokens, "source": "last reported" if code else "estimate", **self.usage}
@@ -1742,6 +1755,7 @@ class Chat:
                 raise ValueError("the agent is still working: wait for it to finish")
             self.display, self.history, self.provider, self.session = [], [], None, None
             self.summary, self.usage = "", {}
+            self.tools.clear()
 
     def stop(self):
         with self.lock:
@@ -1823,6 +1837,7 @@ class Chat:
             if self.provider not in (None, identity):
                 self.history, self.session = [], None  # another provider: a new conversation (each its own format)
                 self.summary, self.usage = "", {}
+                self.tools.clear()
             self.provider, self.busy = identity, True
             self.tool_state = st
             self.cancel, self.run_id = threading.Event(), uuid.uuid4().hex
@@ -1844,7 +1859,7 @@ class Chat:
                 return {"error": "this agent turn was stopped; nothing changed"}
             self.active_tools += 1
         try:
-            return run(st, name, args)
+            return self.tools.call(st, name, args)
         finally:
             with self.tool_done:
                 self.active_tools -= 1
@@ -1854,7 +1869,8 @@ class Chat:
         st = getattr(self, 'tool_state', st)
         if self.cancel.is_set() or (st is not None and st.closed):
             return {"error": "agent stopped; nothing changed"}
-        out = run(st, name, args)
+        out = self.tools.call(st, name, args)
+        name, args = agent_context.call_details(name, args)
         self.display.append({"role": "tool", "tool": name, "args": _short(args, 200),
                              "text": out.get("error") or out.get("summary") or _short(out, 200), "error": bool(out.get("error"))})
         return out
@@ -1918,7 +1934,7 @@ class Chat:
         if s["provider"] != "claude_code" and len(json.dumps(history, default=str)) >= len(json.dumps(self.history, default=str)):
             raise ValueError("the summary did not reduce context; the previous context was kept")
         self.summary, self.session, self.usage, self.history = context, None, {}, history
-        self.display.append({"role": "status", "text": "Context compacted. The visible transcript is kept.\n" + summary.strip()})
+        self.display.append({"role": "status", "text": "Context compacted."})
 
     def _claude_code(self, st, s, prompt):
         """Claude Code run headless (`claude -p`, streaming JSON) on the owner's own login (a Claude subscription, or
@@ -1938,7 +1954,9 @@ class Chat:
         args = cmd + ["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config",
                       "--mcp-config", json.dumps({"mcpServers": {} if self.compacting else {"vulturetracker": server}}),
                       "--tools", "", "--allowedTools", "" if self.compacting else "mcp__vulturetracker",
-                      "--append-system-prompt", SYSTEM]
+                      "--system-prompt", SYSTEM, "--disable-slash-commands", "--setting-sources", "user",
+                      "--settings", json.dumps({"claudeMdExcludes": ["**"], "autoMemoryEnabled": False,
+                                                 "disableAllHooks": True})]
         if s.get("model"):
             args += ["--model", s["model"]]
         if s.get("effort"):
@@ -1981,11 +1999,12 @@ class Chat:
                         self._say("agent", b.get("text", ""))
                     elif b.get("type") == "tool_use":
                         calls[b.get("id")] = (str(b.get("name", "")).replace("mcp__vulturetracker__", ""), b.get("input"))
-            elif kind == "user":
+            elif kind == "user" and not self.compacting:
                 for b in (ev.get("message") or {}).get("content") or []:
                     if not isinstance(b, dict) or b.get("type") != "tool_result":
                         continue
                     name, args_ = calls.pop(b.get("tool_use_id"), ("tool", {}))
+                    name, args_ = agent_context.call_details(name, args_)
                     text = b.get("content")
                     if isinstance(text, list):
                         text = "".join(c.get("text", "") for c in text if isinstance(c, dict))
@@ -2015,10 +2034,11 @@ class Chat:
         except ImportError:
             raise RuntimeError("the Anthropic API needs the anthropic package: pip install anthropic")
         client = anthropic.Anthropic(api_key=s.get("api_key") or None)  # else ANTHROPIC_API_KEY or an `ant auth` profile
-        tools = tool_list()
+        tools = agent_context.tool_list()
         self.history.append({"role": "user", "content": prompt})
         for _ in range(40):
             self._check_stop()
+            self.tools.trim_history(self.history)
             messages = copy.deepcopy(self.history)
             resp = self._request(lambda: client.beta.messages.create(
                 model=s.get("model") or "claude-opus-5-5", max_tokens=16000, system=SYSTEM, tools=tools,
@@ -2040,7 +2060,7 @@ class Chat:
                 if b.type == "tool_use":
                     out = self._tool(st, b.name, b.input)
                     results.append({"type": "tool_result", "tool_use_id": b.id, "is_error": bool(out.get("error")),
-                                    "content": json.dumps(out, default=str)[:60000]})
+                                    "content": agent_context.dumps(out)})
             self.history.append({"role": "user", "content": results})
         self._say("error", "stopped after 40 tool rounds")
 
@@ -2050,12 +2070,13 @@ class Chat:
         _, model, _ = connection(s)
         if not model:
             raise ValueError("choose a model in SETTINGS; use FIND MODELS for Ollama or LM Studio")
-        tools = compatible_tools(s["provider"])
+        tools = compatible_tools(s["provider"], compact=True)
         if not self.history:
             self.history.append({"role": "system", "content": SYSTEM})
         self.history.append({"role": "user", "content": prompt})
         for _ in range(40):
             self._check_stop()
+            self.tools.trim_history(self.history)
             body = {"model": model, "messages": copy.deepcopy(self.history), "tools": tools}
             resp = self._request(lambda: compatible_request(s, "/chat/completions", body))
             self._usage(resp.get("usage"))
@@ -2078,7 +2099,7 @@ class Chat:
                     continue
                 out = self._tool(st, c["function"]["name"], args)
                 self.history.append({"role": "tool", "tool_call_id": c.get("id", ""),
-                                     "content": json.dumps(out, default=str)[:60000]})
+                                     "content": agent_context.dumps(out)})
         self._say("error", "stopped after 40 tool rounds")
 
 

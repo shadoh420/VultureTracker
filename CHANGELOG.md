@@ -2,6 +2,16 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## 1.5.2 (2026-10-10)
+
+- Agent chat loads tool definitions on demand through a small tool directory, reducing the upfront catalog from
+  roughly 47,000 to 2,400 characters while keeping every song operation available.
+- Large tool results are paged; older API tool output becomes retrievable references. Existing undo, approval and
+  stop protections still apply, and retrieving a result never repeats an edit.
+- COMPACT keeps its continuation summary private and shows only a short confirmation in the chat.
+- App-launched Claude Code sessions exclude personal/project coding instructions, auto memory, hooks and skills,
+  preventing unrelated wiki-maintenance reminders. Normal Claude Code settings are unchanged; managed policy applies.
+
 ## 1.5.1 (2026-10-10)
 
 - Release validation now checks the expected missing-dependency result for file-recipe synthesis when optional

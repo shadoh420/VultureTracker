@@ -112,6 +112,7 @@ class TestPage(unittest.TestCase):
                             with mock.patch.object(agent,'compatible_request',return_value=reply):
                                 page.click('#ag-compact')
                                 page.wait_for_function("S.chat.messages.some(m=>m.text.startsWith('Context compacted.')) && !S.chat.busy")
+                                self.assertNotIn("Keep the approved drums.", page.inner_text("#ag-msgs"))
                             started,release=threading.Event(),threading.Event()
                             def delayed(*args):
                                 started.set();release.wait(5)

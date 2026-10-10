@@ -52,11 +52,15 @@ def handle(msg, port=None):
                                       "measure, don't claim to hear; levels and approved entries are the owner's; "
                                       "offer sounds as tryout candidates."}
         elif method == "tools/list":
-            try:
-                tools = _http(_port(port), "/api/tools")["tools"]
-            except RuntimeError:
-                from .agent import tool_list
-                tools = tool_list()  # the list is the same; calls will say the app is not open
+            if os.environ.get("VT_AGENT_RUN_ID"):
+                from .agent_context import tool_list
+                tools = tool_list()
+            else:
+                try:
+                    tools = _http(_port(port), "/api/tools")["tools"]
+                except RuntimeError:
+                    from .agent import tool_list
+                    tools = tool_list()  # external MCP clients keep the full public list
             result = {"tools": [{"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
                                 for t in tools]}
         elif method == "tools/call":
@@ -68,7 +72,7 @@ def handle(msg, port=None):
                 out = _http(_port(port), "/api/tool", body)
             except RuntimeError as e:
                 out = {"error": str(e)}
-            result = {"content": [{"type": "text", "text": json.dumps(out, indent=1, default=str)}],
+            result = {"content": [{"type": "text", "text": json.dumps(out, ensure_ascii=False, separators=(",", ":"), default=str)}],
                       "isError": bool(out.get("error"))}
         elif method == "ping":
             result = {}
