@@ -121,10 +121,12 @@ class TestRelease080Page(unittest.TestCase):
                     # every tab label on one line, all inside the bar
                     self.assertTrue(page.evaluate("""(()=>{const t=document.querySelector('.tabs');
                         return t.scrollWidth<=t.clientWidth&&[...t.querySelectorAll('.tab')].every(x=>x.getBoundingClientRect().height<=28)})()"""))
-                    # the transport's first row stays one line above the loop strip, a long status included
+                    # A long status may wrap, but stays inside the transport and above the loop strip.
                     self.assertTrue(page.evaluate("""(()=>{$('nowmode').textContent+=' · re-rendering, the old mix plays until it lands';
                         const r=$('nowmode').parentElement.getBoundingClientRect();
-                        return r.height<24&&r.bottom<=$('loopbar').getBoundingClientRect().top})()"""))
+                        const panel=document.querySelector('.bottom').getBoundingClientRect();
+                        return r.top>=panel.top&&r.bottom<=panel.bottom&&r.left>=panel.left&&r.right<=panel.right
+                            &&r.bottom<=$('loopbar').getBoundingClientRect().top})()"""))
                     # F5 with a dialog open does not reach the browser (it would reload the page)
                     self.assertTrue(page.evaluate("""(()=>{toggle('keys',true);const e=new KeyboardEvent('keydown',{key:'F5',cancelable:true,bubbles:true});
                         document.dispatchEvent(e);toggle('keys',false);return e.defaultPrevented})()"""))
