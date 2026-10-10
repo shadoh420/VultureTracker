@@ -2,7 +2,7 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.4.1 (2026-10-10)
 
 - **Import Browse:** the native file picker accepts the module, tab and MIDI filter again.
 - **Agent checks:** a successful check with warnings is no longer shown or sent to the model as a tool error.
