@@ -578,8 +578,55 @@ def render_one(path, name, spec=None, note=None, out=None, log=print):
     if len(jobs) != 1:
         raise RecipeError(f"sample '{name}': {'no key ' + str(note) if note is not None else 'a notes: list'}; give one key")
     fx_chain(jobs[0][1].get("fx"), f"sample '{name}'")
+    # VST reset can reload the plugin, which JUCE permits only on its main thread.
+    # Both the Recipe box and agent jobs call here from background workers.
+    import threading
+    if "patch" in jobs[0][1] and threading.current_thread() is not threading.main_thread():
+        return _render_one_process((path, name, spec, note, out), log)
     synths = Synths(rate) if "patch" in jobs[0][1] else None
     return _render_job(Path(path), rate, synths, *jobs[0], out_dir, log, out)
+
+
+def _render_one_child(send, args):
+    """Spawn target: plugin lifetime, including resets, stays on this process's main thread."""
+    try:
+        result = render_one(*args, log=lambda line: send.send(('log', line)))
+        send.send(('done', result))
+    except Exception as e:
+        send.send(('error', (getattr(e, 'kind', None), str(e))))
+    finally:
+        send.close()
+
+
+def _render_one_process(args, log):
+    import multiprocessing
+    ctx = multiprocessing.get_context('spawn')
+    receive, send = ctx.Pipe(duplex=False)
+    child = ctx.Process(target=_render_one_child, args=(send, args))
+    try:
+        child.start()
+        send.close()
+        while True:
+            try:
+                kind, value = receive.recv()
+            except EOFError as e:
+                raise RecipeError('synth process exited without a result') from e
+            if kind == 'log':
+                log(value)
+            elif kind == 'done':
+                return value
+            else:
+                need, message = value
+                raise SynthMissing(need, message) if need else RecipeError(message)
+    finally:
+        receive.close()
+        send.close()
+        if child.pid is not None:
+            child.join(timeout=5)
+            if child.is_alive():
+                child.terminate()
+                child.join()
+            child.close()
 
 
 def render_recipe(path, only=None, log=print):

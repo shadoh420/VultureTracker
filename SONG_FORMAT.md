@@ -122,9 +122,12 @@ defaults, written into the .it as OpenMPT saves them. **Only OpenMPT and libopen
 built on libopenmpt); other trackers play the channels dry. The app's RACK tab edits them.
 
 Plugin keys: `effect` (required), `name` (≤31 characters), `output` (a plugin number; none = master), `bypass` (bool),
-`gain` (0.1–25.5, the plugin's output gain as a factor, default 1), `dry` (0–1, the dry signal mixed back in),
+`output_gain` (0.1–25.5, the plugin's output gain as a factor, default 1), `dry` (0–1, the dry signal mixed back in),
 `master` (bool, OpenMPT's "apply to master mix"), and the effect's parameters below (each optional, its default in
 brackets):
+
+For effects without their own `gain` parameter, `gain` remains an alias for `output_gain` (use one, not both).
+For Compressor, Distortion and Parametric EQ, `gain` is always the effect's dB parameter in the table below.
 
 | effect | OpenMPT's name | parameters |
 |---|---|---|

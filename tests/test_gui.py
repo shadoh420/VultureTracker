@@ -3,6 +3,7 @@ No HTTP, no browser."""
 import importlib.util
 import json
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -1226,7 +1227,7 @@ class TestGui(unittest.TestCase):
                 if st.recipe_job["status"] in ("failed", "done"):
                     return st.recipe_job
                 time.sleep(0.05)
-        with mock.patch.object(synth, "DEFAULT_SURGE", self.dir / "nowhere"), \
+        with mock.patch.dict(os.environ, {"SURGE_XT_DIR": str(self.dir / "nowhere")}), \
                 mock.patch.object(synth, "fetch_synth", side_effect=lambda kind, progress: progress(5, 10)) as fetch:
             st.request_recipe_render("patch: Pads/Anything\nnote: C-5\n")
             self.assertEqual((wait()["status"], wait()["need"]), ("failed", "surge"))

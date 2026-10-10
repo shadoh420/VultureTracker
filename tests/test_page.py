@@ -100,6 +100,42 @@ class TestPage(unittest.TestCase):
                         self.assertEqual(rendered["italic"], ["italic"])
                         self.assertEqual(rendered["images"], 0)
                         self.assertIn("<img src=x onerror=alert(1)>", rendered["text"])
+                        # Real controls against the HTTP handler; model replies are local test doubles.
+                        with mock.patch.object(gui, 'CHAT', agent.Chat()) as chat:
+                            chat.provider=('ollama',f'http://127.0.0.1:{port}/v1','local-tool-model')
+                            chat.history=[{'role':'system','content':agent.SYSTEM},
+                                          {'role':'user','content':'Keep the drums. '*300}]
+                            chat.display=[{'role':'you','text':'Keep the drums.'}]
+                            page.wait_for_function('S.chat.can_compact && !S.chat.busy')
+                            self.assertIn('Context ~',page.inner_text('#ag-tokens'))
+                            reply={'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':'Keep the approved drums.'}}]}
+                            with mock.patch.object(agent,'compatible_request',return_value=reply):
+                                page.click('#ag-compact')
+                                page.wait_for_function("S.chat.messages.some(m=>m.text.startsWith('Context compacted.')) && !S.chat.busy")
+                            started,release=threading.Event(),threading.Event()
+                            def delayed(*args):
+                                started.set();release.wait(5)
+                                return reply
+                            try:
+                                with mock.patch.object(agent,'compatible_request',side_effect=delayed):
+                                    page.fill('#ag-in','Work on channel 9')
+                                    page.click('#ag-send')
+                                    page.wait_for_function('S.chat.busy')
+                                    self.assertTrue(started.wait(2))
+                                    self.assertTrue(page.is_disabled('#ag-compact'))
+                                    self.assertTrue(page.is_disabled('#ag-send'))
+                                    page.fill('#ag-in','Preserve this draft')
+                                    page.press('#ag-in','Enter')
+                                    self.assertEqual(page.input_value('#ag-in'),'Preserve this draft')
+                                    page.click('#ag-stop')
+                                    page.wait_for_function("!S.chat.busy && S.chat.messages.some(m=>m.text.startsWith('Stopped.'))")
+                                    self.assertTrue(page.is_disabled('#ag-stop'))
+                                    self.assertFalse(page.is_disabled('#ag-send'))
+                                    self.assertEqual(page.input_value('#ag-in'),'Preserve this draft')
+                            finally:
+                                release.set()
+                            if os.environ.get('VT_AGENT_SCREENSHOT'):
+                                page.screenshot(path=os.environ['VT_AGENT_SCREENSHOT'])
                         self.assertEqual(errors, [])
                     finally:
                         browser.close()

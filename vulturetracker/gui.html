@@ -28,6 +28,7 @@ input:focus{box-shadow:inset 0 0 0 1px #3c5c46}
 .row{display:flex;align-items:baseline;justify-content:space-between;padding:3px 0;font-size:10.5px}.row span:first-child{color:var(--mid)}.row span:last-child{font:11px/1 var(--mono);color:var(--ink)}
 .btn{padding:5px 10px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:var(--dim);background:#151a1c;box-shadow:inset 1px 1px 0 #232a2d,inset -1px -1px 0 #0a0c0d;user-select:none;display:inline-block;white-space:nowrap}.btn:hover{color:var(--acc)}.btn.on{color:#0c1a0f;background:var(--acc)}
 .btn.sm{padding:3px 6px;font-size:9px}.btn.dimb{color:#4a5255}
+#ag-foot .btn:disabled{opacity:.45;color:var(--dim);cursor:default}
 .btn.big{padding:9px 16px;font-size:11.5px;color:#9df0a5;background:var(--accd);text-align:center}.btn.big:hover{background:#274030}
 .btn.warn{color:#1a1508;background:var(--amber)}
 .grid{display:grid;gap:1px;font-size:8.5px;color:var(--dim)}
@@ -154,10 +155,15 @@ option.hascand{color:var(--acc);font-weight:700}
     <p class="meta">The tools never move a fader or a level, leave anything marked approved (the ✓ in the SONG and SAMPLES tabs) alone, and offer sounds as tryout candidates for you to pick. Each edit is one undo step; patterns an agent writes are marked by: agent.</p>
   </div>
   <div id="ag-foot" style="flex:none;padding:8px 10px 10px;box-shadow:inset 0 1px 0 #0a0c0d">
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:6px">
+      <span id="ag-tokens" class="meta" style="flex:1;min-width:160px"></span>
+      <button class="btn sm" id="ag-compact" onclick="act('chat',{compact:true})" title="Ask the current model to summarize the conversation and replace its context. Keeps the visible transcript; uses a model request.">COMPACT</button>
+      <button class="btn sm" id="ag-stop" onclick="act('chat',{stop:true})" title="Stop further agent actions. Completed edits remain undoable. An in-flight provider request may finish remotely.">STOP</button>
+    </div>
     <div class="agchips" id="ag-chips"></div>
     <div id="ag-ctx" class="mono" style="font-size:9.5px;color:var(--mid);margin-bottom:4px"></div>
     <textarea id="ag-in" rows="3" placeholder="Ask, or say how it should feel" onkeydown="event.stopPropagation();if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();agSend()}"></textarea>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><span class="meta" style="font-size:9.5px">Enter sends · Shift+Enter: new line</span><span class="btn" onclick="agSend()">SEND</span></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><span class="meta" style="font-size:9.5px">Enter sends · Shift+Enter: new line</span><button class="btn" id="ag-send" onclick="agSend()">SEND</button></div>
   </div>
 </div>
 <div class="tabs">
@@ -705,7 +711,8 @@ const secs=v=>v==null?'—':v.toFixed(v<1?3:2)+' s', hz=v=>v==null?'—':Math.ro
 // in-place update: touch the DOM only when the markup changed, and keep the scroll position when it did
 function put(id,h){if(shown[id]===h)return;shown[id]=h;const el=$(id),t=el.scrollTop,l=el.scrollLeft;el.innerHTML=h;el.scrollTop=t;el.scrollLeft=l}
 async function act(name,body){const r=await fetch('/api/'+name,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})});const j=await r.json();if(j.error)alert(j.error);await refresh();return j}
-async function refresh(){const j=await (await fetch('/api/state')).json();const had=!!(S&&S.song);S=j;
+async function refresh(){const j=await (await fetch('/api/state')).json();const had=!!(S&&S.song);
+  if(S?.song?.path!==j.song?.path)resetPlayer();S=j;
   sel=S.candidates?.find(c=>c.path===S.selected_candidate)?.id??null;
   if(!S.song){if(!$('startmodal').classList.contains('on'))renderStart();return}
   if(!had)toggle('start',false);  // only the no-song → song transition closes the start screen; a routine poll never does
@@ -714,7 +721,7 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
   $('recentlist').innerHTML=(j.recent||[]).length?`<div class="k" style="margin-bottom:6px">RECENT</div>`+j.recent.map(p=>li(p)).join(''):'';
   $('demolist').innerHTML=(j.demos||[]).length?`<div class="k" style="margin-bottom:6px">DEMOS</div>`+j.demos.map(p=>li(p,'demo')).join(''):'';
   $('startver').textContent=j.version||'';$('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
-function resetPlayer(){faLetGo();clearTimeout(FA.draftT);$('fa-code').value='';sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
+function resetPlayer(){AG.song=null;$('phrase-audio').pause();$('phrase-audio').removeAttribute('src');faLetGo();clearTimeout(FA.draftT);$('fa-code').value='';sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
 async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}}
 async function newSong(){const p=$('newpath').value.trim();if(!p)return;await EDQ.chain;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab('pattern')}}
 async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;await EDQ.chain;
@@ -789,7 +796,7 @@ function render(){
       <div class="nums"><div class="num"><b>DURATION</b><span>${secs(m.duration)}</span></div><div class="num"><b>PITCH</b><span>${m.pitch?m.pitch+(m.cents?` ${m.cents>0?'+':''}${m.cents}¢`:''):'—'}</span></div><div class="num"><b>CENTROID</b><span>${hz(m.centroid)}</span></div><div class="num"><b>DECAY −40</b><span>${secs(m.decay)}</span></div><div class="num" style="width:80px"><b>DIST TO REF</b><span style="color:${c.dist==null?'var(--dim)':c.dist<3?'var(--acc)':'var(--ink)'}">${c.dist==null?'—':c.dist.toFixed(1)}</span></div></div></div>
     <div style="margin-top:8px;display:flex;align-items:center;gap:10px" onclick="event.stopPropagation()"><div class="stars">${[1,2,3,4,5].map(n=>`<i class="${c.stars>=n?'on':''}" onclick="act('rate',{id:${c.id},stars:${c.stars===n?0:n}})">★</i>`).join('')}</div><span class="rej ${c.rejected?'on':''}" onclick="act('rate',{id:${c.id},rejected:${!c.rejected}})">✕ REJECT</span><input class="note" value="${esc(c.note)}" placeholder="note…" onchange="act('rate',{id:${c.id},note:this.value})"></div>
     </div></div>`}).join('')+'</div>');
-  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();renderRack();renderOut();renderAgent();if(S.cue&&S.cue.id!==AG.cue){const first=AG.cue===null;AG.cue=S.cue.id;if(!first)agCue(S.cue)}if(!S.cue&&AG.cue===null)AG.cue=0;if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();renderFaust();
+  $('m-song').classList.toggle('on',sel==null);renderChosen();updateAudio();renderBuild();renderSpec();renderLoop();lvSync();renderSongTab();renderRack();renderOut();renderAgent();agReceiveCue(S.cue);if(!ENVD)renderIns();if(!W.drag)renderSmp();renderMap();renderPaint();renderFaust();
   const L=S.library;if(L&&L.busy&&$('simmsg').style.display==='block')$('simmsg').textContent=`indexing the library: ${L.status.done}/${L.status.total}`;
 }
 function bandsvg(m,ref){if(!m||!m.bands)return '';const pts=b=>b.map((v,i)=>`${i*100/8},${14-v*13}`).join(' ');return `<svg viewBox="0 0 100 14" preserveAspectRatio="none">${ref&&ref.bands?`<polyline points="${pts(ref.bands)}" fill="none" stroke="#3f525f" stroke-width=".8"/>`:''}<polygon points="0,14 ${pts(m.bands)} 100,14" fill="#7ee787" opacity=".7"/></svg>`}
@@ -900,11 +907,11 @@ function resetVoice(){const v=(S.voice||[])[0],m=JSON.parse(JSON.stringify(S.mix
 // ---- song overview: pattern view (read only; follows the playhead while the tryout plays)
 function posAt(t){const f=S.song.facts,[a,b]=S.orders||[0,f.orders.length];
   for(let i=a;i<b;i++){const o=f.orders[i];if(t<o.seconds||i===b-1)return {o:i,row:Math.max(0,Math.min(o.rows-1,o.seconds?Math.floor(t/o.seconds*o.rows):0))};t-=o.seconds}return {o:a,row:0}}
-function playPos(){if(LV.playing&&LV.pos&&LV.oi>=0)return {o:LV.oi,row:LV.pos.row};if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;return posAt(audio.currentTime)}
+function playPos(){if((LV.playing||pausedTransport?.engine==='live')&&LV.pos&&LV.oi>=0)return {o:LV.oi,row:LV.pos.row};if(audio.paused||solo||!isFinite(audio.duration)||!S||!S.song.facts)return null;return posAt(audio.currentTime)}
 let curSection=null;  // the cursor starts at the tryout section's first order, and moves there when the section changes
 function viewOrder(){const p=playPos();if(p&&!EDIT)return p.o;const s=JSON.stringify(S.orders);if(s!==curSection){curSection=s;CUR.o=S.orders?S.orders[0]:0;CUR.row=0}return CUR.o}
 function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const key=`${S.song.mtime}|${o.index}`;
-  if(PAT.key!==key){const keep=PAT.rows&&PAT.idx===o.index?PAT.rows:null;PAT={key,rows:keep,order:oi,active:[],row:-2,idx:o.index,fo:PAT.fo};
+  if(PAT.key!==key){const keep=PAT.rows&&PAT.idx===o.index&&PAT.rows.every(r=>r.length===f.channels.length)?PAT.rows:null;PAT={key,rows:keep,order:oi,active:[],row:-2,idx:o.index,fo:PAT.fo};
     fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key&&!EDQ.n){PAT.rows=j.rows;renderPat()}})}
   PAT.order=oi;renderPat()}
 function drumChannels(){return S.song.facts.channels.map((c,i)=>fam(c)===0?i:-1).filter(i=>i>=0)}
@@ -955,7 +962,11 @@ function rollDown(e){if(!PAT.rows||e.button>2)return;e.preventDefault();const at
   addEventListener('mousemove',mv);addEventListener('mouseup',up)}
 function rollVel(e){if(!EDIT||!PAT.rows)return;const r=$('rollvel').getBoundingClientRect(),z=zf(),row=Math.floor(((e.clientX-r.left)/z+$('rollscroll').scrollLeft-40)/ROLL.RW),
   x=rollNotes(CUR.ch).find(q=>q.row===row);if(!x)return;const v=Math.max(0,Math.min(64,Math.round((1-((e.clientY-r.top)/z-4)/38)*64)));patEdit([rollSet(row,[null,null,'v'+String(v).padStart(2,'0')])])}
-function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL=f.highlight||[4,16];if(!o)return;agSyncSel();if(ROLL.on)setTimeout(renderRoll);
+function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL=f.highlight||[4,16];if(!o)return;
+  if(focus){focus=focus.filter(c=>c<f.channels.length);if(!focus.length)focus=null}
+  CUR.ch=Math.min(CUR.ch,f.channels.length-1);
+  if(SEL&&(SEL.a.ch>=f.channels.length||(SEL.b&&SEL.b.ch>=f.channels.length)))SEL=null;
+  agSyncSel();if(ROLL.on)setTimeout(renderRoll);
   const mk=((S.marks||{}).patterns||{})[o.pattern]||{};
   $('pattitle').textContent=`PATTERN ${o.pattern.toUpperCase()} · ORD ${pad(PAT.order)} · ${EDIT?'EDITING':'VIEW'}${mk.by?' · BY '+mk.by.toUpperCase():''}${mk.approved?' · APPROVED':''}`;$('pat').classList.toggle('editing',EDIT);
   if(!rows){put('pat','<div style="padding:30px;text-align:center;color:var(--dim)">loading…</div>');put('patctl','');$('patrow').textContent='';return}
@@ -981,7 +992,8 @@ function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseIn
 // the loop, SPEED and note previews act at once; when the song or the mix changes, the recompiled song is swapped in where
 // it plays. The worklet reports module order indices; facts.orders[i].order maps them to the order list here.
 const LV={ctx:null,node:null,ready:null,key:'',playing:false,pos:null,oi:-1,sent:{},held:{},err:null,version:''},CUR={o:0,row:0,ch:0,col:0};
-let lvLatency='0',lvPatLoop=false;try{lvLatency=localStorage.lvlatency==='interactive'?'interactive':'0'}catch(e){}
+let pausedTransport=null;
+let playEpoch=0,lvLatency='0',lvPatLoop=false;try{lvLatency=localStorage.lvlatency==='interactive'?'interactive':'0'}catch(e){}
 const lvKey=()=>`${S.song.mtime}|${S.song.stamps}|${JSON.stringify(S.mix||{})}`;  // stamps: the WAVs the song plays
 function lvStart(){if(LV.ready)return LV.ready;
   LV.ready=(async()=>{const ctx=LV.ctx=new AudioContext({latencyHint:lvLatency==='0'?0:lvLatency});
@@ -1011,11 +1023,11 @@ function lvSync(){if(!LV.node||!S||!S.song.facts){renderLiveBar();return}const f
   if(LV.sent.tempo!==speed){LV.sent.tempo=speed;P.postMessage({type:'tempo',factor:speed})}
   const hl=f.highlight||[4,16],ms=JSON.stringify([METRO,hl]);if(LV.sent.metro!==ms){LV.sent.metro=ms;P.postMessage({type:'metro',on:METRO,beat:hl[0],bar:hl[1]})}
   renderLiveBar()}
-async function lvPlay(oi,row){try{await lvStart()}catch(e){return}const o=S.song.facts.orders[oi];if(!o)return;audio.pause();LV.ctx.resume();lvSync();
+async function lvPlay(oi,row){pausedTransport=null;const epoch=++playEpoch;try{await lvStart()}catch(e){return}if(epoch!==playEpoch)return;const o=S.song.facts.orders[oi];if(!o)return;audio.pause();LV.ctx.resume();lvSync();
   LV.node.port.postMessage({type:'play',order:o.order,row:Math.min(row,o.rows-1)});LV.playing=true;renderLiveBar()}
 function lvPlayCursor(){if(LV.playing)return lvStop();lvPatLoop=false;lvPlay(CUR.o,CUR.row)}
 function lvLoopPattern(){lvPatLoop=!(lvPatLoop&&LV.playing);if(lvPatLoop)lvPlay(CUR.o,CUR.row);else lvStop()}
-function lvStop(){if(PK.srcs.size)pkStop();if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=LV.pos.row}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar()}
+function lvStop(){pausedTransport=null;playEpoch++;if(PK.srcs.size)pkStop();if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=LV.pos.row}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar()}
 function lvSetLatency(v){lvLatency=v;try{localStorage.lvlatency=v}catch(e){}if(PK.ctx){pkStop();PK.ctx.close();PK.ctx=FA.node=null}if(LV.ctx){lvStop();LV.ctx.close();Object.assign(LV,{ctx:null,node:null,ready:null,key:'',pos:null,oi:-1,sent:{}})}renderLiveBar()}
 function renderLiveBar(){if(!S||!S.song||!S.song.facts)return;const f=S.song.facts,ins=f.instruments&&f.instruments.length?f.instruments.map((n,i)=>[i,`${pad(i+1)} ${n}`]):f.samples.map((s,i)=>[i,`${pad(s.num)} ${s.name}`]);
   put('lv-ins',ins.map(([i,n])=>`<option value="${i}">${esc(n)}</option>`).join(''));$('lv-lat').value=lvLatency;
@@ -1392,7 +1404,7 @@ function keyLine(f){const r=f.key_report;if(!r||!r.estimate)return '';const low=
     (r.key&&low.length?`<div class="meta" style="font-size:10px;padding:2px 0 4px">mostly outside it: ${low.map(c=>pad(c.channel)+' '+esc(c.name)).join(', ')}</div>`:'')}
 // ---- AGENT: the chat panel (optional: a model the owner configures), the activity of every agent (also over MCP), the
 // selection the page shares with the tools, and the places an agent cues (shown, and played when it asks)
-const AG={view:'chat',seen:0,sel:'',selT:null,cue:null,editing:false,discovery:0};
+const AG={view:'chat',seen:0,sel:'',selT:null,cue:null,song:null,applied:null,reporting:false,editing:false,discovery:0};
 try{if(localStorage.agent==='1')document.body.classList.add('agent-on')}catch(e){}
 function agentToggle(){document.body.classList.toggle('agent-on');try{localStorage.agent=document.body.classList.contains('agent-on')?'1':'0'}catch(e){}renderAgent()}
 function agSelection(){const f=S.song&&S.song.facts;if(!f)return null;const o=f.orders[PAT.order];if(!o)return null;
@@ -1402,7 +1414,8 @@ function agSelText(s){if(!s)return '';const f=S.song.facts,ch=s.channels[0]===s.
   return `${ch} · pattern ${s.pattern} (order ${s.order}) · rows ${pad(s.rows[0])}–${pad(s.rows[1])}`}
 function agSyncSel(){const s=agSelection(),k=JSON.stringify(s);if(k===AG.sel)return;AG.sel=k;clearTimeout(AG.selT);
   AG.selT=setTimeout(()=>fetch('/api/selection',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selection:s})}).catch(()=>{}),250);if(document.body.classList.contains('agent-on'))renderAgent()}
-function agSend(text){const t=(text||$('ag-in').value).trim();if(!t)return;const s=agSelection();if(!text)$('ag-in').value='';act('chat',{text:t,context:SEL?agSelText(s):null})}
+async function agSend(text){if(S.chat&&S.chat.busy)return;const input=$('ag-in').value,t=(text||input).trim();if(!t)return;const s=agSelection();
+  const r=await act('chat',{text:t,context:SEL?agSelText(s):null});if(!r.error&&!text&&$('ag-in').value===input)$('ag-in').value=''}
 function agFields(){return {provider:$('ag-provider').value,model:$('ag-model').value,base_url:$('ag-base').value,effort:$('ag-effort').value}}
 async function agSave(){const b=agFields();if($('ag-key').value)b.api_key=$('ag-key').value;const r=await act('chatsettings',b);if(!r.error){$('ag-key').value='';AG.editing=false;AG.view='chat';renderAgent()}}
 async function agForget(){const r=await act('chatsettings',{...agFields(),clear_key:true});if(!r.error){$('ag-key').value='';$('ag-key').placeholder='none stored'}}
@@ -1428,6 +1441,12 @@ async function agModels(){const ticket=++AG.discovery,b=agFields();if($('ag-key'
 const AG_CHIPS=['What is selected here?','Measure this','Make it darker','More space','Give me three options'];
 function renderAgent(){const on=document.body.classList.contains('agent-on');$('agentbtn').classList.toggle('on',on);if(!on||!S.song)return;
   const c=S.chat||{messages:[],settings:{}},st=c.settings||{},v=AG.view;
+  const cx=c.context||{},count=cx.tokens==null?'unavailable':Number(cx.tokens).toLocaleString();
+  $('ag-tokens').textContent=`Context ${cx.source==='estimate'?'~':''}${count}${cx.tokens==null?'':' tokens'}${cx.source==='last reported'?' · last reported':''}`;
+  $('ag-tokens').title=(cx.source==='estimate'?'Approximate size of conversation, system prompt and tools (characters / 4); model tokenization varies.':'Claude Code reports its own context; hidden session data cannot be counted locally.')+
+    (cx.input==null?'':` Last model request: ${cx.input.toLocaleString()} input, ${cx.output.toLocaleString()} output tokens.`)+' No model context-window limit is assumed.';
+  $('ag-stop').disabled=!c.busy||c.stopping;$('ag-stop').textContent=c.stopping?'STOPPING…':'STOP';
+  $('ag-compact').disabled=!!c.busy||!c.can_compact;$('ag-send').disabled=!!c.busy;
   ['chat','log','set'].forEach(k=>$('ag-v-'+k).classList.toggle('on',v===k));
   $('ag-who').textContent=st.provider==='claude_code'?'· Claude Code'+(st.model?' · '+st.model:''):st.provider==='anthropic'?'· '+(st.model||'claude-opus-5-5'):st.provider?'· '+({gemini:'Gemini',ollama:'Ollama',lmstudio:'LM Studio',openai:'Custom'}[st.provider]||st.provider)+(st.model?' · '+st.model:''):'· chat off (SETTINGS)';
   $('ag-set').style.display=v==='set'?'block':'none';$('ag-msgs').style.display=v==='set'?'none':'flex';$('ag-foot').style.display=v==='chat'?'block':'none';
@@ -1437,7 +1456,7 @@ function renderAgent(){const on=document.body.classList.contains('agent-on');$('
   const box=$('ag-msgs'),end=box.scrollTop+box.clientHeight>=box.scrollHeight-20;
   if(v==='log')put('ag-msgs',(S.agent_log||[]).slice().reverse().map(l=>`<div class="agm tool ${l.error?'err':''}"><b>${new Date(l.time*1000).toTimeString().slice(0,5)}</b><span class="tx">${esc(l.tool)} ${esc(l.args)}\n→ ${esc(l.error||l.summary)}</span></div>`).join('')||'<div class="meta">No agent has used the tools on this song yet.</div>');
   else put('ag-msgs',(c.messages||[]).map(m=>m.role==='tool'?`<div class="agm tool ${m.error?'err':''}"><b>TOOL</b><span class="tx">${esc(m.tool)} ${esc(m.args)}\n→ ${esc(m.text)}</span></div>`:
-      `<div class="agm ${m.role}"><b>${m.role==='you'?'YOU':m.role==='agent'?'AGENT':'!'}</b><span class="tx">${m.role==='agent'?md(m.text):esc(m.text)}${m.context?`<span class="cx">on ${esc(m.context)}</span>`:''}</span></div>`).join('')+(c.busy?'<div class="agm agent"><b>AGENT</b><span class="tx" style="color:var(--dim)">working…</span></div>':'')||
+      `<div class="agm ${m.role}"><b>${m.role==='you'?'YOU':m.role==='agent'?'AGENT':m.role==='status'?'INFO':'!'}</b><span class="tx">${m.role==='agent'?md(m.text):esc(m.text)}${m.context?`<span class="cx">on ${esc(m.context)}</span>`:''}</span></div>`).join('')+(c.busy?`<div class="agm agent"><b>AGENT</b><span class="tx" style="color:var(--dim)">${c.stopping?'stopping…':c.compacting?'compacting…':'working…'}</span></div>`:'')||
       `<div class="meta" style="line-height:1.6">${st.provider?'Ask about the song, or select rows in the PATTERN tab and say what they should do.':'The chat is off: choose a provider in SETTINGS (an API key, or a local model). Claude Code can work on this song over MCP without it.'}</div>`);
   if(end||c.busy)box.scrollTop=box.scrollHeight;
   put('ag-chips',AG_CHIPS.map(t=>`<span onclick="agSend(${attr(t)})">${esc(t)}</span>`).join(''));
@@ -1461,7 +1480,36 @@ function md(s){const inl=t=>{const code=[];
     else if(m=l.match(/^&gt;\s?(.*)/))out.push(`<span class="mq">${inl(m[1])}</span>`);
     else out.push(inl(l))}
   return out.join('\n').replace(/\n?(<pre>|<table>|<hr>)/g,'$1').replace(/(<\/pre>|<\/table>|<hr>)\n?/g,'$1')}
-function agCue(c){tab('pattern');CUR.o=c.order;CUR.row=c.row;if(c.channel!=null)CUR.ch=c.channel;showPattern(c.order);renderPat();if(c.play){lvPatLoop=false;lvPlay(c.order,c.row)}}
+function agReceiveCue(c){const song=S?.song?.path;if(song!==AG.song){AG.song=song;AG.cue=c?.id||0;AG.applied=null;return}
+  if(!c||c.id<=AG.cue)return;AG.cue=c.id;if(c.expires&&Date.now()/1000>c.expires)return;
+  agCue(c,song).then(()=>{if(S?.song?.path===song&&AG.cue===c.id)AG.applied=c.id}).catch(e=>{LV.err=String(e);renderLiveBar()})}
+async function agCue(c,song){if(c.action==='stop'){audio.pause();lvStop();return}
+  if(c.action==='pause'){
+    if(pausedTransport)return;
+    playEpoch++;
+    if(LV.playing){pausedTransport={engine:'live'};LV.node.port.postMessage({type:'stop'});LV.playing=false;renderLiveBar()}
+    else if(!audio.paused){pausedTransport={engine:'rendered',src:audio.src};audio.pause()}
+    return}
+  if(c.action==='resume'){
+    const p=pausedTransport;if(!p)throw new Error('No paused playback to resume');
+    if(p.engine==='live'){await LV.ctx.resume();if(S?.song?.path!==song||pausedTransport!==p)return;
+      lvSync();LV.node.port.postMessage({type:'play'});LV.playing=true;renderLiveBar()}
+    else {if(audio.src!==p.src){pausedTransport=null;throw new Error('The rendered audio changed; cue playback again')}await audio.play()}
+    pausedTransport=null;return}
+
+  if(c.action==='loop'||c.action==='audition'){await refresh();if(S?.song?.path!==song)return;
+    if(c.action==='loop')lvPatLoop=false;lvSync();const span=loopSpan();if(span&&!audio.paused&&(audio.currentTime<span[0]||audio.currentTime>=span[1]))audio.currentTime=span[0];return}
+  tab('pattern');CUR.o=c.order;CUR.row=c.row;if(c.channel!=null)CUR.ch=c.channel;showPattern(c.order);renderPat();if(c.play){lvPatLoop=false;await lvPlay(c.order,c.row)}}
+async function agReportUI(){if(!S?.song||AG.reporting)return;AG.reporting=true;const song=S.song.path;
+  const state={tab:document.querySelector('.tab.on')?.dataset.t,rack_channel:RK_CH+1,
+    cursor:{order:CUR.o,row:CUR.row,channel:CUR.ch+1},applied_request:AG.applied,
+    playback:{paused:!!pausedTransport,paused_engine:pausedTransport?.engine,playing:LV.playing||!audio.paused,engine:LV.playing||pausedTransport?.engine==='live'?'live':!audio.paused||pausedTransport?.engine==='rendered'?'rendered':'stopped',
+      mode:LV.playing||pausedTransport?.engine==='live'?'song':solo?'sample_alone':sel==null?'song':'candidate_in_song',position:playPos(),
+      seconds:LV.playing||pausedTransport?.engine==='live'?LV.pos?.seconds:audio.currentTime,pattern_loop:lvPatLoop,speed,engine_error:LV.err,loading:!!LV.loading},
+    candidate:sel,pending_edits:EDQ.n,queued_renders:S.queue,render_status:sel==null?S.own?.status:S.candidates?.find(c=>c.id===sel)?.status,
+    render_error:sel==null?S.own?.error:S.candidates?.find(c=>c.id===sel)?.error};
+  try{const r=await fetch('/api/uistate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({song,state})});
+    const j=await r.json();if(r.ok&&S?.song?.path===song)agReceiveCue(j.cue)}catch(e){}finally{AG.reporting=false}}
 // TAP: the beat tapped four times or more sets the tempo (for the song's speed and rows per beat) a moment after the last tap
 const TAP={t:[],timer:null};
 function tapTempo(){const now=performance.now();TAP.t=TAP.t.filter(x=>now-x<2500).concat(now).slice(-8);clearTimeout(TAP.timer);const el=$('taptb');
@@ -1617,7 +1665,7 @@ function recOpen(){const st=REC.st&&REC.st.status;if(st&&st.open)return recCmd({
 function recReopen(){const st=REC.st&&REC.st.status;if(st&&st.open&&!st.recording)recOpenCmd()}  // INPUT, RATE or EXCLUSIVE changed on an open input: reopen with it (the poll would put the old value back)
 function recMode(){const st=REC.st&&REC.st.status;if(st&&st.open)recCmd({cmd:'mode',mode:$('rec-mode').value})}
 function recGo(){const st=REC.st&&REC.st.status;if(!st||!st.open)return $('rec-msg').textContent='OPEN an input first';
-  if(st.recording)recCmd({cmd:'stop',name:$('rec-name').value||'take',trim:$('rec-trim').checked,trim_db:+$('rec-tdb').value,root:$('rec-root').checked,dest:$('rec-dest').value});
+  if(st.recording||st.pending_save)recCmd({cmd:'stop',name:$('rec-name').value||'take',trim:$('rec-trim').checked,trim_db:+$('rec-tdb').value,root:$('rec-root').checked,dest:$('rec-dest').value});
   else {audio.pause();lvStop();recCmd({cmd:'start',preroll:+$('rec-pre').value||0,backing:$('rec-backing').checked,output:+$('rec-output').value,section:$('rec-section').value,countin:+$('rec-countin').value,loops:+$('rec-loops').value,latency_ms:+$('rec-latency').value})}}
 function recCalibrate(){audio.pause();lvStop();recCmd({cmd:'calibrate',output:+$('rec-output').value})}
 function recPlay(f){if(REC.audio)REC.audio.pause();REC.audio=new Audio('/take/'+encodeURIComponent(f));REC.audio.play()}
@@ -1629,7 +1677,7 @@ function renderRec(){const j=REC.st;if(!j)return;const st=j.status,sel=(id,opts,
   sel('rec-mode',Object.entries(j.modes||{}),st.open?st.mode:null);if(st.open)$('rec-rate').value=String(st.rate);
   if(document.activeElement!==$('rec-asio'))$('rec-asio').checked=!!j.asio_saved;
   $('rec-open').textContent=st.open?'CLOSE':'OPEN';$('rec-open').classList.toggle('on',st.open);
-  const go=$('rec-go');go.textContent=st.finished?(st.calibrating?'MEASURE LATENCY':'SAVE TAKES'):st.recording?'■ STOP':'● REC';go.style.background=st.recording?'var(--red)':'';go.style.color=st.recording?'#0b0e0f':'';
+  const go=$('rec-go');go.textContent=st.pending_save?'RETRY SAVE':st.finished?(st.calibrating?'MEASURE LATENCY':'SAVE TAKES'):st.recording?'■ STOP':'● REC';go.style.background=st.recording?'var(--red)':'';go.style.color=st.recording?'#0b0e0f':'';
   $('rec-time').textContent=fmtT(st.seconds||0)+(st.backing?' · pass '+st.pass:'');
   const bar=(i)=>{const p=st.peak[i],h=st.hold[i],w=v=>v==null?0:Math.max(0,Math.min(100,(v+60)/60*100)),c=st.clip[i];
     return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span class="k" style="width:52px">INPUT ${i+1}</span><div style="position:relative;flex:1;height:12px;background:#0b0e0f;border:1px solid #242a2e">
@@ -1719,9 +1767,9 @@ function updateAudio(){const c=S.candidates.find(x=>x.id===sel);const src=srcFor
   $('nowname').textContent=c?c.name:'the song as it is';$('nowmode').textContent=(c?(solo?'· sample alone':c.status==='ready'?'· in the song, this slot swapped':'· '+c.status):solo?'· pick a candidate to hear it alone':o.status==='ready'?(nMix()?'· with the unwritten faders':'· nothing swapped'):'· '+(o.error||o.status||''))+(S.solo!=null?' · channel '+pad(S.solo+1)+' soloed':S.muted.length?` · ${S.muted.length} channels muted`:'');
   if(src!==lastSrc){const pending=c?(c.status==='queued'||c.status==='rendering'):(o.status==='queued'||o.status==='rendering');
     if(!src){if(pending&&audio.src){$('nowmode').textContent+=' · re-rendering, the old mix plays until it lands';return}lastSrc=src;audio.pause();audio.removeAttribute('src');return}  // a re-render after a fader or mute change: keep playing the old one until the new one lands
-    lastSrc=src;renderSpec();const t=audio.currentTime,was=!audio.paused;
-    audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(landAt!=null?landAt:t,Math.max(0,audio.duration-.05));landAt=null;if(was)audio.play()},{once:true});audio.load()}}
-function togglePlay(){if(LV.playing){lvStop();return}if(!audio.src){if(sel==null&&(!S.own||S.own.status!=='ready')){const c=visible()[0];if(c)pick(c.id)}if(!audio.src)return}audio.paused?audio.play():audio.pause()}
+    lastSrc=src;renderSpec();const t=audio.currentTime,was=!audio.paused,epoch=playEpoch;
+    audio.src=src;audio.addEventListener('loadedmetadata',()=>{if(!solo&&isFinite(audio.duration))audio.currentTime=Math.min(landAt!=null?landAt:t,Math.max(0,audio.duration-.05));landAt=null;if(was&&epoch===playEpoch)audio.play()},{once:true});audio.load()}}
+function togglePlay(){if(pausedTransport){agCue({action:'resume'},S.song.path).catch(e=>{LV.err=String(e);renderLiveBar()});return}if(LV.playing){lvStop();return}if(!audio.src){if(sel==null&&(!S.own||S.own.status!=='ready')){const c=visible()[0];if(c)pick(c.id)}if(!audio.src)return}audio.paused?audio.play():audio.pause()}
 function setSolo(v){solo=v;$('m-mix').classList.toggle('on',!v);$('m-solo').classList.toggle('on',v);updateAudio()}
 function setSpeed(v){v=Math.max(.1,Math.min(2,+v||1));speed=v;if(LV.node)lvSync();const s=$('speed');if(![...s.options].some(o=>o.value===String(v))){s.querySelectorAll('option[data-c]').forEach(o=>o.remove());const o=new Option(Math.round(v*100)+' %',String(v));o.dataset.c=1;s.insertBefore(o,s.lastElementChild)}audio.defaultPlaybackRate=v;audio.playbackRate=v;audio.preservesPitch=true;try{localStorage.speed=v}catch(e){}$('speed').value=String(v)}
 // a solo or mute while playing: the old render keeps playing until the new one lands, which then starts a second before the click
@@ -2086,7 +2134,7 @@ async function ptPreview(action){$('pt-msg').textContent='rendering…';const r=
   const b=await r.blob();if(PTA.src)URL.revokeObjectURL(PTA.src);PTA.src=URL.createObjectURL(b);PTA.play().catch(()=>{});$('pt-msg').textContent=action==='preview'?'playing the picture':'playing slot '+pad(+$('pt-fslot').value)+' through the picture'}
 async function ptAct(action){$('pt-msg').textContent='writing…';const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ptBody(action))}),j=await r.json();
   $('pt-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'');refresh()}
-setSpeed(speed);refresh();setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
+setSpeed(speed);refresh();setInterval(agReportUI,1000);setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
 function workflowDiff(title,help,lines,label,action){
   $('workflow-title').textContent=title;$('workflow-help').textContent=help;
   $('workflow-diff').textContent=(lines||[]).join('\n')||'No text changes.';

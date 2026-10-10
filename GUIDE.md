@@ -195,7 +195,14 @@ or MP3 sample keeps what OpenMPT's loaders keep from it (its loops; a FLAC's roo
 (soundlib/plugins/dmo), saved in the .it as OpenMPT saves them (the FXnn and CHFX chunks of Load_it.cpp's
 SaveMixPlugins, each plugin's output routed to master or to the next plugin); `module: macros:` sets the SFx macros
 of the embedded MIDI configuration over OpenMPT's defaults (SF0 cutoff, Z80-Z8F resonance), and a plugin parameter's
-macro is OpenMPT's `F0F` + (0x80 + the parameter's index) + `z`. Deliberate
+macro is OpenMPT's `F0F` + (0x80 + the parameter's index) + `z`. The agent's first-instrument creation wraps existing
+samples at their original instrument numbers, as OpenMPT's `CModDoc::ConvertSamplesToInstruments` does
+([Modedit.cpp](https://github.com/OpenMPT/openmpt/blob/master/mptrack/Modedit.cpp)), with identity note maps and
+OpenMPT's default fadeout (256 internally, 8 in the IT field). Unlike OpenMPT's conversion prompt, this tool converts
+atomically with the new instrument and refuses conversion when material is approved. Agent transposition follows
+`CViewPattern::TransposeSelection` (View_pat.cpp): real notes clamp to the format's range, while off/cut/fade stay
+unchanged. Agent region copies use field-wise empty-field mixing; unlike UI clipboard clipping, a region that does
+not fit is refused whole, and occupied destinations require explicit overwrite. Deliberate
 differences: the MIDI import reads track names written as UTF-8 as UTF-8 (OpenMPT reads them as Latin-1, so they come
 out garbled there), keeps the file's time signatures (OpenMPT imports every file as 4/4), makes a marker a named
 section where OpenMPT names a pattern, and bends no drums (their keys are kit pieces here); its bends, pedal and the
@@ -499,9 +506,133 @@ key and shades the pitches outside it.
 (`vulturetracker/agent.py`): read the song and a pattern, read the owner's selection (the rows and channels selected in
 the Pattern tab, with what sounds there), write cells, set the order list, add a pattern, set the tempo, speed, title
 or key, set the rack's plugins, measure (below), cue a place in the app and play it, offer WAVs as tryout candidates,
-read the listening notes, check the key, undo. No tool moves a fader, a channel's volume or pan, or the mix volume, and
-an entry marked approved is refused. Every edit is one undo step, and a pattern an agent writes is marked `by: agent`
-(`you and agent` when it had notes before; the owner's later edit of an agent's pattern makes it that too). Two ways in:
+read the listening notes, check the key, undo and redo. It can also:
+
+- **Add an empty channel** with `create_channel` (optional name, up to 64 channels). The returned channel number is
+  ready for `write_cells`; existing notes and routing stay in place.
+- **Rename, move or remove channels** with `edit_channel`. Channel numbers are 1-based; moves carry notes, routing,
+  pan, volume and audition faders/mutes. The result maps old numbers to new ones. Removing notes requires
+  `remove_notes:true` and the owner's request. Approved channels cannot be changed or shifted; approved patterns
+  block moves/removal. Each operation is undoable.
+- **Create samples and instruments** with `create_sample` and `create_instrument`. Samples import an audio file into
+  an unused slot (WAVs are referenced; other supported formats become a new WAV beside the song), defaulting to
+  C-5 root and stereo preservation. Set `base_note` for another root. Instruments accept a sample number or keymap;
+  without either they are silent. Creating the first instrument converts existing samples to instruments at the same
+  numbers before adding the new one, in one undo step. Conversion is refused with approved material. Existing slots
+  are never overwritten; `offer_samples` remains the tool for proposing tryout choices.
+- **Export songs and stems** with `export_song`: IT, WAV, MP3, OGG or FLAC, an optional named section, aligned stems,
+  and optional IT alongside audio. Defaults are saved mix, ignored audition mutes and no replacement. Choose
+  `mix:current` to include unwritten faders and the selected candidate, and `mutes:respect` to include solo/mutes.
+  `game_loop:true` writes WAV/OGG/FLAC loop metadata for the whole song or named section, not the audition row loop.
+  Follow the returned `job_id` with `export_status`; only `done` confirms published files, and compiler warnings are
+  separate from failures. `cancel_export` requires that ID and can cancel queued/rendering work, not final publication.
+  Exports use a frozen snapshot; replacing existing outputs requires explicit `replace:true`, and source assets remain
+  protected. The app retains the current/latest job, also visible in RENDER & EXPORT.
+- **Edit existing sounds** with `edit_instrument` (mapping, envelopes and note behavior) and `edit_sample`
+  (name, tuning, loops, vibrato, format or an explicitly requested WAV replacement). Omitted fields stay unchanged;
+  nested fields are replaced whole, and `clear` removes optional fields. Mixer volume and static pan remain the owner's.
+  `delete_slot` removes only unreferenced sample/instrument definitions, without renumbering or deleting audio files.
+  References in unused patterns and instrument maps also block deletion.
+- **Process samples** with `inspect_sample` first: it reports source-frame dimensions, usage and optional loop/slice
+  suggestions. `process_sample` exposes trim, fades, normalize, reverse, DC removal, loop crossfade/auto-loop, gain,
+  low/high-pass, EQ, RMS loudness, pitch, stretch, tail truncation and denoise. Frame ends are exclusive. Processing
+  writes a new WAV and preserves the original; exceeding full scale causes reported attenuation. Level processing
+  requires the owner's request. Approved sounds and voices used by approved material are protected (conservatively,
+  any approved pattern protects all played voices because notes can carry into it).
+  `slice_sample` creates kit or multisample slots from explicit frame points; `render_sample` creates a slot from
+  inclusive pattern rows, including current mix settings. Both retain original notes and samples. Each edit is undoable.
+- **Find sounds** with `index_library`, `library_status`, `search_library` and `similar_samples`. Scans add supplied
+  folders to the shared index by default; `replace_roots:true` replaces them deliberately. Only WAVs are indexed.
+  Filename search uses all query words, with pagination and file-stamp freshness; similarity compares measured timbre.
+  Neither chooses a candidate. Scans and similarity searches return job IDs: pass the ID to `library_status` so a
+  newer UI/agent job cannot be mistaken for your result. Search does not implicitly scan a large library.
+- **Synthesize sounds** with `synthesis_catalog` (sources/dependencies, installed patches, patch parameters and nearby
+  recipes), `read_sound_recipe`, `save_sound_recipe` and `render_synthesis`. Recipe edits create a new version beside
+  the song; `changes` replaces top-level fields, `clear` removes fields, and relative input paths keep their original
+  meaning. Each render uses one entry/note and supports patch, file, Faust and resynth sources. `render_paint` creates
+  a WAV, PNG and reusable settings JSON; optional `file` applies the picture as a spectral filter. Its `source` reloads
+  saved Paint settings, with supplied fields overriding them. `read_sound_recipe` can inspect those settings too.
+  Poll `synthesis_status` with the job ID; only `done` returns usable output paths. `cancel_synthesis` suppresses
+  publication, but a running plugin/Faust/DSP call finishes before cleanup. The latest job is also in `get_state`.
+  Outputs are new assets, outside song undo, and remain for reuse. Use `offer_samples` to audition them or explicitly
+  create a new slot with `create_sample`; no render automatically selects a sound. Dependencies are reported without
+  downloading. Faust recipe rendering needs Node and faustwasm; named patches need their installed synth/library.
+  Patch parameter inspection returns recipe values with units, ranges and choices; `raw_value` is informational.
+  Background VST renders use a separate process so plugin resets can run on its main thread.
+- **Compare phrases** with `capture_phrase`, `read_phrase`, `edit_phrase`, `render_phrase` and `phrase_diff`.
+  Capture one order's inclusive row range and 1-based channels, with 2–4 alternatives. Edits and renders require
+  the current comparison ID; replacing a capture requires its `replace_id` and archives it. Alternatives are
+  0-based; `-1` renders the line absent. Draft edits preserve the captured dimensions and song-wide timing/effects.
+  `read_phrase` returns summaries, or up to 32 rows of one alternative with `offset`/`limit`. Renders use frozen
+  sounds and mix; stale comparisons can still render but need recapture before editing or acceptance. These
+  draft/assets operations are outside song undo. Ratings and final acceptance stay with you in PHRASES.
+- **Manage projects** with `project_status`, `create_project`, `import_project`, `open_project`, `collect_project`
+  and `relink_samples`. Create/import/collect return new paths without switching songs. Imports use the app's
+  module, Guitar Pro or MIDI importer and preserve the source; collisions get numbered output names. Collection
+  uses a new external folder, optionally a ZIP, and checks frozen phrase assets. `open_project` switches the app
+  and subsequent agent tools to that YAML; it refuses external changes, pending page edits or active recording/
+  render/export jobs. Inspect its returned compile/read-only status before editing. `relink_samples` maps sample
+  slot numbers to WAV paths in one undo step, including missing-file repair; approved sounds are protected.
+  Project creation/open/import/status are also available over MCP before a song is open. Relative paths start
+  at the current song folder, or the app's working directory when no song is open. Creation/opening/collection
+  are not undoable song edits; a collected copy starts a new history.
+- **Arrange named sections** with `edit_section`: create/update boundaries, rename, delete, move or duplicate.
+  Section bounds use raw order positions (including skips and end markers), start inclusive and end exclusive.
+  `to` is a boundary in the original order list. Moves remap jumps and audition loops; independent pattern copies
+  are the duplication default. Shared copies with internal jumps are refused. Deleting a section removes its name,
+  not its orders. Overlapping sections or changes to approved material are refused before writing.
+- **Maintain patterns** with `edit_pattern`: rename, resize, delete unused patterns, or materialize shorthand into
+  explicit cells. Resizing is 1-200 rows; removing nonempty rows requires `discard_rows:true`. Materializing preserves
+  authorship and approval marks. Approved patterns cannot be edited by the agent; with an approved channel, structural
+  changes such as renaming/resizing/deleting patterns may require the owner to use the Pattern tab.
+- **Transform selections** with `transform_patterns`: transpose, clear selected fields, wildcard find/replace,
+  groove delays, Euclidean rhythms, chords and instrument/sample layers. Selections name each pattern once and use
+  inclusive row bounds and 1-based channels; repeated orders share the edit. Chords write adjacent channels and need
+  `overwrite:true` for occupied destinations. Groove keeps other effects and reports skipped notes.
+  `copy_pattern_region` copies or moves rectangular regions (optionally selected fields) using a snapshot for overlaps;
+  `mix:true` fills empty fields for copies. Other occupied destinations require `overwrite:true`. `write_patterns`
+  writes full cells across several patterns. Each call validates the whole result before saving one undo step, marks
+  edited cells' patterns with agent authorship, and protects approved material. Empty/no-op edits add no history.
+- **Inspect the full Rack and state** with `get_state`: plugin IDs, every parameter, routing, macros, sample and
+  instrument definitions, audition settings, unwritten mix, history, and the window's selected tab/channel and
+  playback mode. A selected Rack channel is not automatically soloed. Window reports include their age and a stale flag;
+  they stop updating when the window is closed or suspended.
+- **Solo, mute and loop** with `set_audition`. Channels are 1-based; loop endpoints are `[order,row]`, 0-based and
+  inclusive. `solo:null`, `muted:[]` and `loop:null` clear those settings; omitted fields stay unchanged. A loop selects
+  its orders for rendering and overrides F6's pattern loop. These settings persist in the tryout sidecar, without moving
+  faders or changing notes. Use `cue` with `play:true` to start; `stop_playback` stops the live and rendered players.
+  Stop/audition requests report **queued**, with a request ID: `get_state.ui.applied_request` confirms window delivery.
+  Playback state is reported separately; requests expire after ten seconds if no open window handles them.
+- **Edit one effect** with `edit_effect`: add to a channel, patch selected parameters or bypass, remove and reconnect
+  its inputs, or reorder within a channel. Other settings are retained. Shared effects affect every channel using them;
+  shared-chain reordering is refused, and approved channels' effects, master chains and macros are protected.
+- **Record and manage takes** with `recording_status`, `control_recording` and `manage_take`. Device inspection
+  does not open an input; opening starts input metering, and recording starts only on request. Recording supports
+  pre-roll, backing/section, count-in, passes and latency compensation. Stop saves a new WAV (default: keep);
+  offer it as a candidate, create a tuned slot, or combine pitched takes into a multisample. Saved WAVs persist;
+  the take list lasts for the session. Failed saves retain unsaved passes in memory for **RETRY SAVE** or explicit
+  discard; save/discard before closing the app. Input reopen/close and project switches refuse unsaved takes.
+- **Update listening notes** with `update_listening_note`: add at an explicit order/row, update text/tag/channels,
+  or delete an explicitly selected note. Read its `revision` through `read_notes` before update/delete. Updates keep
+  the original sounding and playback context. Input channels are 1-based; stored note channels remain 0-based.
+  These are the owner's annotations, outside song undo; the agent must not invent listening impressions.
+- **Pause/resume playback** with `pause_playback` and `resume_playback`. The live engine retains its exact position
+  and loop; the rendered player retains its time. Stop or a project switch clears resume. A changed rendered source
+  requires a new cue. Requests need the same window acknowledgement as other transport tools.
+- **Inspect detailed history** with `inspect_history`: paginated undo/redo snapshots, nearest first, stable content
+  IDs, saved versions, bounded current-to-snapshot YAML/settings diffs and asset/approval restore checks. Supply the
+  listed entry ID for details so a shifted stack cannot silently select another snapshot. History has no reliable
+  operation names or timestamps. Inspection never restores or trims it.
+- **Use PROJECT checkpoints** with `checkpoint`: list, save, diff, restore and delete. Names are never overwritten.
+  Restore is undoable and refuses changes to current approved material or owner-controlled levels/pan; the owner can
+  restore such a checkpoint in PROJECT. Existing sample fingerprint checks still apply.
+
+For example: “Save a checkpoint called Before flanger, create a channel called Melody, then solo it and loop order 8
+rows 0–59.” The agent can do each step through the same tools in chat or MCP.
+
+No tool moves a fader, a channel's volume or pan, or the mix volume, and approved material is protected. Each song
+edit is one undo step (audition settings and checkpoint saves are separate), and a pattern an agent writes is marked
+`by: agent` (`you and agent` when it had notes before; the owner's later edit makes it that too). Two ways in:
 
 - **Claude Code (or any MCP client):** `claude mcp add vulturetracker -- python -m vulturetracker mcp`, then ask it
   about the song open in the app. The MCP server finds the running app through `running.json` in the user folder
@@ -518,6 +649,19 @@ an entry marked approved is refused. Every edit is one undo step, and a pattern 
   remote and not https: the key would travel in clear. With rows selected in the Pattern tab, a message carries
   them ("on 07 Bass · pattern intro · rows 00-15"). The chips under the messages are starting points. The agent's replies show as
   markdown (bold, code, lists, headings, tables); links show their address and are not clickable.
+
+  **Context** shows an approximate token count for the conversation, system prompt and tools; hover for the last
+  request's provider-reported input/output counts when available. Claude Code shows its last reported context instead,
+  or unavailable until it reports usage. No model context-window limit is guessed. **STOP** interrupts the current
+  turn and prevents further tool actions; an edit already underway finishes and remains undoable. A remote API request
+  may still finish on the provider, but its late reply cannot edit the song. You can keep typing while it works; SEND
+  becomes available when it stops. **COMPACT** asks the current model for a summary, keeping decisions, completed edits
+  and unfinished work for the next turn. The visible transcript stays. This uses a model request (normal provider
+  usage applies), with song tools disabled; failed, interrupted or unreduced API summaries leave the old context intact.
+  **NEW** clears the conversation. Stop the agent before opening another song.
+
+  Agent rack routing also accepts the channel-list indentation written by module imports, so effects such as flanger
+  can be assigned to an imported song's channels without rewriting its YAML by hand.
 
 **Free cloud and local chat setup.** In AGENT → SETTINGS, the existing Claude Code, Anthropic API and custom
 OpenAI-compatible server choices remain available. The additional presets are:

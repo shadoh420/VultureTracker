@@ -8,6 +8,7 @@ import re
 import shutil
 import tempfile
 import threading
+import uuid
 
 from . import api
 from .model import ORDER_END
@@ -195,7 +196,7 @@ def prepare(state, options):
             raise ValueError('An output exists. Choose another destination/name or enable Replace previous exports')
         return {'snapshot': snap, 'todo': todo, 'sources': protected, 'existing': existing,
                 'cancel': threading.Event(), 'folder': folder, 'region': region_name, 'mix': mode,
-                'result': {'status': 'queued', 'done': 0, 'total': len(todo), 'dir': str(stemdir) if chans else None,
+                'result': {'job_id': uuid.uuid4().hex, 'status': 'queued', 'done': 0, 'total': len(todo), 'dir': str(stemdir) if chans else None,
                            'song': str(todo[0][0]) if options.get('song', True) else None, 'fmt': fmt, 'error': None,
                            'files': [], 'seconds': snap['frames']/RATE, 'snapshot': digest(snap['it'])[:12],
                            'warnings': snap['warnings'], 'mismatches': [], 'bytes': len(snap['it']), 'loop': snap['loop']}}

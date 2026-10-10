@@ -1,6 +1,7 @@
 """The exe's launcher (tools/build_exe.py packs this; __main__.py uses relative imports). `--selfcheck` imports every
 packed optional path and prints one line per item (`ok`, `FAIL`, `info`); exit 1 on any FAIL. tools/exe_check.py runs it."""
 import sys
+import multiprocessing
 from pathlib import Path
 
 if not getattr(sys, "frozen", False):  # `python tools/exe_entry.py` from the checkout
@@ -51,7 +52,10 @@ def _missing(p):
     raise FileNotFoundError(p)
 
 
-if "--selfcheck" in sys.argv[1:]:
-    sys.exit(selfcheck())
-from vulturetracker.__main__ import main  # noqa: E402
-sys.exit(main())
+if __name__ == "__main__":
+    # PyInstaller's spawn children must dispatch before the normal CLI starts.
+    multiprocessing.freeze_support()
+    if "--selfcheck" in sys.argv[1:]:
+        sys.exit(selfcheck())
+    from vulturetracker.__main__ import main
+    sys.exit(main())

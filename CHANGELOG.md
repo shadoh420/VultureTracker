@@ -2,6 +2,54 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## 1.5.0 (2026-10-10)
+
+- Claude Code chat now passes the selected effort level to the CLI, including Low, instead of silently using its default.
+
+- Agent tools now cover recording inputs/takes, listening-note add/update/delete with revision checks, live/rendered
+  pause/resume, and detailed read-only undo/redo inspection. Failed recording saves retain unsaved passes for retry;
+  reopening inputs or switching projects cannot silently discard them. Recording tests use simulated input.
+
+- **Agent phrase comparisons and projects:** capture, inspect, edit, render and diff frozen alternatives; final
+  ratings and acceptance stay in PHRASES. Create/import/open projects, inspect missing samples, collect portable
+  copies/ZIPs and relink sample paths. Follow-up chat tools and the player now follow an agent-requested project
+  switch. Collection rejects modified frozen phrase samples; headless phrase renders create their cache folder.
+
+- **Background synth rendering:** Recipe and agent plugin renders now run in a separate process so VST resets can
+  execute on the plugin's main thread. This fixes Surge renders failing in the packaged app.
+
+- **Agent library and synthesis:** index configured WAV folders, search filenames and measured timbre, discover
+  installed patches/parameters, inspect recipes and save new recipe versions. Render patches, file recipes, Faust,
+  resynthesis and spectral Paint/filtering into new assets with job IDs, status and cancellation. Original sources
+  remain intact; audition candidates and song-slot creation are explicit follow-up operations. Missing dependencies
+  are reported without automatic downloads.
+
+- **Agent arrangement and pattern tools:** create/update/rename/delete/move/duplicate named sections; rename, resize,
+  delete and materialize patterns; transpose, clear, find/replace, groove, Euclidean rhythm, chords and layers;
+  copy/move regions and write multiple patterns atomically. Edits support undo and approval guards; shrinking populated
+  patterns and overwriting occupied copy/chord destinations require explicit options. Materializing preserves marks.
+
+- **Agent sample editing:** edit instrument mappings/envelopes/behavior and sample tuning/loops/format, inspect sample
+  usage and loop/slice suggestions, delete unused slots, process audio, slice kits/multisamples, and render rows into a
+  new sample. Uses the existing editor and DSP, preserves original WAVs, supports undo/redo, and protects approved
+  voices and owner mixer settings. Deletion checks unused patterns and mapping references without renumbering slots.
+
+- **More agent song tools:** import new sample slots, create instruments (with atomic sample-mode conversion), rename,
+  move and remove channels while preserving their settings, and export IT/audio/stems with status and cancellation.
+  Existing slots and source assets cannot be overwritten; approved material and owner levels stay guarded.
+  Removing the last focused channel also clears the Pattern tab's stale focus and selection.
+- **Agent song controls:** create empty channels; inspect complete Rack settings and the window's reported playback
+  state; solo, mute, loop and stop; edit one effect without replacing the Rack; and list/save/diff/restore/delete
+  PROJECT checkpoints, with guarded redo. Playback requests are acknowledged by the window, and stopping cancels
+  pending live starts/render resumes. Approved material and owner-controlled levels remain protected.
+- **Rack bypass and removal:** Distortion, Compressor and Parametric EQ no longer block rack edits because their
+  gain in dB was also validated as an output multiplier. `output_gain` sets that multiplier separately.
+- **Agent controls:** context size and provider token counts, STOP for an active turn, and COMPACT to continue from a
+  summary while retaining the visible transcript. Late replies and stopped Claude Code tool calls cannot start edits;
+  completed edits remain undoable. Draft messages stay while the agent works.
+- **Imported-song rack routing:** valid channel lists with unindented sequence dashes now support channel edits and
+  plugin routing, fixing the agent's "no channel 9" failure when assigning a flanger.
+
 ## 1.4.1 (2026-10-10)
 
 - **Import Browse:** the native file picker accepts the module, tab and MIDI filter again.

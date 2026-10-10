@@ -208,6 +208,31 @@ class TestSurgeRender(unittest.TestCase):
         with self.assertRaises(RecipeError):
             self.surge.load("Leads/No Such Patch")
 
+    def test_background_recipe_render_uses_plugin_main_thread(self):
+        import os
+        from concurrent.futures import ThreadPoolExecutor
+        from unittest import mock
+        from vulturetracker.synth import render_one, SynthMissing
+        with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(1) as worker:
+            recipe = Path(tmp) / 'source.yaml'
+            recipe.write_text('defaults: {hold: 0.2, tail: 0.1, trim: false}\n'
+                              'samples:\n  saw: {patch: Leads/Moogy Saw, notes: [C-5, D-5]}\n')
+            out = Path(tmp) / 'chosen.wav'
+            logs = []
+            for _ in range(2):
+                file, root, loop = worker.submit(render_one, recipe, 'saw', None, 'D-5', out, logs.append).result(60)
+                wav = read_wav(file)
+                self.assertEqual((file, root, loop), (out, 62, None))
+                self.assertEqual((wav.root, wav.rate), (62, 44100))
+                self.assertGreater(max(map(abs, wav.channels[0])), 100)
+            self.assertTrue(any('chosen.wav' in line for line in logs))
+            with self.assertRaisesRegex(RecipeError, 'unknown patch'):
+                worker.submit(render_one, recipe, 'saw', {'patch': 'Leads/No Such Patch', 'note': 'C-5'}).result(60)
+            with mock.patch.dict(os.environ, {'SURGE_XT_DIR': str(Path(tmp) / 'not-installed')}):
+                with self.assertRaises(SynthMissing) as error:
+                    worker.submit(render_one, recipe, 'saw', None, 'D-5', out).result(60)
+                self.assertEqual(error.exception.kind, 'surge')
+
     def test_dexed_and_obxd_patches_load(self):
         from vulturetracker.synth import estimate_pitch
         for patch in ("dexed:SynprezFM_02/E.-PIANO", "obxd:001 - Bass 1/Bass Round Bass"):

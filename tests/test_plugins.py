@@ -126,6 +126,34 @@ class PluginTests(unittest.TestCase):
                 compile_song(self.d, extra)
             self.assertIn(msg, str(cm.exception))
 
+    def test_rack_gain_roundtrip_and_bypass_audio(self):
+        # The Rack sends to_song's values back on EVERY edit, including bypass/removal of another device.
+        for effect in plugins.EFFECTS:
+            with self.subTest(effect=effect):
+                extra = f"  plugins:\n    1: {{effect: {effect}, output_gain: 1.5}}\n"
+                mod, _ = read_it(compile_song(self.d, extra))
+                entries = plugins.to_song(mod.plugins)
+                entries[1]["bypass"] = True
+                again, _ = read_it(compile_song(self.d, "  plugins: " + api.safe_dump(entries, default_flow_style=True)))
+                self.assertEqual(again.plugins[1]["gain"], 1.5)
+                self.assertTrue(again.plugins[1]["bypass"])
+                np.testing.assert_allclose(again.plugins[1]["params"], mod.plugins[1]["params"], atol=1e-4)
+        for effect, db in (("distortion", -30), ("compressor", -12), ("param_eq", -6)):
+            mod, _ = read_it(compile_song(self.d, f"  plugins:\n    1: {{effect: {effect}, gain: {db}}}\n"))
+            self.assertEqual(plugins.to_song(mod.plugins)[1]["gain"], db)
+            self.assertEqual(mod.plugins[1].get("gain", 1.0), 1.0)
+        for entry in ("effect: echo, gain: 2, output_gain: 3", "effect: distortion, output_gain: -18"):
+            with self.assertRaises(SongError):
+                compile_song(self.d, f"  plugins:\n    1: {{{entry}}}\n")
+        def pcm(extra, routed=True):
+            with LoadedModule(compile_song(self.d, extra, channel_plugin=routed)) as lm:
+                return np.frombuffer(lm.render(44100, max_seconds=0.2, oversample=1), '<i2')
+        dry = pcm('', False)
+        wet = pcm('  plugins:\n    1: {effect: distortion}\n')
+        bypass = pcm('  plugins:\n    1: {effect: distortion, bypass: true}\n')
+        np.testing.assert_array_equal(bypass, dry)
+        self.assertGreater(np.max(np.abs(wet.astype(int) - dry.astype(int))), 100)
+
     @unittest.skipUnless(shutil.which("node"), "needs node")
     def test_the_page_engine_plays_them(self):
         # the app's live engine (libopenmpt as WebAssembly, tests/engine_check.js) renders the echo as the DLL does

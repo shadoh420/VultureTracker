@@ -6,6 +6,7 @@ call goes to the app over its local HTTP port (written to the user folder's runn
 Register it with Claude Code:  claude mcp add vulturetracker -- python -m vulturetracker mcp
 """
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -61,7 +62,10 @@ def handle(msg, port=None):
         elif method == "tools/call":
             p = msg.get("params") or {}
             try:
-                out = _http(_port(port), "/api/tool", {"name": p.get("name"), "args": p.get("arguments") or {}})
+                body = {"name": p.get("name"), "args": p.get("arguments") or {}}
+                if os.environ.get("VT_AGENT_RUN_ID"):
+                    body["run_id"] = os.environ["VT_AGENT_RUN_ID"]
+                out = _http(_port(port), "/api/tool", body)
             except RuntimeError as e:
                 out = {"error": str(e)}
             result = {"content": [{"type": "text", "text": json.dumps(out, indent=1, default=str)}],

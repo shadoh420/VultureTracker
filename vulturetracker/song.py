@@ -270,10 +270,14 @@ def _plugins(ctx, m, mod):
                         d["output"] = out
                 d["bypass"] = _bool(ctx, p, "bypass", False, w)
                 d["master"] = _bool(ctx, p, "master", False, w)
+                param_gain = any(s[0] == "gain" for s in specs)
+                if not param_gain and "gain" in p and "output_gain" in p:
+                    ctx.error(_line(p, "output_gain"), f"{w}: use only one of 'gain' and 'output_gain' for the output multiplier")
                 for key, lo, hi, default in (("gain", 0.1, 25.5, 1.0), ("dry", 0.0, 1.0, 0.0)):
-                    v = p.get(key, default)
+                    source_key = "output_gain" if key == "gain" and (param_gain or "output_gain" in p) else key
+                    v = p.get(source_key, default)
                     if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
-                        ctx.error(_line(p, key), f"{w}: '{key}' must be a number {lo}..{hi}, got {v!r}")
+                        ctx.error(_line(p, source_key), f"{w}: '{source_key}' must be a number {lo}..{hi}, got {v!r}")
                     else:
                         d[key] = float(v)
                 mod.plugins[num] = d

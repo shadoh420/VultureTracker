@@ -49,7 +49,7 @@ EFFECTS = {
         ("high_freq_rt_ratio", "", 0.001, 0.999, 0.0)]),
 }
 BY_CLSID = {v[0]: k for k, v in EFFECTS.items()}
-PLUGIN_KEYS = ["effect", "name", "output", "bypass", "gain", "dry", "master"]  # and the effect's parameters
+PLUGIN_KEYS = ["effect", "name", "output", "bypass", "gain", "output_gain", "dry", "master"]  # and the effect's parameters
 
 
 def params_of(effect):
@@ -223,9 +223,11 @@ def to_song(plugins):
     """Plugins as the song file writes them: the parameters by name in their units."""
     out = {}
     for num, p in sorted(plugins.items()):
-        d = {"effect": p["effect"]}
+        d = {"effect": str(p["effect"])}  # the compiler's location-tagged string is not YAML-dumpable
         quiet = {"name": "", "bypass": False, "master": False, "gain": 1.0, "dry": 0.0}  # the defaults, left out
         d.update({k: v for k, v in p.items() if k not in ("effect", "params") and quiet.get(k, object()) != v})
+        if "gain" in d and any(s[0] == "gain" for s in params_of(p["effect"])):
+            d["output_gain"] = d.pop("gain")  # keep the output multiplier separate from the effect's dB gain
         for spec, v in zip(params_of(p["effect"]), p["params"]):
             d[spec[0]] = to_unit(spec, v)
         out[num] = d

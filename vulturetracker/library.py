@@ -14,6 +14,7 @@ import struct
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 import numpy as np
@@ -320,6 +321,7 @@ class Library:
         self._model = None   # (generation, paths, vecs, centre, scale, xy)
         self.generation = 0
         self.job = None      # the running scan or search (run)
+        self.job_id = None
         self.result = None   # what the last job returned, or {"error"}
         self.scanned = 0.0   # time.time() of the last finished scan
         try:
@@ -407,6 +409,7 @@ class Library:
         with self.lock:
             if self.job and self.job.is_alive():
                 raise ValueError(f"the library is busy: {self.status.get('message') or 'working'}")
+            self.job_id = uuid.uuid4().hex
             self.result = None
 
             def go():

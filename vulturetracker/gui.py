@@ -1152,6 +1152,7 @@ class State:
         self.history, self.future = [], []
         self.takes = []       # this session's recorded takes, newest first (save_take)
         self.selection = None  # the page's pattern selection or cursor: {order, pattern, rows [a, b], channels [a, b]}
+        self.ui_state = None   # last window report; agent inspection includes its age rather than claiming live state
         self.cue = None        # an agent's request to show (and play) a place: {id, order, row, channel, play}
         self.agent_log = []    # the agent tools' calls (agent.run): what an agent did, for the page
         self.agent_measures = {}  # the last measure per scope, for the next one's change
@@ -1160,6 +1161,7 @@ class State:
         self.export_result = None
         self.stems = None     # stems export progress
         self.recipe_job = None  # the recipe panel's last render, write or synth download: {"status", "error", "log", "file", "need"}
+        self.synthesis_job = None  # agent render; outputs are new assets, never an automatic tryout choice
         self._recipe_retry = None  # the render a missing synth stopped, run again once fetch_synth has it
         self._recipe_memo = {}  # (recipe path, mtime, size) -> recipe_outputs, or None for a YAML file that is no recipe
         self.error = None
@@ -1542,7 +1544,11 @@ class State:
     def close(self):
         """Another song replaced this one in the app: the worker stops after the job it is on (it would keep rendering
         into this song's cache and prune it against the new state's writes)."""
-        self.closed = True
+        with self.lock:
+            self.closed = True
+            if self.synthesis_job and self.synthesis_job['status'] in ('queued', 'rendering', 'cancelling'):
+                self.synthesis_job['cancel'] = True
+                self.synthesis_job['status'] = 'cancelled' if self.synthesis_job['status'] == 'queued' else 'cancelling'
         self.release_lock()
         for _ in range(WORKERS):
             self._put(-1, ("close",))
@@ -1558,7 +1564,7 @@ class State:
             job = self.jobs.get()[2]
             if job[0] == "close":
                 return
-            if job[0] in ("export", "build", "meters", "recipe", "fetch"):
+            if job[0] in ("export", "build", "meters", "recipe", "fetch", "synthesis"):
                 try:
                     if job[0] == 'export':
                         from .export import run
@@ -1567,6 +1573,8 @@ class State:
                         self._build(job[1])
                     elif job[0] == "meters":
                         self._meters(job[1])
+                    elif job[0] == "synthesis":
+                        agent.agent_sounds.render_job(self, job[1])
                     elif job[0] == "recipe":
                         self._recipe_render(*job[1])
                     else:
@@ -1610,6 +1618,8 @@ class State:
                 self.meters.update(status="failed", error=error)
             elif job[0] in ("recipe", "fetch") and self.recipe_job:
                 self.recipe_job.update(status="failed", error=error)
+            elif job[0] == "synthesis":
+                job[1].update(status="failed", error=error)
 
     def _meters(self, mk):
         with self.lock:
@@ -2243,7 +2253,7 @@ class State:
         place, as one undoable step (see edit_patterns)."""
         self.edit_patterns([(index, cells)])
 
-    def edit_patterns(self, groups, who=None):
+    def edit_patterns(self, groups, who=None, guard=None):
         """Write each (pattern index, cells) of `groups` in place, all as one undoable step. The whole song is compiled
         first: an edit that breaks it is refused (SongError) and nothing is written. Refused too when the song changed on
         disk since it was read (reload first). `who` "agent": the patterns are marked `by: agent` (one that had notes
@@ -2268,7 +2278,7 @@ class State:
                         self._pattern_mark(lines, pat.name, {"by": new})
                     except ValueError:  # a pattern written as one block carries no marks
                         pass
-            self._commit("".join(lines))  # compiled first (SongError: nothing is written)
+            self._commit("".join(lines), guard=guard)  # compiled first (SongError: nothing is written)
 
     def pattern_entry(self, name):
         """The song file's entry of pattern `name` as a dict ({} when it is written as one block)."""
@@ -2295,7 +2305,7 @@ class State:
             else:
                 lines.insert(j + 1, f"{ind}{key}: {text}\n")
 
-    def materialize_pattern(self, index):
+    def materialize_pattern(self, index, guard=None):
         """Make the compiled cells explicit; one undo restores the original pattern notation."""
         with self.lock:
             self._need_compiled()
@@ -2304,6 +2314,7 @@ class State:
             data = ''.join(f"{r:02d}: {' | '.join(format_cell(c) for c in row)}\n"
                            for r, row in enumerate(pat.rows))
             entry = {'rows': len(pat.rows), 'data': data}
+            entry.update({k: v for k, v in self.pattern_entry(pat.name).items() if k in ('by', 'approved')})
             top = self._top(lines, 'patterns')
             if lines[top].split(':', 1)[1].strip().startswith('{'):
                 key = next(k for k in self.song['patterns'] if str(k) == pat.name)  # `1:` is the int 1, compiled as '1'
@@ -2315,7 +2326,7 @@ class State:
                 indent = ' ' * self._ind(lines[at])
                 block = api.to_yaml({pat.name: entry})
                 lines[at:self._span(lines, at)] = [indent + line + '\n' for line in block.splitlines()]
-            self._commit(''.join(lines))
+            self._commit(''.join(lines), guard=guard)
 
     def _need_compiled(self):
         if self.mod is None or self.error:
@@ -2492,13 +2503,15 @@ class State:
         text = raw.decode('utf-8-sig').replace('\r\n', '\n')
         return dict(self._diff(text, False), token=digest(raw))
 
-    def _commit(self, new, loaded=None, meta=None):
+    def _commit(self, new, loaded=None, meta=None, guard=None):
         """Compile, write, then publish one undo step. A failed write consumes no history or settings; an edit that
         changes nothing (channel 1 moved up) adds no step and keeps the redo steps."""
         meta = copy.deepcopy(self.meta if meta is None else meta)
         if new == self.text and meta == self.meta:
             return
         loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
+        if guard is not None:
+            guard(new, loaded, meta)
         changed = {k: copy.deepcopy(self.meta.get(k)) for k in self.META_KEYS if self.meta.get(k) != meta.get(k)}
         back = self._step(changed or None)
         history = (self.history + [back])[-self.UNDO_LIMIT:]
@@ -2604,7 +2617,15 @@ class State:
             if k == "channels":
                 if lines[j].split("#")[0].split(":", 1)[1].strip():
                     raise ValueError("module.channels is written on one line: write one '- {name: ...}' per channel to edit channels here")
-                items = [i for i in range(j + 1, self._span(lines, j)) if lines[i].lstrip().startswith("-")]
+                # YAML permits the sequence dashes at the same indentation as `channels:` (our importer writes this).
+                end, indent = j + 1, self._ind(lines[j])
+                while end < len(lines):
+                    text = lines[end].strip()
+                    if text and not text.startswith('#') and (self._ind(lines[end]) < indent or
+                            (self._ind(lines[end]) == indent and not text.startswith('- '))):
+                        break
+                    end += 1
+                items = [i for i in range(j + 1, end) if lines[i].lstrip().startswith("-")]
                 if any(not (entry := self._entry(lines[i], '-')) or not entry.group(4) for i in items):
                     raise ValueError("Use one-line '- {name: ..., pan: ..., volume: ...}' channel entries before editing channels here")
                 return j, items
@@ -2771,6 +2792,19 @@ class State:
                 else:
                     entry.pop(k, None)
             self._song_op(lines, orders, {"op": "sample_set", "num": num, "entry": entry}, remap)
+        elif kind == "instruments_from_samples":
+            # OpenMPT CModDoc::ConvertSamplesToInstruments: preserve sample-number assignments.
+            if self.mod.instruments is not None:
+                raise ValueError("the song already uses instruments")
+            entries = {n: {"name": s.name, "fadeout": 8, **({"sample": n} if n in self.song.get("samples", {}) else {})}
+                       for n, s in enumerate(self.mod.samples, 1)}
+            block = api.to_yaml({"instruments": entries}).splitlines(keepends=True)
+            try:
+                top = self._top(lines, "instruments")
+                lines[top:self._span(lines, top)] = block
+            except ValueError:
+                top = self._top(lines, "patterns")
+                lines[top:top] = block
         elif kind in ("instrument_set", "instrument_new", "sample_new", "sample_set"):
             section = "samples" if kind.startswith("sample") else "instruments"
             try:
@@ -3327,21 +3361,21 @@ class State:
             out[-1] = out[-1][:-1]
         lines[i + 1:end] = out
 
-    def section_edit(self, body):
+    def section_edit(self, body, guard=None):
         with self.lock:
             self._need_compiled()
             name, action = str(body.get('name', '')).strip(), body.get('action', 'save')
             sections = copy.deepcopy(self.song.get('sections') or {})
             if action == 'save':
                 sections[name] = [int(body['start']), int(body['end'])]
-                self._commit(sections_text(self.text, sections))
+                self._commit(sections_text(self.text, sections), guard=guard)
                 return
             if name not in sections:
                 raise ValueError('Select a named section first')
             a, b = sections[name]
             if action == 'delete':
                 del sections[name]
-                self._commit(sections_text(self.text, sections))
+                self._commit(sections_text(self.text, sections), guard=guard)
                 return
             if action == 'rename':
                 new = str(body.get('new_name') or '').strip()
@@ -3349,7 +3383,7 @@ class State:
                     raise ValueError('Name the section 1-80 characters')
                 if new in sections:
                     raise ValueError(f'A section is named {new} already')
-                self._commit(section_renamed(self.text, name, new))
+                self._commit(section_renamed(self.text, name, new), guard=guard)
                 return
             meta = copy.deepcopy(self.meta)
             if action in ('select', 'loop'):
@@ -3359,7 +3393,7 @@ class State:
                 meta['orders'] = [playable[0], playable[-1]+1]
                 if action == 'loop':
                     meta['loop'] = {'from': [playable[0], 0], 'to': [playable[-1], self.facts['orders'][playable[-1]]['rows']-1]}
-                self._commit(self.text, meta=meta)
+                self._commit(self.text, meta=meta, guard=guard)
                 return
             before = [str(o) for o in self.song['orders']]
             at = int(body.get('to', len(before)))
@@ -3410,7 +3444,7 @@ class State:
                 sections[new_name] = [insert, insert + b-a]
                 lines = sections_text(''.join(lines), sections).splitlines(keepends=True)
             self._write_orders(lines, after)
-            self._commit(''.join(lines), meta=meta)
+            self._commit(''.join(lines), meta=meta, guard=guard)
 
     def _wav_for_op(self, f):
         """An edit's sound file as a WAV (as_wav); one written for it goes again when the edit is refused."""
@@ -3419,7 +3453,7 @@ class State:
             self._created.append(f)
         return f.resolve()
 
-    def song_edit(self, ops):
+    def song_edit(self, ops, guard=None):
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
         channel_rename, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
         sample_set (the whole entry), sample_file (the slot pointed at another WAV), sample_delete, sample_process (an edit of the slot's audio written as a new WAV beside the song,
@@ -3466,7 +3500,7 @@ class State:
             if meta.get("loop") and max(meta["loop"]["from"][0], meta["loop"]["to"][0]) >= n:
                 meta["loop"] = None
             try:
-                self._commit(''.join(lines), loaded, meta=meta)
+                self._commit(''.join(lines), loaded, meta=meta, guard=guard)
             except Exception:
                 for f in self._created:
                     f.unlink(missing_ok=True)
@@ -3963,6 +3997,8 @@ class State:
 
 class Handler(BaseHTTPRequestHandler):
     state: State = None
+    song_lock = threading.RLock()
+    pending_recording = None  # unsaved passes retained in memory until saved or explicitly discarded
     window = None  # pywebview window, when the UI runs in one
 
     recorder = None      # record.Recorder, made on the RECORD tab's first request
@@ -4013,15 +4049,27 @@ class Handler(BaseHTTPRequestHandler):
             out.update(available=False, error=str(e), devices=[])
         out["status"] = r.status()
         out["takes"] = cls.state.takes if cls.state else []
+        out["status"]["pending_save"] = bool(cls.pending_recording)
         return out
 
     @classmethod
     def rec_command(cls, body):
+        with cls.song_lock:
+            return cls._rec_command(body)
+
+    @classmethod
+    def _rec_command(cls, body):
         """POST /api/rec: {cmd: open (device, mode, rate, exclusive) | mode | close | start (preroll) | stop (name, trim,
         trim_db, root, dest: candidate / slot / keep) | discard}."""
         from .record import RecordError
         r, cmd = cls.rec(), body.get("cmd")
         try:
+            if cmd in ('open', 'mode', 'close', 'start', 'calibrate') and (cls.pending_recording or r.recording):
+                raise RecordError('Save or discard the current take first')
+            if cmd in ('start', 'stop', 'send', 'multisample'):
+                if cls.state is None:
+                    raise RecordError('open a song first')
+                cls.state._writable()
             if cmd == "open":
                 r.open(int(body["device"]), str(body.get("mode") or "1"), int(body.get("rate") or 44100),
                        bool(body.get("exclusive")))
@@ -4078,23 +4126,37 @@ class Handler(BaseHTTPRequestHandler):
             elif cmd == "multisample":  # the session's takes with a note as one instrument
                 return {"report": cls.state.takes_multisample(body.get("files"))}
             elif cmd in ("stop", "discard"):
-                takes, plan = r.stop_takes()
-                if cmd == 'stop' and takes:
-                    if plan and plan['calibration']:
+                if cmd == 'discard':
+                    r.stop_takes()
+                    cls.pending_recording = None
+                    return {}
+                if cls.pending_recording is None:
+                    takes, plan = r.stop_takes()
+                    if plan and plan['calibration'] and takes:
                         from .record import measure_latency
                         return {'latency_ms': measure_latency(plan['pcm'], takes[0], r.rate)}
-                    saved = []
-                    for i, x in enumerate(takes):
-                        opts = dict(body)
-                        if plan:
-                            opts['trim'] = False  # preserve placement against the backing track
-                            if plan['loops'] > 1:
-                                opts['name'] = str(body.get('name') or 'take') + f'-pass{i+1}'
-                        saved.append(cls.state.save_take(x, r.rate, opts))
-                    return {'take': saved[-1], 'takes': saved}
+                    if not takes:
+                        return {}
+                    cls.pending_recording = dict(takes=takes, plan=plan, rate=r.rate, saved=[], file=None)
+                pending = cls.pending_recording
+                while len(pending['saved']) < len(pending['takes']):
+                    i = len(pending['saved'])
+                    opts, plan = dict(body), pending['plan']
+                    if plan:
+                        opts['trim'] = False  # preserve placement against the backing track
+                        if plan['loops'] > 1:
+                            opts['name'] = str(body.get('name') or 'take') + f'-pass{i+1}'
+                    if pending['file'] is None:
+                        take = cls.state.save_take(pending['takes'][i], pending['rate'], dict(opts, dest='keep'))
+                        pending['file'] = take['file']
+                    take = cls.state.send_take(pending['file'], body.get('dest') or 'candidate')
+                    pending['saved'].append(take)
+                    pending['file'] = None
+                cls.pending_recording = None
+                return {'take': pending['saved'][-1], 'takes': pending['saved']}
             else:
                 raise RecordError(f"unknown recorder command {cmd!r}")
-        except (RecordError, ValueError) as e:
+        except (RecordError, ValueError, OSError) as e:
             return {"error": str(e)}
         return {}
 
@@ -4117,13 +4179,18 @@ class Handler(BaseHTTPRequestHandler):
                 "busy": bool(lib.job and lib.job.is_alive())}
 
     @classmethod
-    def open_song(cls, path):
-        if cls.recorder is not None and cls.recorder.recording:
-            raise ValueError('Save or discard the recording before opening another song')
-        old, cls.state = cls.state, State(path)  # the same song opened again shares the old state's lock
-        if old is not None:
-            old.close()
-        remember_song(cls.state.song_path)
+    def open_song(cls, path, agent_request=False):
+        with cls.song_lock:
+            if CHAT.busy and not agent_request:
+                raise ValueError('Stop the agent before opening another song')
+            if cls.pending_recording or (cls.recorder is not None and cls.recorder.recording):
+                raise ValueError('Save or discard the recording before opening another song')
+            old, cls.state = cls.state, State(path)  # the same song opened again shares the old state's lock
+            if agent_request:
+                CHAT.tool_state = cls.state
+            if old is not None:
+                old.close()
+            remember_song(cls.state.song_path)
 
     @classmethod
     def browse(cls, wav=False, module=False):
@@ -4412,6 +4479,8 @@ class Handler(BaseHTTPRequestHandler):
                 res = lib.run(lib.scan, 0.5) if body.get("scan", True) else None
                 return self._send(200, {"result": res, **self.lib_snapshot()})
             elif act == "tool":  # an agent tool run on the open song (the MCP server's calls)
+                if body.get("run_id") is not None:
+                    return self._send(200, CHAT.remote_tool(st, str(body.get("name")), body.get("args") or {}, body["run_id"]))
                 return self._send(200, agent.run(st, str(body.get("name")), body.get("args") or {}))
             elif act == "chatsettings":
                 return self._send(200, agent.save_settings(body))
@@ -4427,8 +4496,21 @@ class Handler(BaseHTTPRequestHandler):
             elif act == "selection":
                 st.selection = body.get("selection")
                 return self._send(200, {"ok": True})
+            elif act == "uistate":
+                if body.get("song") != str(st.song_path):
+                    raise ValueError("UI report belongs to another song")
+                report = body.get("state")
+                if not isinstance(report, dict) or len(json.dumps(report)) > 8192:
+                    raise ValueError("invalid UI state report")
+                with st.lock:
+                    st.ui_state = {**report, "reported_at": time.time()}
+                    return self._send(200, {"cue": st.cue})
             elif act == "chat":
-                if body.get("clear"):
+                if body.get("stop"):
+                    CHAT.stop()
+                elif body.get("compact"):
+                    CHAT.compact(st)
+                elif body.get("clear"):
                     CHAT.clear()
                 else:
                     CHAT.send(st, str(body.get("text") or "").strip(), body.get("context"))

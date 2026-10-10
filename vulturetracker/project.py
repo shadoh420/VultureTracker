@@ -226,6 +226,8 @@ def collect(state, destination, make_zip=False, browser=None):
             changes, assets = [], {}
             for num, entry in api.from_yaml(ph['snapshot'])['samples'].items():
                 if isinstance(entry, dict) and entry.get('file'):
+                    if digest((state.base_dir / entry['file']).read_bytes()) != ph['assets'].get(entry['file']):
+                        raise ValueError('Frozen phrase sample changed; restore it before collecting')
                     rel = copy_file(state.base_dir / entry['file'], 'phrase-samples')
                     assets[rel] = digest((temp / rel).read_bytes())
                     changes.append((('samples', num, 'file'), rel))

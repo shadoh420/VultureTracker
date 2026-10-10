@@ -14,7 +14,7 @@ from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from vulturetracker import agent, gui, mcp
+from vulturetracker import agent, api, gui, mcp
 from vulturetracker.wavload import write_wav
 
 from tests.test_gui import RATE, SONG_BLOCK, sine
@@ -98,6 +98,553 @@ class AgentTests(unittest.TestCase):
     def read(self):
         return (self.dir / "song.yaml").read_bytes().decode("utf-8")
 
+    def sound_job(self, st, tool_name, **args):
+        result = agent.run(st, tool_name, args)
+        self.assertNotIn('error', result, result)
+        for _ in range(300):
+            status = agent.run(st, 'synthesis_status', {'job_id': result['job_id']})
+            if status['status'] not in ('queued', 'rendering', 'cancelling'):
+                return status
+            time.sleep(.02)
+        self.fail('synthesis job did not finish')
+
+    def test_library_index_search_similarity_and_ids(self):
+        from vulturetracker.library import Library
+        st = self.state()
+        lib = Library(self.dir / 'library.json')
+        with mock.patch.object(gui.Handler, 'library', lib):
+            def wait(job):
+                self.assertNotIn('error', job, job)
+                lib.job.join(5)
+                result = agent.run(st, 'library_status', {'job_id': job['job_id']})
+                self.assertTrue(result['done'], result)
+                return result
+            before = st.text
+            job = agent.run(st, 'index_library', {'roots': [str(self.dir)], 'replace_roots': True})
+            result = wait(job)
+            self.assertEqual(result['count'], 2)
+            self.assertEqual(result['roots'], [str(self.dir)])
+            result = agent.run(st, 'search_library', {'query': 'a.wav', 'limit': 1})
+            self.assertEqual(result['results'][0]['file'], str(self.dir / 'a.wav'))
+            self.assertTrue(result['results'][0]['current'])
+            result = wait(agent.run(st, 'similar_samples', {'slot': 1}))
+            self.assertEqual(result['result']['results'][0]['file'], str(self.dir / 'b.wav'))
+            self.assertIn('error', agent.run(st, 'library_status', {'job_id': job['job_id']}))
+            self.assertEqual(st.text, before)
+            self.assertEqual(st.cands(), [])
+            self.assertIn('error', agent.run(st, 'index_library', {'roots': ['missing']}))
+            self.assertEqual(lib.roots, [str(self.dir)])
+
+    def test_library_busy_and_pagination(self):
+        from vulturetracker.library import Library
+        st = self.state()
+        lib, event = Library(self.dir / 'library.json'), threading.Event()
+        with mock.patch.object(gui.Handler, 'library', lib):
+            lib.scan([str(self.dir)])
+            first = agent.run(st, 'search_library', {'limit': 1})
+            second = agent.run(st, 'search_library', {'offset': first['next_offset'], 'limit': 1})
+            self.assertNotEqual(first['results'][0]['file'], second['results'][0]['file'])
+            lib.run(lambda: event.wait(3))
+            try:
+                self.assertIn('error', agent.run(st, 'index_library', {'roots': [str(self.dir)]}))
+                self.assertIn('error', agent.run(st, 'similar_samples', {'file': 'a.wav'}))
+            finally:
+                event.set()
+                lib.job.join(5)
+
+    def test_recipe_versions_defaults_relative_inputs_and_render(self):
+        st = self.state()
+        d = self.dir / 'sources'
+        d.mkdir()
+        (d / 'recipe.yaml').write_text('sample_rate: 22050\ndefaults: {trim: false, fade_out: 0}\nsamples:\n  tone: {file: ../a.wav, note: A-5}\n')
+        before = (d / 'recipe.yaml').read_bytes()
+        result = agent.run(st, 'save_sound_recipe', {'recipe': 'sources/recipe.yaml', 'entry': 'tone',
+                                                   'changes': {'reverse': True}, 'name': 'Variant'})
+        self.assertNotIn('error', result, result)
+        self.assertEqual(result['spec']['file'], str(self.dir / 'a.wav'))
+        self.assertEqual(result['sample_rate'], 22050)
+        self.assertFalse(result['spec']['trim'])
+        self.assertEqual((d / 'recipe.yaml').read_bytes(), before)
+        read = agent.run(st, 'read_sound_recipe', {'recipe': result['recipe'], 'entry': result['entry']})
+        self.assertTrue(read['spec']['reverse'])
+        song, audio = st.text, (self.dir / 'a.wav').read_bytes()
+        out = self.sound_job(st, 'render_synthesis', recipe=result['recipe'], entry=result['entry'])
+        self.assertEqual(out['status'], 'done', out)
+        self.assertEqual(out['sample_rate'], 22050)
+        self.assertEqual(out['root'], 69)
+        self.assertTrue(Path(out['file']).is_file())
+        self.assertEqual(st.text, song)
+        self.assertEqual((self.dir / 'a.wav').read_bytes(), audio)
+        self.assertEqual(st.cands(), [])
+        # The generated recipe is discoverable after the owner uses its WAV.
+        recipes = agent.run(st, 'synthesis_catalog', {'action': 'recipes'})['results']
+        self.assertIn(out['file'], [r['file'] for r in recipes])
+
+    def test_synthesis_failure_cancel_and_close_publish_nothing(self):
+        from vulturetracker import synth
+        st = self.state()
+        out = self.sound_job(st, 'render_synthesis', spec={'file': 'missing.wav'})
+        self.assertEqual(out['status'], 'failed', out)
+        self.assertEqual(list(self.dir.glob('agent-*')), [])
+        started, release = threading.Event(), threading.Event()
+        original = synth.render_one
+        def slow(*args, **kwargs):
+            started.set()
+            self.assertTrue(release.wait(5))
+            return original(*args, **kwargs)
+        with mock.patch.object(synth, 'render_one', slow):
+            job = agent.run(st, 'render_synthesis', {'spec': {'file': 'a.wav'}})
+            self.assertTrue(started.wait(5))
+            try:
+                self.assertIn('error', agent.run(st, 'render_synthesis', {'spec': {'file': 'a.wav'}}))
+                self.assertIn('error', agent.run(st, 'cancel_synthesis', {'job_id': 'old'}))
+                self.assertEqual(agent.run(st, 'cancel_synthesis', {'job_id': job['job_id']})['status'], 'cancelling')
+                st.close()
+            finally:
+                release.set()
+            for _ in range(300):
+                if st.synthesis_job['status'] == 'cancelled':
+                    break
+                time.sleep(.01)
+            self.assertEqual(st.synthesis_job['status'], 'cancelled')
+        self.assertEqual(list(self.dir.glob('agent-*')), [])
+
+    def test_synthesis_validates_and_does_not_fetch_dependencies(self):
+        from vulturetracker import synth
+        st = self.state()
+        for args in [{'spec': {'faust': 'process=0;', 'hold': float('nan')}},
+                     {'spec': {'file': 'a.wav', 'patch': 'both'}},
+                     {'spec': {'patch': 'X', 'notes': ['C-4', 'C-5']}},
+                     {'spec': {'resynth': {'target': 'a.wav', 'corpus': 'b.wav', 'overlap': 1000}}}]:
+            self.assertIn('error', agent.run(st, 'render_synthesis', args))
+        self.assertIsNone(st.synthesis_job)
+        with mock.patch.object(synth, 'render_one', side_effect=synth.SynthMissing('faust', 'not installed')), \
+                mock.patch.object(synth, 'fetch_synth') as fetch:
+            result = self.sound_job(st, 'render_synthesis', spec={'faust': 'process=0;', 'hold': .1})
+            self.assertEqual(result['status'], 'failed')
+            self.assertEqual(result['need'], 'faust')
+            fetch.assert_not_called()
+        st.read_only = 'test read-only'
+        self.assertIn('error', agent.run(st, 'save_sound_recipe', {'spec': {'file': 'a.wav'}}))
+        self.assertIn('error', agent.run(st, 'render_synthesis', {'spec': {'file': 'a.wav'}}))
+        st.read_only = None
+
+    def test_paint_render_reload_filter_and_silence_failure(self):
+        st = self.state()
+        from vulturetracker.wavload import read_wav
+        before = st.text
+        out = self.sound_job(st, 'render_paint', amp=[[1, .5, 0]], seconds=.1, fmin=440, fmax=880)
+        self.assertEqual(out['status'], 'done', out)
+        self.assertEqual(len(out['files']), 3)
+        read = agent.run(st, 'read_sound_recipe', {'recipe': out['recipe']})
+        self.assertEqual(read['paint']['amp'], [[1., .5, 0.]])
+        again = self.sound_job(st, 'render_paint', source=out['recipe'])
+        self.assertEqual(Path(out['file']).read_bytes(), Path(again['file']).read_bytes())
+        filtered = self.sound_job(st, 'render_paint', amp=[[1]], file='a.wav', fmin=40, fmax=12000)
+        self.assertEqual(filtered['status'], 'done', filtered)
+        self.assertEqual(filtered['root'], 69)
+        self.assertEqual(read_wav(filtered['file']).rate, RATE)
+        failed = self.sound_job(st, 'render_paint', amp=[[0]], seconds=.1)
+        self.assertEqual(failed['status'], 'failed')
+        self.assertIsNone(failed['file'])
+        self.assertEqual(st.text, before)
+
+    def test_resynthesis_and_faust_recipe_sources(self):
+        from vulturetracker import synth
+        import numpy as np
+        st = self.state()
+        out = self.sound_job(st, 'render_synthesis', spec={'resynth': {'target': 'a.wav', 'corpus': ['b.wav'],
+                              'corpus_seconds': .3}, 'length': .1, 'trim': False})
+        self.assertEqual(out['status'], 'done', out)
+        self.assertTrue(any('resynth:' in s for s in out['log']))
+        # Faust integration gets the frozen source and parameters; real compiler renders have tests.test_faust.
+        with mock.patch.object(synth, '_faust', return_value=(np.sin(np.arange(4410)*.1)[None, :], 'test Faust')) as render:
+            out = self.sound_job(st, 'render_synthesis', spec={'faust': 'process=0;', 'hold': .1, 'params': {'tone': .2}})
+            self.assertEqual(out['status'], 'done', out)
+            self.assertEqual(render.call_args.args[1]['params'], {'tone': .2})
+
+    def test_synthesis_catalog_and_note_selection(self):
+        from vulturetracker import synth
+        st = self.state()
+        with mock.patch.object(synth, 'patch_index', return_value={'Pads/Dark': ('surge', self.dir, 0),
+                                                                  'Leads/Bright': ('surge', self.dir, 0)}):
+            results = agent.run(st, 'synthesis_catalog', {'action': 'patches', 'query': 'dark'})
+            self.assertEqual(results['results'], [{'patch': 'Pads/Dark', 'synth': 'surge'}])
+        host = mock.Mock()
+        host.plugin.cutoff = 440.0
+        host.plugin.parameters = {'cutoff': mock.Mock(raw_value=.4, type=float, label='Hz', min_value=20., max_value=20000.),
+                                  'gain': mock.Mock(raw_value=.7)}
+        with mock.patch.object(synth, 'Synths', return_value=host):
+            result = agent.run(st, 'synthesis_catalog', {'action': 'parameters', 'patch': 'Pads/Dark', 'query': 'cut'})
+            host.load.assert_called_once_with('Pads/Dark')
+            self.assertEqual(result['results'], [{'name': 'cutoff', 'value': 440., 'type': 'float', 'units': 'Hz',
+                              'min': 20., 'max': 20000., 'choices': None, 'choice_count': None, 'raw_value': .4}])
+        saved = agent.run(st, 'save_sound_recipe', {'spec': {'patch': 'Pads/Dark', 'notes': ['C-4', 'C-5']}, 'note': 'C-5'})
+        self.assertNotIn('error', saved, saved)
+        self.assertEqual(saved['spec']['note'], 'C-5')
+        self.assertNotIn('notes', saved['spec'])
+
+    def test_synthesis_queued_cancel_and_output_collision(self):
+        st = self.state()
+        with mock.patch.object(st, '_put'):
+            queued = agent.run(st, 'render_synthesis', {'spec': {'file': 'a.wav'}})
+        agent.run(st, 'cancel_synthesis', {'job_id': queued['job_id']})
+        agent.agent_sounds.render_job(st, st.synthesis_job)
+        self.assertEqual(st.synthesis_job['status'], 'cancelled')
+        self.assertEqual(list(self.dir.glob('agent-*')), [])
+        occupied = self.dir / 'occupied.wav'
+        occupied.write_bytes(b'preserve')
+        with mock.patch.object(agent.agent_sounds, '_asset', return_value=occupied):
+            result = self.sound_job(st, 'render_synthesis', spec={'file': 'a.wav'})
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(occupied.read_bytes(), b'preserve')
+
+    def batch4(self, st, tool_name, **args):
+        result = agent.run(st, tool_name, args)
+        self.assertNotIn('error', result, result)
+        return result
+
+    def test_section_tools_remap_jumps_loops_and_undo(self):
+        st = self.state()
+        st.song_edit([{'op': 'orders', 'orders': ['p1', 'p2', 'p1', 'p2']}])
+        st.edit_patterns([(0, [{'row': 3, 'ch': 0, 'cell': '... .. ... B01'}])])
+        call = lambda tool_name, **kw: self.batch4(st, tool_name, **kw)
+        call('edit_section', action='create', name='Intro', start=0, end=2)
+        call('edit_section', action='create', name='Tail', start=2, end=4)
+        st.section_edit({'action': 'loop', 'name': 'Intro'})
+        before, n = st.text, len(st.history)
+        call('edit_section', action='move', name='Intro', to=4)
+        self.assertEqual(st.song['sections']['Intro'], [2, 4])
+        self.assertEqual(st.mod.patterns[0].rows[3][0].param, 3)
+        self.assertEqual(st.meta['loop']['from'], [2, 0])
+        self.assertEqual(len(st.history), n+1)
+        call('undo')
+        self.assertEqual(st.text, before)
+        call('edit_section', action='duplicate', name='Intro', new_name='Again', to=4)
+        self.assertEqual(st.song['sections']['Again'], [4, 6])
+        self.assertNotEqual(st.song['orders'][4], 'p1')
+        clone = next(p for p in st.mod.patterns if p.name == st.song['orders'][4])
+        self.assertEqual(clone.rows[3][0].param, 5)
+        call('edit_section', action='rename', name='Again', new_name='Outro')
+        orders = list(st.song['orders'])
+        call('edit_section', action='delete', name='Outro')
+        self.assertEqual(st.song['orders'], orders)
+
+    def test_section_tools_fail_atomically(self):
+        st = self.state()
+        self.batch4(st, 'edit_section', action='create', name='A', start=0, end=1)
+        for args in [dict(action='create', name='A', start=0, end=1),
+                     dict(action='update', name='missing', start=0, end=1),
+                     dict(action='create', name='Overlap', start=0, end=2),
+                     dict(action='update', name='A', start=True, end=1),
+                     dict(action='move', name='A', to=3)]:
+            before, n = st.text, len(st.history)
+            self.assertIn('error', agent.run(st, 'edit_section', args))
+            self.assertEqual((st.text, len(st.history)), (before, n))
+        self.batch4(st, 'edit_section', action='update', name='A', start=0, end=2)
+        self.assertEqual(st.song['sections']['A'], [0, 2])
+
+    def test_pattern_maintenance_and_discard_guard(self):
+        st = self.state()
+        call = lambda **kw: self.batch4(st, 'edit_pattern', **kw)
+        before = st.text
+        self.assertIn('error', agent.run(st, 'edit_pattern', dict(action='resize', pattern='p1', rows=2)))
+        self.assertEqual(st.text, before)
+        call(action='resize', pattern='p1', rows=2, discard_rows=True)
+        self.assertEqual(len(st.mod.patterns[0].rows), 2)
+        self.batch4(st, 'undo')
+        self.assertEqual(st.text, before)
+        call(action='rename', pattern='p1', new_name='Lead')
+        self.assertEqual(st.song['orders'], ['Lead', 'p2'])
+        call(action='resize', pattern='Lead', rows=8)
+        self.assertEqual(len(st.mod.patterns[0].rows), 8)
+        self.assertIn('error', agent.run(st, 'edit_pattern', dict(action='delete', pattern='Lead')))
+        self.batch4(st, 'new_pattern', name='Unused')
+        call(action='delete', pattern='Unused')
+        self.assertNotIn('Unused', st.song['patterns'])
+
+    def test_materialize_preserves_marks_and_cells(self):
+        st = self.state()
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'by': 'you'}])
+        before, rows = st.text, st.mod.patterns[0].rows
+        self.batch4(st, 'edit_pattern', action='materialize', pattern='p1')
+        self.assertEqual(st.mod.patterns[0].rows, rows)
+        self.assertEqual(st.pattern_entry('p1')['by'], 'you')
+        self.batch4(st, 'undo')
+        self.assertEqual(st.text, before)
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'approved': True}])
+        self.assertIn('error', agent.run(st, 'edit_pattern', dict(action='materialize', pattern='p1')))
+        st.materialize_pattern(0)  # owner operation retains approval too
+        self.assertTrue(st.pattern_entry('p1')['approved'])
+
+    def test_write_patterns_atomic_compile_and_approval_guards(self):
+        st = self.state()
+        before, n = st.text, len(st.history)
+        groups = [{'pattern': 'p1', 'cells': [{'row': 1, 'channel': 1, 'cell': 'D-5 01'}]},
+                  {'pattern': 'p2', 'cells': [{'row': 1, 'channel': 2, 'cell': 'invalid'}]}]
+        self.assertIn('error', agent.run(st, 'write_patterns', {'patterns': groups}))
+        self.assertEqual((st.text, len(st.history)), (before, n))
+        groups[1]['cells'][0]['cell'] = 'E-5 02'
+        self.assertEqual(self.batch4(st, 'write_patterns', patterns=groups)['changed_cells'], 2)
+        self.assertEqual(len(st.history), n+1)
+        self.assertEqual(st.pattern_entry('p1')['by'], 'you and agent')
+        self.batch4(st, 'undo')
+        self.assertEqual(st.text, before)
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p2', 'approved': True}])
+        before, n = st.text, len(st.history)
+        self.assertIn('error', agent.run(st, 'write_patterns', {'patterns': groups}))
+        self.assertEqual((st.text, len(st.history)), (before, n))
+
+    def test_transform_transpose_replace_and_clear(self):
+        st = self.state()
+        self.batch4(st, 'write_patterns', patterns=[{'pattern': 'p1', 'cells': [
+            {'row': 1, 'channel': 1, 'cell': 'B-9 01'}, {'row': 3, 'channel': 1, 'cell': '==='}]}])
+        before, n = st.text, len(st.history)
+        selections = [{'pattern': 'p1', 'channels': [1]}, {'pattern': 'p2', 'channels': [1]}]
+        self.batch4(st, 'transform_patterns', action='transpose', selections=selections, semitones=12)
+        self.assertEqual([st.mod.patterns[0].rows[r][0].note for r in (0, 1, 3)], [72, 119, 255])
+        self.assertEqual(st.mod.patterns[1].rows[0][0].note, 72)
+        self.assertEqual(len(st.history), n+1)
+        self.batch4(st, 'undo')
+        self.assertEqual(st.text, before)
+        self.batch4(st, 'transform_patterns', action='replace', selections=selections,
+                    match={'note': 'C-?', 'instrument': '0*'}, replacement={'note': 'F#4', 'effect': 'R44'})
+        self.assertEqual(st.mod.patterns[0].rows[0][0].note, 54)
+        self.assertEqual(st.mod.patterns[1].rows[0][0].effect, 18)
+        self.batch4(st, 'transform_patterns', action='clear', selections=selections, fields=['effect'])
+        self.assertEqual(st.mod.patterns[1].rows[0][0].effect, 0)
+        self.assertEqual(st.mod.patterns[1].rows[0][0].note, 54)
+
+    def test_composition_helpers_and_guard_on_chord_destinations(self):
+        st = self.state()
+        select = [{'pattern': 'p1', 'channels': [1]}]
+        call = lambda **kw: self.batch4(st, 'transform_patterns', selections=select, **kw)
+        call(action='euclid', hits=2, steps=4)
+        self.assertEqual([r[0].note for r in st.mod.patterns[0].rows], [60, None, 60, None])
+        call(action='groove', ticks=[1, 0])
+        self.assertEqual(st.mod.patterns[0].rows[0][0].param, 0xD1)
+        call(action='layers', instruments=[1, 2])
+        self.assertEqual([st.mod.patterns[0].rows[r][0].instrument for r in [0, 2]], [1, 2])
+        before, n = st.text, len(st.history)
+        self.assertIn('error', agent.run(st, 'transform_patterns', dict(action='chord', selections=select, shape='5')))
+        self.assertEqual((st.text, len(st.history)), (before, n))
+        call(action='chord', shape='5', overwrite=True)
+        self.assertEqual(st.mod.patterns[0].rows[2][1].note, 67)
+        self.batch4(st, 'undo')
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 1, 'approved': True}])
+        before, n = st.text, len(st.history)
+        self.assertIn('error', agent.run(st, 'transform_patterns', dict(action='chord', selections=select, shape='5', overwrite=True)))
+        self.assertEqual((st.text, len(st.history)), (before, n))
+
+    def test_copy_move_overlap_fields_mix_and_undo(self):
+        st = self.state()
+        before, n = st.text, len(st.history)
+        source = {'pattern': 'p1', 'from_row': 0, 'to_row': 2, 'channels': [1]}
+        result = self.batch4(st, 'copy_pattern_region', source=source, pattern='p1', row=1, channel=1, move=True)
+        self.assertEqual(result['changed_cells'], 2)
+        self.assertIsNone(st.mod.patterns[0].rows[0][0].note)
+        self.assertEqual(st.mod.patterns[0].rows[1][0].note, 60)
+        self.assertEqual(len(st.history), n+1)
+        self.batch4(st, 'undo')
+        self.assertEqual(st.text, before)
+        source['to_row'] = 0
+        self.batch4(st, 'copy_pattern_region', source=source, pattern='p2', row=0, channel=1, mix=True)
+        self.assertEqual(st.mod.patterns[1].rows[0][0].instrument, 2)
+        self.batch4(st, 'copy_pattern_region', source=source, pattern='p2', row=1, channel=2, fields=['note'])
+        self.assertEqual(st.mod.patterns[1].rows[1][1].note, 60)
+        self.assertEqual(st.mod.patterns[1].rows[1][1].instrument, 0)
+
+    def test_copy_refusals_do_not_clear_source(self):
+        st = self.state()
+        source = {'pattern': 'p1', 'from_row': 0, 'to_row': 0, 'channels': [1]}
+        for extra in [dict(row=0, channel=1), dict(row=4, channel=1), dict(row=0, channel=1, mix=True, move=True)]:
+            before, n = st.text, len(st.history)
+            self.assertIn('error', agent.run(st, 'copy_pattern_region', dict(source=source, pattern='p2', **extra)))
+            self.assertEqual((st.text, len(st.history)), (before, n))
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'approved': True}])
+        self.batch4(st, 'copy_pattern_region', source=source, pattern='p2', row=1, channel=1)
+        before, n = st.text, len(st.history)
+        self.assertIn('error', agent.run(st, 'copy_pattern_region', dict(source=source, pattern='p2', row=2, channel=1, move=True)))
+        self.assertEqual((st.text, len(st.history)), (before, n))
+
+    def test_batch4_strict_bounds_readonly_noop_and_duplicates(self):
+        st = self.state()
+        before, n = st.text, len(st.history)
+        selection = [{'pattern': 'p1', 'channels': [1]}]
+        for name, args in [
+            ('edit_pattern', dict(action='rename', pattern=0, new_name='Wrong')),
+            ('transform_patterns', dict(action='transpose', selections=selection*2, semitones=1)),
+            ('transform_patterns', dict(action='transpose', selections=selection, semitones=True)),
+            ('transform_patterns', dict(action='clear', selections=[dict(pattern='p1', to_row=4)])),
+            ('write_patterns', dict(patterns=[dict(pattern='p1', cells=[dict(row=0, channel=1, cell='D-5')]*2)]))]:
+            self.assertIn('error', agent.run(st, name, args))
+            self.assertEqual((st.text, len(st.history)), (before, n))
+        self.assertEqual(self.batch4(st, 'transform_patterns', action='transpose', selections=selection, semitones=0)['changed_cells'], 0)
+        self.assertEqual((st.text, len(st.history)), (before, n))
+        st.read_only = True
+        self.assertIn('error', agent.run(st, 'edit_section', dict(action='create', name='A', start=0, end=1)))
+        self.assertIn('error', agent.run(st, 'transform_patterns', dict(action='transpose', selections=selection, semitones=1)))
+        self.assertEqual((st.text, len(st.history)), (before, n))
+        st.read_only = False
+
+    def test_section_jump_guard_keeps_approved_pattern_and_history(self):
+        st = self.state()
+        st.edit_patterns([(0, [{'row': 3, 'ch': 0, 'cell': '... .. ... B01'}])])
+        self.batch4(st, 'edit_section', action='create', name='A', start=0, end=1)
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'approved': True}])
+        before, n = st.text, len(st.history)
+        self.assertIn('approved', agent.run(st, 'edit_section', dict(action='move', name='A', to=2))['error'])
+        self.assertEqual((st.text, len(st.history)), (before, n))
+
+    def test_edit_instrument_and_sample_fields(self):
+        from tests.test_gui import SONG_INS
+        (self.dir / "song.yaml").write_bytes(SONG_INS.encode())
+        st = self.state()
+        def call(name, **args):
+            out = agent.run(st, name, args)
+            self.assertNotIn("error", out, out)
+            return out
+        call("edit_instrument", number=1, changes={"nna": "fade", "volume_envelope": {
+            "nodes": [[0, 64], [10, 32]], "sustain": [1, 1]}})
+        self.assertEqual(st.song["instruments"][1]["fadeout"], 128)
+        self.assertEqual(st.mod.instruments[0].nna, 3)
+        call("edit_sample", number=1, changes={"loop": {"start": 100, "end": 1000},
+                                              "vibrato": {"type": "ramp_down", "speed": 3}})
+        self.assertEqual(call("inspect_sample", number=1)["usage"]["instruments"], [1])
+        call("edit_sample", number=1, clear=["loop"])
+        self.assertNotIn("loop", st.song["samples"][1])
+        for name, args in [("edit_instrument", {"number": 1, "changes": {"global_volume": 12}}),
+                           ("edit_sample", {"number": 1, "changes": {"loop": {"start": 0, "end": 999999}}}),
+                           ("edit_instrument", {"number": 1, "changes": {"sample": 99}})]:
+            before = self.read()
+            self.assertIn("error", agent.run(st, name, args))
+            self.assertEqual(before, self.read())
+
+    def test_delete_slots_checks_all_references_and_restores_holes(self):
+        st = self.state()
+        st.song_edit([{"op": "orders", "orders": ["p1"]}])
+        out = agent.run(st, "delete_slot", {"kind": "sample", "number": 2})
+        self.assertIn("error", out)
+        self.assertIn("p2", {r["pattern"] for r in out["usage"]["references"]})
+        st.song_edit([{"op": "sample_new", "num": 3, "file": "a.wav", "keep": {"volume": 13}},
+                      {"op": "sample_new", "num": 4, "file": "b.wav"}])
+        original = (self.dir / "a.wav").read_bytes()
+        for name, args in [("delete_slot", {"kind": "sample", "number": 3}), ("undo", {}), ("redo", {})]:
+            out = agent.run(st, name, args)
+            self.assertNotIn("error", out, out)
+        self.assertNotIn(3, st.song["samples"])
+        self.assertIn(4, st.song["samples"])
+        self.assertEqual((self.dir / "a.wav").read_bytes(), original)
+        agent.run(st, "create_instrument", {"sample": 4})
+        self.assertIn("error", agent.run(st, "delete_slot", {"kind": "sample", "number": 4}))
+        n = max(st.song["instruments"])
+        self.assertNotIn("error", agent.run(st, "delete_slot", {"kind": "instrument", "number": n}))
+        # A shadowed default mapping still references a sample in the source format.
+        st.song_edit([{"op": "instrument_new", "num": n, "entry": {"sample": 4,
+            "keymap": [{"notes": "C-0..B-9", "sample": 1}]}}])
+        self.assertIn(n, agent.run(st, "inspect_sample", {"number": 4})["usage"]["instruments"])
+
+    def test_sample_processing_preserves_audio_and_undo(self):
+        import numpy as np
+        st = self.state()
+        original = (self.dir / "a.wav").read_bytes()
+        x = st._sample_wav(1)[3].copy()
+        out = agent.run(st, "process_sample", {"number": 1, "action": "reverse"})
+        self.assertNotIn("error", out, out)
+        new_path = st.base_dir / st.song["samples"][1]["file"]
+        self.assertTrue(np.allclose(st._sample_wav(1)[3], x[:, ::-1], atol=1 / 32768))
+        self.assertEqual((self.dir / "a.wav").read_bytes(), original)
+        self.assertNotIn("error", agent.run(st, "undo", {}))
+        self.assertEqual(st.song["samples"][1]["file"], "a.wav")
+        self.assertNotIn("error", agent.run(st, "redo", {}))
+        self.assertEqual(st.base_dir / st.song["samples"][1]["file"], new_path)
+        out = agent.run(st, "process_sample", {"number": 1, "action": "trim", "start": 100, "end": 2000})
+        self.assertNotIn("error", out, out)
+        self.assertEqual(st._sample_wav(1)[3].shape[1], 1900)
+        before, files = self.read(), set(self.dir.glob("*.wav"))
+        for args in [{"action": "gain", "params": {"db": float("nan")}},
+                     {"action": "lowpass", "params": {"hz": -1}},
+                     {"action": "trim", "start": True}, {"action": "auto_loop", "frames": 1},
+                     {"action": "gain", "params": {"unrecognized": 1}},
+                     {"action": "denoise", "params": {"na": 0, "nb": 999999}}]:
+            self.assertIn("error", agent.run(st, "process_sample", {"number": 1, **args}))
+            self.assertEqual(self.read(), before)
+            self.assertEqual(set(self.dir.glob("*.wav")), files)
+
+    def test_sample_tools_protect_approved_and_readonly_material(self):
+        st = self.state()
+        st.song_edit([{"op": "mark", "what": "pattern", "key": "p2", "approved": True}])
+        before = self.read()
+        # Sample 1 is only named in p1, but can sustain into approved p2.
+        for name, args in [("process_sample", {"number": 1, "action": "reverse"}),
+                           ("edit_sample", {"number": 1, "changes": {"base_note": "C-4"}})]:
+            self.assertIn("approved", agent.run(st, name, args)["error"])
+        self.assertEqual(self.read(), before)
+        st.read_only = True
+        self.assertIn("error", agent.run(st, "slice_sample", {"number": 1, "points": [0]}))
+        out = agent.run(st, "inspect_sample", {"number": 1, "analysis": "slices", "slice_mode": "equal", "value": 2})
+        self.assertNotIn("error", out, out)
+        self.assertEqual(len(out["slices"]["points"]), 2)
+        self.assertEqual(self.read(), before)
+
+    def test_processing_effects_loops_and_failed_write_cleanup(self):
+        import numpy as np
+        tone = (12000 * np.sin(2 * np.pi * 440 * np.arange(RATE) / RATE)).astype(int).tolist()
+        write_wav(self.dir / "a.wav", RATE, [tone])
+        st = self.state()
+        cases = [("fade_in", {}), ("fade_out", {}), ("normalize", {}), ("dc", {}),
+                 ("gain", {"db": -6}), ("lowpass", {"hz": 1000}), ("highpass", {"hz": 200}),
+                 ("eq", {"hz": 1000, "db": 3}), ("loudness", {"db": -20}),
+                 ("pitch", {"semitones": 3}), ("stretch", {"percent": 125}),
+                 ("denoise", {"na": 0, "nb": 4096})]
+        for action, params in cases:
+            with self.subTest(action=action):
+                before = self.read()
+                out = agent.run(st, "process_sample", {"number": 1, "action": action, "params": params})
+                self.assertNotIn("error", out, out)
+                self.assertNotEqual(st.song["samples"][1]["file"], "a.wav")
+                self.assertNotIn("error", agent.run(st, "undo", {}))
+                self.assertEqual(self.read(), before)
+        before = self.read()
+        out = agent.run(st, "inspect_sample", {"number": 1, "analysis": "loop"})
+        self.assertNotIn("error", out, out)
+        self.assertEqual(self.read(), before)
+        out = agent.run(st, "process_sample", {"number": 1, "action": "auto_loop"})
+        self.assertNotIn("error", out, out)
+        self.assertEqual(st.song["samples"][1]["file"], "a.wav")
+        self.assertEqual(st.song["samples"][1]["loop"]["start"], out["entry"]["loop"]["start"])
+        out = agent.run(st, "process_sample", {"number": 1, "action": "crossfade", "frames": 50})
+        self.assertNotIn("error", out, out)
+        # A failure after generating the WAV must remove that new file and leave the song unchanged.
+        before, files = self.read(), set(self.dir.glob("*.wav"))
+        with mock.patch.object(st, "_commit", side_effect=OSError("test write failure")):
+            out = agent.run(st, "process_sample", {"number": 1, "action": "reverse"})
+        self.assertIn("error", out)
+        self.assertEqual(self.read(), before)
+        self.assertEqual(set(self.dir.glob("*.wav")), files)
+
+    def test_slice_and_render_new_samples(self):
+        st = self.state()
+        original = self.read()
+        out = agent.run(st, "slice_sample", {"number": 1, "points": [0, 4000], "end": 8000})
+        self.assertNotIn("error", out, out)
+        self.assertEqual(out["samples"], [3, 4])
+        self.assertEqual(st._sample_wav(3)[3].shape[1], 4000)
+        self.assertEqual(st.song["samples"][1]["file"], "a.wav")
+        self.assertNotIn("error", agent.run(st, "undo", {}))
+        self.assertEqual(original, self.read())
+        out = agent.run(st, "render_sample", {"order": 0, "start_row": 0, "end_row": 1, "channels": [1], "tail": 0})
+        self.assertNotIn("error", out, out)
+        self.assertEqual(out["samples"], [3])
+        self.assertGreater(st._sample_wav(3)[3].shape[1], 0)
+        self.assertNotIn("error", agent.run(st, "undo", {}))
+        self.assertEqual(original, self.read())
+        for name, args in [("slice_sample", {"number": 1, "points": [0, 1]}),
+                           ("render_sample", {"order": 0, "start_row": 0, "end_row": 1, "channels": [0]}),
+                           ("render_sample", {"order": 99, "start_row": 0, "end_row": 1})]:
+            self.assertIn("error", agent.run(st, name, args))
+            self.assertEqual(original, self.read())
+
     def test_tools_read_edit_and_refuse(self):
         st = self.state()
         ov = agent.run(st, "song_overview", {})
@@ -137,6 +684,426 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(st.facts["channel_plugins"], [0, 1])
         self.assertIn("approved", agent.run(st, "set_plugins", {"channel_plugins": {"1": 1}})["error"])
 
+    def test_flanger_routes_on_imported_channel_layout(self):
+        # api.to_yaml (also used by module import) writes indentless channel sequences.
+        song = api.load(self.dir / 'song.yaml')
+        song['module']['channels'] = [{'name': f'Ch {n}'} for n in range(1, 18)]
+        text = api.to_yaml(song)
+        self.assertIn('  channels:\n  - ', text)
+        (self.dir / 'song.yaml').write_bytes(text.encode())
+        st = self.state()
+        before = self.read()
+        out = agent.run(st, 'set_plugins', {'plugins': {'1': {'effect': 'flanger', 'name': 'Melody flanger'}},
+                                           'channel_plugins': {'9': 1}})
+        self.assertTrue(out.get('ok'), out)
+        self.assertEqual(st.facts['channel_plugins'], [0]*8 + [1] + [0]*8)
+        self.assertEqual(st.facts['plugins'][1]['effect'], 'flanger')
+        st.undo()
+        self.assertEqual(self.read(), before)
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 8, 'approved': True}])
+        self.assertIn('approved', agent.run(st, 'set_plugins', {'channel_plugins': {'9': 1}})['error'])
+
+    def test_create_channel_imported_and_limit(self):
+        song = api.load(self.dir / 'song.yaml')
+        song['module']['channels'] = [{'name': f'Ch {n}'} for n in range(1, 18)]
+        (self.dir / 'song.yaml').write_bytes(api.to_yaml(song).encode())
+        st = self.state()
+        before, rows = self.read(), [p.rows for p in st.mod.patterns]
+        out = agent.run(st, 'create_channel', {'name': 'Melody'})
+        self.assertEqual(out.get('channel'), 18, out)
+        for old, p in zip(rows, st.mod.patterns):
+            for a, b in zip(old, p.rows):
+                self.assertEqual(a, b[:17])
+                self.assertTrue(b[17].is_empty())
+        self.assertEqual(len(st.history), 1)
+        st.undo()
+        self.assertEqual(self.read(), before)
+        for name in ['', 'x'*21, 123]:
+            self.assertIn('error', agent.run(st, 'create_channel', {'name': name}))
+        st.read_only = True
+        self.assertIn('error', agent.run(st, 'create_channel', {}))
+        st.read_only = False
+        song['module']['channels'] = [{'name': f'Ch {n}'} for n in range(1, 65)]
+        st._commit(api.to_yaml(song))
+        self.assertIn('64', agent.run(st, 'create_channel', {})['error'])
+
+    def test_complete_state_and_atomic_audition(self):
+        st = self.state()
+        st.selection = {'order': 0, 'rows': [0, 1], 'channels': [0, 1], 'pattern': 'p1'}
+        st.ui_state = {'reported_at': time.time(), 'rack_channel': 2, 'applied_request': 7}
+        before = self.read()
+        result = agent.run(st, 'get_state', {})
+        self.assertFalse(result['ui_stale'])
+        self.assertEqual(result['selection']['channels'], [1, 2])
+        self.assertEqual(result['samples'], st.song['samples'])
+        self.assertEqual(result['rack']['channel_plugins'], {1: 0, 2: 0})
+        st.ui_state['reported_at'] -= 10
+        self.assertTrue(agent.run(st, 'get_state', {})['ui_stale'])
+        meta = json.dumps(st.meta, sort_keys=True)
+        for changes in [{'solo': 3}, {'solo': True}, {'muted': [0]},
+                        {'solo': 1, 'loop': {'from': [1, 3], 'to': [0, 1]}},
+                        {'loop': {'from': [0, 0], 'to': [0, 4]}}, {'mix': {}}]:
+            self.assertIn('error', agent.run(st, 'set_audition', changes))
+            self.assertEqual(json.dumps(st.meta, sort_keys=True), meta)
+        out = agent.run(st, 'set_audition', {'solo': 2, 'muted': [1], 'loop': {'from': [0, 1], 'to': [1, 2]}})
+        self.assertTrue(out.get('ok'), out)
+        self.assertEqual(st.meta['solo'], 1)
+        self.assertEqual(st.meta['muted'], [0])
+        self.assertEqual(st.meta['orders'], [0, 2])
+        self.assertEqual(json.loads(st.meta_path.read_text())['solo'], 1)
+        self.assertEqual(self.read(), before)
+        self.assertEqual(len(st.history), 0)
+        stop = agent.run(st, 'stop_playback', {})
+        self.assertEqual(stop['request_id'], out['request_id'] + 1)
+        self.assertEqual(stop['status'], 'queued')
+        self.assertEqual(st.cue['action'], 'stop')
+        self.assertGreater(st.cue['expires'], time.time())
+        self.assertTrue(agent.run(st, 'set_audition', {'solo': None, 'muted': [], 'loop': None})['ok'])
+        self.assertEqual(st.mix(), result['audition']['mix'])
+
+    def test_targeted_rack_edits_and_inspection(self):
+        st = self.state()
+        for effect in ['chorus', 'distortion', 'flanger']:
+            out = agent.run(st, 'edit_effect', {'action': 'add', 'channel': 2, 'effect': effect})
+            self.assertTrue(out.get('ok'), out)
+        self.assertEqual(agent._chain(st.facts, 1), [1, 2, 3])
+        self.assertTrue(agent.run(st, 'set_plugins', {'macros': {'SF1': 'F0F080z'}})['ok'])
+        before = agent.run(st, 'get_state', {})['rack']
+        out = agent.run(st, 'edit_effect', {'action': 'update', 'plugin': 2, 'changes': {'gain': -9, 'bypass': True}})
+        self.assertTrue(out.get('ok'), out)
+        after = agent.run(st, 'get_state', {})['rack']
+        self.assertEqual(after['plugins'][1], before['plugins'][1])
+        self.assertEqual(after['plugins'][3], before['plugins'][3])
+        self.assertEqual(after['macros'], before['macros'])
+        self.assertEqual(after['plugins'][2]['gain'], -9)
+        self.assertTrue(after['plugins'][2]['bypass'])
+        for changes in [{'gain': 999}, {'output': 1}]:
+            text, steps = self.read(), len(st.history)
+            self.assertIn('error', agent.run(st, 'edit_effect', {'action': 'update', 'plugin': 2, 'changes': changes}))
+            self.assertEqual((self.read(), len(st.history)), (text, steps))
+        out = agent.run(st, 'edit_effect', {'action': 'move', 'channel': 2, 'plugin': 3, 'position': 1})
+        self.assertTrue(out.get('ok'), out)
+        self.assertEqual(agent._chain(st.facts, 1), [3, 1, 2])
+        self.assertTrue(agent.run(st, 'edit_effect', {'action': 'remove', 'plugin': 1})['ok'])
+        self.assertEqual(agent._chain(st.facts, 1), [3, 2])
+        self.assertTrue(agent.run(st, 'edit_effect', {'action': 'remove', 'plugin': 3})['ok'])
+        self.assertEqual(st.facts['channel_plugins'], [0, 2])
+
+    def test_rack_protection_preflights_shared_and_master(self):
+        st = self.state()
+        self.assertTrue(agent.run(st, 'set_plugins', {'plugins': {1: {'effect': 'echo'}, 2: {'effect': 'chorus', 'master': True}},
+                                                      'channel_plugins': {1: 1, 2: 1}})['ok'])
+        self.assertIn('shared', agent.run(st, 'edit_effect', {'action': 'move', 'channel': 2, 'plugin': 1, 'position': 1})['error'])
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 0, 'approved': True}])
+        text, steps = self.read(), len(st.history)
+        for args in [{'action': 'update', 'plugin': 1, 'changes': {'bypass': True}},
+                     {'action': 'remove', 'plugin': 1}, {'action': 'add', 'channel': 2, 'effect': 'flanger'},
+                     {'action': 'update', 'plugin': 2, 'changes': {'bypass': True}}]:
+            self.assertIn('approved', agent.run(st, 'edit_effect', args)['error'])
+            self.assertEqual((self.read(), len(st.history)), (text, steps))
+        self.assertIn('approved', agent.run(st, 'set_plugins', {'macros': {'SF1': 'F0F080z'}})['error'])
+
+    def test_agent_checkpoints_restore_and_redo(self):
+        st = self.state()
+        def cp(action):
+            return agent.run(st, 'checkpoint', {'action': action, 'name': 'Before FX'})
+        self.assertTrue(cp('save').get('ok'))
+        self.assertIn('exists', cp('save')['error'])
+        self.assertEqual(cp('list')['checkpoints'], ['Before FX'])
+        before = self.read()
+        self.assertTrue(agent.run(st, 'edit_effect', {'action': 'add', 'channel': 2, 'effect': 'distortion'})['ok'])
+        changed = self.read()
+        self.assertTrue(cp('diff')['ok'])
+        result = cp('restore')
+        self.assertTrue(result.get('ok'), result)
+        self.assertEqual(self.read(), before)
+        st.undo()
+        self.assertEqual(self.read(), changed)
+        result = agent.run(st, 'redo', {})
+        self.assertTrue(result.get('ok'), result)
+        self.assertEqual(self.read(), before)
+        self.assertTrue(cp('delete')['ok'])
+        self.assertEqual(cp('list')['checkpoints'], [])
+
+    def test_checkpoint_protects_owner_changes(self):
+        st = self.state()
+        self.assertTrue(agent.run(st, 'checkpoint', {'action': 'save', 'name': 'Before'})['ok'])
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 0, 'approved': True}])
+        text = self.read()
+        out = agent.run(st, 'checkpoint', {'action': 'restore', 'name': 'Before'})
+        self.assertIn('approved', out['error'])
+        self.assertEqual(self.read(), text)
+        st.undo()
+        st.meta['mix'] = {'channel_volume': {'0': 20}}
+        self.assertIn('levels', agent.run(st, 'checkpoint', {'action': 'restore', 'name': 'Before'})['error'])
+
+    def wait_chat(self, chat):
+        for _ in range(200):
+            if not chat.busy:
+                return
+            time.sleep(.01)
+        self.fail('chat did not stop within two seconds')
+
+    def test_channel_operations_carry_notes_routing_and_owner_faders(self):
+        st = self.state()
+        st.set_mix({'volume': {'0': 23, '1': 41}, 'pan': {'0': 12}})
+        st.meta.update(solo=0, muted=[1])
+        self.assertTrue(agent.run(st, 'edit_effect', {'action': 'add', 'channel': 1, 'effect': 'echo'})['ok'])
+        before, rows = self.read(), [p.rows for p in st.mod.patterns]
+        out = agent.run(st, 'edit_channel', {'action': 'move', 'channel': 1, 'to': 2})
+        self.assertEqual(out.get('channel_map'), {1: 2, 2: 1}, out)
+        self.assertEqual(st.facts['channel_plugins'], [0, 1])
+        self.assertEqual(st.meta['mix']['volume'], {'1': 23, '0': 41})
+        self.assertEqual((st.meta['solo'], st.meta['muted']), (1, [0]))
+        self.assertEqual([p.rows for p in st.mod.patterns], [[list(reversed(r)) for r in p] for p in rows])
+        moved = self.read()
+        for tool, expected in [('undo', before), ('redo', moved)]:
+            out = agent.run(st, tool, {})
+            self.assertTrue(out.get('ok'), out)
+            self.assertEqual(self.read(), expected)
+        self.assertTrue(agent.run(st, 'edit_channel', {'action': 'rename', 'channel': 2, 'name': 'Lead'})['ok'])
+        before = self.read()
+        self.assertIn('remove_notes', agent.run(st, 'edit_channel', {'action': 'remove', 'channel': 1})['error'])
+        self.assertEqual(self.read(), before)
+        out = agent.run(st, 'edit_channel', {'action': 'remove', 'channel': 1, 'remove_notes': True})
+        self.assertEqual(out.get('channel_map'), {1: None, 2: 1}, out)
+        self.assertEqual(st.meta['mix']['volume'], {'0': 23})
+        out = agent.run(st, 'undo', {})
+        self.assertTrue(out.get('ok'), out)
+        self.assertEqual(self.read(), before)
+
+    def test_channel_operations_protect_approved_material_and_validate(self):
+        st = self.state()
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 1, 'approved': True}])
+        before = self.read()
+        for args in [{'action': 'move', 'channel': 1, 'to': 2},
+                     {'action': 'remove', 'channel': 1, 'remove_notes': True},
+                     {'action': 'rename', 'channel': 2, 'name': 'Changed'},
+                     {'action': 'move', 'channel': 1, 'to': True},
+                     {'action': 'rename', 'channel': 0, 'name': 'Changed'}]:
+            self.assertIn('error', agent.run(st, 'edit_channel', args))
+            self.assertEqual(self.read(), before)
+        st.undo()
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'approved': True}])
+        self.assertIn('approved', agent.run(st, 'edit_channel', {'action': 'move', 'channel': 1, 'to': 2})['error'])
+        self.assertEqual(agent.run(st, 'create_channel', {})['channel'], 3)
+        self.assertIn('approved', agent.run(st, 'edit_channel', {'action': 'remove', 'channel': 3})['error'])
+
+    def test_new_sample_is_undoable_and_never_replaces_existing_slots(self):
+        st = self.state()
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 0, 'approved': True}])
+        before, audio = self.read(), (self.dir / 'a.wav').read_bytes()
+        out = agent.run(st, 'create_sample', {'file': str(self.dir / 'a.wav'), 'base_note': 'A-5', 'name': 'Imported'})
+        self.assertEqual(out.get('sample'), 3, out)
+        self.assertEqual(out['entry']['base_note'], 'A-5')
+        self.assertEqual((self.dir / 'a.wav').read_bytes(), audio)
+        self.assertEqual(st.mod.samples[2].name, 'Imported')
+        out = agent.run(st, 'undo', {})  # unused additions don't change the approved channel's voice
+        self.assertTrue(out.get('ok'), out)
+        self.assertEqual(self.read(), before)
+        for args in [{'file': 'a.wav', 'number': 1}, {'file': 'a.wav', 'number': True},
+                     {'file': 'missing.wav'}, {'file': 'a.wav', 'base_note': 'bad'},
+                     {'file': 'a.wav', 'stereo': 'false'}, {'file': 'a.wav', 'volume': 10}]:
+            self.assertIn('error', agent.run(st, 'create_sample', args))
+            self.assertEqual(self.read(), before)
+        st.read_only = True
+        self.assertIn('error', agent.run(st, 'create_sample', {'file': 'a.wav'}))
+
+    def test_first_instrument_wraps_samples_atomically_then_supports_keymaps(self):
+        st = self.state()
+        before, rows = self.read(), [p.rows for p in st.mod.patterns]
+        out = agent.run(st, 'create_instrument', {'sample': 2, 'name': 'New voice'})
+        self.assertEqual((out.get('instrument'), out.get('converted_samples')), (3, 2), out)
+        self.assertEqual([p.rows for p in st.mod.patterns], rows)
+        for i in range(2):
+            self.assertEqual(st.mod.instruments[i].keymap, [(n, i + 1) for n in range(120)])
+            self.assertEqual(st.mod.instruments[i].fadeout, 8)
+        self.assertTrue(agent.run(st, 'undo', {})['ok'])
+        self.assertEqual(self.read(), before)
+        self.assertTrue(agent.run(st, 'redo', {})['ok'])
+        out = agent.run(st, 'create_instrument', {'keymap': [{'notes': 'C-0..B-4', 'sample': 1},
+                                                          {'notes': 'C-5..B-9', 'sample': 2}]})
+        self.assertEqual(out.get('instrument'), 4, out)
+        self.assertEqual([st.mod.instruments[3].keymap[n][1] for n in [0, 59, 60, 119]], [1, 1, 2, 2])
+        out = agent.run(st, 'create_instrument', {})
+        self.assertEqual(out.get('instrument'), 5, out)
+        self.assertTrue(all(s == 0 for _, s in st.mod.instruments[4].keymap))
+
+    def test_instrument_creation_failure_preserves_sample_mode_and_approvals(self):
+        st = self.state()
+        before = self.read()
+        for args in [{'number': 1}, {'sample': 99}, {'sample': True},
+                     {'keymap': [{'notes': 'bad', 'sample': 1}]}, {'sample': 1, 'keymap': []}]:
+            self.assertIn('error', agent.run(st, 'create_instrument', args))
+            self.assertEqual(self.read(), before)
+            self.assertIsNone(st.mod.instruments)
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 0, 'approved': True}])
+        self.assertIn('approved', agent.run(st, 'create_instrument', {'sample': 1})['error'])
+
+    def test_agent_export_completion_and_snapshot_options(self):
+        st = self.state()
+        self.assertEqual(agent.run(st, 'export_status', {}), {'job': None})
+        st.section_edit({'name': 'End', 'start': 1, 'end': 2})
+        before = self.read()
+        st.meta.update(solo=0)
+        opts = {'format': 'wav', 'destination': 'outputs', 'name': 'melody', 'region': 'End',
+                'stems': True, 'include_it': True, 'game_loop': True, 'tail': 0, 'mix': 'current', 'mutes': 'respect'}
+        out = agent.run(st, 'export_song', opts)
+        self.assertTrue(out.get('ok'), out)
+        job_id = out['job']['job_id']
+        for _ in range(200):
+            job = agent.run(st, 'export_status', {'job_id': job_id})['job']
+            if job['status'] in ('done', 'failed', 'cancelled'):
+                break
+            time.sleep(.02)
+        self.assertEqual(job['status'], 'done', job)
+        self.assertEqual(set(job['files']), set(job['planned_files']))
+        self.assertTrue(all(Path(p).is_file() for p in job['files']))
+        self.assertTrue(any(Path(p).suffix == '.it' for p in job['files']))
+        self.assertIsNotNone(job['loop'])
+        self.assertEqual(self.read(), before)
+        self.assertIn('error', agent.run(st, 'export_song', opts))  # no implicit overwrite
+        self.assertIn('error', agent.run(st, 'export_status', {'job_id': 'old'}))
+        self.assertFalse(agent.run(st, 'cancel_export', {'job_id': job_id})['cancellation_requested'])
+
+    def test_agent_export_validation_cancellation_and_source_protection(self):
+        from vulturetracker import export
+        st = self.state()
+        before = (self.dir / 'a.wav').read_bytes()
+        for args in [{}, {'format': 'pdf'}, {'format': 'wav', 'replace': 'false'},
+                     {'format': 'wav', 'name': 'a', 'destination': '.', 'replace': True},
+                     {'format': 'wav', 'region': 'Missing'}, {'format': 'mp3', 'game_loop': True}]:
+            self.assertIn('error', agent.run(st, 'export_song', args))
+            self.assertEqual((self.dir / 'a.wav').read_bytes(), before)
+        with mock.patch.object(st, '_put'):
+            out = agent.run(st, 'export_song', {'format': 'it', 'destination': 'outputs'})
+            job_id = out['job']['job_id']
+            self.assertIn('error', agent.run(st, 'export_song', {'format': 'it'}))
+            self.assertIn('error', agent.run(st, 'cancel_export', {'job_id': 'wrong'}))
+            self.assertFalse(st.export_job['cancel'].is_set())
+            out = agent.run(st, 'cancel_export', {'job_id': job_id})
+            self.assertTrue(out['cancellation_requested'])
+            self.assertEqual(export.run(st.export_job, gui._encode)['status'], 'cancelled')
+            self.assertEqual(agent.run(st, 'export_status', {'job_id': job_id})['job']['files'], [])
+            self.assertFalse((self.dir / 'outputs' / 'song.it').exists())
+
+    def test_stop_discards_late_response_and_allows_next_message(self):
+        st = self.state()
+        before = self.read()
+        agent.save_settings({'provider':'openai', 'model':'fixture'})
+        started, release, returned = threading.Event(), threading.Event(), threading.Event()
+        def delayed(*args):
+            started.set()
+            release.wait(5)
+            returned.set()
+            return {'choices':[{'message':{'role':'assistant','tool_calls':[
+                {'id':'late','function':{'name':'set_module','arguments':'{"key":"key","value":"D major"}'}}]}}]}
+        chat = agent.Chat()
+        try:
+            with mock.patch.object(agent, 'compatible_request', side_effect=delayed):
+                chat.send(st, 'make a change')
+                self.assertTrue(started.wait(2))
+                chat.stop()
+                self.wait_chat(chat)
+            answer = {'choices':[{'message':{'role':'assistant','content':'Next answer'}}],
+                      'usage':{'prompt_tokens':123,'completion_tokens':7}}
+            with mock.patch.object(agent, 'compatible_request', return_value=answer):
+                chat.send(st, 'next message')
+                self.wait_chat(chat)
+            release.set()
+            self.assertTrue(returned.wait(2))
+            self.assertEqual(self.read(), before)
+            self.assertEqual(chat.display[-1]['text'], 'Next answer')
+            self.assertFalse(any(m.get('tool_calls') for m in chat.history))
+            context = chat.snapshot()['context']
+            self.assertEqual((context['input'],context['output']), (123,7))
+            self.assertEqual(context['source'],'estimate')
+        finally:
+            release.set()
+
+    def test_stop_between_tools_keeps_valid_history_and_completed_edit(self):
+        st = self.state()
+        agent.save_settings({'provider':'openai','model':'fixture'})
+        reply = {'choices':[{'message':{'role':'assistant','tool_calls':[
+            {'id':'a','function':{'name':'set_module','arguments':'{"key":"key","value":"D major"}'}},
+            {'id':'b','function':{'name':'undo','arguments':'{}'}}]}}]}
+        chat, run = agent.Chat(), agent.run
+        def first(*args):
+            result = run(*args)
+            chat.stop()
+            return result
+        with mock.patch.object(agent,'compatible_request',return_value=reply), mock.patch.object(agent,'run',side_effect=first):
+            chat.send(st,'two actions')
+            self.wait_chat(chat)
+        self.assertEqual(st.song['module']['key'],'D major')
+        results = [json.loads(m['content']) for m in chat.history if m['role']=='tool']
+        self.assertTrue(results[0]['ok'])
+        self.assertIn('stopped',results[1]['error'])
+        self.assertEqual(len(results),2)
+
+    def test_compact_keeps_transcript_and_seeds_next_request_without_tools(self):
+        st = self.state()
+        agent.save_settings({'provider':'gemini','api_key':'fixture'})
+        answer = lambda text: {'choices':[{'finish_reason':'stop','message':{'role':'assistant','content':text}}]}
+        with mock.patch.object(agent,'compatible_request',return_value=answer('Detailed reply '*300)):
+            chat=self._chat(st,'Keep the drums; change only channel 9.')
+        display=list(chat.display)
+        before=chat.snapshot()['context']['tokens']
+        with mock.patch.object(agent,'compatible_request',return_value=answer('Owner approved drums. Work only on channel 9.')) as req:
+            chat.compact(st)
+            self.wait_chat(chat)
+            self.assertNotIn('tools',req.call_args.args[2])
+        self.assertEqual(chat.display[:len(display)],display)
+        self.assertIn('Context compacted',chat.display[-1]['text'])
+        self.assertLess(chat.snapshot()['context']['tokens'],before)
+        with mock.patch.object(agent,'compatible_request',return_value=answer('Continuing')) as req:
+            chat.send(st,'continue')
+            self.wait_chat(chat)
+            messages=req.call_args.args[2]['messages']
+        self.assertIn('Owner approved drums',messages[1]['content'])
+        self.assertEqual(messages[-1]['content'],'continue')
+        self.assertFalse(any('tool_calls' in m for m in messages))
+
+    def test_failed_or_stopped_compaction_preserves_context(self):
+        st=self.state()
+        agent.save_settings({'provider':'openai','model':'fixture'})
+        chat=agent.Chat()
+        with mock.patch.object(agent,'compatible_request',return_value={'choices':[{'message':{'role':'assistant','content':'Prior reply'}}]}):
+            chat.send(st,'prior request')
+            self.wait_chat(chat)
+        history=list(chat.history)
+        with mock.patch.object(agent,'compatible_request',side_effect=ValueError('fixture failure')):
+            chat.compact(st)
+            self.wait_chat(chat)
+        self.assertEqual(chat.history,history)
+        started,release=threading.Event(),threading.Event()
+        def delayed(*args):
+            started.set();release.wait(5)
+            return {'choices':[{'message':{'role':'assistant','content':'Discard me'}}]}
+        try:
+            with mock.patch.object(agent,'compatible_request',side_effect=delayed):
+                chat.compact(st)
+                self.assertTrue(started.wait(2))
+                chat.stop();self.wait_chat(chat)
+            self.assertEqual(chat.history,history)
+        finally:
+            release.set()
+
+    def test_stopped_claude_run_rejects_late_mcp_tools(self):
+        st=self.state()
+        chat=agent.Chat()
+        chat.busy=True;chat.run_id='current'
+        proc=chat.process=mock.Mock()
+        self.assertIn('channels',chat.remote_tool(st,'song_overview',{},'current'))
+        proc.poll.assert_not_called()  # completing a tool must not terminate its owning model process
+        chat.process=None
+        self.assertIn('stopped',chat.remote_tool(st,'undo',{},'old')['error'])
+        chat.stop()
+        self.assertIn('stopped',chat.remote_tool(st,'undo',{},'current')['error'])
+        with mock.patch.dict(os.environ,{'VT_AGENT_RUN_ID':'current'}), mock.patch.object(mcp,'_http',return_value={'ok':True}) as http:
+            mcp.handle({'id':1,'method':'tools/call','params':{'name':'song_overview'}},port=8765)
+        self.assertEqual(http.call_args.args[2]['run_id'],'current')
+
     def test_measure_reports_the_change(self):
         st = self.state()
         first = agent.run(st, "measure", {})
@@ -156,7 +1123,12 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(sel["cells"], ["00: C-5 01 ... ...", "01: ... .. ... ..."])
         self.assertEqual(sel["sounding_at_first_row"][0]["name"], "A")
         agent.run(st, "cue", {"order": 1, "row": 2, "play": True})
-        self.assertEqual(st.cue, {"id": 1, "order": 1, "row": 2, "channel": None, "play": True})
+        self.assertEqual({k: st.cue[k] for k in ('id', 'order', 'row', 'channel', 'play')},
+                         {"id": 1, "order": 1, "row": 2, "channel": None, "play": True})
+        before = dict(st.cue)
+        for args in [{'order': 1, 'row': 4}, {'order': 1, 'channel': 0}, {'order': -1}]:
+            self.assertIn('error', agent.run(st, 'cue', args))
+            self.assertEqual(st.cue, before)
 
     def test_mcp_without_the_app(self):
         out = mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
@@ -263,7 +1235,7 @@ class AgentTests(unittest.TestCase):
             "for ev in [{'type': 'system', 'subtype': 'init', 'session_id': 's1', 'mcp_servers': [{'name': 'vulturetracker', 'status': 'connected'}]},\n"
             "           {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 't1', 'name': 'mcp__vulturetracker__song_overview', 'input': {}}]}},\n"
             "           {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': [{'type': 'text', 'text': json.dumps({'title': 'T', 'summary': 'two channels'})}]}]}},\n"
-            "           {'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'It has two channels.'}]}},\n"
+            "           {'type': 'assistant', 'message': {'usage': {'input_tokens': 100, 'cache_read_input_tokens': 900, 'output_tokens': 12}, 'content': [{'type': 'text', 'text': 'It has two channels.'}]}},\n"
             "           {'type': 'result', 'subtype': 'success', 'is_error': False, 'session_id': 's1', 'result': 'It has two channels.'}]:\n"
             "    print(json.dumps(ev), flush=True)\n", encoding="utf-8")
         seen = self.dir / "seen.json"
@@ -272,7 +1244,7 @@ class AgentTests(unittest.TestCase):
         agent.PORT = 8765
         try:
             st = self.state()
-            agent.save_settings({"provider": "claude_code"})
+            agent.save_settings({"provider": "claude_code", "model": "sonnet", "effort": "low"})
             chat = agent.Chat()
             chat.send(st, "how many channels?")
             for _ in range(200):
@@ -285,6 +1257,8 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(got["stdin"], "how many channels?")
             argv = got["argv"]
             self.assertIn("-p", argv)
+            self.assertEqual(argv[argv.index("--model") + 1], "sonnet")
+            self.assertEqual(argv[argv.index("--effort") + 1], "low")
             self.assertEqual(argv[argv.index("--tools") + 1], "")            # no built-in tools: only the song's
             self.assertEqual(argv[argv.index("--allowedTools") + 1], "mcp__vulturetracker")
             cfg = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["vulturetracker"]
@@ -298,8 +1272,55 @@ class AgentTests(unittest.TestCase):
                 time.sleep(0.05)
             argv = json.loads(seen.read_text())["argv"]
             self.assertEqual(argv[argv.index("--resume") + 1], "s1")
+            self.assertEqual(chat.snapshot()['context']['tokens'],1012)
+            chat.compact(st)
+            self.wait_chat(chat)
+            got=json.loads(seen.read_text());argv=got['argv']
+            self.assertIn('--fork-session',argv)
+            self.assertEqual(json.loads(argv[argv.index('--mcp-config')+1]),{'mcpServers':{}})
+            self.assertEqual(argv[argv.index('--allowedTools')+1],'')
+            self.assertIsNone(chat.session)
+            chat.send(st,'continue after compaction')
+            self.wait_chat(chat)
+            got=json.loads(seen.read_text())
+            self.assertNotIn('--resume',got['argv'])
+            self.assertIn('Summary of earlier conversation',got['stdin'])
         finally:
             agent.claude_command, agent.PORT = old
+
+    def test_claude_process_stop_and_resume_controls(self):
+        fake=self.dir/'slow_claude.py'
+        fake.write_text('import sys,time\nsys.stdin.read()\nprint(\'{}\',flush=True)\ntime.sleep(30)\n',encoding='utf-8')
+        agent.save_settings({'provider':'claude_code'})
+        chat=agent.Chat()
+        with mock.patch.object(agent,'claude_command',return_value=[sys.executable,str(fake)]), mock.patch.object(agent,'PORT',8765):
+            chat.send(self.state(),'wait')
+            for _ in range(200):
+                if chat.process is not None:break
+                time.sleep(.01)
+            proc=chat.process
+            self.assertIsNotNone(proc)
+            chat.stop();self.wait_chat(chat)
+            self.assertIsNotNone(proc.poll())
+            self.assertIn('Stopped',chat.display[-1]['text'])
+
+    def test_anthropic_compact_keeps_only_summary_and_no_tools(self):
+        try:
+            import anthropic
+        except ImportError:
+            self.skipTest('needs anthropic')
+        from types import SimpleNamespace
+        agent.save_settings({'provider':'anthropic','api_key':'fixture'})
+        chat=agent.Chat();chat.provider=('anthropic','','')
+        chat.history=[{'role':'user','content':'Request '*500},{'role':'assistant','content':'Earlier response '*500}]
+        client=mock.MagicMock()
+        client.__enter__.return_value=client
+        client.messages.create.return_value=SimpleNamespace(stop_reason='end_turn',content=[SimpleNamespace(type='text',text='Keep the approved drums.')])
+        with mock.patch.object(anthropic,'Anthropic',return_value=client):
+            chat.compact(self.state());self.wait_chat(chat)
+        self.assertEqual(len(chat.history),1)
+        self.assertIn('Keep the approved drums',chat.history[0]['content'])
+        self.assertNotIn('tools',client.messages.create.call_args.kwargs)
 
     def file(self):
         return json.loads((self.dir / "agent.json").read_text(encoding="utf-8"))

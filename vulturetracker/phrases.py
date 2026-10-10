@@ -184,6 +184,7 @@ def action(state, body):
                                      phrase['r1']]))[:24]
             out = state.cache_dir / f'{key}.wav'
             if not out.exists():
+                out.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write(out, variant_wav(state, phrase, text))
             state.renders[key] = {'status': 'ready', 'file': str(out), 'error': None}
             return {'key': key, 'path': str(out)}
