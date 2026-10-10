@@ -2,6 +2,11 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## 1.5.1 (2026-10-10)
+
+- Release validation now checks the expected missing-dependency result for file-recipe synthesis when optional
+  `pedalboard` is absent. Includes all 1.5.0 agent integration and Rack fixes below; application behavior is unchanged.
+
 ## 1.5.0 (2026-10-10)
 
 - Claude Code chat now passes the selected effort level to the CLI, including Low, instead of silently using its default.

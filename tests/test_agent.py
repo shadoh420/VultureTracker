@@ -169,6 +169,15 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(read['spec']['reverse'])
         song, audio = st.text, (self.dir / 'a.wav').read_bytes()
         out = self.sound_job(st, 'render_synthesis', recipe=result['recipe'], entry=result['entry'])
+        from importlib.util import find_spec
+        if find_spec('pedalboard') is None:
+            self.assertEqual(out['status'], 'failed', out)
+            self.assertIn('pedalboard', out['error'])
+            self.assertIsNone(out['file'])
+            self.assertEqual(st.text, song)
+            self.assertEqual((self.dir / 'a.wav').read_bytes(), audio)
+            self.assertEqual(st.cands(), [])
+            return  # File recipes require the optional synth dependency; saved recipe checks still run.
         self.assertEqual(out['status'], 'done', out)
         self.assertEqual(out['sample_rate'], 22050)
         self.assertEqual(out['root'], 69)

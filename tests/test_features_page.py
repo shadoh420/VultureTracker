@@ -146,7 +146,8 @@ class TestFeaturesPage(unittest.TestCase):
         with self.page() as (page, d), mock.patch.object(gui.Handler, 'library', Library(d / 'library.json')):
             def call(tool_name, **args):
                 out = page.request.post(page.url + 'api/tool', data={'name': tool_name, 'args': args}).json()
-                self.assertFalse(out.get('error'), out)
+                if tool_name != 'synthesis_status' or out.get('status') != 'failed':
+                    self.assertFalse(out.get('error'), out)
                 return out
             def wait(tool_name, job):
                 # wait_for_function treats a returned fetch Promise as truthy before its result arrives.
@@ -164,6 +165,13 @@ class TestFeaturesPage(unittest.TestCase):
             saved = call('save_sound_recipe', spec={'file': 'a.wav', 'note': 'A-5', 'reverse': True}, name='Reversed')
             job = call('render_synthesis', recipe=saved['recipe'], entry=saved['entry'])
             out = wait('synthesis_status', job)
+            from importlib.util import find_spec
+            if find_spec('pedalboard') is None:
+                self.assertEqual(out['status'], 'failed', out)
+                self.assertIn('pedalboard', out['error'])
+                self.assertIsNone(out['file'])
+                self.assertEqual((d / 'song.yaml').read_bytes(), before)
+                return  # The library/recipe checks run even without the optional file renderer.
             self.assertEqual(out['status'], 'done', out)
             call('offer_samples', slot=1, files=[out['file']])
             page.evaluate("tab('tryout'); refresh()")
