@@ -393,3 +393,142 @@ class TestITReader(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             song = module_to_song(mod, Path(tmp) / "m.yaml", Path(tmp) / "m_samples")
             self.assertTrue(api.check(api.to_yaml(song), tmp)["ok"])
+
+
+def write_sf2(presets, insts, samples, rate=22050, version=(2, 1)):
+    """A SoundFont 2 bank: `samples` [(name, frames, root, correction)], `insts` [(name, [zone])] and `presets`
+    [(name, preset, bank, [zone])], a zone being a list of (generator, amount) pairs (amounts as unsigned 16-bit)."""
+    def chunk(cid, body):
+        return cid + struct.pack("<I", len(body)) + body + (b"\0" if len(body) & 1 else b"")
+
+    def lst(kind, body):
+        return chunk(b"LIST", kind + body)
+
+    smpl, shdr = b"", b""
+    for name, frames, root, corr in samples:
+        start = len(smpl) // 2
+        smpl += struct.pack(f"<{len(frames)}h", *frames) + bytes(92)  # 46 zero frames after each, as the format asks
+        loop = (start + 100, start + 900) if len(frames) >= 1000 else (start, start)
+        shdr += struct.pack("<20sIIIIIBbHH", name.encode(), start, start + len(frames), *loop, rate, root, corr, 0, 1)
+    shdr += struct.pack("<20sIIIIIBbHH", b"EOS", 0, 0, 0, 0, 0, 0, 0, 0, 0)
+
+    def table(entries, head):
+        hdr, bag, gen = b"", b"", b""
+        nbag = ngen = 0
+        for name, *rest, zones in entries:
+            hdr += head(name, rest, nbag)
+            for zone in zones:
+                bag += struct.pack("<HH", ngen, 0)
+                gen += b"".join(struct.pack("<HH", g, a & 0xFFFF) for g, a in zone)
+                ngen += len(zone)
+                nbag += 1
+        hdr += head("EOP", [0, 0], nbag)
+        return hdr, bag + struct.pack("<HH", ngen, 0), gen + struct.pack("<HH", 0, 0)
+
+    phdr, pbag, pgen = table(presets, lambda n, r, b: struct.pack("<20sHHHIII", n.encode(), r[0], r[1], b, 0, 0, 0))
+    inst, ibag, igen = table(insts, lambda n, r, b: struct.pack("<20sH", n.encode(), b))
+    pdta = b"".join(chunk(k, v) for k, v in ((b"phdr", phdr), (b"pbag", pbag), (b"pmod", bytes(10)), (b"pgen", pgen),
+                                              (b"inst", inst), (b"ibag", ibag), (b"imod", bytes(10)), (b"igen", igen),
+                                              (b"shdr", shdr)))
+    body = b"sfbk" + lst(b"INFO", chunk(b"ifil", struct.pack("<HH", *version))) + lst(b"sdta", chunk(b"smpl", smpl)) + lst(b"pdta", pdta)
+    return b"RIFF" + struct.pack("<I", len(body)) + body
+
+
+def _tc(seconds):  # SF2 timecents
+    return round(1200 * math.log2(seconds))
+
+
+def bank():
+    """A bank with a melodic preset (a global zone, two key ranges, two velocity layers above C-5), a left/right pair
+    and a drum kit."""
+    from vulturetracker import sf2 as s
+    sine = [round(8000 * math.sin(2 * math.pi * i / 50)) for i in range(1000)]
+    samples = [("low", sine, 48, 0), ("high", [v // 2 for v in sine], 72, 0), ("quiet", [v // 8 for v in sine], 72, 0),
+               ("left", sine[:500], 60, 0), ("right", [-v for v in sine[:500]], 60, 0)]
+    keys = lambda lo, hi: (s.KEY_RANGE, lo | hi << 8)
+    vel = lambda lo, hi: (s.VEL_RANGE, lo | hi << 8)
+    insts = [("keys", [[(s.ATTACK_VOL, _tc(0.2)), (s.RELEASE_VOL, _tc(0.5)), (s.ATTENUATION, 200)],  # attenuation here
+                       # is not carried to the zones (OpenMPT computes each zone's volume from its own)
+                       [keys(0, 59), (s.FINE_TUNE, 50), (s.SAMPLE_MODES, 1), (s.ATTENUATION, 60), (s.SAMPLE_ID, 0)],
+                       [keys(60, 127), vel(0, 63), (s.SAMPLE_ID, 2)],   # first on its keys: OpenMPT would keep it
+                       [keys(60, 127), vel(64, 127), (s.SAMPLE_ID, 1)]]),
+             ("pad", [[(s.PAN, -500), (s.SAMPLE_ID, 3)], [(s.PAN, 500), (s.SAMPLE_ID, 4)]]),
+             ("kit", [[keys(36, 36), (s.SCALE_TUNING, 0), (s.SAMPLE_ID, 0)], [keys(38, 38), (s.SAMPLE_ID, 1)]])]
+    presets = [("Keys", 0, 0, [[(s.INSTRUMENT, 0)]]), ("Pad", 1, 0, [[(s.INSTRUMENT, 1)]]), ("Kit", 0, 128, [[(s.INSTRUMENT, 2)]])]
+    return write_sf2(presets, insts, samples), sine
+
+
+def write_pat(samples, name=b"organ"):
+    """A GUS patch: `samples` [(frames (16-bit), low, high, root MIDI notes, scale factor, flags, balance)]."""
+    mhz = lambda m: round(2044 * 2 ** ((m + 24) / 12))  # GF1 frequencies in mHz (MIDI 60 = 261.6 Hz)
+    head = b"GF1PATCH110\0ID#000002\0" + bytes(60) + struct.pack("<BBBHHI", 1, 14, 0, len(samples), 127, 0) + bytes(36)
+    body = b""
+    for frames, lo, hi, root, scale, flags, balance in samples:
+        data = struct.pack(f"<{len(frames)}h", *frames)
+        body += struct.pack("<7sBIIIHIIIhB6B6BBBBBBBBhH", b"w", 0, len(data), 200, 1600, 22050, mhz(lo), mhz(hi), mhz(root),
+                            1, balance, *([0] * 12), 0, 0, 0, 0, 0, 0, flags | 1, 60, scale) + bytes(36) + data
+    return head + struct.pack("<H16sIB", 0, name, 0, 1) + bytes(40) + struct.pack("<BBIB", 0, 0, len(body), len(samples)) + bytes(40) + body
+
+
+class TestSF2Import(unittest.TestCase):
+    def test_gus_patch(self):
+        from vulturetracker import sf2
+        sine = [round(8000 * math.sin(2 * math.pi * i / 50)) for i in range(1000)]
+        mod, warnings = sf2.pat_module(write_pat([(sine, 0, 59, 48, 1024, 4, 0), (sine, 60, 127, 72, 1024, 0, 15)]))
+        a, b = mod.samples
+        km = mod.instruments[0].keymap
+        self.assertEqual((km[0], km[59], km[60], km[119]), ((0, 1), (59, 1), (60, 2), (119, 2)))  # ranges where they sound
+        self.assertEqual((a.c5_speed, b.c5_speed), (44100, 11025))  # rooted C-4 and C-6
+        self.assertEqual((a.loop.start, a.loop.end, b.loop, a.pan, b.pan), (100, 800, None, 0, 64))  # loop points in bytes
+        self.assertEqual((mod.instruments[0].fadeout, mod.instruments[0].nna, mod.instruments[0].name), (64, 2, "organ"))
+        one, _ = sf2.pat_module(write_pat([(sine, 0, 0, 60, 0, 0, 7)]))  # no scale factor: one pitch on every key
+        self.assertEqual({n for n, _ in one.instruments[0].keymap}, {60})
+        with self.assertRaises(sf2.SF2Error):
+            sf2.pat_module(b"GF1PATCH200\0" + bytes(300))
+
+    def test_preset_read_as_openmpt_reads_it(self):
+        from vulturetracker import sf2
+        data, sine = bank()
+        self.assertEqual(sf2.presets(data), [(0, 0, "Keys"), (0, 1, "Pad"), (128, 0, "Kit")])
+        mod, warnings = sf2.preset_module(data, 0)
+        a, b = mod.samples
+        ins = mod.instruments[0]
+        self.assertEqual((a.name, b.name), ("low", "high"))  # "quiet" (velocity 0-63) left out, though first on its keys
+        self.assertTrue(any("velocity layers" in w for w in warnings))
+        self.assertEqual({k: s for k, (_, s) in enumerate(ins.keymap) if k in (0, 59, 60, 119)}, {0: 1, 59: 1, 60: 2, 119: 2})
+        self.assertEqual([n for n, _ in ins.keymap[:3]], [0, 1, 2])  # each key plays its own note
+        self.assertEqual(a.c5_speed, round(22050 * 2 ** (12.5 / 12)))  # root C-4 (48) plus 50 cents of fine tune
+        self.assertEqual(b.c5_speed, round(22050 * 2 ** (-12 / 12)))
+        self.assertEqual((a.loop.start, a.loop.end, b.loop), (100, 900, None))  # sampleModes 1 loops; none: no loop
+        self.assertEqual((a.global_volume, b.global_volume), (59, 64))  # 6 dB of attenuation read at a tenth, as OpenMPT reads it
+        env = ins.volume_envelope
+        self.assertEqual((env.nodes[:2], env.sustain, env.nodes[-1]), ([(0, 17), (10, 64)], (1, 1), (35, 0)))
+        self.assertEqual((ins.fadeout, ins.nna, ins.dct, ins.dca), (40, 2, 1, 2))  # 32768 / 25 ticks, in IT's units
+
+    def test_stereo_pair_drum_kit_and_refusals(self):
+        from vulturetracker import sf2
+        data, sine = bank()
+        mod, warnings = sf2.preset_module(data, 1)
+        self.assertEqual(len(mod.samples), 1)
+        self.assertEqual(mod.samples[0].data, [sine[:500], [-v for v in sine[:500]]])  # left zone left, right right
+        self.assertTrue(any("stereo" in w for w in warnings))
+        mod, _ = sf2.preset_module(data, 0, 128)
+        km = mod.instruments[0].keymap
+        self.assertEqual((km[36], km[38], km[37][1]), ((60, 1), (38, 2), 0))  # scale tuning 0: one pitch on its key
+        with self.assertRaises(sf2.SF2Error):
+            sf2.preset_module(data, 5)
+        with self.assertRaises(sf2.SF2Error):
+            sf2.read_sf2(write_sf2([], [], [], version=(3, 1)))
+        with self.assertRaises(sf2.SF2Error):
+            sf2.read_sf2(b"RIFF\0\0\0\0WAVE")
+
+    def test_import_writes_a_song_that_compiles(self):
+        from vulturetracker.sf2 import import_sf2
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "bank.sf2"
+            src.write_bytes(bank()[0])
+            song, _ = import_sf2(src, Path(tmp) / "keys.yaml", Path(tmp) / "keys_samples", 0)
+            text = (Path(tmp) / "keys.yaml").read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("# Imported from bank.sf2"))
+            self.assertTrue(api.check(text, tmp)["ok"])
+            self.assertEqual(song["instruments"][1]["keymap"], [{"notes": "C-0..B-4", "sample": 1}, {"notes": "C-5..B-9", "sample": 2}])

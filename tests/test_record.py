@@ -209,6 +209,38 @@ class TestTakesInTheSong(unittest.TestCase):
             gui.REC_SETTINGS = saved
 
 
+    def test_unsaved_passes_kept_until_saved(self):
+        gui.Handler.state = self.st
+        H = gui.Handler
+        spills = self.dir / "recordings"
+        with mock.patch.object(record, "spill_dir", lambda: spills):
+            H.rec_command({"cmd": "open", "device": 0, "mode": "1"})
+            H.recorder.stream.stop()
+            H.recorder.stream.feed(0.2)
+            H.rec_command({"cmd": "start"})
+            H.recorder.stream.feed(1.5)
+            with mock.patch.object(gui.State, "save_take", side_effect=OSError("disk full")):
+                self.assertIn("error", H.rec_command({"cmd": "stop", "name": "pluck", "dest": "keep"}))
+            self.assertEqual(len(record.spilled()), 1)          # kept in the user folder while unsaved
+            self.assertEqual(H.rec_snapshot()["unsaved"], [])   # this session's own take is the one to RETRY SAVE
+            H.pending_recording = None                          # the app closed before it was saved
+            unsaved = H.rec_snapshot()["unsaved"]
+            self.assertEqual((len(unsaved), unsaved[0]["passes"]), (1, 1))
+            self.assertEqual(H.rec_command({"cmd": "recover", "id": unsaved[0]["id"]}), {})
+            self.assertTrue(H.rec_snapshot()["status"]["pending_save"])
+            r = H.rec_command({"cmd": "stop", "name": "pluck", "dest": "keep"})
+            self.assertEqual(r["take"]["note"], "G-4")
+            self.assertEqual(record.spilled(), [])              # saved: gone from the user folder
+            sid = record.spill([np.zeros((1, 100), np.float32)], RATE, self.st.song_path)
+            self.assertEqual(H.rec_command({"cmd": "forget", "id": sid}), {})
+            self.assertEqual(record.spilled(), [])
+            sid = record.spill([np.zeros((1, 100), np.float32)], RATE, self.st.song_path)
+            note = spills / f"{sid}.json"
+            note.write_text(note.read_text().replace('"time": ', '"time": 1.0, "was": '))  # 1970: past the 7 days
+            self.assertEqual((record.spilled(), list(spills.iterdir())), ([], []))
+            H.rec_command({"cmd": "close"})
+
+
 class TestSoundDeviceErrors(unittest.TestCase):
     def test_every_portaudio_call_on_one_thread(self):
         # found on a real Scarlett: Focusrite USB ASIO failed to load when OPEN came on another thread than the import

@@ -181,7 +181,7 @@ def create_song(path, channels=8, sample=None):
     name = re.sub(r"[^ -~]", "", wav.stem)[:25] or "sample"
     q = State._yname
     chans = "".join(f"    - {{name: Ch {i + 1}}}\n" for i in range(max(1, min(64, int(channels)))))
-    _atomic(path, (f"# {title}: a song made in VultureTracker (the format: SONG_FORMAT.md)\nmodule:\n  title: {q(title)}\n"
+    _atomic(path, (f"# {title}: a song made in VultureTracker (the format: SONG_FORMAT.md)\n{api.written_by_line()}module:\n  title: {q(title)}\n"
                       f"  tempo: 125\n  speed: 6\n  global_volume: 128\n  mix_volume: 48\n  sample_rate: 44100\n  channels:\n{chans}"
                       f"samples:\n  1: {{file: {q(rel)}, name: {q(name)}}}\ninstruments:\n  1: {{name: {q(name)}, sample: 1}}\n"
                       f"patterns:\n  p00:\n    rows: 64\n    data: |\norders: [p00]\n").encode("utf-8"), replace=False)
@@ -704,12 +704,21 @@ def ffmpeg_exe():
     return exe
 
 
-def _encode(path, pcm, fmt, loop=None):
-    """Interleaved int16 stereo PCM at RATE to `fmt` (a key of ENCODE) through ffmpeg (no console window on Windows);
-    `loop` = (start, end_exclusive) frames as the LOOPSTART and LOOPLENGTH tags game engines read from OGG and FLAC."""
+def _encode(path, pcm, fmt, loop=None, rate=RATE, depth=16, bitrate=None, quality=None):
+    """Interleaved stereo PCM (int16, or float32 at `depth` 24) at `rate` to `fmt` (a key of ENCODE) through ffmpeg (no
+    console window on Windows): MP3 at `bitrate` kbit/s, OGG at Vorbis `quality`, FLAC at 16 or 24 bits; `loop` =
+    (start, end_exclusive) frames as the LOOPSTART and LOOPLENGTH tags game engines read from OGG and FLAC."""
     tags = ["-metadata", f"LOOPSTART={loop[0]}", "-metadata", f"LOOPLENGTH={loop[1] - loop[0]}"] if loop else []
-    r = subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "s16le", "-ar", str(RATE), "-ac", "2", "-i", "-",
-                        *ENCODE[fmt], *tags, str(path)], input=pcm, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    args = list(ENCODE[fmt])
+    if fmt == "mp3" and bitrate:
+        args[-1] = f"{int(bitrate)}k"
+    if fmt == "ogg" and quality is not None:
+        args[-1] = f"{float(quality):g}"
+    if fmt == "flac" and depth == 24:
+        args += ["-sample_fmt", "s32", "-bits_per_raw_sample", "24"]
+    r = subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "s16le" if depth == 16 else "f32le", "-ar", str(rate),
+                        "-ac", "2", "-i", "-", *args, *tags, str(path)], input=pcm, capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     if r.returncode:
         raise OSError(f"ffmpeg failed: {r.stderr.decode(errors='replace').strip()[-400:]}")
 
@@ -720,6 +729,14 @@ def _mix_numbers(path, stamp):
     from . import dsp
     pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
     return dsp.measure_mix(pcm, RATE)
+
+
+@functools.lru_cache(maxsize=8)
+def _meters(path, stamp):
+    import numpy as np
+    from . import dsp
+    pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
+    return dsp.meter_series(pcm, RATE)
 
 
 def mix_numbers(path):
@@ -2498,6 +2515,37 @@ class State:
             _atomic(self.history_store.path, data)
             self.history, self.future = history, future
 
+    def relink_hints(self, lib, k=3):
+        """For each sample slot whose file is missing, up to `k` WAVs of the same name (any case) in the sample library's
+        index (`lib`, library.Library): first those whose contents match the digest an undo step recorded for the
+        missing file ("same": the same file moved), then those sharing more of its folders. Nothing is relinked here.
+        {"hints": {slot: [{"path", "same"}]}, "indexed": files in the index}."""
+        with self.lock:
+            missing = {int(n): (self.base_dir / str(v["file"])).resolve() for n, v in (self.song.get("samples") or {}).items()
+                       if isinstance(v, dict) and v.get("file") and not (self.base_dir / str(v["file"])).is_file()}
+            steps = list(self.history)
+        with lib.lock:
+            files = list(lib.data["files"])
+        by_name = {}
+        for p in files:
+            by_name.setdefault(Path(p).name.lower(), []).append(Path(p))
+        hints = {}
+        for num, gone in missing.items():
+            found = [p for p in by_name.get(gone.name.lower(), []) if p.is_file() and p.resolve() != gone]
+            if not found:
+                continue
+            known = None
+            for step in reversed(steps):  # the newest digest recorded while the file was there
+                known = (unpack_step(step).get("assets") or {}).get(str(gone))
+                if known:
+                    break
+            tail = lambda p: next((i for i, (a, b) in enumerate(zip(reversed(p.parts), reversed(gone.parts))) if a.lower() != b.lower()),
+                                  min(len(p.parts), len(gone.parts)))
+            same = {p: bool(known) and digest(p.read_bytes()) == known for p in found}
+            found.sort(key=lambda p: (not same[p], -tail(p), str(p)))
+            hints[num] = [{"path": str(p), "same": same[p]} for p in found[:k]]
+        return {"hints": hints, "indexed": len(files)}
+
     def relink(self, num=None, path=None, links=None):
         with self.lock:
             moved = {}
@@ -2524,10 +2572,12 @@ class State:
 
     def _commit(self, new, loaded=None, meta=None, guard=None):
         """Compile, write, then publish one undo step. A failed write consumes no history or settings; an edit that
-        changes nothing (channel 1 moved up) adds no step and keeps the redo steps."""
+        changes nothing (channel 1 moved up) adds no step and keeps the redo steps. A `# written by VultureTracker`
+        line naming another version is brought to this one (api.refresh_written_by; a song without one gets none)."""
         meta = copy.deepcopy(self.meta if meta is None else meta)
         if new == self.text and meta == self.meta:
             return
+        new = api.refresh_written_by(new)  # a comment, in place: what `loaded` compiled stays line for line the same
         loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
         if guard is not None:
             guard(new, loaded, meta)
@@ -2792,6 +2842,8 @@ class State:
             self._render_sample(lines, orders, op, remap)
         elif kind == "sample_slice":
             self._slice(lines, orders, op, remap)
+        elif kind == "sf2_preset":
+            self._sf2_preset(lines, orders, op, remap)
         elif kind == "sample_file":  # the slot pointed at another WAV (dropped on it), as the tryout's apply does it
             import copy
             num, f = int(op["num"]), Path(str(op["file"]))
@@ -3286,20 +3338,24 @@ class State:
             msg += "; " + self._slice_pattern(lines, orders, remap, [bounds[k][0] for k in keep_k], w.rate, nums,
                                               [notes[k][1] if mode == "multi" else 60 + i if ins else 60
                                                for i, k in enumerate(keep_k)],
-                                              ins, int(op.get("ch") or 0), f"{stem}_slices")
+                                              ins, int(op.get("ch") or 0), f"{stem}_slices", op.get("grid_bpm"))
         self._report.append(msg)
 
-    def _slice_pattern(self, lines, orders, remap, starts, rate, nums, keys, ins, ch, base):
+    def _slice_pattern(self, lines, orders, remap, starts, rate, nums, keys, ins, ch, base, grid_bpm=None):
         """A new pattern that plays the slices (their start frames `starts` in the source, their slots `nums`, played
         with instrument `ins` on `keys`, or each slot at C-5 in a song without instruments) in order at their original
-        timing, from channel `ch`; not added to the order list. Returns the report's words."""
+        timing, from channel `ch`, or with `grid_bpm` (the sample's tempo) each on the row its beat reaches at the song's
+        rows per beat; not added to the order list. Returns the report's words."""
         from . import compose
         from .model import Cell
         from .notation import format_cell
         mod = self.mod
         nch = len(mod.channels)
         ch = max(0, min(nch - 1, ch))
-        placed, rows, dropped = compose.slice_rows(starts, rate, mod.tempo, mod.speed, ch, nch)
+        if grid_bpm is not None and not 20 <= float(grid_bpm) <= 999:
+            raise ValueError("the sample's BPM is 20 to 999")
+        beat_grid = (float(grid_bpm), mod.row_highlight[0] or 4) if grid_bpm else None
+        placed, rows, dropped = compose.slice_rows(starts, rate, mod.tempo, mod.speed, ch, nch, grid=beat_grid)
         if any(delay > 15 for _, _, _, delay in placed):
             raise ValueError('Slice timing needs a delay above 15 ticks; choose a song speed of 16 or less before creating a pattern')
         name = re.sub(r"[^\w.-]+", "_", base)
@@ -3316,8 +3372,9 @@ class State:
         first, _ = self._pattern_block(lines, name)
         ind = " " * (self._ind(lines[first - 1]) + 2)
         lines[first:first] = [f"{ind}{r:02d}: {' | '.join(cells)}\n" for r, cells in enumerate(grid)]
-        words = (f"pattern '{name}' plays them at their timing ({rows} rows at tempo {mod.tempo} speed {mod.speed}; "
-                 f"not in the order list: INSERT it in the Song tab)")
+        words = (f"pattern '{name}' plays them on the song's grid ({rows} rows, the sample at {float(grid_bpm):g} BPM; "
+                 if beat_grid else f"pattern '{name}' plays them at their timing ({rows} rows at tempo {mod.tempo} speed {mod.speed}; ")
+        words += "not in the order list: INSERT it in the Song tab)"
         if dropped:
             words += f", {len(dropped)} left out (past 200 rows, or every channel taken on their row)"
         return words
@@ -3582,6 +3639,45 @@ class State:
             self._write_orders(lines, after)
             self._commit(''.join(lines), meta=meta, guard=guard)
 
+    def _sf2_preset(self, lines, orders, op, remap):
+        """The `sf2_preset` op: preset `preset` of bank `bank` (default 0) of the SoundFont `path` (or the GUS patch, a
+        .pat) as a new instrument, read the way OpenMPT's loaders read them (sf2.py): its zones written as WAVs in a new folder beside the song
+        (`<file stem>_<preset name>/`), each a new slot, and one instrument playing them over the bank's key ranges with the
+        preset's envelope. One undo step; the WAVs go again when the edit is refused."""
+        from . import sf2
+        from .itreader import _safe, _sanitize, module_to_song
+        if self.mod.instruments is None:
+            raise ValueError("a SoundFont preset is an instrument: this song plays samples directly (no instruments)")
+        src = Path(str(op["path"]))
+        src = src if src.is_absolute() else self.base_dir / src
+        if not src.is_file():
+            raise ValueError(f"no such SoundFont: {src}")
+        mod, warnings = sf2.bank_module(src, int(op.get("preset") or 0), int(op.get("bank") or 0))
+        _sanitize(mod, warnings)
+        first = max((int(k) for k in (self.song.get("samples") or {})), default=0) + 1
+        if first + len(mod.samples) - 1 > 99:
+            raise ValueError(f"the preset's {len(mod.samples)} samples from slot {first} would pass slot 99")
+        stem = f"{_safe(src.stem)}_{_safe(mod.instruments[0].name)}"
+        folder = next(p for p in (self.base_dir / (stem if j == 1 else f"{stem}-{j}") for j in itertools.count(1)) if not p.exists())
+        try:
+            song = module_to_song(mod, self.base_dir / "song.yaml", folder)  # only its WAVs and entries are used
+        finally:
+            self._created.extend(sorted(folder.glob("*.wav")))
+        for i, entry in sorted(song["samples"].items()):
+            entry = dict(entry)
+            file, name = self.base_dir / entry.pop("file"), entry.pop("name")
+            self._song_op(lines, orders, {"op": "sample_new", "num": first + i - 1, "file": str(file), "name": name,
+                                          "keep": entry}, remap)
+        ins = dict(song["instruments"][1])
+        if "sample" in ins:
+            ins["sample"] += first - 1
+        for e in ins.get("keymap") or []:
+            e["sample"] += first - 1
+        num = max((int(k) for k in (self.song.get("instruments") or {})), default=0) + 1
+        self._song_op(lines, orders, {"op": "instrument_new", "num": num, "entry": ins}, remap)
+        self._report.append(f"instrument {num:02d} '{ins['name']}' from {src.name}, slots {first:02d}-{first + len(mod.samples) - 1:02d} "
+                            f"in {folder.name}/: " + "; ".join(warnings))
+
     def _wav_for_op(self, f):
         """An edit's sound file as a WAV (as_wav); one written for it goes again when the edit is refused."""
         f, new = self.as_wav(f)
@@ -3594,7 +3690,7 @@ class State:
         pattern_split, channel_rename, channel_color, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
         sample_set (the whole entry), sample_file (the slot pointed at another WAV), sample_delete, sample_process (an edit of the slot's audio written as a new WAV beside the song,
         the slot pointed at it), echo, groove, euclid, chord, layers, arp, interpolate, automate, grow, shrink, fill,
-        set_length, cut_here, glue, render_sample (rows rendered into a new slot), sample_slice) to the song text as one undo step. The tryout's
+        set_length, cut_here, glue, render_sample (rows rendered into a new slot), sample_slice, sf2_preset) to the song text as one undo step. The tryout's
         channel mutes and unwritten faders follow a channel that moves or goes; its section and loop are dropped when they
         fall outside a changed order list."""
         with self.lock:
@@ -3923,9 +4019,11 @@ class State:
             raise ValueError("no loop found: the sound does not hold steady for 0.2 s (a drum or a short hit?)")
         return {"start": lp[0], "end": lp[1], "hz": round(hz, 2) if hz else None}
 
-    def slice_points(self, num, mode="onsets", value=50, a=None, b=None):
+    def slice_points(self, num, mode="onsets", value=50, a=None, b=None, bpm=None, snap=None):
         """Where SLICE would cut slot `num`'s WAV, frames a..b (default: all of it): at its hits (`onsets`, value the
-        sensitivity 0-100) or into `equal` parts (value the count). {"points": the slices' start frames, "end"}."""
+        sensitivity 0-100) or into `equal` parts (value the count), moved to a grid of 1/`snap` notes at `bpm` when
+        both are given. {"points": the slices' start frames, "end", "bpm": the span's tempo guessed from its length
+        (dsp.bpm_guess), "rate"}."""
         from . import dsp
         with self.lock:
             _, _, w, x = self._sample_wav(num)
@@ -3938,7 +4036,11 @@ class State:
             pts = dsp.onsets(x, w.rate, value, a, b)
         else:
             raise ValueError("slices go at the hits (onsets) or in equal parts")
-        return {"points": [int(p) for p in pts], "end": b}
+        if bpm and snap:
+            if not 20 <= float(bpm) <= 999 or int(snap) not in (4, 8, 16, 32):
+                raise ValueError("snap to 1/4, 1/8, 1/16 or 1/32 notes at 20-999 BPM")
+            pts = [p for p in dsp.snap_points(pts, a, w.rate, float(bpm), int(snap)) if p < b]
+        return {"points": [int(p) for p in pts], "end": b, "bpm": dsp.bpm_guess((b - a) / w.rate), "rate": w.rate}
 
     def sample_view(self, num, a=0, b=None, n=1000):
         """The editor's view of slot `num`: the WAV (frames, rate, channels, bits), its loops in the WAV's frames, the
@@ -4210,6 +4312,16 @@ class Handler(BaseHTTPRequestHandler):
         out["status"] = r.status()
         out["takes"] = cls.state.takes if cls.state else []
         out["status"]["pending_save"] = bool(cls.pending_recording)
+        from . import record
+        if out["status"]["finished"] and not r.spill_id and cls.state is not None:  # backing passes done, not saved yet
+            try:
+                takes, plan = r.peek_takes()
+                if takes:
+                    r.spill_id = record.spill(takes, r.rate, cls.state.song_path, plan["loops"] if plan else 0)
+            except OSError:
+                pass
+        live = {r.spill_id, (cls.pending_recording or {}).get("spill")}
+        out["unsaved"] = [s for s in record.spilled() if s["id"] not in live]
         return out
 
     @classmethod
@@ -4224,8 +4336,20 @@ class Handler(BaseHTTPRequestHandler):
         from .record import RecordError
         r, cmd = cls.rec(), body.get("cmd")
         try:
-            if cmd in ('open', 'mode', 'close', 'start', 'calibrate') and (cls.pending_recording or r.recording):
+            if cmd in ('open', 'mode', 'close', 'start', 'calibrate', 'recover') and (cls.pending_recording or r.recording):
                 raise RecordError('Save or discard the current take first')
+            if cmd == 'recover':  # passes an earlier session kept, back as the take to save (the song open now)
+                from .record import load_spill
+                if cls.state is None:
+                    raise RecordError('open a song first: takes are saved beside it')
+                takes, rate, loops = load_spill(str(body.get('id')))
+                cls.pending_recording = dict(takes=takes, rate=rate, saved=[], file=None, spill=str(body['id']),
+                                             plan={'loops': loops, 'calibration': False} if loops else None)
+                return {}
+            if cmd == 'forget':  # kept passes thrown away
+                from .record import unspill
+                unspill(str(body.get('id')))
+                return {}
             if cmd in ('start', 'stop', 'send', 'multisample'):
                 if cls.state is None:
                     raise RecordError('open a song first')
@@ -4287,7 +4411,11 @@ class Handler(BaseHTTPRequestHandler):
                 return {"report": cls.state.takes_multisample(body.get("files"))}
             elif cmd in ("stop", "discard"):
                 if cmd == 'discard':
+                    from .record import unspill
+                    unspill(r.spill_id)
+                    unspill((cls.pending_recording or {}).get('spill'))
                     r.stop_takes()
+                    r.spill_id = None
                     cls.pending_recording = None
                     return {}
                 if cls.pending_recording is None:
@@ -4297,7 +4425,15 @@ class Handler(BaseHTTPRequestHandler):
                         return {'latency_ms': measure_latency(plan['pcm'], takes[0], r.rate)}
                     if not takes:
                         return {}
-                    cls.pending_recording = dict(takes=takes, plan=plan, rate=r.rate, saved=[], file=None)
+                    sid = r.spill_id
+                    if sid is None:  # kept in the user folder until saved: a failed save or a crash keeps the passes
+                        from .record import spill
+                        try:
+                            sid = spill(takes, r.rate, cls.state.song_path, plan['loops'] if plan else 0)
+                        except OSError:
+                            sid = None
+                    r.spill_id = None
+                    cls.pending_recording = dict(takes=takes, plan=plan, rate=r.rate, saved=[], file=None, spill=sid)
                 pending = cls.pending_recording
                 while len(pending['saved']) < len(pending['takes']):
                     i = len(pending['saved'])
@@ -4313,6 +4449,8 @@ class Handler(BaseHTTPRequestHandler):
                     pending['saved'].append(take)
                     pending['file'] = None
                 cls.pending_recording = None
+                from .record import unspill
+                unspill(pending.get('spill'))
                 return {'take': pending['saved'][-1], 'takes': pending['saved']}
             else:
                 raise RecordError(f"unknown recorder command {cmd!r}")
@@ -4353,9 +4491,10 @@ class Handler(BaseHTTPRequestHandler):
             remember_song(cls.state.song_path)
 
     @classmethod
-    def browse(cls, wav=False, module=False):
-        """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module) path or None."""
-        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Module tab and MIDI files", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("Song files", "*.yaml;*.yml")
+    def browse(cls, wav=False, module=False, sf2=False):
+        """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module; with `sf2`,
+        SoundFont) path or None."""
+        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Module tab and MIDI files", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("SoundFonts and GUS patches", "*.sf2;*.pat") if sf2 else ("Song files", "*.yaml;*.yml")
         if cls.window is not None:
             import webview
             r = cls.window.create_file_dialog(webview.OPEN_DIALOG, file_types=(f"{kind} ({pat})", "All files (*.*)"))
@@ -4533,7 +4672,7 @@ class Handler(BaseHTTPRequestHandler):
             q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
             try:
                 return self._send(200, st.slice_points(int(path[12:]), q.get("mode", "onsets"), float(q.get("value", 50)),
-                                                       q.get("a"), q.get("b")))
+                                                       q.get("a"), q.get("b"), q.get("bpm"), q.get("snap")))
             except (ValueError, OSError, ImportError) as e:
                 return self._send(404, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/api/wave/"):
@@ -4562,6 +4701,15 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ImportError, wave.Error, ValueError) as e:
                 return self._send(500, {"error": f"{type(e).__name__}: {e}"})
             return self._send(200, png, "image/png")
+        if path.startswith("/api/meters/"):  # a render's short-term loudness and stereo sums every 0.1 s (dsp.meter_series)
+            r = st.renders.get(path[12:])
+            if not r or r["status"] != "ready":
+                return self._send(404, {"error": "not rendered"})
+            p = Path(r["file"])
+            try:
+                return self._send(200, _meters(str(p), (p.stat().st_mtime_ns, p.stat().st_size)))
+            except (OSError, ImportError, ValueError) as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/refspec/"):  # ?view=ref|delta&scale=log|lin
             try:
                 png = st.reference_png(path[9:], "delta" if "view=delta" in self.path else "ref", "lin" if "scale=lin" in self.path else "log")
@@ -4627,6 +4775,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": str(out), "warnings": warnings})
             elif act == "browsewav":
                 return self._send(200, {"path": self.browse(wav=True)})
+            elif act == "relinkhints" and st is not None:  # PROJECT's missing samples: same-named WAVs in the library
+                return self._send(200, st.relink_hints(self.lib()))
+            elif act == "sf2presets":  # a SoundFont's presets for the Instruments tab (`browse` picks the bank first)
+                from .sf2 import presets
+                p = self.browse(sf2=True) if body.get("browse") else body.get("path")
+                if not p:
+                    return self._send(200, {"path": None})
+                data = Path(str(p)).read_bytes()
+                found = [[0, 0, "the patch"]] if data[:8] == b"GF1PATCH" else [list(x) for x in presets(data)]
+                return self._send(200, {"path": str(p), "presets": found})
             elif act == "rec":
                 return self._send(200, self.rec_command(body))
             elif act == "fetchfaust":  # faustwasm from npm, on a thread; GET /api/faust reports it

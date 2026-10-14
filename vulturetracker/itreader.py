@@ -687,7 +687,8 @@ def import_it(it_path, song_path, samples_dir):
         elif diff is not None and mod.mix_volume != want:
             warnings.append(f"mix volume {mod.mix_volume}: the level libopenmpt plays the original at ({diff:+.1f} dB)")
     song = module_to_song(mod, song_path, samples_dir)
-    header = f"# Imported from {Path(it_path).name} by vulturetracker import\n"
+    from .api import written_by_line
+    header = f"# Imported from {Path(it_path).name} by vulturetracker import\n" + written_by_line()
     for w in warnings:
         header += f"# import warning: {w}\n"
     atomic_write(song_path, (header + to_yaml(song)).encode("utf-8"))  # one write, LF as the other importers

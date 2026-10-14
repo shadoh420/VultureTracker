@@ -461,6 +461,10 @@ The format has no version number: it grows only by new optional keys, and a key 
   one can say so: `requires: "1.2"` at the top level, and an app older than 1.2 then reports that one thing ("this song
   needs VultureTracker 1.2 or newer; this is 1.1.0") instead of the keys it does not know. Quote the version: YAML reads
   a bare `1.10` as the number 1.1. The app's own edits keep the key.
+- **Which version wrote it.** A song the app creates or imports starts with a comment `# written by VultureTracker
+  X.Y.Z` among its leading comments; `check --json` reports it as `written_by` (null without one). An app write brings
+  the line to its own version only when it names another, and never adds one to a song without it, so a committed
+  song's diff stays the edit. It is a comment: nothing reads it to decide what a key means.
 - **The files beside the song** (`<song>.tryout.json`, `.notes.json` and the notes archives, `.history.json`, and a
   collected project's `project.json`) carry a `schema` number. An app reads its own and older ones and writes its own;
   one written by a newer app opens the song read-only, with a notice naming the file, and nothing is written over it.

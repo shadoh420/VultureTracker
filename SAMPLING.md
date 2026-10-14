@@ -122,7 +122,8 @@ samples:
 | key | default | meaning |
 |---|---|---|
 | `patch` | | Surge XT: `Category/Name` (factory), `3rdparty/Author/Category/Name`, or a path to an `.fxp`. Dexed: `dexed:Cartridge/Voice` (voices of each `.syx` cartridge in Dexed's cartridge folder or `tools/synths/cartridges/`). OB-Xd: `obxd:Bank/Program` (programs of each `.fxb` bank). Use `audition` with a glob to list and hear them. |
-| `file` | | instead of `patch`: an audio file (WAV, FLAC, AIFF, OGG, MP3; relative to the recipe), or a list of files mixed together (e.g. close and overhead mics of one drum hit). Resampled to `sample_rate`. |
+| `file` | | instead of `patch`: an audio file (WAV, FLAC, AIFF, OGG, MP3; relative to the recipe), or a list of files mixed together (e.g. close and overhead mics of one drum hit), or a Hydrogen drum kit (`.h2drumkit`, with `instrument`; see below). Resampled to `sample_rate`. |
+| `instrument`, `layer`, `layers` | , the loudest | a Hydrogen kit's instrument (its name, or a number from 1) and velocity layer (a number from 1); `layers: [1, 2, 3]` writes one sample per layer (`name_l1.wav`, ...) to try out |
 | `resynth` | | instead of `patch` or `file`: a target WAV rebuilt from blocks of other WAVs (see below) |
 | `faust` | | instead of `patch`: Faust code, or a `.dsp` file beside the recipe, rendered a voice per note (see below) |
 | `wave` | | instead of `patch`: one looped cycle of a chip or drawn waveform, band-limited by construction (see below) |
@@ -211,6 +212,24 @@ code is in `vulturetracker/faust_examples/`; copy one beside the recipe to chang
   pluck: {faust: pluck.dsp, notes: [E-3, E-4], hold: 0.8, tail: 1.5, params: {position: 0.12}}
   kick: {faust: kick.dsp, hold: 0.5, params: {start: 220, end: 42, dist: 0.4}}
 ```
+
+## Hydrogen drum kits (`file: kit.h2drumkit`)
+
+A Hydrogen kit (`.h2drumkit`, the archive Hydrogen exports and its kit sites offer) is read without unpacking it:
+`drumkit.xml` names its instruments and each one's velocity layers, as Hydrogen's own loader reads them (the current
+format with `instrumentComponent`, and the old one with the layers, or one `filename`, in the instrument).
+
+```yaml
+samples:
+  kick:  {file: kits/GMRockKit.h2drumkit, instrument: Kick}              # the loudest layer
+  snare: {file: kits/GMRockKit.h2drumkit, instrument: Snare, layers: [1, 2, 3, 4]}  # snare_l1..l4 to try out
+```
+
+A sample is the layer's file times the layer's, its component's and the instrument's gains and the instrument's
+volume, as Hydrogen's sampler multiplies them, pitched by the layer's and instrument's pitch offsets. A WAV holds no
+pan, so the log prints the instrument's (as the song's 0-64) with the kit's author and licence. A kit's licence is its
+own: a song that commits samples from one needs its `ATTRIBUTION.md` entry. Without `instrument` the error lists the
+kit's instruments.
 
 ## Resynthesis from a corpus (`resynth:`)
 

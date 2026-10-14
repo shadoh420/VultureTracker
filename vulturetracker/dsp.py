@@ -89,6 +89,26 @@ def onsets(x, rate, sensitivity=50, a=0, b=None, min_gap=0.05):
     return out
 
 
+def bpm_guess(seconds):
+    """A loop's tempo guessed from its length, as SlicerT guesses it: 240 / seconds (one bar of four beats), doubled or
+    halved into 100-200 BPM. A guess for the owner to correct, not a measurement."""
+    if seconds <= 0:
+        return 120.0
+    v = 240.0 / seconds
+    while v < 100:
+        v *= 2
+    while v > 200:
+        v /= 2
+    return round(v, 2)
+
+
+def snap_points(points, a, rate, bpm, division):
+    """Slice starts moved to the nearest line of a grid of 1/`division` notes at `bpm` from frame `a` (a 1/16 is a
+    quarter of a beat); two that land on one line become one."""
+    step = rate * 240.0 / (bpm * division)
+    return sorted({a + round(round((p - a) / step) * step) for p in points})
+
+
 def equal_parts(a, b, n):
     """`n` equal slices of frames a..b: their start frames."""
     n = max(1, min(99, int(n)))
@@ -452,11 +472,59 @@ def k_weighting(rate, taps=8191):
     return h
 
 
+def meter_series(x, rate, hop=0.1, ms=None):
+    """A mix's meters over time (`x`: channels x frames, full scale 1.0), every `hop` seconds: the short-term loudness
+    (EBU R128: K-weighted over the 3 s ending there, over what there is in the first 3 s; None under -70 LUFS) and, for
+    two channels, each hop's sums of L*R, L*L and R*R, from which span_numbers takes the correlation of any span exactly.
+    `ms`: the K-weighted squares per channel when the caller has them."""
+    from .resample import fir_filter
+    x = np.atleast_2d(np.asarray(x, float))
+    if ms is None:
+        h = k_weighting(rate)
+        ms = [fir_filter(c, h) ** 2 for c in x]
+    step, win = max(1, round(hop * rate)), round(3 * rate)
+    n = x.shape[1] // step
+    ends = (np.arange(n) + 1) * step
+    starts = np.maximum(0, ends - win)
+    z = sum((c[ends] - c[starts]) / (ends - starts) for c in (np.concatenate([[0.0], np.cumsum(m)]) for m in ms)) if n else np.zeros(0)
+    short = -0.691 + 10 * np.log10(np.maximum(z, 1e-20))
+    out = {"hop": hop, "short": [round(float(v), 2) if v > -70 else None for v in short], "full_from": win // step - 1}
+    if x.shape[0] == 2 and n:
+        seg = x[:, :n * step].reshape(2, n, step)
+        g = lambda v: [float(f"{s:.5g}") for s in v]  # noqa: E731
+        out.update(ab=g((seg[0] * seg[1]).sum(1)), aa=g((seg[0] ** 2).sum(1)), bb=g((seg[1] ** 2).sum(1)))
+    return out
+
+
+def loudness_range(series):
+    """EBU Tech 3342's loudness range (LU) from meter_series: the short-term values of full 3 s windows, gated at
+    -70 LUFS and 20 LU under their power mean, the 95th minus the 10th percentile; None with fewer than two."""
+    v = np.array([s for s in series["short"][series.get("full_from", 0):] if s is not None], float)
+    if len(v) < 2:
+        return None
+    v = v[v >= 10 * np.log10(np.mean(10 ** (v / 10))) - 20]
+    return round(float(np.percentile(v, 95) - np.percentile(v, 10)), 2) if len(v) >= 2 else None
+
+
+def span_numbers(series, t0, t1):
+    """The meters of seconds t0..t1 from meter_series: the highest short-term loudness ending in it (`lufs_s`) and the
+    stereo correlation of its hops (None for silence or one channel)."""
+    hop = series["hop"]
+    a, b = int(round(t0 / hop)), max(int(round(t0 / hop)) + 1, int(round(t1 / hop)))
+    short = [s for s in series["short"][a:b] if s is not None]
+    corr = None
+    if "ab" in series and b > a:
+        ab, aa, bb = (sum(series[k][a:b]) for k in ("ab", "aa", "bb"))
+        corr = round(ab / (aa * bb) ** 0.5, 3) if aa > 1e-9 and bb > 1e-9 else None
+    return {"lufs_s": max(short) if short else None, "correlation": corr}
+
+
 def measure_mix(x, rate):
     """A mix's numbers (`x`: channels x frames, full scale 1.0): integrated loudness in LUFS (BS.1770-4: K-weighted,
     400 ms blocks every 100 ms, gated at -70 LUFS and 10 LU under the ungated mean), true peak in dBTP (4x
-    oversampled), sample peak in dBFS, and the stereo correlation of the sounding part (1 mono, 0 unrelated, -1 out of
-    phase). Measurements, not judgements: what they say about the sound is the listener's call."""
+    oversampled), sample peak in dBFS, the stereo correlation of the sounding part (1 mono, 0 unrelated, -1 out of
+    phase) and the loudness range in LU (EBU Tech 3342, `lra`). Measurements, not judgements: what they say about the
+    sound is the listener's call."""
     from .resample import fir_filter, lowpass_fir
     x = np.atleast_2d(np.asarray(x, float))
     h = k_weighting(rate)
@@ -489,7 +557,7 @@ def measure_mix(x, rate):
         corr = round(float((a * b).sum() / den), 3) if den else None
     db = lambda v: round(20 * float(np.log10(v)), 2) if v > 0 else None  # noqa: E731
     return {"lufs": lufs, "true_peak_dbtp": db(tp), "peak_dbfs": db(sp), "correlation": corr,
-            "seconds": round(x.shape[1] / rate, 2)}
+            "lra": loudness_range(meter_series(x, rate, ms=ms)), "seconds": round(x.shape[1] / rate, 2)}
 
 
 # ---------------------------------------------------------------- printed effects for a recipe's `fx:` (synth.py)

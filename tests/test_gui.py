@@ -262,6 +262,47 @@ class TestGui(unittest.TestCase):
         self.assertEqual((st.stems["status"], st.stems["error"], st.stems["dir"]), ("failed", "MP3 export needs ffmpeg", None))
         self.assertFalse((self.dir / "song.mp3").exists())
 
+    def test_export_rate_depth_and_repeat(self):
+        import struct
+        from vulturetracker.export import prepare, run
+        st = self.state()
+        out = {}
+        for name, opts in (("base", {}), ("hi", {"rate": 48000, "depth": 24}), ("fl", {"depth": "float"}), ("rep", {"repeat": 1})):
+            res = run(prepare(st, {"fmt": "wav", "name": name, "tail": 0, **opts}), gui._encode)
+            self.assertEqual(res["status"], "done", res)
+            b = (self.dir / f"{name}.wav").read_bytes()
+            tag, _, rate, _, _, bits = struct.unpack_from("<HHIIHH", b, b.index(b"fmt ") + 8)
+            out[name] = (tag, rate, bits, struct.unpack_from("<I", b, b.index(b"data") + 4)[0] // (bits // 4))
+        frames = out["base"][3]
+        self.assertEqual(out["base"][:3], (1, 44100, 16))
+        self.assertEqual(out["hi"][:3], (1, 48000, 24))
+        self.assertLess(abs(out["hi"][3] - frames * 48000 / 44100), 2)
+        self.assertEqual(out["fl"], (3, 44100, 32, frames))  # IEEE float
+        self.assertEqual(out["rep"][3], 2 * frames)  # two passes of the song
+        for fmt, bad in (("mp3", {"depth": 24}), ("wav", {"bitrate": 128}), ("ogg", {"quality": 11}),
+                         ("wav", {"rate": 12345}), ("wav", {"repeat": 1, "loop": True}), ("flac", {"depth": "float"})):
+            with self.assertRaises(ValueError, msg=(fmt, bad)):
+                prepare(st, {"fmt": fmt, "name": "x", **bad})
+
+    def test_export_normalise_is_a_gain_held_under_the_ceiling(self):
+        import numpy as np
+        from vulturetracker import dsp
+        from vulturetracker.export import prepare, run
+        st = self.state()
+        for name, lufs, ceiling in (("quiet", -30, -1), ("held", -5, -6)):
+            res = run(prepare(st, {"fmt": "wav", "name": name, "tail": 0, "master_lufs": lufs, "master_ceiling": ceiling}), gui._encode)
+            self.assertEqual(res["status"], "done", res)
+            b = (self.dir / f"{name}.wav").read_bytes()
+            m = dsp.measure_mix(np.frombuffer(b[b.index(b"data") + 8:], "<i2").reshape(-1, 2).T / 32768, 44100)
+            if name == "quiet":
+                self.assertLess(abs(m["lufs"] - lufs), 0.1)
+            else:  # the ceiling holds it back: under -5 LUFS, its true peak at the ceiling
+                self.assertLess(m["lufs"], lufs)
+                self.assertLess(abs(m["true_peak_dbtp"] - ceiling), 0.1)
+                self.assertTrue(any("ceiling held it" in w for w in res["warnings"]), res["warnings"])
+        with self.assertRaises(ValueError):
+            prepare(st, {"fmt": "it", "name": "x", "master_lufs": -14})
+
     def test_export_never_overwrites_a_sample(self):
         (self.dir / "a.yaml").write_bytes(SONG.encode("utf-8"))  # a song named like its sample: a.wav is both
         st = gui.State(self.dir / "a.yaml")
@@ -809,6 +850,26 @@ class TestGui(unittest.TestCase):
             st.undo()
         self.assertEqual(read(), SONG_BLOCK)
 
+
+    def test_written_by_line(self):
+        from vulturetracker import __version__, api
+        p = gui.create_song(self.dir / "fresh", channels=1)
+        self.assertEqual(api.check(p)["written_by"], __version__)  # a song the app makes says which version made it
+        self.assertIsNone(api.check(self.dir / "song.yaml")["written_by"])
+        old = "# my song\r\n# written by VultureTracker 0.0.1\r\nmodule: {}\r\n"
+        self.assertEqual(api.refresh_written_by(old), old.replace("0.0.1", __version__))  # its own line endings kept
+        for text in ("# my song\nmodule: {}\n", f"# written by VultureTracker {__version__}\nmodule: {{}}\n",
+                     "module: {}\n# written by VultureTracker 0.0.1\n"):  # none, this version, or past the leading comments
+            self.assertEqual(api.refresh_written_by(text), text)
+        # an app write brings an older line to this version, and adds none to a song without one
+        (self.dir / "song.yaml").write_bytes(("# written by VultureTracker 0.0.1\n" + SONG).encode("utf-8"))
+        st = self.state()
+        st.song_edit([{"op": "pattern_new", "name": "zz", "rows": 4}])
+        self.assertTrue((self.dir / "song.yaml").read_text(encoding="utf-8").startswith(f"# written by VultureTracker {__version__}\n"))
+        (self.dir / "song.yaml").write_bytes(SONG.encode("utf-8"))
+        st.reload()
+        st.song_edit([{"op": "pattern_new", "name": "yy", "rows": 4}])
+        self.assertNotIn("written by", (self.dir / "song.yaml").read_text(encoding="utf-8"))
 
     def test_new_song_and_instrument_edits(self):
         p = gui.create_song(self.dir / "fresh", channels=3)
@@ -1431,6 +1492,23 @@ class TestGui(unittest.TestCase):
         st.undo()
         self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK)
 
+    def test_sf2_preset_as_a_new_instrument(self):
+        from tests.test_modimport import bank
+        (self.dir / "bank.sf2").write_bytes(bank()[0])
+        (self.dir / "song.yaml").write_bytes(SONG.encode("utf-8"))
+        with self.assertRaises(ValueError):  # a song without instruments
+            self.state().song_edit([{"op": "sf2_preset", "path": "bank.sf2", "preset": 0}])
+        (self.dir / "song.yaml").write_bytes(SONG_INS.encode("utf-8"))
+        st = self.state()
+        r = st.song_edit([{"op": "sf2_preset", "path": "bank.sf2", "preset": 0}])
+        self.assertTrue(r["report"].startswith("instrument 03 'Keys' from bank.sf2, slots 03-04 in bank_Keys/"), r["report"])
+        s, ins = st.song["samples"], st.song["instruments"][3]
+        self.assertEqual((s[3]["file"], s[3]["loop"], s[4]["name"]), ("bank_Keys/01_low.wav", {"start": 100, "end": 900}, "high"))
+        self.assertEqual(ins["keymap"], [{"notes": "C-0..B-4", "sample": 3}, {"notes": "C-5..B-9", "sample": 4}])
+        self.assertEqual((ins["nna"], ins["fadeout"]), ("off", 40))
+        st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_INS)
+
     def test_slice_a_sample_into_slots_and_a_kit(self):
         import math
         from vulturetracker.wavload import read_wav
@@ -1484,6 +1562,16 @@ class TestGui(unittest.TestCase):
         self.assertEqual([row[0] for row in rows], ["C-5 04 ... ...", "C-5 05 ... SD4", "... .. ... ...", "C-5 06 ... SD2"])
         with self.assertRaises(ValueError):  # a multisample needs instruments
             st.song_edit([{"op": "sample_slice", "num": 3, **pts, "mode": "multi"}])
+        st.undo()
+        # on the grid: the hits 0.2 s apart are half a beat apart at 150 BPM, two rows at 4 rows a beat; FIND's guess of
+        # the 0.6 s WAV's tempo is 240 / 0.6 folded under 200
+        self.assertEqual(st.slice_points(3, "onsets", 50)["bpm"], 200.0)
+        r = st.song_edit([{"op": "sample_slice", "num": 3, **pts, "pattern": True, "grid_bpm": 150}])
+        self.assertIn("plays them on the song's grid (5 rows, the sample at 150 BPM", r["report"])
+        rows = st.pattern_rows(len(st.mod.patterns) - 1)["rows"]
+        self.assertEqual([row[0] for row in rows], ["C-5 04 ... ...", "... .. ... ...", "C-5 05 ... ...", "... .. ... ...", "C-5 06 ... ..."])
+        snapped = st.slice_points(3, "onsets", 50, bpm=150, snap=8)["points"]  # an 1/8 at 150 BPM is 0.2 s
+        self.assertEqual(snapped, [0, 8820, 17640])
 
     def test_denoise(self):
         # a 440 Hz tone at -12 dBFS after half a second of white noise at -40 dBFS RMS (which goes on under the tone):

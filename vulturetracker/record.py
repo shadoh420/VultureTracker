@@ -233,6 +233,7 @@ class Recorder:
         self.play_frame = 0
         self.finished = False
         self.exclusive = False
+        self.spill_id = None     # the finished passes' copy in the user folder (spill), until they are saved
 
     def _backend(self):
         if self.be is None:
@@ -354,7 +355,7 @@ class Recorder:
         self.close()
         with self.lock:
             self.backing, self.play_frame, self.frames, self.finished = plan, 0, 0, False
-            self.chunks = []
+            self.chunks, self.spill_id = [], None
             self.recording = True
         try:
             opts = {'loopback': calibration} if isinstance(be, FakeBackend) else {}
@@ -384,6 +385,20 @@ class Recorder:
             outdata[:] = out if outdata.shape[1] == 2 else out.mean(axis=1, keepdims=True)
             self.play_frame += frames
 
+    def peek_takes(self):
+        """The passes recorded so far, as stop_takes returns them, without ending the take."""
+        with self.lock:
+            chunks, plan, mode = list(self.chunks), self.backing, self.mode
+        if not chunks:
+            return [], plan
+        x = np.concatenate(chunks).T
+        x = x if MODES[mode][1] or x.shape[0] == 1 else x.mean(axis=0, keepdims=True)
+        if plan is None:
+            return [x], None
+        x = x[:, plan['offset']:]
+        n = len(plan['pcm'])
+        return [x[:, i:i+n] for i in range(0, x.shape[1], n)], plan
+
     def stop_takes(self):
         plan = self.backing
         x = self.stop()
@@ -404,6 +419,7 @@ class Recorder:
                 raise RecordError('Stop the current take first')
             self.backing = None
             self.finished = False
+            self.spill_id = None
             keep, got = [], 0
             want = int(max(0.0, min(self.preroll_s, float(preroll))) * self.rate)
             for b in reversed(self.preroll):
@@ -482,3 +498,71 @@ def measure_latency(reference, captured, rate):
     if confidence < .5 or np.max(np.abs(got), initial=0) < .005:
         raise RecordError('No clear loopback pulse detected; connect the selected output to the selected input and retry')
     return round(1000 * lag / rate, 2)
+
+
+# ---------------------------------------------------------------- passes kept in the user folder until saved
+
+SPILL_DAYS = 7
+
+
+def spill_dir():
+    from .fileio import user_dir
+    return user_dir() / "recordings"
+
+
+def spill(takes, rate, song, loops=0):
+    """A copy of finished, unsaved passes (float channels x frames each, kept exactly as .npy) in the user folder's
+    recordings/, with a note of the song, the rate and, for passes over a backing track (`loops`), that they keep their
+    placement. Returns its id; removed by unspill once the passes are saved or discarded."""
+    import json
+    d = spill_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    sid = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}-{int(time.time() * 1000) % 1000:03d}"
+    files = []
+    for i, take in enumerate(takes):
+        np.save(d / f"{sid}-{i + 1}.npy", np.asarray(take, np.float32))
+        files.append(f"{sid}-{i + 1}.npy")
+    note = {"song": str(song), "rate": int(rate), "files": files, "loops": int(loops), "time": time.time(),
+            "seconds": round(sum(np.asarray(t).shape[-1] for t in takes) / rate, 2)}
+    (d / f"{sid}.json").write_text(json.dumps(note), encoding="utf-8")
+    return sid
+
+
+def spilled():
+    """The kept passes left by an earlier session (saved or discarded ones are gone), newest first:
+    [{id, song, time, passes, seconds}]; those older than SPILL_DAYS days are removed first."""
+    import json
+    d, out = spill_dir(), []
+    for f in sorted(d.glob("*.json"), reverse=True) if d.is_dir() else []:
+        try:
+            note = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if time.time() - float(note.get("time", 0)) > SPILL_DAYS * 86400:
+            unspill(f.stem)
+            continue
+        out.append({"id": f.stem, "song": note.get("song"), "time": note.get("time"), "passes": len(note.get("files") or []),
+                    "seconds": note.get("seconds")})
+    return out
+
+
+def load_spill(sid):
+    """(takes, rate, loops) of kept passes `sid`."""
+    import json
+    d = spill_dir()
+    if not sid or "/" in sid or "\\" in sid or not (d / f"{sid}.json").is_file():
+        raise RecordError("no such unsaved take")
+    note = json.loads((d / f"{sid}.json").read_text(encoding="utf-8"))
+    return [np.load(d / f, allow_pickle=False) for f in note["files"]], int(note["rate"]), int(note.get("loops") or 0)
+
+
+def unspill(sid):
+    """Remove kept passes `sid` (nothing when it is gone already)."""
+    d = spill_dir()
+    if not sid or "/" in sid or "\\" in sid:
+        return
+    for f in [d / f"{sid}.json", *d.glob(f"{sid}-*.npy")]:
+        try:
+            f.unlink()
+        except OSError:
+            pass

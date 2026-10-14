@@ -151,18 +151,22 @@ def layers(rows, chans, r0, r1, instruments, mode="cycle", default_volume=None):
     return out
 
 
-def slice_rows(starts, rate, tempo, speed, ch=0, nch=1, max_rows=200):
+def slice_rows(starts, rate, tempo, speed, ch=0, nch=1, max_rows=200, grid=None):
     """Where slices that start at frames `starts` (ascending, of a WAV at `rate`) fall in a pattern played at `tempo` and
     `speed`, so that playing them in order keeps their original timing (Renoise's slices rendered to a phrase): the
     first on row 0, each on the row its start reaches and delayed by the ticks left over (SDx), rounded to the nearest
     tick (2.5 / tempo s). A slice that lands on a row already taken goes to the next channel to the right (up to `nch`).
+    `grid` = (the sample's own BPM, the song's rows per beat): each slice on the row its place in beats reaches instead,
+    rounded, no delays, so a loop at another tempo follows the song's (SlicerT's notes on its grid).
     Returns (placed: [(slice index, row, ch, delay ticks)], rows the pattern needs, dropped: slice indices that did not
     fit: past `max_rows` or with every channel taken)."""
     tick = 2.5 / tempo
     placed, dropped, taken, last = [], [], {}, 0
     for k, s in enumerate(starts):
-        t = round((s - starts[0]) / rate / tick)
-        row, delay = divmod(t, speed)
+        if grid:
+            row, delay = round((s - starts[0]) / rate * grid[0] * grid[1] / 60), 0
+        else:
+            row, delay = divmod(round((s - starts[0]) / rate / tick), speed)
         c = ch
         while c < nch and (row, c) in taken:
             c += 1

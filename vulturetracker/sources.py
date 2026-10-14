@@ -10,7 +10,8 @@
 - additive: Nasca Octavian Paul's PADsynth (public domain): harmonics as Gaussian bands, random phases, one inverse FFT,
   an exact loop;
 - mip: per-step copies of any source, each band-limited for the keys it serves and stored at a rate to match, with the
-  `samples:`/`keymap:` blocks to paste into a song.
+  `samples:`/`keymap:` blocks to paste into a song;
+- a Hydrogen drum kit (.h2drumkit) read for `file:`: its drumkit.xml, one instrument's layer and its gains.
 """
 import math
 
@@ -711,3 +712,101 @@ def additive(spec, root, rate):
     x = np.fft.irfft(spectrum * np.exp(1j * phases), n)
     x /= np.abs(x).max()
     return x[None, :], (0, n, False), f"additive {len(amps)} harmonics, {bw:g} cents"
+
+
+# ---------------------------------------------------------------- Hydrogen drum kits
+
+def _xml_children(node, tag):
+    return [c for c in node if c.tag.rsplit("}", 1)[-1] == tag]
+
+
+def _xml_text(node, tag, default=None):
+    found = _xml_children(node, tag)
+    return found[0].text.strip() if found and found[0].text and found[0].text.strip() else default
+
+
+def _xml_float(node, tag, default):
+    try:
+        return float(_xml_text(node, tag, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def h2kit(path):
+    """A Hydrogen drum kit (.h2drumkit: a tar archive, usually gzipped, holding `<kit>/drumkit.xml` and its samples, as
+    Hydrogen's Drumkit.cpp packs it) read as its drumkit.xml says (data/xsd/drumkit.xsd and Instrument.cpp,
+    InstrumentComponent.cpp, InstrumentLayer.cpp): {name, author, license, xml (the member's folder), instruments: [{id,
+    name, volume, gain, pan (-1 left .. 1 right; the old pan_L/pan_R pair converted as Sampler::getRatioPan does),
+    pitch, layers: [{file, min, max, gain, pitch}]}]}. A kit of the old format keeps its layers in the instrument itself,
+    or one `filename` there; each layer's gain includes its component's."""
+    import tarfile
+    from xml.etree import ElementTree
+    try:
+        with tarfile.open(path, "r:*") as tar:
+            xmls = sorted((m for m in tar.getmembers() if m.isfile() and m.name.rsplit("/", 1)[-1] == "drumkit.xml"),
+                          key=lambda m: m.name.count("/"))
+            if not xmls:
+                raise SourceError(f"{path}: no drumkit.xml in the archive")
+            root = ElementTree.fromstring(tar.extractfile(xmls[0]).read())
+    except (tarfile.TarError, OSError, ElementTree.ParseError) as e:
+        raise SourceError(f"{path}: not a Hydrogen drum kit ({e})")
+    folder = xmls[0].name.rsplit("/", 1)[0] if "/" in xmls[0].name else ""
+    lists = [n for n in root.iter() if n.tag.rsplit("}", 1)[-1] == "instrumentList"]
+    out = []
+    for ins in _xml_children(lists[0], "instrument") if lists else []:
+        pan = _xml_text(ins, "pan")
+        if pan is not None:
+            pan = _xml_float(ins, "pan", 0.0)
+        else:
+            left, right = _xml_float(ins, "pan_L", 1.0), _xml_float(ins, "pan_R", 1.0)
+            pan = 0.0 if left < 0 or right < 0 or left == right == 0 else (right / left - 1 if left >= right else 1 - left / right)
+        layers = []
+        parts = [(c, _xml_float(c, "gain", 1.0)) for c in _xml_children(ins, "instrumentComponent")] or [(ins, 1.0)]
+        for part, gain in parts:
+            for layer in _xml_children(part, "layer"):
+                if _xml_text(layer, "filename"):
+                    layers.append({"file": _xml_text(layer, "filename"), "min": _xml_float(layer, "min", 0.0),
+                                   "max": _xml_float(layer, "max", 1.0), "gain": gain * _xml_float(layer, "gain", 1.0),
+                                   "pitch": _xml_float(layer, "pitch", 0.0)})
+        if not layers and _xml_text(ins, "filename"):
+            layers.append({"file": _xml_text(ins, "filename"), "min": 0.0, "max": 1.0, "gain": 1.0, "pitch": 0.0})
+        out.append({"id": _xml_text(ins, "id"), "name": _xml_text(ins, "name", ""), "volume": _xml_float(ins, "volume", 1.0),
+                    "gain": _xml_float(ins, "gain", 1.0), "pan": max(-1.0, min(1.0, pan)),
+                    "pitch": _xml_float(ins, "pitchOffset", 0.0), "layers": layers})
+    return {"name": _xml_text(root, "name", ""), "author": _xml_text(root, "author", ""),
+            "license": _xml_text(root, "license", ""), "xml": folder, "instruments": out}
+
+
+def h2kit_pick(kit, instrument, layer=None):
+    """(instrument, layer number from 1, layer) of a kit: `instrument` by name (any case) or number from 1, `layer` by
+    number, by default the loudest (the one reaching the highest velocity)."""
+    names = ", ".join(i["name"] for i in kit["instruments"])
+    if instrument is None:
+        raise SourceError(f"a .h2drumkit needs instrument: (a name or a number from 1); this kit has: {names}")
+    found = [i for i in kit["instruments"] if str(i["name"]).lower() == str(instrument).lower()]
+    if not found and isinstance(instrument, int) and 1 <= instrument <= len(kit["instruments"]):
+        found = [kit["instruments"][instrument - 1]]
+    if not found:
+        raise SourceError(f"no instrument '{instrument}' in kit '{kit['name']}' (it has: {names})")
+    ins = found[0]
+    if not ins["layers"]:
+        raise SourceError(f"instrument '{ins['name']}' has no sample")
+    if layer is None:
+        k = max(range(len(ins["layers"])), key=lambda j: (ins["layers"][j]["max"], ins["layers"][j]["min"]))
+    elif isinstance(layer, int) and 1 <= layer <= len(ins["layers"]):
+        k = layer - 1
+    else:
+        raise SourceError(f"instrument '{ins['name']}' has layers 1-{len(ins['layers'])}, not {layer}")
+    return ins, k + 1, ins["layers"][k]
+
+
+def h2kit_member(path, kit, layer):
+    """The layer's sample file as bytes, read from the archive (beside drumkit.xml; nothing is extracted to disk)."""
+    import tarfile
+    name = f"{kit['xml']}/{layer['file']}" if kit["xml"] else layer["file"]
+    with tarfile.open(path, "r:*") as tar:
+        try:
+            member = tar.getmember(name)
+        except KeyError:
+            raise SourceError(f"{path}: the kit names {layer['file']}, which the archive does not hold")
+        return tar.extractfile(member).read()

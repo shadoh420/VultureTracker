@@ -73,6 +73,29 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   lfo's loop is placed for it.
 - Instruments: `filter_mode: highpass` (or `lowpass`), OpenMPT's instrument extension written after the sample data as
   OpenMPT writes it (`XTPM`, `FM..`), played by libopenmpt as a high-pass, and read back on import.
+- Import: `import bank.sf2 --preset N [--bank B]` and the Instruments tab's SoundFont row make a SoundFont preset (or a
+  GUS `.pat`) one instrument, its zones WAVs, read the way OpenMPT's loader reads a bank (key ranges, tuning, loops,
+  envelope, stereo pairs); velocity layers keep the loudest, a drum kit is one instrument.
+- Recipes: `file:` reads a Hydrogen drum kit (`.h2drumkit`) as Hydrogen does, `instrument:` and `layer:` choosing a
+  sound (the loudest layer by default), `layers: [..]` one sample per velocity layer to try out; its gains applied,
+  its pan and licence in the log.
+- Export: MIDI (`export -f mid` and RENDER & EXPORT): the notes as a type 1 MIDI file the way OpenMPT exports one, a
+  track per instrument, rows timed as libopenmpt plays them, tempo changes, the effects a MIDI file cannot hold counted.
+- Export: sample rate (22050-96000 Hz), depth (24-bit WAV and FLAC, float WAV), MP3 bitrate, OGG quality and
+  repeated passes of the whole song, in RENDER & EXPORT and as `export --rate --depth --bitrate --quality --repeat`;
+  the defaults are unchanged.
+- Export: NORMALISE TO N LUFS under a true-peak ceiling (-1 dBTP by default), off unless chosen: one gain on the song and
+  its stems, no limiter, the .it untouched (`export --normalize --ceiling`).
+- Samples tab SLICE: ORIGINAL BPM (a guess from the length, editable), SNAP to a 1/4-1/32 grid at it, and + PATTERN ON
+  GRID, the slices placed on the song's rows by beat so a loop at another tempo follows the song.
+- PROJECT: each missing sample offers same-named WAVs from the sample library's index, one click each, the one whose
+  contents match the digest the undo history recorded marked SAME FILE.
+- RECORD: finished passes not yet saved are kept in the user folder's `recordings/` until saved or discarded; the next
+  session lists them as UNSAVED TAKES to recover or discard, and drops them after 7 days.
+- Meters over time: per order the highest short-term loudness (3 s) and the stereo correlation, as a strip under the
+  SPECTRUM tab and in the agent's `measure` (`per_order`), and the loudness range (LRA) beside OUT and in `measure`.
+- Songs the app creates or imports carry `# written by VultureTracker X.Y.Z`, refreshed by an app write only when the
+  version changes (never added to a song without it); `check --json` reports it as `written_by`.
 
 ## 1.5.2 (2026-10-10)
 

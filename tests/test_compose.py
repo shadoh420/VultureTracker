@@ -211,6 +211,18 @@ class TestCompose(unittest.TestCase):
         self.assertEqual((rows, dropped), (3, [4]))
         placed, _, dropped = compose.slice_rows([0, 10, 20], r, 125, 6, ch=0, nch=2)  # three on one row, two channels
         self.assertEqual((len(placed), dropped), (2, [2]))
+        # on the grid: a 170 BPM loop's slices at beats 0, 1/4, 1 and 1.5 land on rows 0, 1, 4 and 6 at 4 rows a beat,
+        # whatever the song's tempo, without delays
+        beat = 60 / 170 * r
+        placed, rows, _ = compose.slice_rows([500 + round(b * beat) for b in (0, 0.25, 1, 1.5)], r, 125, 6, grid=(170, 4))
+        self.assertEqual(([(row, d) for _, row, _, d in placed], rows), ([(0, 0), (1, 0), (4, 0), (6, 0)], 7))
+
+    def test_slice_tempo_guess_and_snap(self):
+        from vulturetracker import dsp
+        self.assertEqual([dsp.bpm_guess(s) for s in (1.5, 4.0, 0.5, 0.6)], [160.0, 120.0, 120.0, 200.0])  # 240 / s, folded
+        # a 1/16 at 120 BPM is 0.125 s: cuts at 0.13 s and 0.24 s go to 0.125 and 0.25; two on one line become one
+        r = 1000
+        self.assertEqual(dsp.snap_points([0, 130, 240, 260], 0, r, 120, 16), [0, 125, 250])
 
     def test_key_splits(self):
         # E-4 (52), A-4 (57), D-5 (62), a repeat of A-4, G-5 (67): each note plays the keys nearest it

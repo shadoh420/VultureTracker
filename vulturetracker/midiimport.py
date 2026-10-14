@@ -279,8 +279,9 @@ def import_midi(src, song_path, samples_dir):
         name = next(n for n in (named[first], *(f"{named[first]} {k}" for k in range(2, 999))) if n not in sections)
         sections[name[:80]] = [first, firsts[i + 1] if i + 1 < len(firsts) else len(bars)]
     title = names[0] if mid.type == 1 and names[0] else Path(src).stem
+    from .api import written_by_line
     head = (f"# Imported from {Path(src).name} by vulturetracker import (MIDI: placeholder sounds, swap them in the tryout)\n"
-            f"# {bpm:g} BPM, {r} rows a quarter note: speed {speed}, tempo {tempo}\n")
+            f"# {bpm:g} BPM, {r} rows a quarter note: speed {speed}, tempo {tempo}\n" + written_by_line())
     song = write_song(song_path, title, lanes, bars, ph, r, speed, tempo, [s[1:] for s in sigs if not s[0]][-1], warnings, head,
                       sections)
     return song, warnings

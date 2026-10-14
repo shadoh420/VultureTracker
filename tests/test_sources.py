@@ -282,3 +282,77 @@ class TestDrum(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def h2drumkit(folder):
+    """A Hydrogen kit as Hydrogen packs one: a gzipped tar of Kit/drumkit.xml (namespaced, a current instrument with a
+    component of two velocity layers, an old-format one with pan_L/pan_R and its layer in the instrument) and WAVs."""
+    import io
+    import tarfile
+    from vulturetracker.wavload import write_wav
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<drumkit_info xmlns="http://www.hydrogen-music.org/drumkit">
+ <name>Test Kit</name><author>someone</author><info/><license>CC0</license>
+ <instrumentList>
+  <instrument><id>0</id><name>Kick</name><volume>0.5</volume><isMuted>false</isMuted><pan>-0.5</pan>
+   <pitchOffset>0</pitchOffset><gain>1</gain>
+   <instrumentComponent><name>Main</name><gain>0.5</gain>
+    <layer><filename>kick_soft.wav</filename><min>0</min><max>0.5</max><gain>1</gain><pitch>12</pitch></layer>
+    <layer><filename>kick_hard.wav</filename><min>0.5</min><max>1</max><gain>1</gain><pitch>0</pitch></layer>
+   </instrumentComponent></instrument>
+  <instrument><id>1</id><name>Snare</name><volume>1</volume><pan_L>1</pan_L><pan_R>0.5</pan_R><gain>1</gain>
+   <layer><filename>snare.wav</filename><min>0</min><max>1</max><gain>1</gain><pitch>0</pitch></layer></instrument>
+ </instrumentList>
+</drumkit_info>"""
+    path = Path(folder) / "test.h2drumkit"
+    with tarfile.open(path, "w:gz") as tar:
+        def add(name, data):
+            info = tarfile.TarInfo(f"Test Kit/{name}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        add("drumkit.xml", xml.encode())
+        for name, amp in (("kick_soft.wav", 4000), ("kick_hard.wav", 16000), ("snare.wav", 8000)):
+            write_wav(Path(folder) / name, R, [[amp if i % 100 < 50 else -amp for i in range(R // 10)]])
+            add(name, (Path(folder) / name).read_bytes())
+    return path
+
+
+class TestH2Kit(unittest.TestCase):
+    def test_kit_read_as_hydrogen_reads_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            kit = sources.h2kit(h2drumkit(tmp))
+            self.assertEqual((kit["name"], kit["license"], kit["xml"]), ("Test Kit", "CC0", "Test Kit"))
+            kick, snare = kit["instruments"]
+            self.assertEqual((kick["pan"], kick["volume"], [l["gain"] for l in kick["layers"]]), (-0.5, 0.5, [0.5, 0.5]))
+            self.assertEqual((snare["pan"], snare["layers"][0]["file"]), (-0.5, "snare.wav"))  # pan_L 1, pan_R 0.5
+            ins, k, layer = sources.h2kit_pick(kit, "kick")
+            self.assertEqual((k, layer["file"]), (2, "kick_hard.wav"))  # the loudest layer by default
+            self.assertEqual(sources.h2kit_pick(kit, 2, 1)[0]["name"], "Snare")
+            for bad in ((None,), ("tom",), ("Kick", 3)):
+                with self.assertRaises(sources.SourceError):
+                    sources.h2kit_pick(kit, *bad)
+            self.assertEqual(len(sources.h2kit_member(Path(tmp) / "test.h2drumkit", kit, layer)), (Path(tmp) / "kick_hard.wav").stat().st_size)
+
+    def test_recipe_layers_expand_and_keys_belong_to_a_kit(self):
+        names = [synth._job_root(n, s)[0] for n, s in synth.expand({"samples": {"kick": {"file": "k.h2drumkit", "instrument": "Kick", "layers": [1, 2]}}})]
+        self.assertEqual(names, ["kick_l1", "kick_l2"])
+        for spec in ({"file": "a.wav", "instrument": "Kick"}, {"file": "k.h2drumkit", "layer": 1, "layers": [2]},
+                     {"file": "k.h2drumkit", "layers": "all"}):
+            with self.assertRaises(synth.RecipeError):
+                list(synth.expand({"samples": {"x": spec}}))
+
+    @unittest.skipUnless(__import__("importlib").util.find_spec("pedalboard"), "the file: source reads audio through pedalboard")
+    def test_recipe_renders_a_layer_at_its_gains(self):
+        d = Path(tempfile.mkdtemp())
+        h2drumkit(d)
+        (d / "r.yaml").write_text("out_dir: out\nsamples:\n  kick: {file: test.h2drumkit, instrument: Kick}\n"
+                                  "  soft: {file: test.h2drumkit, instrument: Kick, layer: 1}\n"
+                                  "  snare: {file: test.h2drumkit, instrument: 2, layers: [1]}\n")
+        log = []
+        synth.render_recipe(d / "r.yaml", log=log.append)
+        peak = max(abs(v) for v in read_wav(d / "out" / "kick.wav").channels[0])
+        self.assertLess(abs(peak - 16000 * 0.5 * 0.5), 300)  # component gain 0.5, instrument volume 0.5
+        self.assertTrue((d / "out" / "snare_l1.wav").exists())
+        frames = lambda name: len(read_wav(d / "out" / f"{name}.wav").channels[0])  # noqa: E731
+        self.assertLess(abs(frames("soft") - frames("kick") / 2), 50)  # the layer's pitch 12: an octave up, half as long
+        self.assertTrue(any("licence: CC0" in line and "pan 16 in a song" in line for line in log), log)

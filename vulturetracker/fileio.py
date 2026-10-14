@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import sys
 import tempfile
 import time
@@ -151,15 +152,27 @@ def protect_outputs(outputs, sources):
         seen.append(path)
 
 
-def wav_bytes(pcm, rate=44100, loop=None):
-    """Interleaved int16 stereo PCM as a WAV; `loop` = (start, end_exclusive) frames, stored in a 'smpl' chunk."""
-    buf = io.BytesIO()
-    with wave.open(buf, 'wb') as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(pcm)
+def wav_bytes(pcm, rate=44100, loop=None, depth=16):
+    """Interleaved stereo PCM as a WAV: int16 bytes, or float32 ones written at `depth` 24 (PCM) or 'float' (IEEE
+    float); `loop` = (start, end_exclusive) frames, stored in a 'smpl' chunk."""
+    if depth == 'float':
+        fmt = struct.pack('<HHIIHHH', 3, 2, rate, rate * 8, 8, 32, 0)  # WAVE_FORMAT_IEEE_FLOAT, with its fact chunk
+        body = (b'WAVE' + b'fmt ' + struct.pack('<I', len(fmt)) + fmt + b'fact' + struct.pack('<II', 4, len(pcm) // 8)
+                + b'data' + struct.pack('<I', len(pcm)) + pcm)
+        data = b'RIFF' + struct.pack('<I', len(body)) + body
+    else:
+        if depth == 24:
+            import numpy as np
+            v = np.clip(np.round(np.frombuffer(pcm, '<f4') * 8388608.0), -8388608, 8388607).astype('<i4')
+            pcm = v.view(np.uint8).reshape(-1, 4)[:, :3].tobytes()
+        buf = io.BytesIO()
+        with wave.open(buf, 'wb') as w:
+            w.setnchannels(2)
+            w.setsampwidth(depth // 8)
+            w.setframerate(rate)
+            w.writeframes(pcm)
+        data = buf.getvalue()
     if loop is None:
-        return buf.getvalue()
+        return data
     from .wavload import add_smpl
-    return add_smpl(buf.getvalue(), rate, (loop[0], loop[1], False))
+    return add_smpl(data, rate, (loop[0], loop[1], False))

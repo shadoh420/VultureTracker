@@ -322,6 +322,27 @@ class TestSafety(unittest.TestCase):
         self.assertIsNone(st.error)
         self.assertEqual(st.text, original.replace('file: a.wav', 'file: "moved.wav"'))
 
+    def test_relink_hints_from_the_library_index(self):
+        from vulturetracker.library import Library
+        st = self.state()
+        st.song_edit([{'op': 'pattern_new', 'name': 'zz', 'rows': 4}])  # an undo step records a.wav's digest
+        lib_dir = self.dir / 'library'
+        for sub, src in (('other', 'b.wav'), ('moved/here', 'a.wav')):  # a different file of the same name, the moved one
+            (lib_dir / sub).mkdir(parents=True)
+            shutil.copyfile(self.dir / src, lib_dir / sub / 'A.WAV')
+        (self.dir / 'a.wav').unlink()
+        st.reload()
+        lib = Library(self.dir / 'index.json')
+        lib.data['files'] = {str(lib_dir / 'other' / 'A.WAV'): {}, str(lib_dir / 'moved/here' / 'A.WAV'): {},
+                             str(lib_dir / 'gone.wav'): {}}
+        hints = st.relink_hints(lib)
+        self.assertEqual(hints['indexed'], 3)
+        self.assertEqual([(Path(h['path']).parent.name, h['same']) for h in hints['hints'][1]], [('here', True), ('other', False)])
+        self.assertNotIn(2, hints['hints'])  # b.wav is there
+        st.relink(1, hints['hints'][1][0]['path'])
+        self.assertIsNone(st.error)
+        self.assertEqual(st.relink_hints(lib)['hints'], {})
+
     def test_api_outputs_protect_sources_and_hardlinks(self):
         song = self.dir / 'song.yaml'
         before = (self.dir / 'a.wav').read_bytes()

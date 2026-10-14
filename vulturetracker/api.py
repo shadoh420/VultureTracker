@@ -135,13 +135,54 @@ def _load(song_or_path, base_dir=None):
     return str(song_or_path), Path(base_dir or "."), "<song>"
 
 
+_WRITTEN_BY = re.compile(r"#\s*written by VultureTracker\s+(\S+)\s*$")
+
+
+def written_by(text):
+    """The version a song's `# written by VultureTracker X.Y.Z` line names (among its leading comments), or None."""
+    for line in text.splitlines():
+        s = line.strip()
+        if s and not s.startswith("#"):
+            return None
+        m = _WRITTEN_BY.match(s)
+        if m:
+            return m.group(1)
+    return None
+
+
+def written_by_line():
+    from . import __version__
+    return f"# written by VultureTracker {__version__}\n"
+
+
+def refresh_written_by(text):
+    """The song text with its `# written by` line naming this version, when it has one naming another: songs that never
+    had the line, and those already at this version, come back as they are (no churn in a committed song's diff)."""
+    from . import __version__
+    old = written_by(text)
+    if old is None or old == __version__:
+        return text
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if _WRITTEN_BY.match(line.strip()):
+            end = line[len(line.rstrip("\r\n")):]
+            lines[i] = written_by_line().rstrip("\n") + end
+            break
+    return "".join(lines)
+
+
 def check(song_or_path, base_dir=None) -> dict:
+    """Validate a song: {ok, errors, warnings, summary (when ok), written_by (the version its `# written by
+    VultureTracker` line names, or None)}."""
     try:
         text, bdir, name = _load(song_or_path, base_dir)
+    except SongError as e:
+        return {"ok": False, "errors": e.errors, "warnings": e.warnings, "written_by": None}
+    try:
         mod, warnings = load_song_text(text, bdir, name)
     except SongError as e:
-        return {"ok": False, "errors": e.errors, "warnings": e.warnings}
-    return {"ok": True, "errors": [], "warnings": warnings, "summary": summarize(mod)}
+        return {"ok": False, "errors": e.errors, "warnings": e.warnings, "written_by": written_by(text)}
+    return {"ok": True, "errors": [], "warnings": warnings, "summary": summarize(mod), "written_by": written_by(text)}
 
 
 def summarize(mod) -> dict:

@@ -33,7 +33,8 @@ FAUST_EXAMPLES = Path(__file__).resolve().parent / "faust_examples"  # `faust: p
 RECIPE_KEYS = ["out_dir", "sample_rate", "defaults", "samples"]
 SOURCE_KEYS = ("patch", "file", "resynth", "faust", "wave", "sfxr", "drum", "additive")  # a sample has exactly one
 SAMPLE_KEYS = ["patch", "file", "resynth", "faust", "wave", "sfxr", "drum", "additive", "mip", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
-               "hold", "tail", "params", "gain", "normalize", "mono", "trim", "loop", "fade_out", "reverse", "root_offset"]
+               "hold", "tail", "params", "gain", "normalize", "mono", "trim", "loop", "fade_out", "reverse", "root_offset",
+               "instrument", "layer", "layers"]  # the last three: a Hydrogen kit's (file: kit.h2drumkit)
 
 
 # `resynth:` (mosaic.resynth): a target rebuilt from blocks of a corpus; its keys and their defaults
@@ -586,10 +587,25 @@ def expand(recipe):
                    or lp.get("type", "forward") not in ("forward", "pingpong")):
             raise RecipeError(f"{where}: loop is {{start, end, crossfade, type}} (seconds; type forward or pingpong), "
                               f"got {lp}")
+        kit = isinstance(spec.get("file"), str) and spec["file"].lower().endswith(".h2drumkit")
+        if any(k in merged for k in ("instrument", "layer", "layers")) and not kit:
+            raise RecipeError(f"{where}: instrument, layer and layers choose a sound in a Hydrogen kit (file: x.h2drumkit)")
+        if "layer" in merged and "layers" in merged:
+            raise RecipeError(f"{where}: layer (one) or layers (a list, one sample each), not both")
+        if "layers" in merged and (not isinstance(merged["layers"], list) or not merged["layers"]
+                                   or not all(isinstance(v, int) and v >= 1 for v in merged["layers"])):
+            raise RecipeError(f"{where}: layers is a list of layer numbers from 1, e.g. [1, 2, 3]")
         if any(k in spec for k in ("file", "resynth", "sfxr", "drum")):
             if "notes" in spec or "chord" in spec or "phrase" in spec:
                 raise RecipeError(f"{where}: 'file', 'resynth', 'sfxr' and 'drum' samples take 'note' (the pitch they are "
                                   "played at), not notes/chord/phrase")
+            if "layers" in merged:  # one sample per layer of the kit's instrument: name_l1, name_l2, ... to try out
+                for n in merged["layers"]:
+                    one = {k: v for k, v in merged.items() if k != "layers"}
+                    one["layer"] = n
+                    one["_name_by_layer"] = True
+                    yield name, one
+                continue
             yield name, merged
             continue
         if "notes" in spec:
@@ -602,6 +618,33 @@ def expand(recipe):
             if not any(k in merged for k in ("note", "chord", "phrase")):
                 raise RecipeError(f"{where}: needs one of note, notes, chord, phrase")
             yield name, merged
+
+
+def _h2kit(kit_path, spec, rate, where, log):
+    """A Hydrogen kit's instrument and layer (sources.h2kit) as audio at `rate`: its sample times the layer's,
+    component's and instrument's gains and the instrument's volume (as Hydrogen's sampler multiplies them), pitched by
+    the layer's and instrument's offsets. The pan is logged for the song (a WAV holds none), with the kit's licence."""
+    import tempfile
+    import numpy as np
+    from .resample import resample
+    if not kit_path.is_file():
+        raise RecipeError(f"{where}: file not found: {kit_path}")
+    kit = _source_check(lambda: sources.h2kit(kit_path), where)
+    ins, k, layer = _source_check(lambda: sources.h2kit_pick(kit, spec.get("instrument"), spec.get("layer")), where)
+    data = _source_check(lambda: sources.h2kit_member(kit_path, kit, layer), where)
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / Path(layer["file"]).name
+        f.write_bytes(data)
+        audio = load_files([f], rate, where)
+    audio = audio * (layer["gain"] * ins["gain"] * ins["volume"])
+    pitch = layer["pitch"] + ins["pitch"]
+    if pitch:  # resample is one channel at a time
+        audio = np.stack([resample(c, rate * 2 ** (pitch / 12), rate) for c in audio]).astype(np.float32)
+    pan = round(32 + 32 * ins["pan"])
+    log(f"  kit '{kit['name']}' by {kit['author'] or '?'}, licence: {kit['license'] or 'not stated'}; '{ins['name']}' "
+        f"layer {k} of {len(ins['layers'])} (velocity {layer['min']:.2f}-{layer['max']:.2f}); its pan {ins['pan']:+.2f}: "
+        f"pan {min(pan, 64)} in a song")
+    return audio, f"{kit_path.name} {ins['name']} layer {k}"
 
 
 def _source_check(fn, where):
@@ -639,6 +682,8 @@ def _job_root(name, spec):
     root += int(spec.get("root_offset", 0))  # patches that sound in a different octave than the key played
     if not 0 <= root < 120:
         raise RecipeError(f"{where}: root_offset moves the root outside C-0..B-9")
+    if spec.get("_name_by_layer"):  # layers: lists become name_l1.wav, name_l2.wav, ...
+        name = f"{name}_l{spec['layer']}"
     if spec.get("_name_by_root"):  # notes: lists become name_c3.wav, name_fs4.wav, ... named by sounding pitch
         name = f"{name}_{notation.format_note(root).replace('#', 's').replace('-', '').lower()}"
     return name, root
@@ -744,7 +789,12 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
     name, root = _job_root(name, spec)
     where = f"sample '{name}'"
     cycle = None  # a source's own loop, in frames
-    if "file" in spec:
+    if isinstance(spec.get("file"), str) and spec["file"].lower().endswith(".h2drumkit"):
+        audio, source = _h2kit(path.parent / spec["file"], spec, rate, where, log)
+        start = int(float(spec.get("start", 0)) * rate)
+        end = start + int(float(spec["length"]) * rate) if "length" in spec else None
+        audio = audio[:, start:end]
+    elif "file" in spec:
         files = spec["file"] if isinstance(spec["file"], list) else [spec["file"]]
         source = " + ".join(Path(f).name for f in files)
         audio = load_files([path.parent / f for f in files], rate, where)

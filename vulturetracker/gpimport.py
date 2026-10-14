@@ -468,8 +468,9 @@ def import_gp(src, song_path, samples_dir):
         warnings.append(f"{count} {what} left out")
     ts = headers[0].timeSignature  # the first measure's
     bars = [(f"m{mi + 1}", starts[pos], mrows[pos]) for pos, mi in enumerate(order)]
+    from .api import written_by_line
     head = (f"# Imported from {Path(src).name} by vulturetracker import (Guitar Pro: placeholder sounds, swap them in the tryout)\n"
-            f"# {gp.tempo} BPM, {r} rows a quarter note: speed {speed}, tempo {tempo}\n")
+            f"# {gp.tempo} BPM, {r} rows a quarter note: speed {speed}, tempo {tempo}\n" + written_by_line())
     song = write_song(song_path, gp.title or Path(src).stem, lanes, bars, ph, r, speed, tempo,
                       (ts.numerator, ts.denominator.value), warnings, head)
     return song, warnings

@@ -1160,6 +1160,11 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(second["change_since_last"]["lufs"], 0.0)   # an empty channel changes nothing
         solo = agent.run(st, "measure", {"channels": [1]})
         self.assertLess(solo["numbers"]["lufs"], first["numbers"]["lufs"])
+        self.assertEqual([o["order"] for o in first["per_order"]], list(range(len(st.facts["orders"]))))
+        self.assertTrue(all(set(o) == {"order", "lufs_s", "correlation"} for o in first["per_order"]))
+        self.assertIn("lra", first["numbers"])
+        part = agent.run(st, "measure", {"orders": [1, 2]})
+        self.assertEqual([o["order"] for o in part["per_order"]], [1])
 
     def test_selection_and_cue(self):
         st = self.state()

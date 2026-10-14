@@ -39,6 +39,26 @@ class MeasureTests(unittest.TestCase):
         n = np.random.default_rng(1).standard_normal((2, rate)) * 0.1
         self.assertLess(abs(dsp.measure_mix(n, rate)["correlation"]), 0.05)
 
+    def test_meters_over_time(self):
+        # 6 s: a quiet in-phase tone for 3 s, then a 10 dB louder one out of phase: per span the short-term loudness
+        # and the correlation of each half; the loudness range spans the step (EBU Tech 3342 on full 3 s windows)
+        rate = 44100
+        a, b = sine(997, rate, 3) * 0.1, sine(997, rate, 3) * 0.316
+        x = np.vstack([np.concatenate([a, b]), np.concatenate([a, -b])])
+        series = dsp.meter_series(x, rate)
+        self.assertEqual(len(series["short"]), 60)
+        first, second = dsp.span_numbers(series, 0, 3), dsp.span_numbers(series, 3, 6)
+        self.assertAlmostEqual(first["lufs_s"], -20.0, delta=0.1)
+        self.assertAlmostEqual(second["lufs_s"], -10.0, delta=0.1)
+        self.assertEqual((first["correlation"], second["correlation"]), (1.0, -1.0))
+        self.assertAlmostEqual(dsp.measure_mix(np.vstack([a, a]), rate)["lra"] or 0.0, 0.0, delta=0.1)  # steady: no range
+        # the full windows ending from 3 s to 6 s hold a fraction f = 0..1 of the louder tone: their levels rise fast
+        # (10 log10 of the mixed power), so the 10th percentile is near -17 and the range about 7 LU, not 10
+        f = np.arange(31) / 30
+        levels = 10 * np.log10((1 - f) * 0.1 ** 2 + f * 0.316 ** 2)
+        want = np.percentile(levels, 95) - np.percentile(levels, 10)
+        self.assertAlmostEqual(dsp.measure_mix(x, rate)["lra"], want, delta=0.15)
+
     def test_api_measure_solo(self):
         with tempfile.TemporaryDirectory() as tmp:
             d = Path(tmp)

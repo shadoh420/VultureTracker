@@ -54,9 +54,11 @@ python -m vulturetracker info demo/arena.it                           # what lib
 python -m vulturetracker import some.xm -o some.yaml                  # existing .it/.xm/.s3m/.mod -> song file + WAVs
 python -m vulturetracker import riff.gp5 -o riff.yaml                 # a Guitar Pro tab, with placeholder sounds
 python -m vulturetracker import song.mid -o song.yaml                  # a MIDI file, with placeholder sounds
+python -m vulturetracker import bank.sf2 --preset 0 -o piano.yaml      # a SoundFont preset (or a GUS .pat) as an instrument
 python -m vulturetracker index C:/samples samples                      # index WAVs by timbre (the app's MAP tab)
 python -m vulturetracker tryout song.yaml --sample 3 --like kick.wav -k 8 # the 8 sounds nearest kick.wav, in the song
 python -m vulturetracker export song.yaml -f ogg --section Loop --loop --stems # RENDER & EXPORT without the app
+python -m vulturetracker export song.yaml -f mid                       # the notes as a MIDI file, a track per instrument
 python -m vulturetracker collect song.yaml ../song-copy --zip           # PROJECT's Collect Samples without the app
 python -m vulturetracker sections song.yaml save Intro 0 4              # SONG's named sections (orders 0-3) without the app
 python -m vulturetracker checkpoint song.yaml save "Before the mix"     # PROJECT's checkpoints: save, diff, restore, delete
@@ -114,7 +116,10 @@ playing (the song or a candidate in it, with the mutes and the unwritten mix), c
 across with the order boundaries marked, aligned with the playhead (click or drag to seek), frequency up in Hz on a
 LOG axis (20 Hz to 22 kHz) or a LIN one (where imaging and aliasing near the top show), colour = level in dBFS from
 -100 to -10 (a full-scale sine is 0 dB); each band shows its loudest bin, so a narrow tone between bands is not lost.
-REFERENCE sets another recording under it (a WAV, MP3, FLAC, OGG or anything ffmpeg reads: a track being transcribed,
+Under the order labels a strip gives each order's meters (S · r): the highest short-term loudness in it (EBU R128, the
+3 s before each 0.1 s; LUFS) and the stereo correlation of its span (1 mono, 0 unrelated, below 0 out of phase); OUT
+adds the loudness range of the whole render (LRA, EBU Tech 3342, LU). The agent's `measure` returns the same per
+order (`per_order`). Numbers, not a verdict. REFERENCE sets another recording under it (a WAV, MP3, FLAC, OGG or anything ffmpeg reads: a track being transcribed,
 or a mix to match), kept with the tryout settings. OFFSET is how much later the song starts than the reference, in ms
 (reference time = song time − offset; negative: earlier); ALIGN finds it by cross-correlating the onsets of what plays
 and of the reference within 30 s of the current offset (music repeats, so a beat or a bar off can score nearly as well:
@@ -230,7 +235,29 @@ the new order). An instrument's `filter_mode` is written as OpenMPT writes its i
 (`InstrumentExtensions.cpp`): an `XTPM` block right after the last sample's data, where `Load_it.cpp` looks for it, with
 the `FM..` property (its code byte-reversed, as OpenMPT writes it), a 16-bit size and a byte per instrument (0xFF
 unchanged, 0 low-pass, 1 high-pass); libopenmpt takes the mode at each note whose instrument filter is on
-(`HandleNoteChangeFilter`), and the import reads the block back the way the loader does. Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
+(`HandleNoteChangeFilter`), and the import reads the block back the way the loader does. A SoundFont preset is read as
+OpenMPT's `Dlsbank.cpp` reads one: the preset's and the instrument's global zones as defaults, key ranges intersected,
+a zone on the same key range as an earlier one left out unless the two are a hard-left and hard-right pair (then one
+stereo sample), each key playing the last zone that covers it, the sample's root (or the zone's overriding root) and
+its coarse, fine and pitch-correction tuning in 1/128 semitones folded into `c5_speed`, attenuation read at a tenth of
+its centibels as the sample's global volume, loops by the zone's sample mode (1 loop, 2 ping-pong, 3 a sustain loop
+too), the volume envelope from the delay, attack, hold, decay, sustain and release generators (`ConvertToMPT`, 20 ms a
+tick, the sustain point where the decay ends, the release as the fadeout), a pitch envelope where the modulation
+envelope moves the pitch by 50 cents or more, new notes off, duplicate notes faded; a GUS patch as `SampleFormats.cpp`'s
+`ReadPATInstrument` reads one. Three deliberate differences: OpenMPT ignores velocity ranges (the first zone on a key
+range wins), here the zones that sound at the highest velocity are kept and the import says how many were left out; a
+drum kit (bank 128) is one instrument with every key (OpenMPT extracts one instrument per key), a zone with scale tuning
+0 played at one pitch on its key as OpenMPT's note map does; and a GUS patch's key ranges sit where they sound, two
+octaves below OpenMPT's (its `ReadPATInstrument` compares the keys with GF1 note numbers, middle C = 84, while tuning
+the sample so C-5 plays middle C). The MIDI export writes what OpenMPT's `mod2midi.cpp` writes: type 1 at 480 ticks a
+quarter, a first track with the song's name, message, time signature (rows per bar over rows per beat), each tempo
+change (OpenMPT's `GetCurrentBPM`, read from libopenmpt while the song plays) and the global volume as a master-volume
+SysEx; a track per instrument played (per sample without instruments) named after it; a tracker channel on MIDI channel
+channel mod 15, skipping 10, its pan as CC 10; a note through the instrument's note map, its velocity the volume column
+(else the channel's volume) doubled as `ProcessMidiOut` computes it, note-offs at the next note, `===`, `^^^` and `~~~`,
+the note-ons of a row after its note-offs, no new note under a tone portamento. One deliberate difference: OpenMPT
+plays pitch slides, vibrato and later volume and pan changes into the file as pitch bends and controllers; here they
+are left out and counted. Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
 its Edit menu's Undo entries (the names are the app's own words). COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
 hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
 import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. A FLAC, AIFF, OGG
@@ -383,7 +410,11 @@ ranges (C-0..B-4) each playing a slot at its own pitch, transposed (+12) or at o
 shows the slot every one of the 120 notes plays. The volume, panning and pitch (or, with `filter`, filter-cutoff)
 envelopes are graphs: drag a node, click empty space to add one, right-click a node to remove it; SUSTAIN takes a node
 (2) or a span (1-3), LOOP a span, and `carry` and on/off are checkboxes. An envelope written as an `lfo:` (SONG_FORMAT.md)
-shows as one line with its settings and is edited in the song file (its ✕ removes it). SAMPLE SLOTS adds a slot for a WAV (typed or
+shows as one line with its settings and is edited in the song file (its ✕ removes it). Under the instrument list, a
+SoundFont (`.sf2`, typed or BROWSE…) lists its presets (bank:preset); ADD makes the chosen one a new instrument, its
+zones new slots written as WAVs in a folder beside the song named after the file and the preset (`TimGM6mb_Violin/`),
+read as OpenMPT reads a bank
+(Following OpenMPT), one undo step; a GUS patch (`.pat`) the same way. SAMPLE SLOTS adds a slot for a WAV (typed or
 BROWSE…); swapping a slot's WAV stays the Tryout tab's job. Settings the Tryout's INSTRUMENT panel holds unwritten for
 an instrument are written or reset there first. A pattern with no notes, and every pattern in edit mode, shows all
 its channels.
@@ -430,7 +461,12 @@ whose cells play the slices in order at their original timing: each on the row i
 and speed, the ticks left over as a note delay (SDx), from the Pattern tab cursor's channel (two on one row: the next
 channel); the timing is kept to the nearest tick (measured: within 8 ms at tempo 125 speed 6, where a tick is 20 ms).
 IT note delays hold at most 15 ticks. If the chosen timing needs more, pattern creation is refused with a
-request to use speed 16 or less; it never wraps a delay to an earlier tick. What SLICE made is reported in the
+request to use speed 16 or less; it never wraps a delay to an earlier tick. ORIGINAL BPM is the sample's own tempo:
+FIND fills it with a guess from the length sliced (240 / seconds, one bar of four beats, doubled or halved into
+100-200, as LMMS's SlicerT guesses it), to be corrected by hand. With SNAP (1/4 to 1/32) FIND moves each cut to the
+nearest line of that grid at ORIGINAL BPM (two on one line become one). + PATTERN ON GRID writes the pattern with each
+slice on the row its place in beats reaches at the song's rows per beat, without delays, so a 170 BPM break plays on
+a 165 BPM song's rows instead of drifting off them. What SLICE made is reported in the
 tab's top line. One step for Ctrl+Z. A hard cut in the recording (a sound that stops
 dead) less than 50 ms before a hit can be taken for the hit (the cut then sits up to that much early): lower the
 sensitivity, or slice a selection that starts at the hit (a selection's start is always a cut). PROPERTIES: name, base note or c5 speed
@@ -707,7 +743,10 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   pre-roll, backing/section, count-in, passes and latency compensation. Stop saves a new WAV (default: keep);
   offer it as a candidate, create a tuned slot, or combine pitched takes into a multisample. Saved WAVs persist;
   the take list lasts for the session. Failed saves retain unsaved passes in memory for **RETRY SAVE** or explicit
-  discard; save/discard before closing the app. Input reopen/close and project switches refuse unsaved takes.
+  discard. Passes that are finished but not yet saved (a backing track's passes done, a save that failed) are also
+  copied, exactly, to the user folder's `recordings/` and removed once saved or discarded; passes a closed or crashed
+  session left there show under UNSAVED TAKES on the RECORD tab, with RECOVER (back as the take to save, beside the
+  song open now) and DISCARD, and go after 7 days. Input reopen/close and project switches refuse unsaved takes.
 - **Update listening notes** with `update_listening_note`: add at an explicit order/row, update text/tag/channels,
   or delete an explicitly selected note. Read its `revision` through `read_notes` before update/delete. Updates keep
   the original sounding and playback context. Input channels are 1-based; stored note channels remain 0-based.
@@ -839,7 +878,21 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
 4. **Mix and checkpoint.** Set faders, compare, and WRITE MIX when ready. Failed song or related-settings writes
    retain the old document, candidates, mixer and history. In PROJECT save a named checkpoint before a substantial
    change. COMPARE / RESTORE shows its text diff and restores it as one undo step.
-5. **Export.** RENDER & EXPORT offers IT, WAV, MP3 (192 kbit/s), OGG (Vorbis quality 6), FLAC and channel stems.
+5. **Export.** RENDER & EXPORT offers IT, WAV, MP3 (192 kbit/s), OGG (Vorbis quality 6), FLAC, MIDI and channel stems.
+   MIDI writes the notes as a standard MIDI file the way OpenMPT's MIDI export does (Following OpenMPT): a track per
+   instrument played, each tracker channel on a MIDI channel of its own, rows timed as libopenmpt plays them; the
+   effects it cannot hold are counted in the job's warnings (stems stay WAV with it). It is made from the exported
+   module: muted channels (the song's, and the audition's with Respect audition mute / solo) are left out, and REPEAT
+   does not apply. RATE (22050 to 96000 Hz),
+   DEPTH (16 bits; 24 for WAV and FLAC, rendered from libopenmpt's float mix; float for WAV), MP3 KBIT/S (32-320),
+   OGG QUALITY (-1 to 10) and REPEAT (the whole song played up to 16 more times, its last pass ending where the song
+   does; not for a section or a game loop) default to 44.1 kHz, 16 bits, 192 kbit/s, quality 6 and one pass, so an
+   export made before them comes out the same (`export --rate --depth --bitrate --quality --repeat` without the app).
+   NORMALISE TO (off by default; `export --normalize LUFS --ceiling DBTP`) turns the audio up or down to an integrated
+   loudness (BS.1770, as the meters measure it), held back where the true peak would pass the ceiling (-1 dBTP by
+   default): a gain measured on the whole mix and applied to the song and every stem alike, no limiter, rendered from
+   libopenmpt's float mix. The job's warnings say the gain, the loudness and peak reached, and when the ceiling held it
+   back. The export then differs from the module; the .it is never changed.
    Choose a destination folder and output name, whole song or named section, saved mix/sounds or current audition
    mix/selected sample, and whether to respect audition mute/solo. A relative destination is taken from the song's
    folder (empty: beside the song). Saved channel mute flags always apply. Playback
@@ -868,7 +921,10 @@ still needs the plugins and packs from `tools/` next to a checkout, as described
    relinked first (a missing tryout candidate must instead be removed in TRYOUT or restored): supply explicit
    replacement WAVs in PROJECT, then RELINK (or all missing samples together). This
    changes only `file:` paths, keeping tuning, loop settings and comments (a slot named after its file gets that
-   name written as `name:`, so instruments that refer to it still find it); the complete song must compile.
+   name written as `name:`, so instruments that refer to it still find it); the complete song must compile. Each
+   missing sample lists up to three WAVs of its name (any case) from the sample library's index (the MAP tab's
+   folders) as USE buttons, one click and one undo step each: SAME FILE first, where the contents match the digest an
+   undo step recorded while the file was there, then those sharing more of its folders. Nothing is relinked unasked.
 
 **From the command line.** `sections`, `checkpoint` and `phrase` do what SONG, PROJECT and PHRASES do, and `undo`,
 `redo` and `trim-history [--keep N]` what the app's undo, redo and PROJECT's history trim do, on a song the app does not
@@ -1066,6 +1122,12 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   Markers and cue points become named sections, each from its bar to the next one's (OpenMPT names the pattern they
   fall in; here bars that sound alike share a pattern, so the name goes on the span). Later volume, pan and other
   controller changes are left out and counted in the warnings.
+- `import bank.sf2 --preset N [--bank B]` writes a song with that SoundFont preset as instrument 1 and its zones as WAVs
+  (`vulturetracker/sf2.py`; without `--preset` it lists the presets; bank 128 holds the drum kits); a `.pat` (GUS
+  patch) takes no preset. The import reads the bank as OpenMPT does (Following OpenMPT) and says what it left out
+  (velocity layers, zones on a key range already taken). SoundFont 3 (compressed samples) is refused: convert it to SF2
+  first. A bank's zones often play far below their root: `check` warns about the images that leaves (No
+  anti-aliasing regressions), and `sample_rate: 88200` is the way out.
 - `import` keeps patterns, instruments, envelopes and samples, and names as written (IT, S3M and XM names read in CP437,
   or Windows-1252 when OpenMPT saved them, MOD names in the Amiga's Latin-1, as OpenMPT reads them; letters IT cannot
   hold lose their accents, ß becomes ss). It keeps OpenMPT's mix plugins when they are its built-in DMO effects, the

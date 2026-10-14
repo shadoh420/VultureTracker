@@ -242,9 +242,12 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("import", help="convert an existing .it, .xm, .s3m or .mod into a song file (samples extracted as "
                                       "WAVs), or a Guitar Pro tab (.gp3, .gp4, .gp5; needs pyguitarpro) or a MIDI file "
-                                      "(.mid, .midi; needs mido) with placeholder sounds")
+                                      "(.mid, .midi; needs mido) with placeholder sounds, or one preset of a SoundFont "
+                                      "(.sf2) or a GUS patch (.pat) as an instrument")
     p.add_argument("module")
-    p.add_argument("-o", "--output", required=True, help="output song .yaml")
+    p.add_argument("-o", "--output", help="output song .yaml (required except to list an .sf2's presets)")
+    p.add_argument("--preset", type=int, help=".sf2: the preset number (without it the presets are listed)")
+    p.add_argument("--bank", type=int, default=0, help=".sf2: the bank (default 0; 128 holds the drum kits)")
     p.add_argument("--samples-dir", help="where to write WAVs (default: <output stem>_samples next to the song)")
     p = sub.add_parser("synth", help="render the samples in a sample recipe: Surge XT, Dexed and OB-Xd patches, recordings, Faust code, resynthesis (see SAMPLING.md)")
     p.add_argument("recipe")
@@ -269,13 +272,14 @@ def main(argv=None):
     p.add_argument("--index", help="the index file (default: the app's, or $VT_LIBRARY)")
     p.add_argument("--like", metavar="WAV", help="then print the sounds nearest this WAV")
     p.add_argument("-k", "--k", type=int, default=8)
-    p = sub.add_parser("export", help="render a song or a section as the app's RENDER & EXPORT does: IT, WAV, MP3, OGG or "
-                                      "FLAC, aligned stems, a game loop (reads the app's .tryout.json for --mix current "
+    p = sub.add_parser("export", help="render a song or a section as the app's RENDER & EXPORT does: IT, WAV, MP3, OGG, "
+                                      "FLAC or MIDI, aligned stems, a game loop (reads the app's .tryout.json for --mix current "
                                       "and --respect-mutes; writes nothing else beside the song)")
     p.add_argument("song")
     p.add_argument("-o", "--destination", help="output folder (default: beside the song)")
     p.add_argument("--name", help="output file name without extension (default: the song's)")
-    p.add_argument("-f", "--format", default="wav", choices=["it", "wav", "mp3", "ogg", "flac"])
+    p.add_argument("-f", "--format", default="wav", choices=["it", "wav", "mp3", "ogg", "flac", "mid"],
+                   help="mid: the notes as a standard MIDI file, a track per instrument (as OpenMPT exports one)")
     p.add_argument("--section", default="", help="a named section instead of the whole song")
     p.add_argument("--tail", type=float, default=2.0, help="seconds of ring-out after the end, 0-10 (0: cut at the end)")
     p.add_argument("--stems", action="store_true", help="also a file per channel in use, all the same length")
@@ -287,6 +291,16 @@ def main(argv=None):
                    help="current: the app's unwritten faders and selected candidate")
     p.add_argument("--respect-mutes", action="store_true", help="apply the app's audition mute and solo")
     p.add_argument("--replace", action="store_true", help="replace earlier exports of the same names")
+    p.add_argument("--rate", type=int, default=44100, help="sample rate of the audio: 22050, 32000, 44100 (default), 48000, "
+                                                          "88200 or 96000")
+    p.add_argument("--depth", default="16", choices=["16", "24", "float"], help="bits: 16 (default), 24 (WAV, FLAC), "
+                                                                               "float (WAV)")
+    p.add_argument("--bitrate", type=int, help="MP3 kbit/s, 32-320 (default 192)")
+    p.add_argument("--quality", type=float, help="OGG Vorbis quality, -1 to 10 (default 6)")
+    p.add_argument("--repeat", type=int, default=0, help="play the whole song this many more times (0-16)")
+    p.add_argument("--normalize", type=float, metavar="LUFS", help="bring the audio to this integrated loudness (-40 to "
+                                                                    "-5), under --ceiling; the .it is untouched")
+    p.add_argument("--ceiling", type=float, default=-1.0, help="the true-peak ceiling for --normalize, dBTP (default -1)")
     p = sub.add_parser("collect", help="copy a song into a new folder with its samples, candidates, notes and recipes, "
                                        "as the app's PROJECT > Collect Samples does")
     p.add_argument("song")
@@ -491,13 +505,15 @@ def main(argv=None):
                 "destination": str(Path(args.destination).resolve()) if args.destination else "", "name": args.name,
                 "fmt": args.format, "region": args.section, "tail": args.tail, "stems": args.stems, "song": not args.no_song,
                 "include_it": args.with_it, "loop": args.loop, "mix": args.mix, "replace": args.replace,
+                "rate": args.rate, "depth": args.depth if args.depth == "float" else int(args.depth), "bitrate": args.bitrate,
+                "quality": args.quality, "repeat": args.repeat, "master_lufs": args.normalize, "master_ceiling": args.ceiling,
                 "mutes": "respect" if args.respect_mutes else "ignore"}), _encode)
             for w in res["warnings"]:
                 print(w)
             for f in res["files"]:
                 print(f"wrote {f}")
             if res["loop"]:
-                print(f"loop: frames {res['loop'][0]}-{res['loop'][1]}, then {res['seconds'] - res['loop'][1] / RATE:.2f} s of release")
+                print(f"loop: frames {res['loop'][0]}-{res['loop'][1]}, then {res['seconds'] - res['loop'][1] / res['rate']:.2f} s of release")
             if res["status"] != "done":
                 print(f"error: {res['error']}", file=sys.stderr)
                 return 1
@@ -513,8 +529,27 @@ def main(argv=None):
 
         if args.cmd == "import":
             from .itreader import import_it
+            is_sf2 = Path(args.module).suffix.lower() in (".sf2", ".pat")
+            if Path(args.module).suffix.lower() == ".pat" and args.preset is None:
+                args.preset = 0  # a patch is one instrument
+            if is_sf2 and args.preset is None:
+                from .sf2 import presets
+                for bank, preset, name in presets(Path(args.module).read_bytes()):
+                    print(f"{bank:3d}:{preset:<3d} {name}")
+                print("choose one with --preset N (and --bank B for a bank other than 0)")
+                return 0 if args.output is None else 1
+            if args.output is None:
+                print("error: -o/--output is required", file=sys.stderr)
+                return 1
             out = Path(args.output)
             sdir = Path(args.samples_dir) if args.samples_dir else out.with_name(out.stem + "_samples")
+            if is_sf2:
+                from .sf2 import import_sf2
+                song, warnings = import_sf2(args.module, out, sdir, args.preset, args.bank)
+                for w in warnings:
+                    print(w)
+                print(f"wrote {out} and {len(song['samples'])} WAVs in {sdir}")
+                return 0
             if Path(args.module).suffix.lower() in (".gp3", ".gp4", ".gp5"):
                 from .gpimport import import_gp
                 song, warnings = import_gp(args.module, out, sdir)

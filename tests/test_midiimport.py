@@ -139,3 +139,54 @@ class TestMidiImport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+EXPORT_SONG = """module: {title: Out, tempo: 125, speed: 6, rows_per_beat: 4, rows_per_bar: 12, channels: [{name: A}, {name: B, pan: 16}]}
+samples:
+  1: {file: a.wav, name: A}
+  2: {file: a.wav, name: B, volume: 48}
+instruments:
+  1: {name: Lead, keymap: [{notes: C-0..B-8, sample: 1, transpose: 12}]}
+  2: {name: Bass, sample: 2}
+patterns:
+  p:
+    rows: 8
+    data: |
+      00: C-5 01 v32 ... | E-5 02 ... ...
+      01: ... .. ... ... | ... .. ... D01
+      02: === .. ... ... | G-5 .. ... SD3
+      03: D-5 01 ... T96 | ... .. ... ...
+      04: ... .. ... ... | A-5 .. ... G04
+orders: [p]
+"""
+
+
+@unittest.skipIf(mido is None, "needs mido")
+class TestMidiExport(unittest.TestCase):
+    def test_song_to_midi_as_openmpt_exports_it(self):
+        from vulturetracker.export import to_midi
+        from vulturetracker.wavload import write_wav
+        d = Path(_tmpdir(self))
+        write_wav(d / "a.wav", 22050, [[(i % 50 - 25) * 800 for i in range(22050)]])
+        it = api.compile_song(api.from_yaml(EXPORT_SONG), d)[0]
+        data, warnings = to_midi(it)
+        f = mido.MidiFile(file=__import__("io").BytesIO(data))
+        self.assertEqual((f.type, f.ticks_per_beat, [t.name for t in f.tracks]), (1, 480, ["Out", "Lead", "Bass"]))
+        events = []
+        for t in f.tracks:
+            now = 0
+            for m in t:
+                now += m.time
+                events.append((t.name, now, m))
+        tempos = [(n, round(m.tempo)) for _, n, m in events if m.type == "set_tempo"]
+        self.assertEqual(tempos, [(0, 480000), (360, 400000)])  # T96 = 150 BPM on row 3 (120 ticks a row at 125)
+        self.assertEqual([(m.numerator, m.denominator) for _, _, m in events if m.type == "time_signature"], [(3, 4)])
+        notes = [(name, n, m.type, m.channel, m.note, m.velocity) for name, n, m in events if m.type in ("note_on", "note_off")]
+        lead = [x[1:] for x in notes if x[0] == "Lead"]  # the keymap's note (+12); v32 doubled, else the sample's 64
+        self.assertEqual(lead[:3], [(0, "note_on", 0, 72, 64), (240, "note_off", 0, 72, 0), (360, "note_on", 0, 74, 127)])
+        self.assertEqual(lead[3][1:3], ("note_off", 0))  # at the song's end
+        bass = [x[1:] for x in notes if x[0] == "Bass"]
+        self.assertEqual(bass[:3], [(0, "note_on", 1, 64, 96), (300, "note_off", 1, 64, 0), (300, "note_on", 1, 67, 96)])  # SD3: 3 ticks of 20
+        self.assertEqual(len(bass), 4, bass)  # G04's A-5 slides the note: no new one
+        self.assertIn(("control_change", 1, 10, 32), [(m.type, m.channel, m.control, m.value) for _, _, m in events if m.type == "control_change"])
+        self.assertEqual(warnings, ["MIDI: left out 1 Dxx, 1 Gxx (effects a MIDI file does not hold)"])

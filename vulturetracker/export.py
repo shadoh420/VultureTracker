@@ -119,13 +119,140 @@ def snapshot(song, folder, region=None, mix=None, muted=(), tail=2.0, loop=False
             'loop': (0, round(duration*RATE)) if loop and region else None}
 
 
-def render(snapshot, silenced=(), cancel=None):
+PPQ = 480  # OpenMPT's MIDI export resolution
+
+
+def _vlq(n):
+    out = [n & 0x7F]
+    while n > 0x7F:
+        n >>= 7
+        out.insert(0, 0x80 | (n & 0x7F))
+    return bytes(out)
+
+
+def _midi_track(events):
+    """An MTrk from [(tick, order, bytes)]: sorted by tick, then order (meta and controllers, note-offs, note-ons, as
+    OpenMPT queues a row's note-ons last), delta times, the end-of-track meta."""
+    body, now = b"", 0
+    for tick, _, msg in sorted(events, key=lambda e: (e[0], e[1])):
+        body += _vlq(tick - now) + msg
+        now = tick
+    body += b"\0\xff\x2f\0"
+    return b"MTrk" + len(body).to_bytes(4, "big") + body
+
+
+def _meta(kind, data):
+    return bytes([0xFF, kind]) + _vlq(len(data)) + data
+
+
+def to_midi(it):
+    """A standard MIDI file (type 1, 480 ticks a quarter) of the module `it`, as OpenMPT's MIDI export (mod2midi.cpp)
+    writes one: a first track with the song's name, message, time signature (rows per bar over rows per beat, in
+    quarters), tempo at each change of libopenmpt's BPM, and the global volume as a master-volume SysEx; then a track
+    per instrument played (per sample in a song without instruments), named after it. A tracker channel plays on MIDI
+    channel (channel mod 15, skipping 10), its pan as CC 10 at the first note; a note is the instrument's note map,
+    its velocity the volume column (or the sample's volume) doubled, a note-off at the next note, `===`, `^^^`, `~~~`
+    or the song's end. Rows are timed as libopenmpt plays them (jumps and loops included); a note delayed by SDx starts
+    that many ticks into its row; a tone portamento (G) holds the note it slides. Every other effect is left out and
+    counted in the warnings. Muted channels are left out. Returns (bytes, warnings)."""
+    from .itreader import read_it
+    from .model import NOTE_CUT, NOTE_FADE, NOTE_OFF
+    mod, _ = read_it(it)
+    with LoadedModule(it) as lm:
+        rows = lm.row_starts(RATE)
+        end = lm.end
+    beat, bar = (mod.row_highlight[0] or 4), (mod.row_highlight[1] or 16)
+    segs, bpm0 = [], None  # (second, tick, bpm) where the tempo changes
+
+    def tick(t):
+        s = next((s for s in reversed(segs) if s[0] <= t), segs[0])
+        return round(s[1] + (t - s[0]) * s[2] * PPQ / 60)
+    conductor = [(0, 0, _meta(3, mod.title.encode("latin-1", "replace")))]
+    if mod.message:
+        conductor.append((0, 0, _meta(1, mod.message.encode("latin-1", "replace"))))
+    conductor.append((0, 0, _meta(0x58, bytes([max(1, bar // beat), 2, 24, 8]))))
+    gv = lambda v: (lambda m: bytes([0xF0, 0x07, 0x7F, 0x7F, 0x04, 0x01, m & 0x7F, (m >> 7) & 0x7F, 0xF7]))(2 * v * 0x3FFF // 256)
+    conductor.append((0, 0, gv(mod.global_volume)))
+    tracks, pans_sent, dropped = {}, {}, {}
+    sounding = {}  # tracker channel -> (track key, midi channel, note)
+    last_ins = {}
+    ins_mode = mod.instruments is not None
+    for t, order, row, bpm, speed in rows:
+        if bpm and bpm != bpm0:
+            segs.append((t, tick(t) if segs else 0, bpm))
+            conductor.append((tick(t), 0, _meta(0x51, round(60_000_000 / bpm).to_bytes(3, "big"))))
+            bpm0 = bpm
+        if not 0 <= order < len(mod.orders) or mod.orders[order] >= len(mod.patterns):
+            continue
+        cells = mod.patterns[mod.orders[order]].rows
+        if row >= len(cells):
+            continue
+        for ch, cell in enumerate(cells[row]):
+            if ch >= len(mod.channels) or mod.channels[ch].muted:
+                continue
+            letter = chr(64 + cell.effect) if 1 <= cell.effect <= 26 else ""
+            delay = cell.param & 0xF if letter == "S" and cell.param >> 4 == 0xD else 0
+            porta = letter == "G" or (cell.volcmd is not None and 193 <= cell.volcmd <= 202)
+            if letter == "V":
+                conductor.append((tick(t), 0, gv(min(cell.param, 128))))
+            elif letter and letter not in "ABCT" and not (letter == "S" and cell.param >> 4 == 0xD):
+                dropped[letter] = dropped.get(letter, 0) + 1
+            if cell.volcmd is not None and cell.volcmd > 64:
+                dropped["volume column"] = dropped.get("volume column", 0) + 1
+            if cell.instrument:
+                last_ins[ch] = cell.instrument
+            if cell.note is None or (porta and cell.note < 120):
+                continue
+            if delay >= speed:  # IT plays no note delayed past its row
+                continue
+            at = tick(t + delay * 60 / (bpm0 * beat * speed))  # a tick lasts 60 / (bpm * rows per beat * speed) s
+            if ch in sounding:
+                key, mch, note = sounding.pop(ch)
+                tracks.setdefault(key, []).append((at, 1, bytes([0x80 | mch, note, 0])))
+            if cell.note in (NOTE_OFF, NOTE_CUT, NOTE_FADE) or cell.note >= 120:
+                continue
+            num = last_ins.get(ch, 0)
+            if ins_mode:
+                if not 1 <= num <= len(mod.instruments):
+                    continue
+                note, smp = mod.instruments[num - 1].keymap[cell.note]
+            else:
+                note, smp = cell.note, num
+            if not 1 <= smp <= len(mod.samples) or not mod.samples[smp - 1].data:
+                continue
+            vol = cell.volcmd if cell.volcmd is not None and cell.volcmd <= 64 else mod.samples[smp - 1].volume
+            mch = ch % 15 + (1 if ch % 15 >= 9 else 0)
+            pan = min(127, 2 * (32 if mod.channels[ch].pan == 100 else mod.channels[ch].pan))
+            if pans_sent.get(mch) != pan:
+                tracks.setdefault(num, []).append((at, 0, bytes([0xB0 | mch, 10, pan])))
+                pans_sent[mch] = pan
+            tracks.setdefault(num, []).append((at, 2, bytes([0x90 | mch, note, min(2 * vol, 127)])))
+            sounding[ch] = (num, mch, note)
+    for key, mch, note in sounding.values():
+        tracks[key].append((tick(end), 1, bytes([0x80 | mch, note, 0])))
+    names = mod.instruments if ins_mode else mod.samples
+    out = [_midi_track(conductor)]
+    for key in sorted(tracks):
+        name = (names[key - 1].name if key <= len(names) else "") or f"{'instrument' if ins_mode else 'sample'} {key}"
+        out.append(_midi_track([(0, 0, _meta(3, name.encode("latin-1", "replace")))] + tracks[key]))
+    data = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(out).to_bytes(2, "big") + PPQ.to_bytes(2, "big")
+    warnings = [f"MIDI: left out {', '.join(f'{n} {k}' if len(k) > 1 else f'{n} {k}xx' for k, n in sorted(dropped.items()))} "
+                f"(effects a MIDI file does not hold)"] if dropped else []
+    return data + b"".join(out), warnings
+
+
+def render(snapshot, silenced=(), cancel=None, rate=RATE, depth=16, repeat=0):
+    """The snapshot's audio as interleaved stereo bytes at `rate`: int16, or float32 for `depth` 24 and 'float'.
+    `repeat` plays the whole song that many more times (its last pass ends where the song does, the tail silence)."""
     from .gui import patch_it
-    with LoadedModule(patch_it(snapshot['render_it'], silenced)) as lm:
+    frames = round((snapshot['frames'] / RATE + snapshot['seconds'] * repeat) * rate)
+    width = 4 if depth == 16 else 8
+    with LoadedModule(patch_it(snapshot['it'] if repeat else snapshot['render_it'], silenced)) as lm:
+        lm.timed_at(rate)
         if snapshot['seek'] is not None:
             lm.order_start(*snapshot['seek'])
-        pcm = lm.render(RATE, max_seconds=snapshot['frames']/RATE, cancel=cancel)
-    length = snapshot['frames'] * 4
+        pcm = lm.render(rate, repeat=repeat, max_seconds=frames/rate, cancel=cancel, floats=depth != 16)
+    length = frames * width
     return pcm[:length].ljust(length, b'\0')
 
 
@@ -140,6 +267,66 @@ def sources(state):
     return paths
 
 
+RATES = (22050, 32000, 44100, 48000, 88200, 96000)
+
+
+def render_settings(options, fmt, region):
+    """The render settings in `options`, checked: rate (Hz), depth (16, 24 for WAV and FLAC, 'float' for WAV), bitrate
+    (MP3 kbit/s), quality (OGG Vorbis -1 to 10) and repeat (more passes of the whole song, 0 to 16). The defaults are
+    the export's: 44.1 kHz, 16 bits, MP3 at 192 kbit/s, OGG at quality 6, one pass."""
+    rate = int(options.get('rate') or RATE)
+    depth = options.get('depth') or 16
+    depth = depth if depth == 'float' else int(depth)
+    repeat = int(options.get('repeat') or 0)
+    bitrate, quality = options.get('bitrate'), options.get('quality')
+    if rate not in RATES:
+        raise ValueError(f"Rate is one of {', '.join(map(str, RATES))} Hz")
+    if depth not in (16, 24, 'float') or (depth == 24 and fmt not in ('wav', 'flac')) or (depth == 'float' and fmt != 'wav'):
+        raise ValueError('Depth is 16 bits, 24 for WAV and FLAC, or float for WAV')
+    if bitrate not in (None, '') and (fmt != 'mp3' or not 32 <= int(bitrate) <= 320):
+        raise ValueError('Bitrate is for MP3: 32 to 320 kbit/s')
+    if quality not in (None, '') and (fmt != 'ogg' or not -1 <= float(quality) <= 10):
+        raise ValueError('Quality is for OGG: Vorbis -1 to 10')
+    if not 0 <= repeat <= 16 or (repeat and region):
+        raise ValueError('Repeat plays the whole song 0 to 16 more times (not a section or a game loop)')
+    lufs, ceiling = options.get('master_lufs'), options.get('master_ceiling')
+    if lufs not in (None, ''):
+        lufs, ceiling = float(lufs), float(-1.0 if ceiling in (None, '') else ceiling)
+        if fmt in ('it', 'mid') or not -40 <= lufs <= -5 or not -12 <= ceiling <= 0:
+            raise ValueError('Normalise is for audio: -40 to -5 LUFS, a ceiling of -12 to 0 dBTP')
+    else:
+        lufs = None
+    return {'rate': rate, 'depth': depth, 'repeat': repeat, 'bitrate': int(bitrate) if bitrate not in (None, '') else None,
+            'quality': float(quality) if quality not in (None, '') else None,
+            'master': {'lufs': lufs, 'ceiling': ceiling} if lufs is not None else None}
+
+
+def master_gain(pcm, rate, lufs, ceiling):
+    """(gain in dB, report) that brings float32 stereo `pcm` to `lufs` integrated loudness, held back where its true
+    peak would pass `ceiling` dBTP (a gain, no limiter: the sound is not changed, only its level)."""
+    import numpy as np
+    from .dsp import measure_mix
+    m = measure_mix(np.frombuffer(pcm, '<f4').reshape(-1, 2).T, rate)
+    if m['lufs'] is None or m['true_peak_dbtp'] is None:
+        return 0.0, 'Normalise: the mix is silent, left as it is'
+    gain = lufs - m['lufs']
+    held = m['true_peak_dbtp'] + gain > ceiling
+    if held:
+        gain = ceiling - m['true_peak_dbtp']
+    return gain, (f"Normalised by {gain:+.2f} dB: {m['lufs'] + gain:.1f} LUFS, true peak {m['true_peak_dbtp'] + gain:.1f} "
+                  f"dBTP" + (f" (the {ceiling:g} dBTP ceiling held it under {lufs:g} LUFS)" if held else "")
+                  + "; the export differs from the module, the .it is untouched")
+
+
+def _at_depth(pcm, gain, depth):
+    """Float32 stereo bytes with `gain` dB applied, as int16 bytes for `depth` 16 (rounded, clipped), else float32."""
+    import numpy as np
+    x = np.frombuffer(pcm, '<f4') * np.float32(10 ** (gain / 20))
+    if depth == 16:
+        return np.clip(np.round(x * 32768), -32768, 32767).astype('<i2').tobytes()
+    return x.astype('<f4').tobytes()
+
+
 def prepare(state, options):
     """Compile before queueing so later edits, faders and WAV changes cannot alter this job."""
     with state.lock:
@@ -147,12 +334,13 @@ def prepare(state, options):
         if state.dirty():
             raise ValueError('Compare and RELOAD external edits before exporting')
         fmt = str(options.get('fmt', 'wav')).lower()
-        if fmt not in ('it', 'wav', 'mp3', 'ogg', 'flac'):
-            raise ValueError('Choose IT, WAV, MP3, OGG or FLAC')
+        if fmt not in ('it', 'wav', 'mp3', 'ogg', 'flac', 'mid'):
+            raise ValueError('Choose IT, WAV, MP3, OGG, FLAC or MID')
         region_name = options.get('region') or ''
         loop = bool(options.get('loop'))
         if loop and fmt not in ('wav', 'ogg', 'flac'):
             raise ValueError('A game loop is exported as WAV (smpl chunk), OGG or FLAC (LOOPSTART and LOOPLENGTH tags)')
+        render_opts = render_settings(options, fmt, loop or bool(region_name))
         region = None
         if region_name or loop:
             orders = state.mod.orders
@@ -179,7 +367,7 @@ def prepare(state, options):
             raise ValueError('Output name must be a filename without directories or reserved characters, and not a '
                              'Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9)')
         chans = [i for i in range(snap['channels']) if any(u[i] for u in state.facts['use'])] if options.get('stems') else []
-        stemfmt = 'wav' if fmt == 'it' else fmt
+        stemfmt = 'wav' if fmt in ('it', 'mid') else fmt
         todo = [(folder / (name+'.'+fmt), None, fmt)] if options.get('song', True) else []
         if options.get('include_it') and fmt != 'it':
             todo.insert(0, (folder / (name+'.it'), None, 'it'))
@@ -194,12 +382,14 @@ def prepare(state, options):
         existing = {str(p): digest(p.read_bytes()) if p.exists() else None for p, _, _ in todo}
         if not options.get('replace', False) and any(v is not None for v in existing.values()):
             raise ValueError('An output exists. Choose another destination/name or enable Replace previous exports')
-        return {'snapshot': snap, 'todo': todo, 'sources': protected, 'existing': existing,
+        return {'snapshot': snap, 'todo': todo, 'sources': protected, 'existing': existing, 'render': render_opts,
                 'cancel': threading.Event(), 'folder': folder, 'region': region_name, 'mix': mode,
                 'result': {'job_id': uuid.uuid4().hex, 'status': 'queued', 'done': 0, 'total': len(todo), 'dir': str(stemdir) if chans else None,
                            'song': str(todo[0][0]) if options.get('song', True) else None, 'fmt': fmt, 'error': None,
-                           'files': [], 'seconds': snap['frames']/RATE, 'snapshot': digest(snap['it'])[:12],
-                           'warnings': snap['warnings'], 'mismatches': [], 'bytes': len(snap['it']), 'loop': snap['loop']}}
+                           'files': [], 'seconds': snap['frames']/RATE + snap['seconds'] * render_opts['repeat'],
+                           'snapshot': digest(snap['it'])[:12], 'rate': render_opts['rate'],
+                           'warnings': snap['warnings'], 'mismatches': [], 'bytes': len(snap['it']),
+                           'loop': (0, round(snap['seconds'] * render_opts['rate'])) if snap['loop'] else None}}
 
 
 def run(job, encode):
@@ -213,20 +403,36 @@ def run(job, encode):
         result['status'] = 'rendering'
         job['folder'].mkdir(parents=True, exist_ok=True)
         stage = Path(tempfile.mkdtemp(prefix='.vt-export-', dir=job['folder']))
-        staged = []
+        staged, gain = [], None
         for i, (path, ch, fmt) in enumerate(job['todo']):
             if cancel():
                 raise ValueError('Export cancelled')
             tmp = stage / f'{i}.{fmt}'
             if fmt == 'it':
                 atomic_write(tmp, job['snapshot']['it'])
+            elif fmt == 'mid':
+                data, notes = to_midi(job['snapshot']['it'])
+                result['warnings'] = [*result['warnings'], *notes]
+                atomic_write(tmp, data)
             else:
+                opts = job.get('render') or {'rate': RATE, 'depth': 16, 'repeat': 0}
                 silenced = [] if ch is None else [c for c in range(job['snapshot']['channels']) if c != ch]
-                pcm = render(job['snapshot'], silenced, cancel)
-                if fmt == 'wav':
-                    atomic_write(tmp, wav_bytes(pcm, loop=job['snapshot']['loop']))
+                depth = opts['depth'] if fmt in ('wav', 'flac') else 16
+                if opts.get('master'):  # one gain from the whole mix, for the song and every stem alike
+                    if gain is None:
+                        gain, report = master_gain(render(job['snapshot'], [], cancel, opts['rate'], 'float', opts['repeat']),
+                                                   opts['rate'], opts['master']['lufs'], opts['master']['ceiling'])
+                        result['warnings'] = [*result['warnings'], report]
+                        result['master'] = round(gain, 2)
+                    pcm = _at_depth(render(job['snapshot'], silenced, cancel, opts['rate'], 'float', opts['repeat']), gain, depth)
                 else:
-                    encode(tmp, pcm, fmt, job['snapshot']['loop'])
+                    pcm = render(job['snapshot'], silenced, cancel, opts['rate'], depth, opts['repeat'])
+                if fmt == 'wav':
+                    atomic_write(tmp, wav_bytes(pcm, opts['rate'], result['loop'], depth))
+                elif opts['rate'] == RATE and depth == 16 and not opts.get('bitrate') and opts.get('quality') is None:  # unchanged
+                    encode(tmp, pcm, fmt, result['loop'])
+                else:
+                    encode(tmp, pcm, fmt, result['loop'], opts['rate'], depth, opts.get('bitrate'), opts.get('quality'))
             rendered_hashes[path] = digest(tmp.read_bytes())
             staged.append((path, tmp))
             result['done'] = i+1

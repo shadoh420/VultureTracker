@@ -49,6 +49,11 @@ for fname, res, args in [
     ("openmpt_module_set_render_param", C.c_int, [_P, C.c_int, C.c_int32]),
     ("openmpt_module_ctl_set_integer", C.c_int, [_P, C.c_char_p, C.c_int64]),
     ("openmpt_module_read_interleaved_stereo", C.c_size_t, [_P, C.c_int32, C.c_size_t, C.POINTER(C.c_int16)]),
+    ("openmpt_module_read_interleaved_float_stereo", C.c_size_t, [_P, C.c_int32, C.c_size_t, C.POINTER(C.c_float)]),
+    ("openmpt_module_get_current_order", C.c_int32, [_P]),
+    ("openmpt_module_get_current_row", C.c_int32, [_P]),
+    ("openmpt_module_get_current_estimated_bpm", C.c_double, [_P]),
+    ("openmpt_module_get_current_speed", C.c_int32, [_P]),
 ]:
     f = getattr(_lib, fname)
     f.restype, f.argtypes = res, args
@@ -154,6 +159,33 @@ class LoadedModule:
         into the hidden subsong that starts at an order playback never enters) or as the whole duration (a skipped row)."""
         return _lib.openmpt_module_set_position_order_row(self._mod, order, row)
 
+    def row_starts(self, rate=44100, oversample=2, block=16):
+        """[(second, order, row, bpm, speed)] for every row as one pass of the song plays it (jumps, breaks and loops as
+        libopenmpt plays them), at the timing of a render at `rate` and `oversample`: the module is played through in
+        blocks of `block` frames and a row is timed where it is first seen (at most a block late: 0.2 ms at 16 frames
+        of 88.2 kHz). `bpm` is libopenmpt's estimate while the row plays (OpenMPT's GetCurrentBPM)."""
+        # ponytail: plays the song through (about 2 s for 3 minutes); a tick-exact time needs a libopenmpt position call
+        mixed = mix_rate(rate, oversample)
+        _lib.openmpt_module_set_repeat_count(self._mod, 0)
+        self.timed_at(rate, oversample)
+        end = _lib.openmpt_module_get_duration_seconds(self._mod)  # libopenmpt plays into the row it loops back to
+        buf = (C.c_int16 * (block * 2))()
+        frames, last, rows = 0, None, []
+        while frames < end * mixed:
+            cur = (_lib.openmpt_module_get_current_order(self._mod), _lib.openmpt_module_get_current_row(self._mod))
+            if cur != last:
+                rows.append([frames / mixed, *cur, None, None])
+                last = cur
+            n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mixed, block, buf)
+            if rows[-1][3] is None:  # the row's tempo, once it plays (before, libopenmpt's estimate is the last row's)
+                rows[-1][3] = _lib.openmpt_module_get_current_estimated_bpm(self._mod)
+                rows[-1][4] = max(1, _lib.openmpt_module_get_current_speed(self._mod))
+            if not n:
+                break
+            frames += n
+        self.end = min(end, frames / mixed)
+        return [tuple(r) for r in rows if r[0] < self.end]
+
     def info(self):
         m = self._mod
         return {
@@ -177,8 +209,9 @@ class LoadedModule:
     ENDLESS_SECONDS = 600       # what a render that repeats forever (repeat=-1) stops at
     SAFETY_SECONDS = 3 * 3600   # the longest render of a song that ends
 
-    def render(self, rate=44100, repeat=0, max_seconds=None, dither=0, oversample=2, cancel=None):
-        """Render to interleaved int16 stereo frames (bytes). repeat=0 plays once, N repeats N more times.
+    def render(self, rate=44100, repeat=0, max_seconds=None, dither=0, oversample=2, cancel=None, floats=False):
+        """Render to interleaved int16 stereo frames (bytes), or with `floats` float32 ones (libopenmpt's float mix, full
+        scale 1.0, for 24-bit and float exports). repeat=0 plays once, N repeats N more times.
         `max_seconds` caps the render; None renders the whole song: its duration times the passes, plus a margin for
         the tail, never more than SAFETY_SECONDS; repeat=-1 (forever) stops at ENDLESS_SECONDS.
         dither=0 (none) makes renders bit-identical between runs; libopenmpt's own default (1) adds random dither.
@@ -192,7 +225,9 @@ class LoadedModule:
         _lib.openmpt_module_ctl_set_integer(self._mod, b"dither", dither)
         mixed = mix_rate(rate, oversample)
         chunk = 4096
-        buf = (C.c_int16 * (chunk * 2))()
+        buf = (C.c_float if floats else C.c_int16) * (chunk * 2)
+        buf = buf()
+        read = _lib.openmpt_module_read_interleaved_float_stereo if floats else _lib.openmpt_module_read_interleaved_stereo
         out = bytearray()
         if max_seconds is None:
             passes = repeat + 1 if repeat >= 0 else 0
@@ -203,7 +238,7 @@ class LoadedModule:
         while frames < limit:
             if cancel is not None and cancel():
                 raise ValueError('Export cancelled')
-            n = _lib.openmpt_module_read_interleaved_stereo(self._mod, mixed, chunk, buf)
+            n = read(self._mod, mixed, chunk, buf)
             if n == 0:
                 break
             out += memoryview(buf)[: n * 2]
@@ -212,6 +247,9 @@ class LoadedModule:
             return bytes(out)
         import numpy as np
         from .resample import decimate, lowpass_fir
+        if floats:
+            y = decimate(np.frombuffer(out, dtype=np.float32).reshape(-1, 2), mixed // rate, lowpass_fir(0.45 * rate / mixed))
+            return y.astype("<f4").tobytes()
         # what resample(x, mixed, rate) does for a whole factor, both channels at once and at the output rate
         y = decimate(np.frombuffer(out, dtype=np.int16).reshape(-1, 2), mixed // rate, lowpass_fir(0.45 * rate / mixed))
         np.rint(y, out=y)

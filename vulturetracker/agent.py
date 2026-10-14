@@ -1199,9 +1199,10 @@ def cancel_export(st, a):
 
 
 @tool("measure", "Render what the tryout plays (the song with the owner's unwritten faders) and measure it: integrated "
-      "loudness (LUFS, BS.1770), true peak (dBTP), sample peak and stereo correlation. `channels` (1-based) solo those; "
-      "`orders` [start, stop) limits it to those play-order positions. Returns the change since the last measure of the "
-      "same scope, so measure before and after an edit. Numbers only: they are not listening.",
+      "loudness (LUFS, BS.1770), true peak (dBTP), sample peak, stereo correlation and loudness range (LRA, EBU), and "
+      "per play-order position (`per_order`) the highest short-term loudness (3 s) and the correlation. `channels` "
+      "(1-based) solo those; `orders` [start, stop) limits it to those play-order positions. Returns the change since "
+      "the last measure of the same scope, so measure before and after an edit. Numbers only: they are not listening.",
       {"channels": {"type": "array", "items": {"type": "integer"}},
        "orders": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}})
 def measure(st, a):
@@ -1215,21 +1216,23 @@ def measure(st, a):
     silenced = [c for c in range(nch) if c not in chans] if chans else st.silenced()
     with LoadedModule(patch_it(st.compiled_it(whole=True), silenced, st.mix())) as lm:
         x = np.frombuffer(lm.render(RATE), "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
+    o = st.facts["orders"]
+    s, e = (int(a["orders"][0]), int(a["orders"][1])) if a.get("orders") else (0, len(o))
+    if not 0 <= s < e <= len(o):
+        raise ValueError(f"orders: a span within 0..{len(o)}")
+    series = dsp.meter_series(x, RATE)
+    per_order = [{"order": i, **dsp.span_numbers(series, o[i]["start"], o[i]["start"] + o[i]["seconds"])} for i in range(s, e)]
     if a.get("orders"):
-        o = st.facts["orders"]
-        s, e = int(a["orders"][0]), int(a["orders"][1])
-        if not 0 <= s < e <= len(o):
-            raise ValueError(f"orders: a span within 0..{len(o)}")
         x = x[:, int(o[s]["start"] * RATE): int((o[e - 1]["start"] + o[e - 1]["seconds"]) * RATE)]
     m = dsp.measure_mix(x, RATE)
     scope = json.dumps({"channels": a.get("channels"), "orders": a.get("orders")}, sort_keys=True)
     prev = st.agent_measures.get(scope)
     st.agent_measures[scope] = m
-    out = {"numbers": m, "scope": json.loads(scope)}
+    out = {"numbers": m, "per_order": per_order, "scope": json.loads(scope)}
     if prev:
         out["change_since_last"] = {k: round(m[k] - prev[k], 2) for k in ("lufs", "true_peak_dbtp", "peak_dbfs", "correlation")
                                     if m.get(k) is not None and prev.get(k) is not None}
-    out["summary"] = f"{m['lufs']} LUFS, TP {m['true_peak_dbtp']} dBTP, corr {m['correlation']}"
+    out["summary"] = f"{m['lufs']} LUFS, TP {m['true_peak_dbtp']} dBTP, corr {m['correlation']}, LRA {m['lra']} LU"
     return out
 
 
