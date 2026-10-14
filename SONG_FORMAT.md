@@ -232,6 +232,8 @@ instruments:
 | `volume_envelope` | envelope | none | values 0–64 |
 | `panning_envelope` | envelope | none | values -32 (left) to 32 (right), added to the channel pan |
 | `pitch_envelope` | envelope | none | values -32–32 in half-semitones (-2 = one semitone down). Add `filter: true` to make it a filter-cutoff envelope instead. |
+| `tuning` | a `.scl` file | none | the instrument plays a Scala scale instead of 12-TET (microtuning, below). Added after 1.5.2: a song that sets it says so with `requires:` |
+| `keymap_file` | a `.kbm` file | none | the Scala keyboard map that lays `tuning` on the keys (below); only with `tuning` |
 
 Keymap entry: `{notes: <note or range>, sample: <number or name>, transpose: <semitones>}` or
 `{..., play_note: <note>}`.
@@ -241,6 +243,19 @@ Keymap entry: `{notes: <note or range>, sample: <number or name>, transpose: <se
 - `transpose: 12`: the note plays 12 semitones higher.
 - `play_note: C-5`: every note in the range plays the sample at C-5. This is how drum kits keep
   each drum at its recorded pitch.
+
+Microtuning: `tuning: scale.scl`, and optionally `keymap_file: map.kbm`, both paths beside the song, in Scala's formats
+(huygens-fokker.org/scala). The .scl's pitches are cents when they hold a `.`, else ratios (`5/4`, `2` for 2/1); at
+most 256 notes. Without a .kbm the scale goes on the keys OpenMPT's way: degree 0 on C-5 at the sample's own C-5 pitch,
+one degree a key, so a 12-note scale is needed. A .kbm sets the middle note (where its first entry goes), the reference
+note and its frequency, the range of keys retuned and the degree on each key (`x` for none); keys it leaves out, or
+outside its range, play nothing. Each key is tuned from the note it plays (after `transpose` or `play_note`), against
+12-TET at A-5 = 440 Hz. Only scales that repeat at the octave over 12 keys: the .scl's last degree must be 2/1 (1200.0
+cents), and a .kbm must map 12 keys with the scale's size as its formal octave degree; anything else is a compile error.
+IT has no tunings, so the compiler writes, for each key whose pitch is not 12-TET, a copy of its sample with
+`c5_speed` times that ratio (one copy per sample and degree, sharing the sample's data in the .it, after the song's
+samples; at most 99 samples in all); the app shows the slot, and a mix level for the slot reaches its copies.
+`check`'s anti-aliasing measure takes each key at its 12-TET pitch (a scale degree moves it by its few cents).
 
 Envelope: `{nodes: [[tick, value], ...], sustain: <i or [a, b]>, loop: [a, b], enabled: true, carry: false}`
 - 1–25 nodes. The first tick must be 0 and ticks must increase (max 9999). Ticks are song ticks
@@ -299,6 +314,29 @@ Rules:
 - **Marks** (they change nothing in the module): `approved: true` on a pattern, a channel entry or a sample entry is
   the owner's mark that the agent tools (GUIDE.md: Agents) leave it alone; `by:` on a pattern (`you`, `agent`, or
   `you and agent`) says who wrote it, set by the app when an agent writes the pattern.
+- **Automation lanes.** `automation:` on a pattern is a list of curves the compiler writes into its cells, each the
+  Pattern tab's AUTOMATE kept in the song and redone on every compile:
+
+  ```yaml
+  verse:
+    rows: 64
+    automation:
+      - {target: Z, channel: 3, rows: [0, 63], from: 0x10, to: 0x7F, shape: scurve, every: 2}
+      - {target: v, channel: Pad, rows: [32, 63], from: 64, to: 8}
+    data: |
+      ...
+  ```
+
+  `target` is `Z` (cutoff, or the SFx macro), `X` (pan), `M` (channel volume), `V` (global volume), `T` (tempo, 0x20
+  up) or `v` (the volume column); `channel` a number from 1 or a channel's name (`V` and `T` are song-wide and go on
+  that channel only); `rows` the first and last row, the whole pattern when left out; `from` and `to` whole numbers
+  (write hex as `0x7F`); `shape` `linear` (default), `scurve`, `exp` or `steps`; `every` 1-64 rows between values
+  (default 1). The values fall on the rows AUTOMATE would write (GUIDE.md: the SELECTION bar). A lane owns its column
+  (the effect column, or the volume column for `v`) on its channel and rows: a cell written there in `data` is an error,
+  and so is a second lane there; the rest of those cells (note, instrument, the other column) is yours. The app draws a
+  lane's cells dimmed and refuses an edit of its column; MAKE EDITABLE turns the lanes into plain cells (one undo step).
+  The .it holds plain cells; nothing of the lane is stored. Added after 1.5.2: a song that uses lanes says so with
+  `requires:`.
 
 ### 6.1 Cell
 

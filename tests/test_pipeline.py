@@ -298,6 +298,106 @@ class TestInstruments(Base):
         self.assertAlmostEqual(freq(24), 441, delta=6)
 
 
+class TestTuning(Base):
+    """`tuning:` a Scala .scl (and `keymap_file:` a .kbm) on an instrument: read as the formats say, the ratio per key to
+    12-TET, written as detuned copies of the sample that share its data, heard at the scale's pitch."""
+    ET = "\n".join(f"{100 * i}.0" for i in range(1, 12))
+    SONG = """
+        module: {tempo: 125, speed: 6, channels: 1}
+        samples:
+          1: {file: low.wav, loop: {start: 0}}
+        instruments:
+          1: {name: Tuned, sample: 1, tuning: q.scl%s}
+        patterns:
+          p:
+            rows: 32
+            data: |
+              %s 01 v64
+        orders: [p]
+    """
+
+    def scl(self, degrees, name="q.scl"):
+        (self.dir / name).write_text("! q.scl\nA test scale\n " + str(len(degrees)) + "\n!\n" + "\n".join(degrees) + "\n", encoding="latin-1")
+
+    def test_scala_files_read_as_the_formats_say(self):
+        from vulturetracker.song import read_kbm, read_scl
+        text = "! meanquar.scl\n!\n1/4-comma meantone\n 4\n!\n 76.049\n 5/4   E\\\n 408.\n 100.0 cents\n"
+        self.assertEqual([round(c, 3) for c in read_scl(text)], [76.049, round(1200 * math.log2(5 / 4), 3), 408.0, 100.0])
+        self.assertEqual(read_scl("\n2\n-5.0\n2\n"), [-5.0, 1200.0])  # empty description; "2" is 2/1
+        for bad in ("x\n3\n100.0\n2/1\n", "x\n1\n0/1\n", "x\n1\n3/0\n", "x\n1\nC#\n", "x\n"):
+            with self.assertRaises(ValueError):
+                read_scl(bad)
+        k = read_kbm("! map\n12\n0\n127\n60\n69\n432.0\n7\n0\nx\n1\n")
+        self.assertEqual((k["size"], k["ref"], k["freq"], k["octave"]), (12, 69, 432.0, 7))
+        self.assertEqual(k["map"], [0, None, 1] + [None] * 9)  # entries left out at the end are unmapped
+        for bad in ("12\n0\n127\n60\n69\n", "1\n0\n127\n60\n69\n440\n12\n0\n1\n"):
+            with self.assertRaises(ValueError):
+                read_kbm(bad)
+
+    def test_ratios_per_key(self):
+        from vulturetracker.song import read_kbm, read_scl, tuning_ratios
+        just = read_scl("x\n12\n" + self.ET.replace("700.0", "3/2") + "\n2/1\n")
+        r = tuning_ratios(just)
+        self.assertAlmostEqual(r[67], 1.5 / 2 ** (7 / 12), 12)  # G-5, OpenMPT's way: degree 0 on C-5 at its own pitch
+        self.assertAlmostEqual(r[67 + 12], r[67], 12)
+        self.assertAlmostEqual(r[60], 1, 12)
+        major = read_scl("x\n7\n200.0\n400.0\n500.0\n700.0\n900.0\n1100.0\n2/1\n")
+        kbm = read_kbm("12\n0\n127\n60\n69\n432.0\n7\n0\nx\n1\nx\n2\n3\nx\n4\nx\n5\nx\n6\n")
+        r = tuning_ratios(major, kbm)
+        self.assertIsNone(r[61])  # C#: unmapped
+        self.assertAlmostEqual(r[69], 432 / 440, 12)  # the reference note at its frequency
+        self.assertAlmostEqual(r[60], 432 / 440, 12)
+        for args, msg in (((read_scl("x\n2\n700.0\n3/1\n"),), "repeat at the octave"),
+                          ((major,), "needs a keyboard map"),
+                          ((major, dict(kbm, size=7)), "repeat every 12 keys"),
+                          ((major, dict(kbm, octave=12)), "formal octave degree 12"),
+                          ((major, dict(kbm, ref=61)), "reference note 61 unmapped")):
+            with self.assertRaisesRegex(ValueError, msg):
+                tuning_ratios(*args)
+
+    def test_heard_at_the_scale_pitch_through_copies(self):
+        from vulturetracker.gui import patch_it
+        self.scl([d for d in self.ET.replace("700.0", "750.0").split("\n")] + ["2/1"])  # G a quarter-tone sharp
+        data = self.build(self.SONG % ("", "G-5"))
+        nord, nins, nsmp = struct.unpack_from("<HHH", data, 0x20)
+        self.assertEqual(nsmp, 2)  # the song's sample and one copy for G
+        offs = [struct.unpack_from("<I", data, 0xC0 + nord + 4 * nins + 4 * i)[0] for i in range(nsmp)]
+        c5 = [struct.unpack_from("<I", data, o + 0x3C)[0] for o in offs]
+        self.assertEqual(c5[1], round(c5[0] * 2 ** (50 / 1200)))
+        self.assertEqual(*[struct.unpack_from("<I", data, o + 0x48)[0] for o in offs])  # one copy of the data
+        keymap = data[struct.unpack_from("<I", data, 0xC0 + nord)[0] + 0x40:][:240]
+        self.assertEqual((keymap[2 * 67], keymap[2 * 67 + 1], keymap[2 * 66 + 1]), (67, 2, 1))
+        import numpy as np
+
+        def hz(data):  # the spectrum's peak, interpolated: the same note untuned is the reference
+            with LoadedModule(data) as m:
+                x = np.array(left(m.render())[RATE // 10: 2 * RATE], dtype=float)
+            s = np.abs(np.fft.rfft(x * np.hanning(len(x)), 8 * len(x)))
+            k = int(np.argmax(s))
+            a, b, c = np.log(s[k - 1: k + 2])
+            return (k + 0.5 * (a - c) / (a - 2 * b + c)) * RATE / (8 * len(x))
+        plain = lambda note: self.build(self.SONG.replace(", tuning: q.scl%s", "") % note)  # noqa: E731
+        self.assertAlmostEqual(1200 * math.log2(hz(data) / hz(plain("G-5"))), 50, delta=0.1)
+        f = self.build(self.SONG % ("", "F-5"))  # an untouched degree: no copy, 12-TET
+        self.assertAlmostEqual(1200 * math.log2(hz(f) / hz(plain("F-5"))), 0, delta=0.1)
+        patched = patch_it(data, mix={"sample_volume": {1: 20}})  # the mixer's slot level reaches its copies
+        self.assertEqual([patched[o + 0x11] for o in offs], [20, 20])
+
+    def test_unmapped_keys_silent_and_errors(self):
+        self.scl(["200.0", "400.0", "500.0", "700.0", "900.0", "1100.0", "2/1"])
+        (self.dir / "m.kbm").write_text("12\n0\n127\n60\n60\n261.6255653\n7\n0\nx\n1\nx\n2\n3\nx\n4\nx\n5\nx\n6\n")
+        mod, _ = load_song_text(textwrap.dedent(self.SONG % (", keymap_file: m.kbm", "C#5")), self.dir, "song.yaml")
+        self.assertEqual(mod.instruments[0].keymap[61], (61, 0))  # C#: no sample, silent
+        self.assertEqual(mod.instruments[0].keymap[62], (62, 1))
+        with LoadedModule(self.build(self.SONG % (", keymap_file: m.kbm", "C#5"))) as m:
+            self.assertLess(rms(left(m.render())), 1)
+        for extra, msg in (("", "needs a keyboard map"), (", keymap_file: none.kbm", "keymap_file: cannot read")):
+            with self.assertRaisesRegex(SongError, msg):
+                load_song_text(textwrap.dedent(self.SONG % (extra, "C-5")), self.dir, "song.yaml")
+        with self.assertRaisesRegex(SongError, "give the .scl too"):
+            load_song_text(textwrap.dedent(self.SONG % ("", "C-5")).replace("tuning: q.scl", "keymap_file: m.kbm"), self.dir, "song.yaml")
+
+
 class TestValidation(Base):
     def errors(self, text):
         with self.assertRaises(SongError) as cm:

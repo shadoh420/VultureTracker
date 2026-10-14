@@ -282,7 +282,15 @@ WAV's or a FLAC's `smpl` unity note) becomes the slot's `base_note` when the sam
 keeps it only as a label and plays every file at its own rate on C-5. QUANT rounds by the row playing, not its tick
 (the live engine reports rows), so a note struck late in a row rounds as if struck at its start and QUANT 1 changes
 nothing. The piano roll (ROLL) is VultureTracker's own:
-OpenMPT has none. Any other difference from OpenMPT is a bug.
+OpenMPT has none. So are a pattern's `automation:` lanes: OpenMPT has no such lanes, and a lane compiles to plain cells,
+so OpenMPT and libopenmpt see an ordinary pattern. An instrument's `tuning:` reads a Scala `.scl` as OpenMPT's
+`ImportScl` does (TuningDialog.cpp: `!` comments, a `.` makes cents, `a/b` or a whole number a ratio, at most 256 notes)
+and, with no `.kbm`, lays it on the keys as OpenMPT's tuning does (degree 0 on C-5 at the sample's own pitch, a degree a
+key). Three differences: OpenMPT plays tunings only in its own MPTM format, so the .it gets detuned copies of the sample
+per degree instead; a pitch such as `-5.0` is read as cents, as Scala's format says, where OpenMPT's reader takes it for
+the ratio -5 and refuses the file; and a `.kbm` keyboard map is read (Scala's format), which OpenMPT does not. So is the MAP tab; its Up and Down step through the filter's matches as the arrow keys step through
+OpenMPT's tree view, but play each sound as they land on it, where OpenMPT plays a tree item on Space (`kcTreeViewPlay`;
+Space here plays the song). Any other difference from OpenMPT is a bug.
 
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
 stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
@@ -329,7 +337,9 @@ song-wide, so only the first channel gets them; `Txx` takes 20-FF, below that it
 `vNN`; FROM and TO in the target's own digits, hex for an effect as its cell shows it; SHAPE LINEAR, S-CURVE (slow at
 both ends), EXP (equal ratios per row, 0 counted as 1) or STEPS (equal steps, one per written row, the last at TO; one step, when EVERY passes the selection, is FROM);
 a value every EVERY rows from the first, the last selected row always at TO except with STEPS; a cell holding another
-command in that column is left alone and counted; one step for Ctrl+Z) and AMPLIFY (the
+command in that column is left alone and counted; one step for Ctrl+Z; the same curve kept in the song, redone on
+every compile, is a pattern's `automation:` lane (SONG_FORMAT.md section 6), whose cells the Pattern tab draws dimmed and
+whose column it will not let you type over: change the lane, or MAKE EDITABLE to turn the lanes into plain cells) and AMPLIFY (the
 volume column by a percentage; a note without a volume gets one, counted from 64, the usual default) and HUMANIZE
 (each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). LENGTH
 works on the selected channels' rows (the cursor's channel over the whole pattern with no selection) and leaves an
@@ -535,7 +545,9 @@ octave), a pitched sound against an unpitched one for more. The MAP tab draws ev
 the first two principal components of the same features (near means alike, though two dimensions cannot keep every
 distance), coloured by folder; rings mark the slot's sample, its candidates, and the sounds nearest the one chosen.
 Click a point to hear it and list its nearest sounds; → CANDIDATE OF SLOT adds it, ≈ ADD ITS NEAREST adds them. The
-wheel zooms, a drag pans, a double-click fits the map; the filter dims what does not match a name or folder. From the
+wheel zooms, a drag pans, a double-click fits the map; the filter dims what does not match a name or folder, and Up and
+Down in the filter box step through the matches (all sounds with no filter), each one selected and played, the map
+panned to it when it lies outside the view. From the
 command line, `tryout --like WAV -k N` adds the N nearest to the candidates given (or renders them alone). A sample
 recipe can also rebuild a sound from blocks of other sounds (`resynth:`, SAMPLING.md); the RECIPE box renders its
 edits as candidates like any other entry.

@@ -96,6 +96,17 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   SPECTRUM tab and in the agent's `measure` (`per_order`), and the loudness range (LRA) beside OUT and in `measure`.
 - Songs the app creates or imports carry `# written by VultureTracker X.Y.Z`, refreshed by an app write only when the
   version changes (never added to a song without it); `check --json` reports it as `written_by`.
+- Releases: a `v*` tag (or a run by hand) builds the Windows exe on a clean runner with `tools/build_exe.py`, checks
+  it with `tools/exe_check.py` and keeps the exe, ffmpeg and the zip as the run's artifact; the published exe is still
+  the local build (AGENTS.md). `release.py --check` has a test that plants a wrong digest.
+- MAP tab: Up and Down in the filter box step through the matching sounds, each selected and played (the view
+  follows it); with no filter they step through all of them.
+- Patterns: `automation:` lanes, a curve the compiler writes into a pattern's cells on every compile (target, channel,
+  rows, from, to, shape, every: the SELECTION bar's AUTOMATE kept in the song); a lane owns its column there, the Pattern
+  tab draws its cells dimmed and refuses edits of that column, and MAKE EDITABLE turns lanes into plain cells.
+- Instruments: microtuning, `tuning: scale.scl` and `keymap_file: map.kbm` (Scala's formats) for scales that repeat at
+  the octave over 12 keys; the .it plays each retuned key through a copy of its sample at that pitch, sharing the
+  sample's data.
 
 ## 1.5.2 (2026-10-10)
 

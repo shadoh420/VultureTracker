@@ -39,7 +39,8 @@ import yaml
 
 from . import __version__, agent, api, plugins
 from .fileio import atomic_write as _atomic, lock_file, protect_outputs, save_beside, unlock_file, user_dir, wav_bytes
-from .notation import format_cell, format_note
+from .model import Cell
+from .notation import format_cell, format_note, parse_cell
 from .itwriter import write_it
 from .history import LABEL, SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
 from .project import collect, file_updates, replace_values, resolve_meta, relative_meta
@@ -473,10 +474,12 @@ def patch_it(data, silenced=(), mix=None):
         d[0x31] = int(mix["mix_volume"])
     if mix.get("sample_volume"):
         nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
+        offs = [struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * i)[0] for i in range(nsmp)]
+        data = [struct.unpack_from("<I", d, off + 0x48)[0] for off in offs]  # a tuning's copies share their slot's data
         for slot, g in mix["sample_volume"].items():
             if 1 <= int(slot) <= nsmp:
-                off = struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * (int(slot) - 1))[0]
-                d[off + 0x11] = int(g)
+                for i in [int(slot) - 1] + ([j for j in range(nsmp) if data[j] == data[int(slot) - 1]] if data[int(slot) - 1] else []):
+                    d[offs[i] + 0x11] = int(g)
     return bytes(d)
 
 
@@ -2369,6 +2372,15 @@ class State:
             r, ch, text = int(c["row"]), int(c["ch"]), str(c["cell"]).strip()
             if not (0 <= r < nrows and 0 <= ch < nch):
                 raise ValueError(f"row {r}, channel {ch + 1} is outside pattern '{pat.name}' ({nrows} rows, {nch} channels)")
+            if (r, ch) in getattr(pat, "lanes", {}):  # an automation lane's column: its value as compiled may pass (left out of the text,
+                col, lane = pat.lanes[(r, ch)]  # the lane writes it), any other value is refused for every writer
+                new, old = parse_cell(text), pat.rows[r][ch]
+                if col == "v" and new.volcmd not in (None, old.volcmd) or col == "e" and (new.effect, new.param) not in ((0, 0), (old.effect, old.param)):
+                    raise ValueError(f"pattern '{pat.name}', row {r}, channel {ch + 1}: the {'volume' if col == 'v' else 'effect'} "
+                                     f"column is automation lane {lane}'s; change the lane (its 'automation:' entry), or MAKE "
+                                     f"EDITABLE to turn the lanes into plain cells")
+                text = format_cell(Cell(new.note, new.instrument, None if col == "v" else new.volcmd,
+                                        new.effect if col == "v" else 0, new.param if col == "v" else 0))
             while len(rows) <= r:  # rows the block leaves implied (empty) are written out up to this one
                 at = rows[-1] + 1 if rows else end
                 label = f"{len(rows):0{width}d}: " if labelled else ""
@@ -4129,7 +4141,8 @@ class State:
     def pattern_rows(self, index):
         """One pattern as read-only tracker rows; each cell in the 'C-5 01 v64 A06' layout libopenmpt prints."""
         pat = self.mod.patterns[self.pattern_at(index)]
-        return {"name": pat.name, "index": index, "rows": [[format_cell(c) for c in row] for row in pat.rows]}
+        return {"name": pat.name, "index": index, "rows": [[format_cell(c) for c in row] for row in pat.rows],
+                "lanes": [[r, ch, col, lane] for (r, ch), (col, lane) in sorted(pat.lanes.items())]}
 
     # ---- snapshot for the page
 

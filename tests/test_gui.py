@@ -1409,6 +1409,59 @@ class TestGui(unittest.TestCase):
             st.undo()
         self.assertEqual(read(), SONG_BLOCK)
 
+    def test_automation_lane(self):
+        """A pattern's `automation:` lane compiles to the cells the SELECTION bar's AUTOMATE writes (the same function);
+        a cell written in its column, a second lane on it, or a bad lane is an error; the page gets the lane's cells; an
+        edit of its column is refused for every writer, other edits keep the lane in the file and its column out of the
+        text, and MAKE EDITABLE turns it into plain cells."""
+        from vulturetracker import compose
+        from vulturetracker.notation import format_cell
+        lane = ("    automation:\n"
+                "      - {target: Z, channel: B, rows: [0, 3], from: 0x10, to: 0x40, every: 2}\n"
+                "      - {target: v, channel: 1, rows: [1, 3], from: 64, to: 16, shape: steps}\n")
+        text = SONG_BLOCK.replace("  p1:\n    rows: 4\n", "  p1:\n    rows: 4\n" + lane, 1)
+        self.assertNotEqual(text, SONG_BLOCK)
+        mod, _ = gui.load_song_text(text, self.dir, "song.yaml")
+        plain, _ = gui.load_song_text(SONG_BLOCK, self.dir, "song.yaml")
+        rows = [list(r) for r in plain.patterns[0].rows]
+        for args in ((rows, [1], 0, 3, "Z", 0x10, 0x40, "linear", 2), (rows, [0], 1, 3, "v", 64, 16, "steps", 1)):
+            for c in compose.automate(*args)[0]:
+                rows[c["row"]][c["ch"]] = gui.parse_cell(c["cell"])
+        self.assertEqual([[format_cell(c) for c in r] for r in mod.patterns[0].rows], [[format_cell(c) for c in r] for r in rows])
+        self.assertEqual([format_cell(r[1]) for r in mod.patterns[0].rows][::3], ["... .. ... Z10", "... .. ... Z40"])
+        self.assertEqual(mod.patterns[0].lanes[(0, 1)], ("e", 1))
+        self.assertEqual(mod.patterns[0].lanes[(2, 0)], ("v", 2))
+        self.assertNotIn((0, 0), mod.patterns[0].lanes)
+        for bad, msg in ((text.replace("02: ... .. ... ... | C-5 02 ... ...", "02: ... .. ... ... | C-5 02 ... A06"),
+                          "row 2, channel 2: the effect column belongs to automation lane 1"),
+                         (text.replace("shape: steps}", "shape: steps}\n      - {target: X, channel: B, rows: [2, 3], from: 0, to: 9}"),
+                          "row 2, channel 2 already belongs to lane 1"),
+                         (text.replace("target: Z", "target: Q"), "'target' is one of"),
+                         (text.replace("channel: B", "channel: C"), "'channel' is a channel number"),
+                         (text.replace("rows: [0, 3]", "rows: [2, 9]"), r"'rows' is \[first, last\]"),
+                         (text.replace("from: 0x10", "from: 0x90"), "Z: values 00-7F")):
+            with self.assertRaisesRegex(gui.SongError, msg):
+                gui.load_song_text(bad, self.dir, "song.yaml")
+        (self.dir / "song.yaml").write_bytes(text.encode("utf-8"))
+        st = self.state()
+        read = lambda: (self.dir / "song.yaml").read_text(encoding="utf-8")  # noqa: E731
+        got = st.pattern_rows(0)
+        self.assertIn([0, 1, "e", 1], got["lanes"])
+        self.assertEqual(got["rows"][3][1], "... .. ... Z40")
+        for cell in ("C-6 02 ... Z20", "C-6 02 ... A01"):  # another value in the lane's column, from any writer
+            with self.assertRaisesRegex(ValueError, "automation lane 1's"):
+                st.edit_patterns([(0, [{"row": 3, "ch": 1, "cell": cell}])])
+        st.edit_patterns([(0, [{"row": 3, "ch": 1, "cell": "C-6 02 ... Z40"}, {"row": 0, "ch": 0, "cell": "D-5 01 ... ..."}])])
+        self.assertIn("03: ... .. ... ... | C-6 02 ... ...", read())  # the lane's value is the lane's, not the text's
+        self.assertIn(lane, read())
+        self.assertEqual(st.pattern_rows(0)["rows"][3][1], "C-6 02 ... Z40")
+        st.materialize_pattern(0)
+        self.assertNotIn("automation:", read())
+        self.assertIn("C-6 02 ... Z40", read())
+        self.assertEqual(st.pattern_rows(0)["lanes"], [])
+        st.undo()
+        self.assertIn(lane, read())
+
     def test_split_pattern(self):
         # OpenMPT's Split Pattern: rows from the cursor's on go to a new pattern, after each order playing the source; a
         # section around those orders widens to take it in; jumps follow; one undo step

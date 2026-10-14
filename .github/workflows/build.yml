@@ -1,0 +1,49 @@
+# The Windows exe built from a tag on a clean runner: what `tools/build_exe.py` makes on the owner's PC, built from the
+# repository alone and checked by `tools/exe_check.py` (the exe started headless on a demo, then its --selfcheck). It runs
+# on every `v*` tag and by hand (workflow_dispatch), and uploads the exe, ffmpeg and the zip as the run's artifact with
+# their SHA-256 in the log.
+#
+# Which exe is published: the owner's local build, as before (AGENTS.md's release recipe; `release.py --check` compares
+# the published digests with the owner's dist/). This job is the check that the tag builds and runs on a machine with
+# nothing but the repository and PyPI: a file packed from the owner's site-packages by accident, or a module missing from
+# the exe, fails here. PyInstaller output is not byte-reproducible, so its digests differ from the local build's. To
+# publish this build instead (a step code signing would need: scratch/audit-2026-10-08/SIGNING.md), download the
+# artifact into dist/ before `release.py X.Y.Z --digests`.
+name: build
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        # everything the exe packs: the package with all its extras (pedalboard, mido, pywebview, sounddevice,
+        # PyGuitarPro, numpy, imageio-ffmpeg), Pillow for the icon, PyInstaller
+        run: python -m pip install -q ".[all]" Pillow pyinstaller
+      - name: Build
+        run: python tools/build_exe.py
+      - name: Check
+        run: python tools/exe_check.py dist/vulturetracker.exe
+      - name: Digests
+        run: sha256sum dist/vulturetracker.exe dist/ffmpeg.exe dist/vulturetracker-win64.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vulturetracker-${{ github.ref_name }}
+          path: |
+            dist/vulturetracker.exe
+            dist/ffmpeg.exe
+            dist/vulturetracker-win64.zip
+          if-no-files-found: error

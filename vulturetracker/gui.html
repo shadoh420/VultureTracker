@@ -110,7 +110,7 @@ input[type=range]{-webkit-appearance:none;flex:1;min-width:30px;height:4px;margi
 .pt.cur .rn{box-shadow:inset 3px 0 0 var(--amber);color:var(--amber)}.pt.cur{background:rgba(217,164,65,.07)}
 .sl{background:rgba(95,125,148,.38)}.cc{box-shadow:inset 0 0 0 1px var(--amber)}#pat.editing .cc{background:var(--amber);color:#1a1508!important}#pat.editing .pt.cur{background:rgba(217,164,65,.14)}
 .pathead span{position:relative}.lvu{position:absolute;left:0;bottom:-3px;height:2px;background:var(--acc);width:0}
-.pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pt.now .pc .n{color:#eaf6ec}.pt.now .pc .n.z{color:#3d4a42}
+.pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pc .ln{opacity:.5;text-decoration:underline dotted}.pt.now .pc .n{color:#eaf6ec}.pt.now .pc .n.z{color:#3d4a42}
 /* listening notes: the tag bar under the player, channel chips, the notes tab */
 .notesbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 12px 6px;background:var(--panel2);box-shadow:inset 0 1px 0 #2a3135}
 .tagb{padding:5px 9px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:#c3cbcf;background:#1b2124;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d;user-select:none;white-space:nowrap}.tagb:hover{color:var(--hi);background:#232a2e}
@@ -396,7 +396,7 @@ option.hascand{color:var(--acc);font-weight:700}
 
 <div class="main" id="t-map">
   <div class="panel col" style="flex:1;min-width:0">
-    <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SAMPLE MAP</span><span class="mono" id="map-n" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><input id="map-q" placeholder="filter by name or folder" style="width:180px;padding:3px 6px;font:10.5px var(--mono)" oninput="drawMap()"><span id="map-leg" style="flex:1;min-width:0;display:flex;gap:8px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim);overflow:hidden;max-height:30px"></span><span class="btn sm" onclick="mapReset()" title="the whole map (double-click does the same)">FIT</span></div>
+    <div class="ph" style="gap:10px;justify-content:flex-start;position:static"><span class="k" style="white-space:nowrap">SAMPLE MAP</span><span class="mono" id="map-n" style="font-size:10px;color:#c3cbcf;white-space:nowrap"></span><input id="map-q" placeholder="filter by name or folder" title="Up/Down step through the matching sounds, playing each" style="width:180px;padding:3px 6px;font:10.5px var(--mono)" oninput="drawMap()" onkeydown="mapStep(event)"><span id="map-leg" style="flex:1;min-width:0;display:flex;gap:8px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim);overflow:hidden;max-height:30px"></span><span class="btn sm" onclick="mapReset()" title="the whole map (double-click does the same)">FIT</span></div>
     <div id="map-box" style="flex:1;min-height:0;position:relative;background:#0b0e0f">
       <canvas id="map-cv" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair" onmousedown="mapDown(event)" onmousemove="mapHover(event)" onmouseleave="MAP.hover=null;drawMap()" onwheel="mapWheel(event)" ondblclick="mapReset()"></canvas>
       <div id="map-tip" style="position:absolute;display:none;pointer-events:none;padding:3px 6px;font:10px var(--mono);color:var(--hi);background:#1b2124;box-shadow:inset 0 0 0 1px #2a3135;white-space:nowrap"></div>
@@ -926,7 +926,7 @@ let curSection=null;  // the cursor starts at the tryout section's first order, 
 function viewOrder(){const p=playPos();if(p&&!EDIT)return p.o;const s=JSON.stringify(S.orders);if(s!==curSection){curSection=s;CUR.o=S.orders?S.orders[0]:0;CUR.row=0}return CUR.o}
 function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const key=`${S.song.mtime}|${o.index}`;
   if(PAT.key!==key){const keep=PAT.rows&&PAT.idx===o.index&&PAT.rows.every(r=>r.length===f.channels.length)?PAT.rows:null;PAT={key,rows:keep,order:oi,active:[],row:-2,idx:o.index,fo:PAT.fo};
-    fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key&&!EDQ.n){PAT.rows=j.rows;renderPat()}})}
+    fetch('/api/pattern/'+o.index).then(r=>r.json()).then(j=>{if(PAT.key===key&&!EDQ.n){PAT.rows=j.rows;PAT.lanes=Object.fromEntries((j.lanes||[]).map(([r,c,col,l])=>[r+','+c,[col,l]]));renderPat()}})}
   PAT.order=oi;renderPat()}
 function drumChannels(){return S.song.facts.channels.map((c,i)=>fam(c)===0?i:-1).filter(i=>i>=0)}
 function setHex(v){hexRows=v;try{localStorage.hexrows=v?'1':'0'}catch(e){}renderPat()}
@@ -1016,8 +1016,8 @@ function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL
   if(PAT.order===CUR.o&&CUR.row>=rows.length)CUR.row=rows.length-1;  // the pattern got shorter under the cursor
   if(SEL&&SEL.o===PAT.order&&Math.max(SEL.a.row,(SEL.b||SEL.a).row)>=rows.length)SEL=null;
   const N=selNorm();renderSelBar();
-  const cell=(s,cur,row,vi)=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'',q=n=>(cur===n?' cc':'')+(N&&inSel(N,row,vi,n)?' sl':'');return `<span class="pc"><span class="n${z(a)}${q(0)}">${a}</span> <span class="i${z(b)}${q(1)}">${b}</span> <span class="v${z(c)}${q(2)}">${c}</span> <span class="e${z(d)}${q(3)}">${d[0]}</span><span class="e${z(d)}${q(4)}">${d.slice(1)}</span></span>`};
-  const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}"${ownCol(c)?` style="box-shadow:inset 0 -2px 0 ${ownCol(c)}"`:''}>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}<i class="lvu" id="lvu${c}"></i></span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%HL[1]?i%HL[0]?'':'b4':'b16'}${PAT.order===CUR.o&&i===CUR.row?' cur':''}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map((c,vi)=>cell(r[c],PAT.order===CUR.o&&i===CUR.row&&c===CUR.ch?CUR.col:-1,i,vi)).join('')}</div>`).join('')}</div>`);
+  const cell=(s,cur,row,vi,ch)=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'',q=n=>(cur===n?' cc':'')+(N&&inSel(N,row,vi,n)?' sl':''),ln=(PAT.lanes||{})[row+','+ch],lv=ln&&ln[0]==='v'?' ln':'',le=ln&&ln[0]==='e'?' ln':'',t=ln?` title="automation lane ${ln[1]} writes this ${ln[0]==='v'?'volume':'effect'} column (the pattern's automation: in the song file)"`:'';return `<span class="pc"${t}><span class="n${z(a)}${q(0)}">${a}</span> <span class="i${z(b)}${q(1)}">${b}</span> <span class="v${z(c)}${q(2)}${lv}">${c}</span> <span class="e${z(d)}${q(3)}${le}">${d[0]}</span><span class="e${z(d)}${q(4)}${le}">${d.slice(1)}</span></span>`};
+  const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}"${ownCol(c)?` style="box-shadow:inset 0 -2px 0 ${ownCol(c)}"`:''}>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}<i class="lvu" id="lvu${c}"></i></span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%HL[1]?i%HL[0]?'':'b4':'b16'}${PAT.order===CUR.o&&i===CUR.row?' cur':''}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map((c,vi)=>cell(r[c],PAT.order===CUR.o&&i===CUR.row&&c===CUR.ch?CUR.col:-1,i,vi,c)).join('')}</div>`).join('')}</div>`);
   if(shown.pat!==was)PAT.row=-2;followPlayhead();patHelp()}
 function followPlayhead(){let p=playPos();if(p&&p.o!==PAT.order){if(!EDIT){showPattern(p.o);return}p=null}const r=p?p.row:-1;
   $('patrow').textContent=PAT.rows?(r>=0?`row ${rowNum(r)} / ${PAT.rows.length}`:`${PAT.rows.length} rows`):'';
@@ -1106,6 +1106,8 @@ const VOLMAX={v:64,p:64,a:9,b:9,c:9,d:9,e:9,f:9,g:9,h:9};
 const cellOf=s=>{const [n,i,v,e]=s.split(' ');return {n,i,v,e}},cellText=p=>`${p.n} ${p.i} ${p.v} ${p.e}`;
 function setEdit(on){EDIT=on;if(on&&CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}renderPat();renderLiveBar()}
 function patEdit(changes){const idx=PAT.idx;if(idx==null||!PAT.rows||!changes.length)return;  // the pattern on show
+  const L=PAT.lanes||{},bad=changes.find(c=>{const o=L[c.row+','+c.ch],a=cellOf(PAT.rows[c.row][c.ch]),b=cellOf(c.cell);return o&&(o[0]==='v'?a.v!==b.v:a.e!==b.e)});
+  if(bad){EDQ.err=`row ${bad.row}, channel ${bad.ch+1}: that ${L[bad.row+','+bad.ch][0]==='v'?'volume':'effect'} column is automation lane ${L[bad.row+','+bad.ch][1]}'s (the pattern's automation: in the song file); MAKE EDITABLE turns the lanes into plain cells`;renderLiveBar();return}
   changes.forEach(c=>{PAT.rows[c.row][c.ch]=c.cell});renderPat();editPost({pattern:idx,cells:changes})}
 function editPost(body){EDQ.n++;  // POST edit in order after the edits before it ({pattern, cells} or {patterns})
   EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json();
@@ -2037,6 +2039,13 @@ function mapWheel(ev){ev.preventDefault();const r=$('map-cv').getBoundingClientR
 function mapReset(){MAP.view={cx:.5,cy:.5,span:1.08};drawMap()}
 async function mapSelect(i,play){MAP.sel=i;MAP.near=[];const p=MAP.data.paths[i];if(play)mapPlay(p);renderMapSel();drawMap();
   const j=await (await fetch('/api/libnear?k='+(+$('simk').value||8)+'&path='+encodeURIComponent(p))).json();if(MAP.sel===i&&!j.error){MAP.near=j.near;renderMapSel();drawMap()}}
+// Up/Down in the filter box: the next or previous matching sound (all of them with no filter) is selected and played, the
+// view panned to it when it lies outside; the box keeps the keys, so the tryout's Up/Down (candidates) stays as it is
+function mapStep(e){const d=MAP.data;if(!d||(e.key!=='ArrowDown'&&e.key!=='ArrowUp'))return;e.preventDefault();
+  const m=mapMatch(),ids=d.paths.map((_,i)=>i).filter(i=>!m||m[i]);if(!ids.length)return;const k=ids.indexOf(MAP.sel),dn=e.key==='ArrowDown';
+  const i=ids[k<0?(dn?0:ids.length-1):Math.max(0,Math.min(ids.length-1,k+(dn?1:-1)))];if(i===MAP.sel)return;
+  const cv=$('map-cv'),[x,y]=mapXY(i,cv.clientWidth,cv.clientHeight);if(x<0||y<0||x>cv.clientWidth||y>cv.clientHeight){MAP.view.cx=d.points[i][0];MAP.view.cy=d.points[i][1]}
+  mapSelect(i,true)}
 function mapPlay(p){MAPA.src='/libwav?path='+encodeURIComponent(p);MAPA.play().catch(()=>{})}
 function mapSend(p){act('add',{globs:p})}
 function renderMapSel(){$('map-slot').textContent=S.slot!=null?`SLOT ${pad(S.slot)}`:'';const d=MAP.data;if(!d||MAP.sel==null||!d.paths[MAP.sel]){put('map-sel','<div style="padding:16px 4px;text-align:center;color:var(--mid);font-size:11px;line-height:1.6">Click a point to hear it. Its nearest sounds are ringed and listed here; send it, or them, to the slot\'s candidates.</div>');return}

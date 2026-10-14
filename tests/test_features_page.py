@@ -408,6 +408,29 @@ class TestFeaturesPage(unittest.TestCase):
             self.assertEqual([r[0][-3:] for r in page.evaluate("PAT.rows")], ['Z00', 'Z10', 'Z20', 'Z30'])
             self.assertIn("03: ... .. ... Z30", (d / 'song.yaml').read_text())
 
+    def test_automation_lane_dimmed_and_refused(self):
+        """A pattern's automation lane: its cells are drawn dimmed in the Pattern tab, an edit of its column is refused
+        in the page (nothing sent, the song unchanged), and a note typed on its row keeps the lane."""
+        lane = "    automation:\n      - {target: Z, channel: 2, rows: [0, 3], from: 0x10, to: 0x40}\n"
+        text = SONG_BLOCK.replace("  p1:\n    rows: 4\n", "  p1:\n    rows: 4\n" + lane, 1)
+        with self.page(text) as (page, d):
+            page.evaluate("tab('pattern'); setEdit(true); showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows && PAT.lanes && Object.keys(PAT.lanes).length === 4")
+            self.assertEqual(page.evaluate("document.querySelectorAll('#pat .pc .e.ln').length"), 8)  # 4 rows, 2 spans each
+            self.assertEqual(page.evaluate("PAT.rows[3][1]"), "... .. ... Z40")
+            before = (d / 'song.yaml').read_text()
+            page.evaluate("patEdit([{row: 3, ch: 1, cell: '... .. ... Z20'}])")
+            self.assertIn("automation lane 1's", page.evaluate("EDQ.err"))
+            self.assertEqual(page.evaluate("EDQ.n"), 0)
+            self.assertEqual((d / 'song.yaml').read_text(), before)
+            page.evaluate("EDQ.err = null; patEdit([{row: 3, ch: 1, cell: 'C-6 02 ... Z40'}])")
+            self.settle(page)
+            self.assertIsNone(page.evaluate("EDQ.err"))
+            song = (d / 'song.yaml').read_text()
+            self.assertIn("03: ... .. ... ... | C-6 02 ... ...", song)
+            self.assertIn(lane, song)
+            page.wait_for_function("PAT.rows && PAT.rows[3][1] === 'C-6 02 ... Z40'")
+
     def test_record_note_off(self):
         """REC OFF (OpenMPT's TempStopNote): letting go of a piano key writes ^^^ (samples only) at the cursor on the
         note's channel; a release after a newer note on that channel is ignored; a filled cell is never overwritten; a
@@ -685,6 +708,26 @@ class TestFeaturesPage(unittest.TestCase):
                 page.wait_for_function('audio.paused')
             finally:
                 recorder.close()
+
+    def test_map_filter_up_down_plays_each_match(self):
+        """In the MAP tab's filter box Down and Up step through the matching sounds only, each selected and played; the
+        ends hold; the keys stay in the box (the tryout's candidate keys are not touched)."""
+        with self.page() as (page, d):
+            got = page.evaluate("""() => {
+              MAP.data = {paths: ['/l/kick1.wav', '/l/snare.wav', '/l/kick2.wav', '/l/kick3.wav'],
+                          names: ['kick1', 'snare', 'kick2', 'kick3'], groups: ['drums', 'drums', 'drums', 'more'],
+                          points: [[.1, .1], [.5, .5], [.9, .9], [5, 5]], info: [{}, {}, {}, {}]};
+              MAP.idx = new Map(MAP.data.paths.map((p, i) => [p, i])); MAP.col = {drums: '#fff', more: '#fff'};
+              const played = []; MAPA.play = () => { played.push(decodeURIComponent(MAPA.src.split('path=')[1])); return Promise.resolve() };
+              const sel0 = sel, q = $('map-q'); q.value = 'kick';
+              const key = k => q.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
+              const out = [];
+              for (const k of ['ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowDown', 'ArrowUp']) { key(k); out.push(MAP.sel) }
+              return {out, played, same: sel === sel0, view: MAP.view.cx};
+            }""")
+            self.assertEqual(got['out'], [0, 2, 3, 3, 2])
+            self.assertEqual(got['played'], ['/l/kick1.wav', '/l/kick2.wav', '/l/kick3.wav', '/l/kick2.wav'])
+            self.assertTrue(got['same'])
 
     def test_tuner_tab(self):
         with self.page() as (page, d):

@@ -547,7 +547,8 @@ def _sample(ctx, num, spec, line, base_dir):
 
 INSTRUMENT_KEYS = ["name", "sample", "keymap", "fadeout", "nna", "dct", "dca", "global_volume", "pan",
                    "pitch_pan_separation", "pitch_pan_center", "random_volume", "random_pan", "filter_cutoff",
-                   "filter_resonance", "filter_mode", "volume_envelope", "panning_envelope", "pitch_envelope"]
+                   "filter_resonance", "filter_mode", "volume_envelope", "panning_envelope", "pitch_envelope",
+                   "tuning", "keymap_file"]
 FILTER_MODES = {"lowpass": 0, "highpass": 1}
 KEYMAP_KEYS = ["notes", "sample", "transpose", "play_note"]
 ENVELOPE_KEYS = ["nodes", "lfo", "loop", "sustain", "enabled", "carry", "filter"]
@@ -713,7 +714,123 @@ def _envelope(ctx, spec, line, kind, where):
     return env
 
 
-def _instrument(ctx, num, spec, line, samples_by_name, sample_numbers):
+def read_scl(text):
+    """A Scala scale (huygens-fokker.org/scala/scl_format.html): lines starting with '!' are comments; the first other
+    line is the description, the next the number of notes, then one pitch a line, cents when it holds a '.', else a
+    ratio a/b or a whole number n (n/1), anything after it ignored. At most 256 notes, as OpenMPT's ImportScl takes.
+    Returns the cents of degrees 1..N (the last is the period). ValueError on a malformed file."""
+    lines = [t for t in text.splitlines() if not t.lstrip().startswith("!")]
+    rest = [t.split() for t in lines[1:] if t.strip()]
+    if not lines or not rest or not rest[0][0].isdigit():
+        raise ValueError("a .scl has a description line, then the number of notes")
+    n, pitches = int(rest[0][0]), [r[0] for r in rest[1:]]
+    if n != len(pitches) or not 1 <= n <= 256:
+        raise ValueError(f"the .scl says {n} notes and lists {len(pitches)} (1 to 256 notes)")
+    cents = []
+    for p in pitches:
+        try:
+            if "." in p:
+                cents.append(float(p))
+                continue
+            a, _, b = p.partition("/")
+            a, b = int(a), int(b or 1)
+        except ValueError:
+            raise ValueError(f"the .scl pitch {p!r} is neither cents (with a '.') nor a ratio a/b") from None
+        if a <= 0 or b <= 0 or max(a, b) > 2 ** 31 - 1:
+            raise ValueError(f"the .scl ratio {p} is not above 0 (or its numbers pass 2147483647)")
+        cents.append(1200 * math.log2(a / b))
+    return cents
+
+
+def read_kbm(text):
+    """A Scala keyboard mapping (.kbm): map size, first and last MIDI note to retune, the middle note (where the first
+    entry goes), the reference note and its frequency, the degree that is the formal octave, then the map, one degree or
+    'x' (unmapped) per key; entries left out at the end are unmapped. ValueError on a malformed file."""
+    vals = [t.split()[0] for t in text.splitlines() if t.strip() and not t.lstrip().startswith("!")]
+    try:
+        size, first, last, middle, ref = (int(v) for v in vals[:5])
+        freq, octave = float(vals[5]), int(vals[6])
+        mapping = [None if v.lower() == "x" else int(v) for v in vals[7:]]
+    except (ValueError, IndexError):
+        raise ValueError("a .kbm has seven numbers (map size, first, last, middle and reference note, its frequency, the "
+                         "formal octave degree) and then the map, a degree or x a key") from None
+    if len(mapping) > size or freq <= 0:
+        raise ValueError(f"the .kbm lists {len(mapping)} keys for a map of {size}" if freq > 0 else "the .kbm's frequency is not above 0")
+    return {"size": size, "first": first, "last": last, "middle": middle, "ref": ref, "freq": freq, "octave": octave,
+            "map": mapping + [None] * (size - len(mapping))}
+
+
+def tuning_ratios(cents, kbm=None):
+    """Per IT note 0-119 (C-5 = MIDI 60) the pitch of the scale (`read_scl`) laid on the keys by `kbm` (`read_kbm`), as
+    a ratio to the note's 12-TET pitch at A-5 = 440 Hz; None for a key the map leaves out. Without a map, OpenMPT's way
+    (CTuning, as its .scl import makes it): degree 0 on C-5 at its own pitch, a degree a key. Only scales that repeat at
+    the octave over 12 keys (a 2/1 period; a map of 12 keys whose formal octave is the scale's size), so every key of a
+    pitch class has one ratio. ValueError otherwise."""
+    n = len(cents)
+    if abs(cents[-1] - 1200) > 1e-6:
+        raise ValueError(f"only scales that repeat at the octave: the last degree is {cents[-1]:.3f} cents, not 2/1 (1200)")
+    if kbm is None:
+        if n != 12:
+            raise ValueError(f"a {n}-note scale needs a keyboard map (keymap_file: a .kbm) to lay it on the 12 keys of an octave")
+        kbm = {"size": 12, "first": 0, "last": 127, "middle": 60, "ref": 60, "freq": 440 * 2 ** (-9 / 12), "octave": 12,
+               "map": list(range(12))}
+    if kbm["size"] != 12 or kbm["octave"] != n:
+        raise ValueError(f"only keyboard maps that repeat every 12 keys with the scale's {n} degrees as their octave "
+                         f"(this one: {kbm['size']} keys, formal octave degree {kbm['octave']})")
+    degree = [0.0] + cents[:-1]
+
+    def at(key):
+        o, i = divmod(key - kbm["middle"], 12)
+        m = kbm["map"][i]
+        if m is None:
+            return None
+        d = m + o * n
+        return degree[d % n] + d // n * 1200
+    ref = at(kbm["ref"])
+    if ref is None:
+        raise ValueError(f"the .kbm leaves its reference note {kbm['ref']} unmapped")
+    out = []
+    for key in range(120):
+        c = at(key) if kbm["first"] <= key <= kbm["last"] else None
+        out.append(None if c is None else kbm["freq"] * 2 ** ((c - ref) / 1200) / (440 * 2 ** ((key - 69) / 12)))
+    return out
+
+
+def _tuning(ctx, m, keymap, base_dir, where):
+    """`tuning:` (a .scl beside the song) and `keymap_file:` (a .kbm): the ratio per key, from each key's played note
+    (after transpose or play_note); keys the map leaves out are made silent in `keymap`."""
+    if "tuning" not in m:
+        if "keymap_file" in m:
+            ctx.error(_line(m, "keymap_file"), f"{where}: 'keymap_file' lays a 'tuning' on the keys; give the .scl too")
+        return None
+    texts = []
+    for key in ("tuning", "keymap_file"):
+        if m.get(key) is None:
+            texts.append(None)
+            continue
+        p = Path(base_dir) / str(m[key])
+        try:
+            texts.append(p.read_text(encoding="latin-1"))
+        except OSError as e:
+            ctx.error(_line(m, key), f"{where}: {key}: cannot read {p}: {e.strerror or e}")
+            raise _Bad
+    try:
+        ratios = tuning_ratios(read_scl(texts[0]), read_kbm(texts[1]) if texts[1] is not None else None)
+    except ValueError as e:
+        ctx.error(_line(m, "keymap_file" if "kbm" in str(e) and "keymap_file" in m else "tuning"), f"{where}: {e}")
+        raise _Bad
+    out = [1.0] * 120
+    for key, (note, s) in enumerate(keymap):
+        if s:
+            r = ratios[note]
+            if r is None:
+                keymap[key] = (note, 0)
+            else:
+                out[key] = r
+    return out
+
+
+def _instrument(ctx, num, spec, line, samples_by_name, sample_numbers, base_dir="."):
     where = f"instrument {num}"
     m = _map(ctx, spec, line, where)
     _check_keys(ctx, m, INSTRUMENT_KEYS, where)
@@ -748,6 +865,7 @@ def _instrument(ctx, num, spec, line, samples_by_name, sample_numbers):
                     ctx.error(_line(e, "transpose"), f"{w}: transpose {transpose:+d} moves {notation.format_note(n)} outside C-0..B-9")
                     raise _Bad
                 keymap[n] = (target, s)
+    ins.tuning = _tuning(ctx, m, keymap, base_dir, where)
     ins.keymap = keymap
     n_errors = len(ctx.errors)
     ins.fadeout = _soft(lambda: _int(ctx, m, "fadeout", 0, 256, 0, where), 0)
@@ -794,14 +912,78 @@ def _marks(ctx, m, where, by=False):
         ctx.error(_line(m, "by"), f"{where}: 'by' must be one of {', '.join(MARKS_BY)}, got {m.get('by')!r}")
 
 
-def _pattern(ctx, name, spec, line, num_channels):
+LANE_KEYS = ["target", "channel", "rows", "from", "to", "shape", "every"]
+
+
+def _lanes(ctx, m, where, grid, lines, channels):
+    """A pattern's `automation:` lanes on its parsed `grid`: each lane is the Pattern tab's AUTOMATE (compose.automate,
+    the same function) kept in the song and redone on every compile. A lane owns its column (the effect column, or the
+    volume column for `v`) on its channel and rows: a cell written there in `data` is an error, as is a second lane
+    there. Returns (rows with the lanes' cells, {(row, channel): (column, lane number)})."""
+    from . import compose
+    spec = m.get("automation") if m is not None else None
+    if spec is None:
+        return grid, {}
+    if not isinstance(spec, LSeq):
+        ctx.error(_line(m, "automation"), f"{where}: 'automation' is a list of lanes ({{target, channel, from, to, ...}})")
+        raise _Bad
+    rows, owned, names = [list(r) for r in grid], {}, [str(c.name) for c in channels]
+    at = lambda r: lines[r] if r < len(lines) else _line(m, "automation")
+    for i, (entry, eline) in enumerate(zip(spec, spec.lines), 1):
+        w = f"{where} automation lane {i}"
+        e = _map(ctx, entry, eline, w)
+        _check_keys(ctx, e, LANE_KEYS, w)
+        target = str(e.get("target", ""))
+        if target not in compose.TARGETS:
+            ctx.error(_line(e, "target") or e.line, f"{w}: 'target' is one of {', '.join(compose.TARGETS)}, got {e.get('target')!r}")
+            raise _Bad
+        ch = e.get("channel", 1)
+        if isinstance(ch, int) and not isinstance(ch, bool) and 1 <= ch <= len(rows[0]):
+            ch -= 1
+        elif str(ch) in names:
+            ch = names.index(str(ch))
+        else:
+            ctx.error(_line(e, "channel") or e.line, f"{w}: 'channel' is a channel number (1-{len(rows[0])}) or name, got {ch!r}")
+            raise _Bad
+        span = e.get("rows", [0, len(rows) - 1])
+        if not (isinstance(span, list) and len(span) == 2 and all(isinstance(x, int) and not isinstance(x, bool) for x in span)
+                and 0 <= span[0] < span[1] < len(rows)):
+            ctx.error(_line(e, "rows") or e.line, f"{w}: 'rows' is [first, last], two rows of the pattern's {len(rows)}, got {span!r}")
+            raise _Bad
+        r0, r1 = span
+        frm, to = _int(ctx, e, "from", 0, 255, None, w), _int(ctx, e, "to", 0, 255, None, w)
+        every = _int(ctx, e, "every", 1, 64, 1, w)
+        shape = _enum(ctx, e, "shape", {s: s for s in compose.CURVES}, "linear", w)
+        col = "v" if target == "v" else "e"
+        chans = [ch]
+        for r in range(r0, r1 + 1):
+            if (r, ch) in owned and owned[(r, ch)][0] == col:
+                ctx.error(eline, f"{w}: row {r}, channel {ch + 1} already belongs to lane {owned[(r, ch)][1]}")
+                raise _Bad
+            c = rows[r][ch]
+            if (c.volcmd is not None) if col == "v" else (c.effect or c.param):
+                ctx.error(at(r), f"{where}, row {r}, channel {ch + 1}: the {'volume column' if col == 'v' else 'effect column'} "
+                                 f"belongs to automation lane {i} (rows {r0}-{r1}): leave it empty in 'data'")
+                raise _Bad
+            owned[(r, ch)] = (col, i)
+        try:
+            cells, _ = compose.automate(rows, chans, r0, r1, target, frm, to, shape, every)
+        except ValueError as err:
+            ctx.error(eline, f"{w}: {err}")
+            raise _Bad
+        for c in cells:
+            rows[c["row"]][c["ch"]] = notation.parse_cell(c["cell"])
+    return rows, owned
+
+
+def _pattern(ctx, name, spec, line, num_channels, channels=()):
     where = f"pattern '{name}'"
     if isinstance(spec, LStr):
         data, rows = spec, None
         m = None
     else:
         m = _map(ctx, spec, line, where)
-        _check_keys(ctx, m, ["rows", "data", "by", "approved"], where)
+        _check_keys(ctx, m, ["rows", "data", "by", "approved", "automation"], where)
         _marks(ctx, m, where, by=True)
         rows = _int(ctx, m, "rows", 1, MAX_ROWS, None, where) if "rows" in m else None
         data = m.get("data")
@@ -814,7 +996,8 @@ def _pattern(ctx, name, spec, line, num_channels):
     key = (str(name), str(data), data.style, data.line, rows, num_channels)
     hit = _PATTERNS.get(key)
     if hit is not None:  # parsed before, and it parsed cleanly: the same cells (shared, never changed) and line numbers
-        return Pattern(str(name), hit[0]), hit[1]
+        rows, lanes = _lanes(ctx, m, where, hit[0], hit[1], channels)
+        return Pattern(str(name), rows, lanes), hit[1]
     # Row line numbers are exact for literal blocks ('data: |'); other string styles report the data line.
     literal = data.style == "|"
     first_line = data.line + 1
@@ -873,7 +1056,8 @@ def _pattern(ctx, name, spec, line, num_channels):
     if not ok:
         raise _Bad
     _remember(_PATTERNS, key, (grid, lines), 8)
-    return Pattern(str(name), grid), lines
+    rows, lanes = _lanes(ctx, m, where, grid, lines, channels)
+    return Pattern(str(name), rows, lanes), lines
 
 
 def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest, highest):
@@ -980,12 +1164,17 @@ def compile_tree(tree, ctx, base_dir) -> Module:
         for num, spec, line in entries:
             instrument_numbers.add(num)
             try:
-                mod.instruments[num - 1] = _instrument(ctx, num, spec, line, samples_by_name, sample_numbers)
+                mod.instruments[num - 1] = _instrument(ctx, num, spec, line, samples_by_name, sample_numbers, base_dir)
             except _Bad:
                 mod.instruments[num - 1] = Instrument(name="(invalid)")
         for i, ins in enumerate(mod.instruments):
             if ins is None:
                 mod.instruments[i] = Instrument()  # gap: empty slot
+        copies = {(s, round(ins.tuning[k], 9)) for ins in mod.instruments if ins.tuning
+                  for k, (_, s) in enumerate(ins.keymap) if s and abs(ins.tuning[k] - 1) > 1e-9}
+        if copies and len(mod.samples) + len(copies) > MAX_NUMBER:
+            ctx.error(_line(tree, "instruments"), f"the tunings need {len(copies)} detuned copies of their samples, "
+                                                  f"{len(mod.samples) + len(copies)} samples in all; IT holds {MAX_NUMBER}")
 
     # Patterns
     num_channels = len(mod.channels) or 1
@@ -1006,7 +1195,7 @@ def compile_tree(tree, ctx, base_dir) -> Module:
                                         f"{_line(pats, first)}): rename one")
             continue
         try:
-            pat, lines = _pattern(ctx, str(name), spec, _line(pats, name), num_channels)
+            pat, lines = _pattern(ctx, str(name), spec, _line(pats, name), num_channels, mod.channels)
         except _Bad:
             pat, lines = Pattern(str(name), [[Cell() for _ in range(num_channels)]]), []
         pat_index[str(name)] = len(mod.patterns)

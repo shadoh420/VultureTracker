@@ -1,6 +1,14 @@
 """The docs name what the code has: SONG_FORMAT's effect and volume tables match what the compiler accepts, every
-command is in README or GUIDE, every agent tool is in GUIDE's agent section."""
+command is in README or GUIDE, every agent tool is in GUIDE's agent section. The release tooling too: the exe build job
+on tags, and `release.py --check` failing on a planted mismatch."""
+import hashlib
+import importlib.util
+import io
 import re
+import tempfile
+from contextlib import redirect_stdout
+from types import SimpleNamespace
+from unittest import mock
 import string
 import subprocess
 import sys
@@ -91,6 +99,68 @@ class TestDocs(unittest.TestCase):
         readme = section(read("README.md"), "## Reporting a problem", "\n## ")
         self.assertIn(where, readme)
         self.assertIn("SECURITY.md", readme)
+
+
+def release_tool():
+    spec = importlib.util.spec_from_file_location("release", ROOT / "tools" / "release.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestReleaseTools(unittest.TestCase):
+    def test_build_job_on_tags_checks_and_uploads_the_release_files(self):
+        """build.yml: on v* tags and by hand, Windows and the exe's Python, build_exe then exe_check on the built exe,
+        and the files release.py publishes uploaded; AGENTS.md says which exe is published."""
+        import yaml
+        flow = yaml.safe_load(read(".github/workflows/build.yml"))
+        on = flow.get("on", flow.get(True))  # YAML 1.1 reads a bare `on` key as True
+        self.assertEqual(on["push"]["tags"], ["v*"])
+        self.assertIn("workflow_dispatch", on)
+        job, = flow["jobs"].values()
+        self.assertEqual(job["runs-on"], "windows-latest")
+        runs = [s.get("run", "") for s in job["steps"]]
+        python = [s["with"]["python-version"] for s in job["steps"] if "setup-python" in s.get("uses", "")]
+        self.assertEqual(python, ["3.14"])
+        build = next(i for i, r in enumerate(runs) if "tools/build_exe.py" in r)
+        check = next(i for i, r in enumerate(runs) if "tools/exe_check.py dist/vulturetracker.exe" in r)
+        self.assertLess(build, check)
+        upload = next(s for s in job["steps"] if "upload-artifact" in s.get("uses", ""))
+        self.assertEqual(upload["with"]["path"].split(), [f"dist/{a}" for a in release_tool().ASSETS])
+        self.assertTrue(".github/workflows/build.yml" in read("AGENTS.md"), "AGENTS.md names the build job")
+
+    def test_release_check_fails_on_a_planted_mismatch(self):
+        """--check against a published body: the right digests pass; one wrong digest, a missing line, a BOM or a
+        leftover TODO each fail, naming what is wrong."""
+        rel = release_tool()
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "dist").mkdir()
+            digest = {}
+            for name in rel.ASSETS:
+                data = f"pretend {name}".encode()
+                (Path(tmp) / "dist" / name).write_bytes(data)
+                digest[name] = hashlib.sha256(data).hexdigest()
+            good = "Notes.\n\n```\n" + "".join(f"{digest[a]} {a}\n" for a in rel.ASSETS) + "```\n"
+
+            def run(body):
+                out = io.StringIO()
+                with mock.patch.object(rel, "ROOT", Path(tmp)), redirect_stdout(out), mock.patch.object(
+                        rel.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout=body, stderr="")):
+                    return rel.check("9.9.9"), out.getvalue()
+
+            code, out = run(good)
+            self.assertEqual(code, 0, out)
+            self.assertIn("release check: passed", out)
+            planted = good.replace(digest["ffmpeg.exe"], "0" * 64)
+            code, out = run(planted)
+            self.assertEqual(code, 1)
+            self.assertRegex(out, r"FAIL ffmpeg\.exe: published 0{64}")
+            self.assertNotIn("FAIL vulturetracker.exe", out)
+            code, out = run(good.replace(f"{digest['vulturetracker-win64.zip']} vulturetracker-win64.zip\n", ""))
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL vulturetracker-win64.zip: published nothing", out)
+            self.assertEqual(run("\ufeff" + good)[0], 1)
+            self.assertEqual(run(good + "**Validation:** TODO write it\n")[0], 1)
 
 
 if __name__ == "__main__":

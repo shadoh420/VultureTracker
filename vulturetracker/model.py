@@ -25,6 +25,8 @@ class Cell:
 class Pattern:
     name: str
     rows: list[list[Cell]]         # rows[row][channel]
+    lanes: dict = field(default_factory=dict, compare=False)  # automation lanes' cells: (row, channel) -> ("e" effect
+                                   # or "v" volume column, lane number from 1); the compiled rows hold their values
 
 
 @dataclass
@@ -86,6 +88,8 @@ class Instrument:
     filter_cutoff: int | None = None     # 0..127
     filter_resonance: int | None = None  # 0..127
     filter_mode: int | None = None       # OpenMPT's extension: None unchanged, 0 low-pass, 1 high-pass
+    tuning: list[float] | None = None    # `tuning:` a .scl: per key, the pitch ratio to 12-TET (1.0 untouched); the
+    #                                      writer plays a key whose ratio is not 1 through a detuned copy of its sample
     volume_envelope: Envelope | None = None
     panning_envelope: Envelope | None = None
     pitch_envelope: Envelope | None = None

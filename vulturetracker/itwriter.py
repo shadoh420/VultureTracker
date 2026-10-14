@@ -3,6 +3,8 @@ import struct
 import sys
 from array import array
 
+from dataclasses import replace
+
 from . import plugins
 from .model import Envelope, Loop, Module, ORDER_END
 
@@ -131,6 +133,32 @@ def _pattern(pat, num_channels) -> bytes:
     return struct.pack("<HH4x", len(packed), len(pat.rows)) + packed
 
 
+def tuned(mod):
+    """The samples and instruments as written when an instrument has `tuning`: a key whose ratio to 12-TET is not 1
+    plays a copy of its sample with c5_speed times that ratio, one copy per (sample, ratio), appended after the song's
+    samples. Returns (samples, instruments, data_of): sample i's data is sample data_of[i]'s (a copy shares its base's
+    data in the file, so nothing is stored twice and gui.patch_it finds a slot's copies by that data offset)."""
+    samples, data_of, copies, insts = list(mod.samples), list(range(len(mod.samples))), {}, []
+    for ins in mod.instruments or []:
+        if not ins.tuning:
+            insts.append(ins)
+            continue
+        keymap = []
+        for key, (note, s) in enumerate(ins.keymap):
+            r = ins.tuning[key]
+            if s and s <= len(mod.samples) and abs(r - 1) > 1e-9:
+                k = (s, round(r, 9))
+                if k not in copies:
+                    base = mod.samples[s - 1]
+                    samples.append(replace(base, c5_speed=round(base.c5_speed * r)))
+                    data_of.append(s - 1)
+                    copies[k] = len(samples)
+                s = copies[k]
+            keymap.append((note, s))
+        insts.append(replace(ins, keymap=keymap))
+    return samples, insts if mod.instruments is not None else None, data_of
+
+
 def write_it(mod: Module) -> bytes:
     if len(mod.patterns) > 254:
         raise ValueError('IT supports at most 254 addressable patterns')
@@ -139,7 +167,8 @@ def write_it(mod: Module) -> bytes:
         orders.append(ORDER_END)
     if len(orders) % 2:  # IT pads the order list to an even length
         orders.append(ORDER_END)
-    instruments = mod.instruments or []
+    samples, instruments, data_of = tuned(mod)
+    instruments = instruments or []
     ins_blobs = [_instrument(i) for i in instruments]
     pat_blobs = [_pattern(p, len(mod.channels)) for p in mod.patterns]
     message = mod.message.replace("\r\n", "\n").replace("\n", "\r").encode("latin-1", "replace") + b"\0" if mod.message else b""
@@ -153,7 +182,7 @@ def write_it(mod: Module) -> bytes:
         extra += plugins.macro_config(mod.macros)
     if mod.plugins:
         extra += plugins.chunks(mod.plugins, [c.plugin for c in mod.channels])
-    pos = HEADER_SIZE + len(orders) + 4 * (len(instruments) + len(mod.samples) + len(mod.patterns)) + len(extra)
+    pos = HEADER_SIZE + len(orders) + 4 * (len(instruments) + len(samples) + len(mod.patterns)) + len(extra)
     msg_offset = pos if message else 0
     pos += len(message)
     ins_offsets = []
@@ -161,7 +190,7 @@ def write_it(mod: Module) -> bytes:
         ins_offsets.append(pos)
         pos += len(blob)
     smp_offsets = []
-    for _ in mod.samples:
+    for _ in samples:
         smp_offsets.append(pos)
         pos += SAMPLE_HEADER_SIZE
     pat_offsets = []
@@ -186,7 +215,7 @@ def write_it(mod: Module) -> bytes:
 
     out = bytearray(b"IMPM" + _name(mod.title, 26))
     out += struct.pack("<BB", mod.row_highlight[0], mod.row_highlight[1])
-    out += struct.pack("<HHHHHHHH", len(orders), len(instruments), len(mod.samples), len(mod.patterns),
+    out += struct.pack("<HHHHHHHH", len(orders), len(instruments), len(samples), len(mod.patterns),
                        0x0214, 0x0214, flags, special)
     out += struct.pack("<BBBBBBHII", mod.global_volume, mod.mix_volume, mod.speed, mod.tempo,
                        mod.separation, 0, len(message), msg_offset, 0)
@@ -199,8 +228,8 @@ def write_it(mod: Module) -> bytes:
     out += message
     for blob in ins_blobs:
         out += blob
-    for smp, off in zip(mod.samples, data_offsets):
-        out += _sample_header(smp, off)
+    for smp, base in zip(samples, data_of):
+        out += _sample_header(smp, data_offsets[base])
     for blob in pat_blobs:
         out += blob
     for blob in smp_datas:
