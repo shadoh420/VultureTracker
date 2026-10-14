@@ -1,7 +1,7 @@
 """`python -m vulturetracker mcp`: a Model Context Protocol server on stdin/stdout, so an agent (Claude Code, Claude
 Desktop, any MCP client) can work on the song open in the running app with the tools in agent.py. It is a bridge: each
 call goes to the app over its local HTTP port (written to the user folder's running.json when the app starts, or
---port), where the tool runs on the open song as one undo step, shown in the app's agent log.
+--port) with the app's per-launch token (running.json's, or VT_TOKEN), where the tool runs on the open song as one undo step, shown in the app's agent log.
 
 Register it with Claude Code:  claude mcp add vulturetracker -- python -m vulturetracker mcp
 """
@@ -27,13 +27,31 @@ def _port(port=None):
                            "(python -m vulturetracker gui song.yaml)")
 
 
+def _token():
+    """The app's API token: VT_TOKEN (the chat panel's Claude Code gets it so), else running.json's."""
+    if os.environ.get("VT_TOKEN"):
+        return os.environ["VT_TOKEN"]
+    try:
+        return str(json.loads(running_path().read_text(encoding="utf-8")).get("token") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
 def _http(port, path, body=None):
     req = urllib.request.Request(f"http://127.0.0.1:{port}{path}",
                                  json.dumps(body).encode("utf-8") if body is not None else None,
-                                 {"Content-Type": "application/json"})
+                                 {"Content-Type": "application/json", "X-VT-Token": _token()})
     try:
         with urllib.request.urlopen(req, timeout=600) as r:
             return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise RuntimeError(f"the app on port {port} refused the token: running.json names the VultureTracker window "
+                               "opened last; restart the bridge without --port, or open the song in that window")
+        try:
+            return json.loads(e.read())  # the app's {"error": ...}
+        except ValueError:
+            raise RuntimeError(f"the app answered HTTP {e.code}")
     except urllib.error.URLError as e:
         raise RuntimeError(f"the app is not answering on port {port} ({getattr(e, 'reason', e)}): is it still open?")
 

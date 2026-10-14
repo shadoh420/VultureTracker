@@ -23,51 +23,47 @@ import os
 import queue
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import threading
 import time
 import wave
 import webbrowser
-import zlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
 
 import yaml
 
-from . import __version__, agent, api, plugins
+from . import __version__, agent, api, plugins, server
 from .fileio import atomic_write as _atomic, lock_file, protect_outputs, save_beside, unlock_file, user_dir, wav_bytes
 from .model import Cell
 from .notation import format_cell, format_note, parse_cell
 from .itwriter import write_it
+from .measure import (DELTA_DB, DELTA_STOPS, RATE, SPEC_DB, SPEC_STOPS, _colour_png, _peak, channel_levels, distance,
+                      measure, mix_numbers, patch_it, png_rgb, reference_align, reference_compare, reference_wav)
+from .sample_edit import (SAMPLE_ACTIONS, VOICE_GROUPS, VOICE_RANGE, entry_loops, paint_args, process_wav, voice_entry,
+                          voice_of, wav_array, wave_peaks)
 from .history import LABEL, SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
-from .project import collect, file_updates, replace_values, resolve_meta, relative_meta
+from .project import file_updates, replace_values, resolve_meta, relative_meta
 from .arrangement import section_renamed, sections_text, occurrence_map, reorder
-from .openmpt import LoadedModule, OpenMPTError, library_version
+from .openmpt import LoadedModule, library_version
 from .song import SongError, it_text, load_song_text
-from .wavload import SOUND_FILES, read_wav, to_wav
+from .wavload import SOUND_FILES, read_wav, run_ffmpeg, to_wav
 
 HTML = Path(__file__).with_name("gui.html")
 WEB = HTML.with_name("web")  # the live engine: libopenmpt 0.8.9 compiled to WebAssembly (official build) and its AudioWorklet
-RATE = 44100
 # the checkout (for the demo list); a frozen exe: its own folder when samples/ is there (the release zip), else one
 # level up (dist/ in a checkout)
 ROOT = ((lambda d: d if (d / "samples").is_dir() else d.parent)(Path(sys.executable).resolve().parent)
         if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent)
 RECENT = user_dir() / "recent.json"
 REC_SETTINGS = RECENT.with_name("record.json")  # the RECORD tab's ASIO choice, read before sounddevice loads
-# the page is served from one address every launch when it can be, and the window keeps a WebView2 profile beside the
-# recent list, so what the browser stores per address stays: the page's settings (localStorage) and the MIDI permission
-PORT = 8723
+CACHE_BYTES = 2 << 30     # the most a song's render cache (.tryout) keeps, besides its newest WAVs by count
 # render workers: the tryout's renders (the song, each candidate), meters, builds and stems share one queue by priority.
 # VT_WORKERS=3 renders three at once: measured in the cloud (4 cores, tools/bench.py --tryout 6) 15-20 % sooner for the
 # song and six candidates, byte-identical, but an edit made meanwhile reached the live engine 2-4x later (the workers
 # hold the GIL between libopenmpt's calls), so one worker stays the default
 WORKERS = max(1, int(os.environ.get("VT_WORKERS") or 1))
-PROFILE = RECENT.parent / "webview"
-LOCKS = RECENT.parent / "open"  # one locked file per song open in an app (app_lock_path)
+PROFILE = RECENT.parent / "webview"  # the window's WebView2 profile: what the page stores at its address (server.PORT)
 OLD_RECENT = RECENT.parent.with_name("TrackerForge") / "recent.json"  # the app's previous name
 HOME_RECENT = Path.home() / "VultureTracker" / "recent.json"  # where Linux and macOS kept it before 1.0
 LOG = RECENT.parent / "vulturetracker.log"
@@ -139,7 +135,7 @@ def recent_songs():
 def remember_song(path):
     RECENT.parent.mkdir(parents=True, exist_ok=True)
     lst = [str(path)] + [p for p in recent_songs() if p != str(path)]
-    RECENT.write_text(json.dumps(lst[:12], indent=1), encoding="utf-8")
+    _atomic_text(RECENT, json.dumps(lst[:12], indent=1))
 
 
 def demo_songs():
@@ -236,99 +232,6 @@ def import_beside(src):
 
 GP_SUFFIXES = (".gp3", ".gp4", ".gp5")
 MIDI_SUFFIXES = (".mid", ".midi")
-
-
-def start_snapshot():
-    return {"song": None, "recent": recent_songs(), "demos": demo_songs(), "version": __version__}
-
-
-# ---------------------------------------------------------------- measurements
-
-def _envelope(mono, bins):
-    """Peak per bin, 0..1, over `bins` equal slices (pure Python: fine for a few seconds of audio)."""
-    n = len(mono)
-    if n == 0:
-        return [0.0] * bins
-    peak = max(1, max(abs(x) for x in mono))
-    out = []
-    for i in range(bins):
-        seg = mono[n * i // bins: max(n * (i + 1) // bins, n * i // bins + 1)]
-        out.append(max(abs(x) for x in seg) / peak)
-    return out
-
-
-def wave_points(env, height=24):
-    """SVG polygon for a symmetric peak envelope in a 100 x `height` box."""
-    mid = height / 2
-    top = [f"{100 * i / (len(env) - 1):.1f},{mid - e * mid:.1f}" for i, e in enumerate(env)]
-    bot = [f"{100 * i / (len(env) - 1):.1f},{mid + e * mid:.1f}" for i, e in reversed(list(enumerate(env)))]
-    return " ".join(top + bot)
-
-
-def measure(path) -> dict:
-    """Duration, root, loop and (with numpy) pitch, spectral centroid, decay and attack of a WAV."""
-    w = read_wav(path)
-    n = len(w.channels[0])
-    mono = w.channels[0] if len(w.channels) == 1 else [sum(c[i] for c in w.channels) // len(w.channels) for i in range(n)]
-    m = {
-        "duration": n / w.rate, "rate": w.rate, "bits": w.bits, "stereo": len(w.channels) > 1,
-        "root": format_note(w.root) if w.root is not None else None,
-        "loop": bool(w.loops), "wave": wave_points(_envelope(mono, 100)),
-        "pitch": None, "cents": None, "centroid": None, "decay": None, "attack": None, "flatness": None, "bands": None,
-    }
-    try:
-        import numpy as np
-        from .synth import estimate_pitch
-    except ImportError:
-        return m
-    x = np.asarray(mono, dtype=float) / 32768
-    if not x.any():
-        return m
-    peak = np.abs(x).max()
-    # 10 ms RMS envelope: attack = time to reach the peak, decay = time until it stays under -40 dB of the peak
-    hop = max(1, w.rate // 100)
-    env = np.sqrt(np.convolve(x * x, np.ones(hop) / hop, mode="same"))
-    ipk = int(np.argmax(env))
-    m["attack"] = ipk / w.rate
-    below = np.nonzero(env[ipk:] < env[ipk] * 10 ** (-40 / 20))[0]
-    m["decay"] = (below[0] / w.rate) if len(below) else None
-    m["decay_curve"] = [float(v) for v in np.interp(np.linspace(0, len(env) - 1, 40), np.arange(len(env)), env / max(env.max(), 1e-9))]
-    # spectrum of the first second (pitched content is at the start)
-    seg = x[: w.rate]
-    spec = np.abs(np.fft.rfft(seg * np.hanning(len(seg))))
-    freqs = np.fft.rfftfreq(len(seg), 1 / w.rate)
-    power = spec ** 2
-    if power.sum() > 0:
-        m["centroid"] = float((freqs * power).sum() / power.sum())
-        m["flatness"] = float(np.exp(np.mean(np.log(power[1:] + 1e-12))) / (np.mean(power[1:]) + 1e-12))
-        bands = []
-        for lo in (31.25 * 2 ** i for i in range(9)):
-            sel = (freqs >= lo) & (freqs < lo * 2)
-            bands.append(float(power[sel].sum()) if sel.any() else 0.0)
-        top = max(bands) or 1.0
-        m["bands"] = [math.sqrt(b / top) for b in bands]
-    est = estimate_pitch(x[int(0.02 * w.rate):], w.rate)
-    if est and est[1] < 0.3 and est[0] > 0:
-        midi = 69 + 12 * math.log2(est[0] / 440)
-        note = int(round(midi))
-        if 0 <= note < 120:
-            m["pitch"] = format_note(note)
-            m["cents"] = int(round((midi - note) * 100))
-    return m
-
-
-def distance(a, b):
-    """Rough perceptual distance between two measurements (0 = same); None when either lacks numbers."""
-    if not a or not b or a.get("centroid") is None or b.get("centroid") is None:
-        return None
-    d = (abs(math.log2(max(a["duration"], 0.01) / max(b["duration"], 0.01))) * 2
-         + abs(math.log2(a["centroid"] / b["centroid"])) * 3)
-    if a.get("decay") is not None and b.get("decay") is not None:
-        d += abs(math.log2(max(a["decay"], 0.01) / max(b["decay"], 0.01))) * 2
-    if a.get("pitch") and b.get("pitch"):
-        from .notation import parse_note
-        d += abs(parse_note(a["pitch"]) - parse_note(b["pitch"])) * 0.5
-    return round(d, 1)
 
 
 # ---------------------------------------------------------------- song facts
@@ -457,212 +360,6 @@ def _stamp(f):
         return f"{f}=missing"
 
 
-def patch_it(data, silenced=(), mix=None):
-    """The compiled module with channels `silenced` disabled (the IT channel-disable bit, which libopenmpt honours) and a
-    mix written into its header: channel volumes (header bytes 0x80..) and pans (0x40..), the mix volume (0x31) and per-slot
-    sample global volumes (the sample headers, via the offset table). Exactly what writing those values into the song
-    would render, without recompiling it."""
-    d = bytearray(data)
-    mix = mix or {}
-    for i, v in (mix.get("volume") or {}).items():
-        d[0x80 + int(i)] = int(v)
-    for i, p in (mix.get("pan") or {}).items():
-        d[0x40 + int(i)] = (d[0x40 + int(i)] & 0x80) | (100 if p == "surround" else int(p))
-    for i in silenced:
-        d[0x40 + i] |= 0x80
-    if mix.get("mix_volume") is not None:
-        d[0x31] = int(mix["mix_volume"])
-    if mix.get("sample_volume"):
-        nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
-        offs = [struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * i)[0] for i in range(nsmp)]
-        data = [struct.unpack_from("<I", d, off + 0x48)[0] for off in offs]  # a tuning's copies share their slot's data
-        for slot, g in mix["sample_volume"].items():
-            if 1 <= int(slot) <= nsmp:
-                for i in [int(slot) - 1] + ([j for j in range(nsmp) if data[j] == data[int(slot) - 1]] if data[int(slot) - 1] else []):
-                    d[offs[i] + 0x11] = int(g)
-    return bytes(d)
-
-
-def channel_levels(data, nch, cancel=None):
-    """Each channel soloed (every other channel disabled so volume commands cannot unmute it): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
-    `cancel()` true between channels abandons the pass (returns None)."""
-    import numpy as np
-    out = []
-    for ch in range(nch):
-        if cancel is not None and cancel():
-            return None
-        d = patch_it(data, [other for other in range(nch) if other != ch])
-        with LoadedModule(d) as lm:
-            x = np.frombuffer(lm.render(RATE, oversample=1), dtype="<i2").astype(np.float32).reshape(-1, 2) / 32768
-        e = np.mean(x ** 2, axis=1)
-        w = RATE // 2
-        seg = e[: len(e) // w * w].reshape(-1, w).mean(axis=1)
-        active = seg[seg > 1e-7]
-        db = lambda p: round(float(10 * np.log10(p + 1e-12)), 1)  # noqa: E731
-        out.append({"db": db(e.mean()) if len(e) else None, "active_db": db(active.mean()) if len(active) else None,
-                    "active_s": len(active) / 2})
-    return out
-
-
-# the spectrogram of what is playing: the colour scale's window in dBFS (a full-scale sine reads 0 dB) and its colours,
-# black -> purple -> red -> orange -> white (scratch/ut99-clean/spectrogram.py's map)
-SPEC_DB = (-100, -10)
-SPEC_STOPS = [[0, 0, 0], [60, 0, 90], [160, 20, 110], [220, 60, 40], [250, 160, 40], [255, 255, 220]]
-
-
-def spectrogram(path, scale="log", cols=1200, rows=256, n=4096):
-    """A 16-bit render's spectrogram: level in dBFS per column (`cols` equal slices of the file, the mean power of the
-    frames centred in each, so column c covers c/cols..(c+1)/cols of the duration) and per row (`rows` bands from 20 Hz,
-    or 0 Hz when `scale` is "lin", up to the Nyquist frequency, log- or evenly spaced; the loudest bin in each band, so a
-    narrow image between two bands is not lost). Returns (db [rows x cols], band edges in Hz), row 0 the lowest band."""
-    return _spectrogram_of(*_wav_mono(path), scale, cols, rows, n)
-
-
-def _wav_mono(path):
-    """A 16-bit WAV as (mono float32 array, rate)."""
-    import numpy as np
-    with wave.open(str(path), "rb") as w:
-        rate, nch = w.getframerate(), w.getnchannels()
-        return np.frombuffer(w.readframes(w.getnframes()), "<i2").astype(np.float32).reshape(-1, nch).mean(axis=1) / 32768, rate
-
-
-def _spectrogram_of(x, rate, scale="log", cols=1200, rows=256, n=4096):
-    """spectrogram() of a mono float array."""
-    import numpy as np
-    length = len(x)
-    hop = max(64, min(n // 2, length // cols))
-    x = np.concatenate([np.zeros(n // 2, np.float32), x, np.zeros(n, np.float32)])  # frame i is centred on sample i * hop
-    frames = max(1, -(-length // hop))
-    cols = max(1, min(cols, frames))
-    nyq = rate / 2
-    edges = np.geomspace(20, nyq, rows + 1) if scale != "lin" else np.linspace(0, nyq, rows + 1)
-    idx = np.minimum((edges[:-1] * n / rate).astype(int), n // 2)
-    win = np.hanning(n).astype(np.float32)
-    acc, cnt = np.zeros((cols, rows)), np.zeros(cols)
-    col_of = np.minimum(np.arange(frames, dtype=np.int64) * hop * cols // max(length, 1), cols - 1)  # numpy 1 on Windows: int32 overflows past ~40 s
-    for a in range(0, frames, 256):
-        fr = np.lib.stride_tricks.sliding_window_view(x, n)[a * hop:(a + 256) * hop:hop][: frames - a]
-        power = np.abs(np.fft.rfft(fr * win, axis=1)) ** 2
-        np.add.at(acc, col_of[a:a + len(fr)], np.maximum.reduceat(power, idx, axis=1))
-        np.add.at(cnt, col_of[a:a + len(fr)], 1)
-    power = acc / np.maximum(cnt, 1)[:, None] / (win.sum() / 2) ** 2  # a full-scale sine peaks at 1
-    return (10 * np.log10(power + 1e-20)).T, edges
-
-
-def png_rgb(rgb):
-    """A PNG of an h x w x 3 uint8 array (stdlib zlib: the exe does not need Pillow)."""
-    h, w, _ = rgb.shape
-    chunk = lambda kind, data: struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))  # noqa: E731
-    raw = b"".join(b"\x00" + row.tobytes() for row in rgb)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
-
-
-@functools.lru_cache(maxsize=12)
-def spectrogram_png(path, stamp, scale="log"):
-    """The spectrogram as a PNG, the highest band at the top (`stamp` keys the cache on the file's mtime and size)."""
-    db, _ = spectrogram(path, scale)
-    return _colour_png((db - SPEC_DB[0]) / (SPEC_DB[1] - SPEC_DB[0]), SPEC_STOPS)
-
-
-def _colour_png(v, stops):
-    """A PNG of `v` (rows x cols, 0..1, row 0 the lowest band, drawn at the bottom) through the colour `stops`."""
-    import numpy as np
-    v = np.clip(v[::-1], 0, 1)
-    stops, pos = np.array(stops, float), np.linspace(0, 1, len(stops))
-    return png_rgb(np.stack([np.interp(v, pos, stops[:, k]) for k in range(3)], axis=-1).astype(np.uint8))
-
-
-# the reference: another recording (any sound file ffmpeg reads) set under the render that plays, for the SPECTRUM tab's
-# REF and DELTA views. The offset is how much later the song starts than the reference, in ms: reference time = song
-# time - offset. DELTA is the song's level minus the reference's in each cell, the reference's overall level matched to
-# the song's first; red = louder in the song, blue = quieter
-DELTA_DB = 30
-DELTA_STOPS = [[30, 80, 200], [120, 160, 225], [235, 235, 235], [230, 130, 110], [205, 35, 35]]
-DELTA_RANGE = 80  # cells more than this many dB under the loudest of both count as silence in both
-
-
-def reference_wav(src, folder):
-    """`src` decoded by ffmpeg to 16-bit stereo at RATE in `folder` (a WAV too: another depth or rate would not line up
-    with the render), decoded again when the source changes."""
-    src = Path(src).resolve()
-    st = src.stat()
-    out = Path(folder) / f"reference-{hashlib.sha1(f'{src}|{st.st_mtime}|{st.st_size}'.encode()).hexdigest()[:12]}.wav"
-    if not out.exists():
-        tmp = out.with_name(out.stem + ".part.wav")
-        r = subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-i", str(src), "-map", "0:a:0", "-ac", "2", "-ar", str(RATE),
-                            "-c:a", "pcm_s16le", str(tmp)], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if r.returncode:
-            tmp.unlink(missing_ok=True)
-            raise ValueError(f"{src.name}: ffmpeg could not read it ({r.stderr.decode(errors='replace').strip()[-300:]})")
-        os.replace(tmp, out)
-    return out
-
-
-def _cut(y, length, start):
-    """`length` samples of `y` from sample `start`; silence where that runs outside it."""
-    import numpy as np
-    out = np.zeros(length, np.float32)
-    a, b = max(0, start), min(len(y), start + length)
-    if b > a:
-        out[a - start:b - start] = y[a:b]
-    return out
-
-
-@functools.lru_cache(maxsize=4)
-def reference_compare(render, rstamp, ref, fstamp, offset_ms, start, scale="log"):
-    """The render (a section `start` seconds into the song) against the reference cut to the same span: (song dB,
-    reference dB, delta dB, mean |delta| per column (None where both are silent), the gain put on the reference in dB,
-    the share of the render the reference covers). The stamps key the cache on the files' mtime and size."""
-    import numpy as np
-    x, rate = _wav_mono(render)
-    y, _ = _wav_mono(ref)
-    at = int(round((start - offset_ms / 1000) * rate))
-    a = max(0, -at)
-    b = max(a, min(len(x), len(y) - at))  # the part of the render the reference covers
-    y = _cut(y, len(x), at)
-    rx, ry = (float(np.sqrt(np.mean(v[a:b] ** 2))) if b > a else 0.0 for v in (x, y))
-    gain = rx / ry if rx > 0 and ry > 0 else 1.0
-    s, _ = _spectrogram_of(x, rate, scale)
-    r, _ = _spectrogram_of(y * gain, rate, scale)
-    floor = max(SPEC_DB[0], max(s.max(), r.max()) - DELTA_RANGE)
-    s, r = np.maximum(s, floor), np.maximum(r, floor)
-    d = s - r
-    live = (s > floor) | (r > floor)
-    n = live.sum(axis=0)
-    cols = [round(float(v), 1) if k else None for v, k in zip(np.abs(d * live).sum(axis=0) / np.maximum(n, 1), n)]
-    return s, r, np.where(live, d, np.nan), cols, round(20 * math.log10(gain), 1), round((b - a) / max(1, len(x)), 3)
-
-
-def reference_align(render, ref, offset_ms, start, reach=30.0):
-    """The offset (ms) that lines the reference up with the render: the onset strength (dsp.novelty) of both,
-    cross-correlated (by FFT, to the hop: 6 ms) within `reach` seconds of the current offset. Returns (offset_ms,
-    correlation 0-1). Music repeats, so a beat or a bar away can score nearly as well: check by ear, nudge OFFSET."""
-    import numpy as np
-    from .dsp import novelty
-    x, rate = _wav_mono(render)
-    y, _ = _wav_mono(ref)
-    pad = int(reach * rate)
-    at = int(round((start - offset_ms / 1000) * rate)) - pad  # the reference from `reach` before where the render sits now
-    fx, hop = novelty(x, rate)
-    fy, _ = novelty(_cut(y, len(x) + 2 * pad, at), rate)
-    fx, fy = fx - fx.mean(), fy - fy.mean()
-    size = 1 << int(np.ceil(np.log2(len(fy) + len(fx))))
-    c = np.fft.irfft(np.fft.rfft(fy, size) * np.conj(np.fft.rfft(fx, size)), size)[: len(fy) - len(fx) + 1]
-    k = int(np.argmax(c))
-    seg = fy[k:k + len(fx)]
-    corr = float(seg @ fx) / (float(np.linalg.norm(seg) * np.linalg.norm(fx)) or 1.0)
-    return round((start - (at + k * hop) / rate) * 1000), round(max(0.0, corr), 2)
-
-
-def worklet_js():
-    """/engine-worklet.js: the libopenmpt glue (a classic script) wrapped as loadGlue(), then the engine core and the
-    processor, as one module for audioWorklet.addModule (a worklet cannot load scripts itself)."""
-    glue = (WEB / "libopenmpt.js").read_text(encoding="utf-8")
-    return ("const loadGlue = function (libopenmpt, require, __dirname) {\n" + glue + "\nreturn Module;\n};\n"
-            + (WEB / "engine-core.js").read_text(encoding="utf-8") + (WEB / "engine-worklet.js").read_text(encoding="utf-8")).encode("utf-8")
-
-
 def _wav_bytes(y, rate):
     """Float channels x frames (full scale 1.0) as the bytes of a 16-bit WAV file."""
     import io
@@ -719,398 +416,13 @@ def _encode(path, pcm, fmt, loop=None, rate=RATE, depth=16, bitrate=None, qualit
         args[-1] = f"{float(quality):g}"
     if fmt == "flac" and depth == 24:
         args += ["-sample_fmt", "s32", "-bits_per_raw_sample", "24"]
-    r = subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "s16le" if depth == 16 else "f32le", "-ar", str(rate),
-                        "-ac", "2", "-i", "-", *args, *tags, str(path)], input=pcm, capture_output=True,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    r = run_ffmpeg([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "s16le" if depth == 16 else "f32le", "-ar", str(rate),
+                    "-ac", "2", "-i", "-", *args, *tags, str(path)], input=pcm)  # -nostdin leaves "-i -" reading the PCM
     if r.returncode:
         raise OSError(f"ffmpeg failed: {r.stderr.decode(errors='replace').strip()[-400:]}")
 
 
-@functools.lru_cache(maxsize=32)
-def _mix_numbers(path, stamp):
-    import numpy as np
-    from . import dsp
-    pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
-    return dsp.measure_mix(pcm, RATE)
-
-
-@functools.lru_cache(maxsize=8)
-def _meters(path, stamp):
-    import numpy as np
-    from . import dsp
-    pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
-    return dsp.meter_series(pcm, RATE)
-
-
-def mix_numbers(path):
-    """A render's loudness (LUFS), true peak, sample peak and stereo correlation (dsp.measure_mix), memoised per file
-    stamp; None when it cannot be read."""
-    try:
-        st = os.stat(path)
-        return _mix_numbers(str(path), (st.st_mtime_ns, st.st_size))
-    except (OSError, ValueError, ImportError):
-        return None
-
-
-def _peak(pcm):
-    """Peak of interleaved int16 PCM, 0..1 (1.0: libopenmpt's mixer clipped)."""
-    try:
-        import numpy as np
-        return round(float(np.abs(np.frombuffer(pcm, "<i2").astype(np.int32)).max()) / 32768, 3)
-    except (ImportError, ValueError):
-        return None
-
-
-# ---------------------------------------------------------------- the sample editor
-
-@functools.lru_cache(maxsize=8)
-def wav_array(path, stamp):
-    """A WAV as (WavData, float32 array channels x frames scaled to -1..1); `stamp` keys the cache on mtime and size."""
-    import numpy as np
-    w = read_wav(path)
-    return w, np.array(w.channels, dtype=np.float32) / (128 if w.out_bits == 8 else 32768)
-
-
-def wave_peaks(x, a, b, n):
-    """Frames a..b of `x` (channels x frames) as `n` columns: (min, max) per column and channel, lists rounded for JSON;
-    when the span holds `n` frames or fewer, the frames themselves (min = max)."""
-    import numpy as np
-    seg = x[:, a:b]
-    if seg.shape[1] <= n:
-        mn = mx = seg
-    else:
-        at = np.arange(n) * seg.shape[1] // n
-        mn, mx = np.minimum.reduceat(seg, at, axis=1), np.maximum.reduceat(seg, at, axis=1)
-    return np.round(mn, 4).tolist(), np.round(mx, 4).tolist()
-
-
-def entry_loops(entry, w):
-    """The sample entry's `loop` and `sustain_loop` in the WAV's frames: {key: (start, end, pingpong) or None}
-    (`from_wav` read from the WAV's smpl chunk, its end clamped to the audio as the compiler plays it)."""
-    out, n = {}, len(w.channels[0])
-    for k in ("loop", "sustain_loop"):
-        spec = entry.get(k)
-        if spec == "from_wav":
-            s, e, pp = w.loops[0] if w.loops else (0, 0, False)
-            out[k] = (s, min(e, n), pp) if min(e, n) > s else None
-        elif isinstance(spec, dict):
-            out[k] = (int(spec.get("start", 0)), int(spec.get("end", n)), spec.get("type") == "pingpong")
-        else:
-            out[k] = None
-    return out
-
-
-SAMPLE_ACTIONS = ("trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade", "gain", "lowpass", "highpass",
-                  "eq", "loudness", "pitch", "stretch", "truncate", "denoise", "spectral_mask", "granular")
-
-
-def _splice(x, a, b, seg, loops):
-    """`x` with frames a..b replaced by `seg` (another length): loops before the span stay, loops after it move with the
-    audio, a loop inside it is scaled with it, one across its edge is dropped."""
-    import numpy as np
-    k = seg.shape[1] / max(1, b - a)
-    out = {}
-    for key, lp in loops.items():
-        if not lp:
-            out[key] = lp
-        elif lp[1] <= a:
-            out[key] = lp
-        elif lp[0] >= b:
-            d = seg.shape[1] - (b - a)
-            out[key] = (lp[0] + d, lp[1] + d, lp[2])
-        elif a <= lp[0] and lp[1] <= b:
-            s, e = a + round((lp[0] - a) * k), a + round((lp[1] - a) * k)
-            out[key] = (s, max(s + 1, e), lp[2])
-        else:
-            out[key] = None
-    return np.concatenate([x[:, :a], seg.astype(x.dtype), x[:, b:]], axis=1), out
-
-
-def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
-    """One sample edit on frames a..b of `x` (float channels x frames; a copy is changed). `loops` ({key: (start, end,
-    pingpong) or None}) follow the audio: trimmed (shifted, clipped, dropped when nothing is left) and mirrored by a
-    reverse of the whole sample. The effects (dsp.py; `params` their settings, `rate` the WAV's) work on the span too:
-    gain (db), lowpass / highpass (hz, slope 12 or 24), eq (hz, db, q), loudness (db: the RMS target), pitch
-    (semitones, the length kept), stretch (percent, the pitch kept), denoise (the noise learned from frames na..nb of
-    `x`, turned down by up to db, sens its threshold over the noise), truncate (silences under db dBFS longer than
-    min_ms shortened to keep_ms) and granular (grain_ms, density, pitch_st, jitter, spray_ms, seed: dsp.granular, the
-    length kept); stretch and truncate change the length, and the loops move with the audio. Crossfade: the last `frames` of the loop fade (equal power) into the audio just before
-    its start, so the wrap is seamless (the synth recipes' crossfade). Returns (x, loops)."""
-    import numpy as np
-    x, loops, n = x.copy(), dict(loops), x.shape[1]
-    seg = x[:, a:b]
-    if action == "trim":
-        x = seg.copy()
-        for k, lp in loops.items():
-            if lp:
-                s, e = max(0, lp[0] - a), min(b - a, lp[1] - a)
-                loops[k] = (s, e, lp[2]) if e > s else None
-    elif action in ("fade_in", "fade_out"):
-        ramp = np.linspace(0, 1, seg.shape[1], dtype=np.float32)
-        seg *= ramp if action == "fade_in" else ramp[::-1]
-    elif action == "normalize":
-        peak = float(np.abs(seg).max()) if seg.size else 0
-        if peak <= 0:
-            raise ValueError("nothing to normalize: the selection is silent")
-        seg *= 1 / peak
-    elif action == "reverse":
-        x[:, a:b] = seg[:, ::-1]
-        if (a, b) == (0, n):
-            loops = {k: lp and (n - lp[1], n - lp[0], lp[2]) for k, lp in loops.items()}
-    elif action == "dc":
-        seg -= seg.mean(axis=1, keepdims=True)
-    elif action == "crossfade":
-        lp = loops.get("loop") or loops.get("sustain_loop")
-        if not lp:
-            raise ValueError("crossfade needs a loop (or a sustain loop)")
-        s, e = lp[0], lp[1]
-        xf = min(int(frames), s, e - s)
-        if xf <= 0:
-            raise ValueError("crossfade needs audio before the loop start: move the loop start later")
-        t = np.linspace(0, np.pi / 2, xf, endpoint=False, dtype=np.float32)
-        x[:, e - xf:e] = x[:, e - xf:e] * np.cos(t) + x[:, s - xf:s] * np.sin(t)
-    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch", "denoise", "spectral_mask", "granular"):
-        from . import dsp
-        q = params or {}
-
-        def num(k, lo, hi, default=None):
-            try:
-                v = float(q.get(k, default))
-            except (TypeError, ValueError):
-                raise ValueError(f"{action}: {k} must be a number")
-            if not lo <= v <= hi:
-                raise ValueError(f"{action}: {k} is {lo:g} to {hi:g}")
-            return v
-        nyq = rate / 2
-        if action == "gain":
-            y = dsp.gain(seg, num("db", -60, 24))
-        elif action == "lowpass":
-            y = dsp.lowpass(seg, rate, num("hz", 20, nyq), num("slope", 12, 24, 24))
-        elif action == "highpass":
-            y = dsp.highpass(seg, rate, num("hz", 10, nyq), num("slope", 12, 24, 24))
-        elif action == "eq":
-            y = dsp.peak_eq(seg, rate, num("hz", 20, nyq * 0.98), num("db", -24, 24), num("q", 0.1, 20, 1))
-        elif action == "loudness":
-            y = dsp.loudness(seg, num("db", -60, 0, -18))[0]
-        elif action == "spectral_mask":  # the PAINT tab's picture laid over the span's spectrum (spectral.py)
-            from . import spectral
-            pic = paint_args(q)
-            y = spectral.spectral_mask(seg, rate, pic["amp"], pic["fmin"], pic["fmax"], pic["scale"], pic["range_db"])
-        elif action == "granular":
-            y = dsp.granular(seg, rate, num("grain_ms", 5, 1000, 80), num("density", 1, 32, 4), num("pitch_st", -24, 24, 0),
-                             num("jitter", 0, 24, 0), num("spray_ms", 0, 2000, 0), seed=int(num("seed", 0, 2 ** 31, 0)))
-        elif action == "denoise":
-            na, nb = int(num("na", 0, n)), int(num("nb", 0, n))
-            if nb - na < 2048:
-                raise ValueError("denoise: LEARN NOISE from a selection where only the noise sounds (at least 50 ms)")
-            y = dsp.denoise(seg, rate, x[:, na:nb], num("db", 0, 60, 12), num("sens", 1, 8, 2))
-        else:
-            y = dsp.pitch_shift(seg, num("semitones", -24, 24))
-        x[:, a:b] = y
-    elif action in ("stretch", "truncate"):
-        from . import dsp
-        q = params or {}
-        if action == "stretch":
-            pct = float(q.get("percent", 100))
-            if not 25 <= pct <= 400:
-                raise ValueError("stretch: 25 to 400 %")
-            new = dsp.stretch(seg, pct / 100)
-        else:
-            runs = dsp.silent_runs(seg, rate, float(q.get("db", -50)), float(q.get("min_ms", 200)))
-            keep = max(0, int(float(q.get("keep_ms", 50)) * rate / 1000))
-            if not runs:
-                raise ValueError("truncate: no silence that long and that quiet in the span")
-            parts, at = [], 0
-            for s, e in runs:
-                parts.append(seg[:, at: s + keep // 2])
-                at = max(s + keep // 2, e - (keep - keep // 2))
-            parts.append(seg[:, at:])
-            new = np.concatenate(parts, axis=1)
-            loops = {k: (lp if lp and (lp[1] <= a or lp[0] >= b) else None) for k, lp in loops.items()}
-        x, loops = _splice(x, a, b, new, loops)
-    else:
-        raise ValueError(f"unknown sample edit '{action}' (one of {', '.join(SAMPLE_ACTIONS)})")
-    if x.shape[1] == 0:
-        raise ValueError("the edit leaves no audio")
-    return x, loops
-
-
-def paint_args(body):
-    """The PAINT tab's picture and its settings from a request, checked: {amp, pan (rows x columns arrays), seconds, fmin,
-    fmax, scale, range_db}."""
-    import numpy as np
-    try:
-        amp = np.asarray(body["amp"], float)
-        pan = np.asarray(body.get("pan") if body.get("pan") is not None else np.zeros_like(amp), float)
-    except (KeyError, TypeError, ValueError):
-        raise ValueError("paint: the picture is rows x columns of brightness 0-1 (amp) and pan -1..1 (pan)")
-    if amp.ndim != 2 or pan.shape != amp.shape or not (1 <= amp.shape[0] <= 256 and 1 <= amp.shape[1] <= 1024):
-        raise ValueError("paint: a picture is 1-256 rows by 1-1024 columns, with a pan of the same shape")
-    scale = body.get("scale") or "log"
-    if scale not in ("log", "notes"):
-        raise ValueError("paint: the rows are spread in log frequency (log) or one per semitone (notes)")
-    fmin, fmax = float(body.get("fmin", 40)), float(body.get("fmax", 12000))
-    if scale == "notes" and not (0 <= fmin < 120):
-        raise ValueError("paint: the lowest note is C-0 (0) to B-9 (119)")
-    if scale == "log" and not (10 <= fmin < fmax <= 20000):
-        raise ValueError("paint: the range is 10 Hz to 20 kHz, low to high")
-    seconds, range_db = float(body.get("seconds", 2)), float(body.get("range_db", 48))
-    if not 0.01 <= seconds <= 60 or not 6 <= range_db <= 96:
-        raise ValueError("paint: 0.01-60 seconds, a 6-96 dB range")
-    return {"amp": np.clip(amp, 0, 1), "pan": np.clip(pan, -1, 1), "seconds": seconds, "fmin": fmin, "fmax": fmax,
-            "scale": scale, "range_db": range_db}
-
-
-# ---------------------------------------------------------------- the instrument panel
-
-# per-note movement the tracker itself plays, in the panel's terms: a volume envelope from attack and decay (ticks) and a
-# sustain level, the release (the instrument's fadeout, 0-256: a fading note loses fadeout / 1024 per tick), the resonant
-# low-pass (cutoff 127 and resonance 0 = off), a filter sweep (the pitch envelope in filter mode, from and to a share of
-# the cutoff in 64ths: libopenmpt scales the cutoff by (value + 32) / 64, so 64 is the cutoff, 0 closed) and random volume
-# per note
-VOICE_GROUPS = {"volume": ("attack", "decay", "sustain"), "release": ("release",), "filter": ("cutoff", "resonance"),
-                "sweep": ("sweep_from", "sweep_to", "sweep_ticks"), "random": ("random",)}
-VOICE_RANGE = {"attack": (0, 64), "decay": (0, 192), "sustain": (0, 64), "release": (0, 256), "cutoff": (0, 127),
-               "resonance": (0, 127), "sweep_from": (0, 64), "sweep_to": (0, 64), "sweep_ticks": (0, 192), "random": (0, 100)}
-
-
-def voice_of(ins):
-    """The panel's view of an instrument entry (the song's mapping). Returns (params, custom): `custom` lists the groups
-    whose envelope in the song has another shape than the panel writes; the panel shows defaults for them and replaces
-    that envelope only when one of its sliders moves."""
-    p = {"attack": 0, "decay": 0, "sustain": 64, "release": int(ins.get("fadeout") or 0),
-         "cutoff": 127 if ins.get("filter_cutoff") is None else int(ins["filter_cutoff"]),
-         "resonance": int(ins.get("filter_resonance") or 0), "sweep_from": 64, "sweep_to": 64, "sweep_ticks": 0,
-         "random": int(ins.get("random_volume") or 0)}
-    custom = []
-
-    def plain(env):  # enabled, no loop; the sustain as one node index (or None)
-        s = env.get("sustain")
-        s = s[0] if isinstance(s, list) and len(s) == 2 and s[0] == s[1] else s
-        return (env.get("enabled", True) and not env.get("loop") and (s is None or isinstance(s, int)),
-                [tuple(n) for n in env.get("nodes") or []], s)
-
-    env = ins.get("volume_envelope")
-    if env:
-        ok, n, s = plain(env)
-        shape = None
-        if ok and n == [(0, 64)]:
-            shape = (0, 0, 64)
-        elif ok and len(n) == 2 and n[0] == (0, 0) and n[1][1] == 64 and s == 1:
-            shape = (n[1][0], 0, 64)
-        elif ok and len(n) == 2 and n[0] == (0, 64) and n[1][1] < 64 and s == (1 if n[1][1] else None):
-            shape = (0, n[1][0], n[1][1])
-        elif ok and len(n) == 3 and n[0] == (0, 0) and n[1][1] == 64 and n[2][1] < 64 and s == (2 if n[2][1] else None):
-            shape = (n[1][0], n[2][0] - n[1][0], n[2][1])
-        if shape:
-            p["attack"], p["decay"], p["sustain"] = shape
-        else:
-            custom.append("volume")
-    env = ins.get("pitch_envelope")
-    if env:
-        ok, n, s = plain(env)
-        if ok and env.get("filter") and s is None and len(n) in (1, 2):
-            p["sweep_from"], p["sweep_to"], p["sweep_ticks"] = n[0][1] + 32, n[-1][1] + 32, n[-1][0]
-        else:
-            custom.append("sweep")
-    return p, custom
-
-
-def voice_entry(ins, edit):
-    """The instrument entry with the panel's `edit` (some of voice_of's params) written in. Only the groups the edit
-    touches change, so an envelope the panel cannot show stays unless one of its sliders moved."""
-    p = voice_of(ins)[0]
-    p.update({k: int(v) for k, v in edit.items() if k in VOICE_RANGE})
-    touched = {g for g, keys in VOICE_GROUPS.items() if any(k in edit for k in keys)}
-    out = dict(ins)
-
-    def put(key, value, keep):
-        if keep:
-            out[key] = value
-        else:
-            out.pop(key, None)
-
-    if "volume" in touched:
-        a, d, s = p["attack"], p["decay"], p["sustain"]
-        nodes = [[0, 0], [a, 64]] if a else [[0, 64]]
-        if s < 64:
-            nodes.append([nodes[-1][0] + max(1, d), s])  # the level held until note-off; 0 lets the note die away
-        put("volume_envelope", {"nodes": nodes, **({"sustain": len(nodes) - 1} if s else {})}, len(nodes) > 1)
-    if "release" in touched:
-        put("fadeout", p["release"], p["release"])
-    sweep = (p["sweep_from"], p["sweep_to"]) != (64, 64)
-    if touched & {"filter", "sweep"}:
-        on = p["cutoff"] < 127 or p["resonance"] > 0 or sweep
-        put("filter_cutoff", p["cutoff"], on)
-        put("filter_resonance", p["resonance"], on)
-    if "sweep" in touched:
-        v0, v1 = p["sweep_from"] - 32, p["sweep_to"] - 32
-        nodes = [[0, v0], [p["sweep_ticks"], v1]] if p["sweep_ticks"] and v0 != v1 else [[0, v1]]
-        put("pitch_envelope", {"nodes": nodes, "filter": True}, sweep)
-    if "random" in touched:
-        put("random_volume", p["random"], p["random"])
-    return out
-
-
 # ---------------------------------------------------------------- state
-
-def app_lock_path(song_path):
-    """The file the app holds locked while a song is open in it: beside the recent-songs list, not in the song's folder
-    (Windows would refuse to rename or move a folder holding an open file)."""
-    key = os.path.normcase(str(Path(song_path).resolve()))
-    return LOCKS / (hashlib.sha1(key.encode("utf-8")).hexdigest()[:16] + ".lock")
-
-
-def open_in_app(song_path):
-    """Whether a running app has the song open: it keeps the song's history and tryout settings in memory and writes
-    them over a change made beside it (a checkpoint saved from the command line would vanish)."""
-    p = app_lock_path(song_path)
-    if not p.exists():
-        return False
-    f = lock_file(p)
-    if f is None:
-        return True
-    unlock_file(f)
-    return False
-
-
-LOCK_WAITS = (0.1, 0.2, 0.4, 0.8, 1.5)  # seconds an app opening a song waits for a command that is changing it
-_HELD = {}  # app_lock_path -> [the locked file, how many of this process's States have the song open]
-_HELD_GUARD = threading.Lock()
-
-
-def take_app_lock(song_path):
-    """Lock the song for this process while a State has it open (the same song opened again shares the lock), waiting
-    LOCK_WAITS for a command that holds it; False when another app or a command holds it all that time."""
-    p = app_lock_path(song_path)
-    for wait in (*LOCK_WAITS, None):
-        with _HELD_GUARD:
-            if p in _HELD:
-                _HELD[p][1] += 1
-                return True
-            LOCKS.mkdir(parents=True, exist_ok=True)
-            f = lock_file(p)
-            if f:
-                _HELD[p] = [f, 1]
-                return True
-        if wait is None:
-            return False
-        time.sleep(wait)
-
-
-def release_app_lock(song_path):
-    p = app_lock_path(song_path)
-    with _HELD_GUARD:
-        held = _HELD.get(p)
-        if held and held[1] > 1:
-            held[1] -= 1
-        elif held:
-            del _HELD[p]
-            unlock_file(held[0])
-            try:
-                p.unlink()
-            except OSError:  # another app or a command took it this moment: it stays, unlocked
-                pass
 
 
 class State:
@@ -1126,7 +438,7 @@ class State:
         another process has the song open; the files beside it are read as they are (an interrupted save's journal and a
         file that does not parse are its to reconcile). An app that cannot take the song's lock opens it read-only."""
         self.song_path = Path(song_path).resolve()
-        self._app_lock = not headless and take_app_lock(self.song_path)  # the command line's tools see the song is open here
+        self._app_lock = not headless and server.take_app_lock(self.song_path)  # the command line's tools see the song is open here
         self.read_only = None if headless or self._app_lock else self.READ_ONLY.format(name=self.song_path.name)
         try:
             self._open(headless, passive or bool(self.read_only))
@@ -1179,6 +491,7 @@ class State:
         self.selection = None  # the page's pattern selection or cursor: {order, pattern, rows [a, b], channels [a, b]}
         self.ui_state = None   # last window report; agent inspection includes its age rather than claiming live state
         self.cue = None        # an agent's request to show (and play) a place: {id, order, row, channel, play}
+        self.agent_allow = {}  # the owner's go-ahead for one agent action: {"replace": monotonic deadline} (ALLOW REPLACE)
         self.agent_log = []    # the agent tools' calls (agent.run): what an agent did, for the page
         self.agent_measures = {}  # the last measure per scope, for the next one's change
         self.build = None     # last build/export result
@@ -1198,6 +511,9 @@ class State:
         self.mod = None       # compiled model of the last good load (pattern view)
         self.it_stamps = None
         self.it = None        # its .it bytes: the whole song as it is, which the live engine plays unless the panel edits it
+        self._to_measure = None  # the newest reload's sample files, for the measuring thread (_measure_later)
+        self._measuring = False
+        self._measure_guard = threading.Lock()
         self.reload(archive=not headless)
         if saved:
             self.checkpoints = saved['checkpoints']
@@ -1253,7 +569,7 @@ class State:
             files = self.files = [str((self.base_dir / v["file"]).resolve()) for v in (self.song.get("samples") or {}).values()
                      if isinstance(v, dict) and v.get("file")]
             self.it_stamps = "|".join(_stamp(f) for f in files)  # the WAVs self.it was compiled from
-            threading.Thread(target=lambda: [self.measured(f) for f in files if Path(f).exists()], daemon=True).start()
+            self._measure_later(files)
             if self.meta["slot"] not in (self.song.get("samples") or {}):
                 self.meta["slot"] = min(self.song.get("samples") or {1: 0})
             if archive and not self.read_only:
@@ -1266,6 +582,32 @@ class State:
                 except OSError as e:
                     self.notices.append(f'Song loaded; listening-note report could not be refreshed: {e}')
             self.queue_all()
+
+    def _measure_later(self, files):
+        """The sample files measured ahead of the page asking, on one thread per State: a reload while it runs leaves
+        its list for that thread (replacing a list not yet started) instead of starting another. The hand-over has a
+        lock of its own: with State.lock the thread waiting for it held up the edit that had just reloaded (tools/bench.py:
+        edit->live about 2x on demo2 and demo3)."""
+        with self._measure_guard:
+            self._to_measure = files
+            if self._measuring:
+                return
+            self._measuring = True
+        threading.Thread(target=self._measure_files, name=f"measure {self.song_path}", daemon=True).start()
+
+    def _measure_files(self):
+        while True:
+            with self._measure_guard:
+                files, self._to_measure = self._to_measure, None
+                if files is None:
+                    self._measuring = False
+                    return
+            for f in files:
+                try:
+                    if Path(f).exists():
+                        self.measured(f)
+                except Exception:  # noqa: BLE001 - logged; the thread lives on for the next reload's list
+                    _log.exception("Measuring %s failed", f)
 
     def dirty(self):
         try:
@@ -1485,20 +827,22 @@ class State:
         return self.meas[path]
 
     def add_candidates(self, globs):
-        added = []
+        found = []
         for g in re.split(r"[\r\n;]+", globs):
             g = g.strip().strip('"')
             if not g:
                 continue
             pat = g if os.path.isabs(g) else str(self.base_dir / g)
-            files = sorted(f for f in glob.glob(pat, recursive=True) if Path(f).suffix.lower() in (".wav", *SOUND_FILES)) or [pat]
-            for f in files:
-                f = str(self.as_wav(Path(f).resolve())[0])
+            files = sorted(f for f in glob.glob(pat, recursive=True) if Path(f).suffix.lower() in (".wav", *SOUND_FILES))
+            found += [str(self.as_wav(Path(f).resolve())[0]) for f in files]  # a decode by ffmpeg runs outside the lock
+        added = []
+        with self.lock:
+            for f in found:
                 if f not in self.cands():
                     self.cands().append(f)
                     added.append(f)
-        self.save_meta()
-        self.queue_all()
+            self.save_meta()
+            self.queue_all()
         return added
 
     def remove_candidate(self, path):
@@ -1582,7 +926,7 @@ class State:
         """Give the song's lock back (another song replaced this one, or it failed to open)."""
         if self._app_lock:
             self._app_lock = False
-            release_app_lock(self.song_path)
+            server.release_app_lock(self.song_path)
 
     def _worker(self):
         while not self.closed:
@@ -1662,12 +1006,18 @@ class State:
                 if self.meters["key"] == mk:
                     self.meters.update(status="failed", error=f"{type(e).__name__}: {e}")
 
-    def _prune(self, keep=60):
-        """Every mute or fader change leaves a render in the cache: keep the newest `keep` WAVs, re-queue what is current."""
+    def _prune(self, keep=60, limit=None):
+        """Every mute or fader change leaves a render in the cache: keep the newest `keep` WAVs and, of those, no more
+        than `limit` bytes (CACHE_BYTES; the newest always stays), re-queue what is current."""
+        limit = CACHE_BYTES if limit is None else limit
         with self.lock:
-            for p in sorted(self.cache_dir.glob("*.wav"), key=lambda p: p.stat().st_mtime)[:-keep]:
-                p.unlink(missing_ok=True)
-                self.renders.pop(p.stem, None)
+            total = 0
+            for i, (_, size, p) in enumerate(sorted(((s.st_mtime, s.st_size, p) for p in self.cache_dir.glob("*.wav")
+                                                     for s in [p.stat()]), reverse=True)):
+                total += size
+                if i >= keep or (i and total > limit):
+                    p.unlink(missing_ok=True)
+                    self.renders.pop(p.stem, None)
             self.queue_all()
 
     # ---- the recipe panel: a slot whose WAV a sample recipe (SAMPLING.md) in the song's folder writes can be rendered again
@@ -4286,751 +3636,6 @@ class State:
 
 # ---------------------------------------------------------------- HTTP
 
-STEP_NAMES = {"apply": "write candidate (U)", "applymix": "WRITE MIX", "relink": "relink samples",
-              "materialize": "materialize pattern", "phrase": "accept phrase", "checkpoint": "restore checkpoint"}
-
-
-def _step_label(act, body):
-    """The undo step name for a request: what it does, in the page's words."""
-    if act == "edit":
-        groups = [g for g in (body.get("patterns") if isinstance(body.get("patterns"), list) else [body])
-                  if isinstance(g, dict)]
-        cells = sum(len(g["cells"]) for g in groups if isinstance(g.get("cells"), list))
-        names = ", ".join(str(g.get("pattern")) for g in groups[:4]) + (", …" if len(groups) > 4 else "")
-        return f"edit pattern {names}: {cells} cell{'s' * (cells != 1)}"
-    if act == "songedit" and isinstance(body.get("ops"), list):
-        return "song: " + ", ".join(dict.fromkeys(str(o.get("op")).replace("_", " ") for o in body["ops"]
-                                                  if isinstance(o, dict)))
-    if act == "section":
-        return f"section {body.get('action', 'save')} {body.get('name', '')}".strip()
-    return STEP_NAMES.get(act, act)
-
-
-class Handler(BaseHTTPRequestHandler):
-    state: State = None
-    song_lock = threading.RLock()
-    pending_recording = None  # unsaved passes retained in memory until saved or explicitly discarded
-    window = None  # pywebview window, when the UI runs in one
-
-    recorder = None      # record.Recorder, made on the RECORD tab's first request
-    rec_devices = None   # the input devices, listed once (again on REFRESH)
-    library = None       # library.Library, read on the first FIND SIMILAR or MAP request
-    faust_job = None     # the faustwasm download: {"status", "got", "size", "error"}
-
-    @classmethod
-    def fetch_faust(cls):
-        from . import faust
-        if cls.faust_job and cls.faust_job["status"] == "fetching":
-            return cls.faust_job
-        job = cls.faust_job = {"status": "fetching", "got": 0, "size": 0, "error": None}
-
-        def run():
-            try:
-                faust.fetch(lambda got, size: job.update(got=got, size=size))
-                job["status"] = "done"
-            except (OSError, ValueError) as e:
-                job.update(status="failed", error=f"{type(e).__name__}: {e}")
-        threading.Thread(target=run, daemon=True).start()
-        return job
-
-    @classmethod
-    def rec(cls):
-        if cls.recorder is None:
-            from .record import Recorder
-            if _read_json(REC_SETTINGS, {}, []).get("asio"):  # sounddevice loads its ASIO build only when this is set first
-                os.environ.setdefault("SD_ENABLE_ASIO", "1")
-            cls.recorder = Recorder()
-        return cls.recorder
-
-    @classmethod
-    def rec_snapshot(cls, devices=False):
-        """The RECORD tab's state: the input devices, the recorder's meters and tuner, the song's takes."""
-        from .record import MODE_NAMES, RecordError
-        r = cls.rec()
-        out = {"available": True, "error": None, "fake": bool(os.environ.get("VT_FAKE_AUDIO")),
-               "asio": bool(os.environ.get("SD_ENABLE_ASIO")), "asio_saved": bool(_read_json(REC_SETTINGS, {}, []).get("asio")),
-               "modes": MODE_NAMES}
-        try:
-            if devices or cls.rec_devices is None:
-                cls.rec_devices = r.devices()
-                cls.rec_outputs = r.outputs()
-            out["devices"] = cls.rec_devices
-            out['outputs'] = getattr(cls, 'rec_outputs', [])
-        except RecordError as e:
-            out.update(available=False, error=str(e), devices=[])
-        out["status"] = r.status()
-        out["takes"] = cls.state.takes if cls.state else []
-        out["status"]["pending_save"] = bool(cls.pending_recording)
-        from . import record
-        if out["status"]["finished"] and not r.spill_id and cls.state is not None:  # backing passes done, not saved yet
-            try:
-                takes, plan = r.peek_takes()
-                if takes:
-                    r.spill_id = record.spill(takes, r.rate, cls.state.song_path, plan["loops"] if plan else 0)
-            except OSError:
-                pass
-        live = {r.spill_id, (cls.pending_recording or {}).get("spill")}
-        out["unsaved"] = [s for s in record.spilled() if s["id"] not in live]
-        return out
-
-    @classmethod
-    def rec_command(cls, body):
-        with cls.song_lock:
-            return cls._rec_command(body)
-
-    @classmethod
-    def _rec_command(cls, body):
-        """POST /api/rec: {cmd: open (device, mode, rate, exclusive) | mode | close | start (preroll) | stop (name, trim,
-        trim_db, root, dest: candidate / slot / keep) | discard}."""
-        from .record import RecordError
-        r, cmd = cls.rec(), body.get("cmd")
-        try:
-            if cmd in ('open', 'mode', 'close', 'start', 'calibrate', 'recover') and (cls.pending_recording or r.recording):
-                raise RecordError('Save or discard the current take first')
-            if cmd == 'recover':  # passes an earlier session kept, back as the take to save (the song open now)
-                from .record import load_spill
-                if cls.state is None:
-                    raise RecordError('open a song first: takes are saved beside it')
-                takes, rate, loops = load_spill(str(body.get('id')))
-                cls.pending_recording = dict(takes=takes, rate=rate, saved=[], file=None, spill=str(body['id']),
-                                             plan={'loops': loops, 'calibration': False} if loops else None)
-                return {}
-            if cmd == 'forget':  # kept passes thrown away
-                from .record import unspill
-                unspill(str(body.get('id')))
-                return {}
-            if cmd in ('start', 'stop', 'send', 'multisample'):
-                if cls.state is None:
-                    raise RecordError('open a song first')
-                cls.state._writable()
-            if cmd == "open":
-                r.open(int(body["device"]), str(body.get("mode") or "1"), int(body.get("rate") or 44100),
-                       bool(body.get("exclusive")))
-            elif cmd == "mode":
-                r.set_mode(str(body["mode"]))
-            elif cmd == "close":
-                r.close()
-            elif cmd == "start":
-                if cls.state is None:
-                    raise RecordError("open a song first: takes are saved beside it")
-                if r.recording:
-                    raise RecordError('Stop the current take first')
-                if body.get('backing'):
-                    from .export import snapshot, render
-                    from .resample import resample
-                    import numpy as np
-                    st = cls.state
-                    with st.lock:
-                        st._need_compiled()
-                        if st.dirty():
-                            raise RecordError('Compare and RELOAD external edits before recording')
-                        region = None
-                        if body.get('section'):
-                            a, b = st.song['sections'][body['section']]
-                            playable = [i for i in range(a, b) if st.mod.orders[i] < len(st.mod.patterns)]
-                            if not playable:
-                                raise RecordError('The selected section has no playable orders')
-                            a, b = playable[0], playable[-1]
-                            region = (a, 0, b, len(st.mod.patterns[st.mod.orders[b]].rows)-1)
-                        snap = snapshot(st.song, st.base_dir, region, st.mix(), st.silenced(), tail=0)
-                        bpm = st.facts['bpm']
-                    pcm = np.frombuffer(render(snap), dtype='<i2').astype(np.float32).reshape(-1, 2) / 32768
-                    if r.rate != RATE:
-                        pcm = np.stack([resample(pcm[:, c], RATE, r.rate) for c in range(2)], axis=1)
-                    if cls.state is not st:
-                        raise RecordError('The song changed while preparing playback; start again')
-                    r.start_backing(pcm, body['output'], countin=body.get('countin', 4), bpm=bpm,
-                                    loops=body.get('loops', 1), latency_ms=body.get('latency_ms', 0))
-                else:
-                    r.start(float(body.get("preroll") or 0))
-            elif cmd == 'calibrate':
-                from .record import calibration_signal
-                if not r.rate:
-                    raise RecordError('Open an input first')
-                r.start_backing(calibration_signal(r.rate), body['output'], countin=0, calibration=True)
-            elif cmd == "asio":  # takes effect at the next start: sounddevice has loaded its PortAudio already
-                REC_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_text(REC_SETTINGS, json.dumps({"asio": bool(body.get("on"))}))
-                now = bool(os.environ.get("SD_ENABLE_ASIO"))
-                return {} if now == bool(body.get("on")) else {"error": "saved: restart the app to switch the ASIO driver "
-                                                                        + ("on" if body.get("on") else "off")}
-            elif cmd == "send":
-                return {"take": cls.state.send_take(str(body["file"]), str(body.get("dest") or "candidate"))}
-            elif cmd == "multisample":  # the session's takes with a note as one instrument
-                return {"report": cls.state.takes_multisample(body.get("files"))}
-            elif cmd in ("stop", "discard"):
-                if cmd == 'discard':
-                    from .record import unspill
-                    unspill(r.spill_id)
-                    unspill((cls.pending_recording or {}).get('spill'))
-                    r.stop_takes()
-                    r.spill_id = None
-                    cls.pending_recording = None
-                    return {}
-                if cls.pending_recording is None:
-                    takes, plan = r.stop_takes()
-                    if plan and plan['calibration'] and takes:
-                        from .record import measure_latency
-                        return {'latency_ms': measure_latency(plan['pcm'], takes[0], r.rate)}
-                    if not takes:
-                        return {}
-                    sid = r.spill_id
-                    if sid is None:  # kept in the user folder until saved: a failed save or a crash keeps the passes
-                        from .record import spill
-                        try:
-                            sid = spill(takes, r.rate, cls.state.song_path, plan['loops'] if plan else 0)
-                        except OSError:
-                            sid = None
-                    r.spill_id = None
-                    cls.pending_recording = dict(takes=takes, plan=plan, rate=r.rate, saved=[], file=None, spill=sid)
-                pending = cls.pending_recording
-                while len(pending['saved']) < len(pending['takes']):
-                    i = len(pending['saved'])
-                    opts, plan = dict(body), pending['plan']
-                    if plan:
-                        opts['trim'] = False  # preserve placement against the backing track
-                        if plan['loops'] > 1:
-                            opts['name'] = str(body.get('name') or 'take') + f'-pass{i+1}'
-                    if pending['file'] is None:
-                        take = cls.state.save_take(pending['takes'][i], pending['rate'], dict(opts, dest='keep'))
-                        pending['file'] = take['file']
-                    take = cls.state.send_take(pending['file'], body.get('dest') or 'candidate')
-                    pending['saved'].append(take)
-                    pending['file'] = None
-                cls.pending_recording = None
-                from .record import unspill
-                unspill(pending.get('spill'))
-                return {'take': pending['saved'][-1], 'takes': pending['saved']}
-            else:
-                raise RecordError(f"unknown recorder command {cmd!r}")
-        except (RecordError, ValueError, OSError) as e:
-            return {"error": str(e)}
-        return {}
-
-    @classmethod
-    def lib(cls):
-        """The sample library's index (library.py), read on first use."""
-        if cls.library is None:
-            from .library import Library, default_index
-            cls.library = Library(default_index())
-        return cls.library
-
-    @classmethod
-    def lib_snapshot(cls):
-        from .library import default_roots
-        lib = cls.library
-        if lib is None:
-            return {"loaded": False}
-        return {"loaded": True, "index": str(lib.path), "roots": lib.data["roots"], "default_roots": default_roots(),
-                "status": lib.status, "count": lib.count(), "generation": lib.generation,
-                "busy": bool(lib.job and lib.job.is_alive())}
-
-    @classmethod
-    def open_song(cls, path, agent_request=False):
-        with cls.song_lock:
-            if CHAT.busy and not agent_request:
-                raise ValueError('Stop the agent before opening another song')
-            if cls.pending_recording or (cls.recorder is not None and cls.recorder.recording):
-                raise ValueError('Save or discard the recording before opening another song')
-            old, cls.state = cls.state, State(path)  # the same song opened again shares the old state's lock
-            if agent_request:
-                CHAT.tool_state = cls.state
-            if old is not None:
-                old.close()
-            remember_song(cls.state.song_path)
-
-    @classmethod
-    def browse(cls, wav=False, module=False, sf2=False):
-        """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module; with `sf2`,
-        SoundFont) path or None."""
-        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Module tab and MIDI files", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("SoundFonts and GUS patches", "*.sf2;*.pat") if sf2 else ("Song files", "*.yaml;*.yml")
-        if cls.window is not None:
-            import webview
-            r = cls.window.create_file_dialog(webview.OPEN_DIALOG, file_types=(f"{kind} ({pat})", "All files (*.*)"))
-            return r[0] if r else None
-        from tkinter import Tk, filedialog
-        root = Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        r = filedialog.askopenfilename(parent=root, title="VultureTracker", filetypes=[(kind, pat.replace(";", " ")), ("All files", "*")])
-        root.destroy()
-        return r or None
-
-    def log_message(self, *a):
-        pass
-
-    def _send(self, code, body, ctype="application/json"):
-        if not isinstance(body, bytes):
-            body = json.dumps(body).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
-    def _send_file(self, path, ctype):
-        p = Path(path)
-        try:
-            f = p.open("rb")
-        except OSError:
-            return self._send(404, {"error": "not found"})
-        with f:
-            self._send_range(f, os.fstat(f.fileno()).st_size, ctype)
-
-    def _send_range(self, f, size, ctype):
-        """The open file `f`, or the byte range the request names, read and sent in pieces (a render is tens of MB, and
-        the page asks for it range by range as it plays and seeks)."""
-        start, end = 0, size - 1
-        rng = self.headers.get("Range")
-        code = 200
-        if rng and rng.startswith("bytes="):
-            a, _, b = rng[6:].split(",")[0].strip().partition("-")  # one range: the first of a list
-            try:
-                if a:
-                    start, end = int(a), min(int(b), end) if b else end
-                elif b:  # the last b bytes
-                    start = max(0, size - int(b))
-                else:
-                    raise ValueError
-            except ValueError:
-                return self._send(400, {"error": f"bad Range header: {rng}"})
-            if start > end or start >= size:
-                self.send_response(416)
-                self.send_header("Content-Range", f"bytes */{size}")
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            code = 206
-        self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(end - start + 1))
-        if code == 206:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.end_headers()
-        f.seek(start)
-        left = end - start + 1
-        while left > 0:
-            piece = f.read(min(left, 1 << 20))
-            if not piece:
-                break
-            self.wfile.write(piece)
-            left -= len(piece)
-
-    def _foreign(self):
-        """A request from another web page (its Origin is not this server's), or one that reached the server under another
-        host name (a DNS-rebinding page): refused, since the POSTs open, create and write files. The page's own requests
-        carry this origin; local tools (the tests, scripts) send none."""
-        port = self.server.server_address[1]
-        if (self.headers.get("Host") or "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost"):
-            return True
-        origin = self.headers.get("Origin")
-        return origin is not None and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
-
-    def _guarded(fn):
-        """An unexpected error is logged and answered with a 500 and its message: the page is never left without one."""
-        @functools.wraps(fn)
-        def run(self):
-            try:
-                return fn(self)
-            except ConnectionError:
-                raise
-            except Exception as e:  # noqa: BLE001
-                _log.exception("%s %s failed", self.command, self.path.split("?")[0])
-                try:
-                    self._send(500, {"error": logged(f"{type(e).__name__}: {e}")})
-                except OSError:
-                    pass
-        return run
-
-    @_guarded
-    def do_GET(self):
-        if self._foreign():
-            return self._send(403, {"error": "not this app's page"})
-        st = self.state
-        path = self.path.split("?")[0]
-        if path == "/":
-            return self._send(200, HTML.read_bytes().replace(b"<title>VultureTracker</title>", f"<title>VultureTracker {__version__}</title>".encode()),
-                              "text/html; charset=utf-8")
-        if path == "/engine-worklet.js":
-            return self._send(200, worklet_js(), "text/javascript; charset=utf-8")
-        if path == "/web/libopenmpt.wasm":
-            return self._send(200, WEB.joinpath("libopenmpt.wasm").read_bytes(), "application/wasm")
-        if path == "/icon.png":
-            return self._send(200, HTML.with_name("icon.png").read_bytes(), "image/png")
-        if path == "/api/state":
-            return self._send(200, {**(st.snapshot() if st else start_snapshot()), "library": self.lib_snapshot()})
-        if path == "/api/library":
-            self.lib()
-            return self._send(200, self.lib_snapshot())
-        if path == "/api/libmap":
-            return self._send(200, self.lib().map())
-        if path == "/api/libnear":  # the nearest sounds of an indexed one, for the map (nothing is added)
-            from urllib.parse import parse_qs
-            q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
-            lib = self.lib()
-            if not lib.has(q.get("path", "")):
-                return self._send(404, {"error": "not in the library"})
-            return self._send(200, {"near": lib.nearest(q["path"], max(1, min(50, int(q.get("k") or 8))))})
-        if path == "/api/faust":
-            from . import faust
-            return self._send(200, {"have": faust.have(), "dir": str(faust.faust_dir()), "version": faust.VERSION,
-                                    "job": Handler.faust_job})
-        if path == "/web/faust-render.mjs":
-            return self._send(200, WEB.joinpath("faust-render.mjs").read_bytes(), "text/javascript; charset=utf-8")
-        if path.startswith("/faust/"):  # the fetched faustwasm files, nothing else
-            from . import faust
-            base = faust.faust_dir().resolve()
-            f = (base / path[7:]).resolve()
-            if not f.is_relative_to(base) or not f.is_file():
-                return self._send(404, {"error": "not found"})
-            kind = {".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm"}.get(f.suffix, "application/octet-stream")
-            return self._send(200, f.read_bytes(), kind)
-        if path == "/libwav":
-            from urllib.parse import parse_qs
-            f = parse_qs(self.path.partition("?")[2]).get("path", [""])[0]
-            if not self.lib().has(f):  # a sound of the index, nothing else
-                return self._send(404, {"error": "not in the library"})
-            return self._send_file(f, "audio/wav")
-        if path == "/api/effects":
-            return self._send(200, effect_help())
-        if path == "/api/tools":  # the agent tools (agent.py), for the MCP server
-            return self._send(200, {"tools": agent.tool_list(), "song": str(self.state.song_path) if self.state else None})
-        if path == "/api/start":
-            return self._send(200, start_snapshot())
-        if path == "/api/rec":
-            return self._send(200, self.rec_snapshot("devices=1" in self.path))
-        if st is None:
-            return self._send(404, {"error": "no song open"})
-        if path.startswith("/take/"):
-            f = st.takes_dir / Path(unquote(path[6:])).name  # a file of the song's takes folder, nothing else
-            return self._send_file(f, "audio/wav")
-        if path.startswith("/api/autoloop/"):
-            try:
-                return self._send(200, st.auto_loop(int(path[14:])))
-            except (ValueError, OSError, ImportError) as e:
-                return self._send(404, {"error": f"{type(e).__name__}: {e}"})
-        if path.startswith("/api/pattern/"):
-            try:
-                return self._send(200, st.pattern_rows(int(path[13:])))
-            except (ValueError, IndexError, AttributeError):
-                return self._send(404, {"error": "no such pattern"})
-        if path.startswith("/api/slices/"):
-            from urllib.parse import parse_qs
-            q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
-            try:
-                return self._send(200, st.slice_points(int(path[12:]), q.get("mode", "onsets"), float(q.get("value", 50)),
-                                                       q.get("a"), q.get("b"), q.get("bpm"), q.get("snap")))
-            except (ValueError, OSError, ImportError) as e:
-                return self._send(404, {"error": f"{type(e).__name__}: {e}"})
-        if path.startswith("/api/wave/"):
-            from urllib.parse import parse_qs
-            q = {k: v[0] for k, v in parse_qs(self.path.partition("?")[2]).items()}
-            try:
-                return self._send(200, st.sample_view(int(path[10:]), q.get("a", 0), q.get("b"), q.get("n", 1000)))
-            except (ValueError, OSError, ImportError) as e:
-                return self._send(404, {"error": f"{type(e).__name__}: {e}"})
-        if path.startswith("/api/sounding/"):
-            try:
-                return self._send(200, {"rows": st.sounding_rows(int(path[14:]))})
-            except (ValueError, IndexError, AttributeError, TypeError):
-                return self._send(404, {"error": "no such order"})
-        if path.startswith("/wav/"):
-            k = path[5:]
-            r = st.renders.get(k)
-            return self._send_file(r["file"], "audio/wav") if r and r["status"] == "ready" else self._send(404, {"error": "not rendered"})
-        if path.startswith("/spec/"):
-            r = st.renders.get(path[6:])
-            if not r or r["status"] != "ready":
-                return self._send(404, {"error": "not rendered"})
-            p = Path(r["file"])
-            try:
-                png = spectrogram_png(str(p), f"{p.stat().st_mtime}:{p.stat().st_size}", "lin" if "scale=lin" in self.path else "log")
-            except (OSError, ImportError, wave.Error, ValueError) as e:
-                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
-            return self._send(200, png, "image/png")
-        if path.startswith("/api/meters/"):  # a render's short-term loudness and stereo sums every 0.1 s (dsp.meter_series)
-            r = st.renders.get(path[12:])
-            if not r or r["status"] != "ready":
-                return self._send(404, {"error": "not rendered"})
-            p = Path(r["file"])
-            try:
-                return self._send(200, _meters(str(p), (p.stat().st_mtime_ns, p.stat().st_size)))
-            except (OSError, ImportError, ValueError) as e:
-                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
-        if path.startswith("/refspec/"):  # ?view=ref|delta&scale=log|lin
-            try:
-                png = st.reference_png(path[9:], "delta" if "view=delta" in self.path else "ref", "lin" if "scale=lin" in self.path else "log")
-            except (OSError, ImportError, wave.Error, ValueError) as e:
-                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
-            return self._send(200, png, "image/png")
-        if path.startswith("/api/refdiff/"):
-            try:
-                *_, cols, gain, covered = st.reference_compare(path[13:])
-            except (OSError, ImportError, wave.Error, ValueError) as e:
-                return self._send(400, {"error": f"{type(e).__name__}: {e}"})
-            live = sorted(v for v in cols if v is not None)
-            return self._send(200, {"cols": cols, "median": live[len(live) // 2] if live else None, "gain_db": gain, "covered": covered})
-        if path.startswith("/raw/"):
-            try:
-                c = st.cand(path[5:])
-            except (ValueError, IndexError):
-                return self._send(404, {"error": "no such candidate"})
-            return self._send_file(c, "audio/wav")
-        if path.startswith("/api/diff/") or path == "/api/mixdiff":
-            try:
-                return self._send(200, st.mix_diff() if path == "/api/mixdiff" else st.diff(st.cand(path[10:])))
-            except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError) as e:
-                return self._send(400, {"error": f"{type(e).__name__}: {e}"})
-        if path == "/api/it":
-            try:
-                return self._send(200, st.live_it(), "application/octet-stream")
-            except (SongError, OSError, ValueError, OpenMPTError) as e:
-                return self._send(400, {"error": "\n".join(getattr(e, "errors", []) or [str(e)])})
-        self._send(404, {"error": "not found"})
-
-    @_guarded
-    def do_POST(self):
-        if self._foreign():
-            return self._send(403, {"error": "not this app's page"})
-        st = self.state
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > 512 << 20:  # a size from the request is what rfile.read allocates
-            return self._send(413, {"error": "the request is over 512 MiB"})
-        act = self.path.split("?")[0].rsplit("/", 1)[-1]
-        if act == "upload":  # raw WAV bytes, ?name=
-            from urllib.parse import parse_qs
-            try:
-                name = parse_qs(self.path.partition("?")[2]).get("name", ["dropped.wav"])[0]
-                return self._send(200, {"path": str(st.save_upload(name, self.rfile.read(n)))})
-            except (AttributeError, ValueError, OSError, struct.error) as e:
-                return self._send(400, {"error": f"{type(e).__name__}: {e}"})
-        try:
-            body = json.loads(self.rfile.read(n) or b"{}")
-            if not isinstance(body, dict):
-                raise ValueError("the request body must be a JSON object")
-            LABEL.name = _step_label(act, body)
-            if act == "open":
-                self.open_song(body["path"])
-            elif act == "new":
-                self.open_song(create_song(body["path"], body.get("channels") or 8, body.get("sample") or None))
-            elif act == "import":  # a module converted beside itself and opened; `browse` picks it in a dialog
-                src = self.browse(module=True) if body.get("browse") else body.get("path")
-                if not src:
-                    return self._send(200, {"path": None})
-                out, warnings = import_beside(src)
-                self.open_song(out)
-                return self._send(200, {"path": str(out), "warnings": warnings})
-            elif act == "browsewav":
-                return self._send(200, {"path": self.browse(wav=True)})
-            elif act == "relinkhints" and st is not None:  # PROJECT's missing samples: same-named WAVs in the library
-                return self._send(200, st.relink_hints(self.lib()))
-            elif act == "sf2presets":  # a SoundFont's presets for the Instruments tab (`browse` picks the bank first)
-                from .sf2 import presets
-                p = self.browse(sf2=True) if body.get("browse") else body.get("path")
-                if not p:
-                    return self._send(200, {"path": None})
-                data = Path(str(p)).read_bytes()
-                found = [[0, 0, "the patch"]] if data[:8] == b"GF1PATCH" else [list(x) for x in presets(data)]
-                return self._send(200, {"path": str(p), "presets": found})
-            elif act == "rec":
-                return self._send(200, self.rec_command(body))
-            elif act == "fetchfaust":  # faustwasm from npm, on a thread; GET /api/faust reports it
-                return self._send(200, self.fetch_faust())
-            elif act == "library":  # roots: the folders to index (saved); then a scan, waited for a moment
-                lib = self.lib()
-                if body.get("roots") is not None:
-                    if lib.job and lib.job.is_alive():
-                        raise ValueError("the library is busy: wait for the scan to finish")
-                    lib.set_roots(body["roots"])
-                res = lib.run(lib.scan, 0.5) if body.get("scan", True) else None
-                return self._send(200, {"result": res, **self.lib_snapshot()})
-            elif act == "tool":  # an agent tool run on the open song (the MCP server's calls)
-                if body.get("run_id") is not None:
-                    return self._send(200, CHAT.remote_tool(st, str(body.get("name")), body.get("args") or {}, body["run_id"]))
-                return self._send(200, agent.run(st, str(body.get("name")), body.get("args") or {}))
-            elif act == "chatsettings":
-                return self._send(200, agent.save_settings(body))
-            elif act == "chatmodels":
-                return self._send(200, agent.discover_models(body))
-            elif act == "browse":
-                p = self.browse()
-                if p:
-                    self.open_song(p)
-                return self._send(200, {"path": p})
-            elif st is None:
-                return self._send(404, {"error": "no song open"})
-            elif act == "selection":
-                st.selection = body.get("selection")
-                return self._send(200, {"ok": True})
-            elif act == "uistate":
-                if body.get("song") != str(st.song_path):
-                    raise ValueError("UI report belongs to another song")
-                report = body.get("state")
-                if not isinstance(report, dict) or len(json.dumps(report)) > 8192:
-                    raise ValueError("invalid UI state report")
-                with st.lock:
-                    st.ui_state = {**report, "reported_at": time.time()}
-                    return self._send(200, {"cue": st.cue})
-            elif act == "chat":
-                if body.get("stop"):
-                    CHAT.stop()
-                elif body.get("compact"):
-                    CHAT.compact(st)
-                elif body.get("clear"):
-                    CHAT.clear()
-                else:
-                    CHAT.send(st, str(body.get("text") or "").strip(), body.get("context"))
-            elif act == "slot":
-                if not 1 <= int(body["slot"]) <= 99:
-                    raise ValueError("a slot is 1-99")
-                st.meta["slot"] = int(body["slot"])
-                st.save_meta()
-                st.queue_all()
-            elif act == "orders":
-                o = body.get("orders")
-                if o is not None and not (isinstance(o, list) and len(o) == 2 and all(type(x) is int for x in o) and 0 <= o[0] < o[1]):
-                    raise ValueError("the section is null or [first order, last order + 1]")
-                st.meta["orders"] = o
-                st.save_meta()
-                st.queue_all()
-            elif act == "loop":
-                st.set_loop(body)
-            elif act == "reference":  # path or browse sets it, offset (ms) moves it, align (with key) lines it up, clear
-                return self._send(200, st.set_reference(self.browse(wav=True) if body.get("browse") else body.get("path"), body))
-            elif act == "mute":
-                muted, solo = sorted({int(i) for i in body.get("muted", [])}), None if body.get("solo") is None else int(body["solo"])
-                if any(not 0 <= i < 64 for i in muted + ([solo] if solo is not None else [])):  # patch_it writes header byte 0x40 + i
-                    raise ValueError("a channel is 0-63")
-                st.meta["muted"], st.meta["solo"] = muted, solo
-                st.save_meta()
-                st.queue_all()
-            elif act == "add":
-                return self._send(200, {"added": st.add_candidates(body["globs"])})
-            elif act == "remove":
-                st.remove_candidate(st.cand(body["id"]))
-            elif act == "rate":
-                c = st.cand(body["id"])
-                if "stars" in body and (type(body["stars"]) is not int or not 0 <= body["stars"] <= 5):
-                    raise ValueError("stars are a whole number 0-5")
-                r = st.meta["ratings"].setdefault(c, {})
-                for k, kind in (("stars", int), ("rejected", bool), ("note", str)):
-                    if k in body:
-                        r[k] = kind(body[k])
-                st.save_meta()
-            elif act == "similar":  # the slot's WAV, a candidate (id) or any WAV (path): its nearest become candidates
-                q = body.get("path") or (st.cand(body["id"]) if body.get("id") is not None else st.current_file())
-                if not q or not Path(q).exists():
-                    raise ValueError("nothing to compare: the slot has no WAV on disk")
-                lib = self.lib()
-                res = lib.run(lambda: st.find_similar(lib, q, body.get("k") or 8), max(0.0, min(60.0, float(body.get("wait", 20)))))
-                if res and res.get("error"):
-                    return self._send(400, res)
-                return self._send(200, res or {"pending": True, "report": lib.status.get("message")})
-            elif act == "paint":  # the PAINT tab: previews answer with WAV bytes, the rest with a report
-                res = st.paint(body)
-                if isinstance(res, bytes):
-                    return self._send(200, res, "audio/wav")
-                return self._send(200, res)
-            elif act == "place":  # a WAV the page uploaded (the FAUST tab's render): to the candidates or a new slot
-                f = Path(str(body["path"])).resolve()
-                if f.parent != st.base_dir or f.suffix.lower() != ".wav":
-                    raise ValueError("only a WAV beside the song")
-                report = f"{f.name} " + st.place_wav(f, body.get("dest"), bool(body.get("stereo")))
-                if isinstance(body.get("faust"), dict):  # the FAUST tab's code and settings: its recipe entry
-                    report += st.faust_recipe(f, body["faust"])
-                return self._send(200, {"report": report})
-            elif act == "faustcode":  # the FAUST tab's code as it is typed, kept with the song
-                st.meta["faust_code"] = str(body.get("code") or "")[:200000]
-                st.save_meta()
-            elif act == "want":
-                st.set_want(st.cand(body["id"]) if body.get("id") is not None else None)
-            elif act == "note":
-                return self._send(200, st.add_note(body))
-            elif act == "noteedit":
-                st.edit_note(int(body["id"]), body)
-            elif act == "retry":
-                st.retry(st.cand(body["id"]))
-            elif act == "apply":
-                st.apply(st.cand(body["id"]))
-            elif act == "mix":
-                st.set_mix(body)
-            elif act == "edit":  # one pattern (pattern, cells) or several in one step (patterns: [{pattern, cells}])
-                st.edit_patterns([(g["pattern"], g["cells"]) for g in body["patterns"]] if "patterns" in body
-                                 else [(body["pattern"], body["cells"])])
-            elif act == "phrase":
-                from .phrases import action
-                return self._send(200, action(st, body))
-            elif act == "section":
-                st.section_edit(body)
-            elif act == "songedit":
-                return self._send(200, {"ok": True, **(st.song_edit(body["ops"]) or {})})
-            elif act in ("undo", "redo"):
-                st.undo(redo=act == "redo")
-            elif act == "applymix":
-                st.apply_mix()
-            elif act == "reciperender":
-                st.request_recipe_render(body.get("spec"))
-            elif act == "recipewrite":
-                st.recipe_write(body.get("spec"))
-            elif act == "fetchsynth":
-                st.request_fetch_synth(body.get("kind"))
-            elif act == "external":
-                return self._send(200, st.external_diff())
-            elif act == "collect":
-                return self._send(200, collect(st, body['destination'], bool(body.get('zip')), body.get('browser')))
-            elif act == "relink":
-                st.relink(body.get('num'), body.get('path'), body.get('links'))
-            elif act == "projectsettings":
-                settings = body.get('settings')
-                if not isinstance(settings, dict) or len(json.dumps(settings)) > 2 * 1024 * 1024:
-                    raise ValueError('Project browser settings must be an object under 2 MiB')
-                st.meta['project_settings'] = settings
-                st.save_meta()
-            elif act == "materialize":
-                st.materialize_pattern(body['pattern'])
-            elif act == "trimhistory":
-                st.trim_history(body.get('keep', 0))
-            elif act == "checkpoint":
-                return self._send(200, st.checkpoint(body.get('name', ''), body.get('action', 'save')))
-            elif act == "reload":
-                if body.get('token') and digest(st.song_path.read_bytes()) != body['token']:
-                    raise ValueError('The external file changed again; compare it again before reloading')
-                st.reload()
-            elif act == 'export':
-                st.request_export(body)
-            elif act == 'cancelexport':
-                st.cancel_export()
-            elif act == "build":
-                st.request_build(bool(body.get("render")))
-            elif act == "stems":
-                st.request_stems(body.get("fmt", "wav"), body.get("song", False), body.get("stems", True))
-            else:
-                return self._send(404, {"error": "unknown action"})
-        except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError, SongError, OpenMPTError, struct.error) as e:
-            return self._send(400, {"error": f"{type(e).__name__}: {e}"})  # a bad request is answered, never dropped
-        self._send(200, {"ok": True})
-
-
-class _Server(ThreadingHTTPServer):
-    allow_reuse_address = False  # on Windows SO_REUSEADDR would let a second app take a port the first still listens on
-
-    def handle_error(self, request, client_address):
-        """A page that went away mid-answer (closed, reloaded, a seek that cancelled a request) is no error to print."""
-        if not isinstance(sys.exc_info()[1], ConnectionError):
-            _log.exception("A request from %s failed", client_address[0])
-
-
-def make_server(port=0):
-    """The HTTP server on `port`; 0 means PORT when it is free (a second app window gets any free port)."""
-    if not port:
-        try:
-            return _Server(("127.0.0.1", PORT), Handler)
-        except OSError:
-            pass
-    return _Server(("127.0.0.1", port), Handler)
-
 
 def no_webview2():
     """True when pywebview would draw the window with Internet Explorer (Windows without the WebView2 runtime): that
@@ -5051,7 +3656,7 @@ def serve(song_path=None, port=0, open_browser=True, window=True):
     """Serve the UI. With pywebview installed (and `window`), it opens in a native window; else the default
     browser. `song_path` may be None: the UI then starts on its open-a-song screen."""
     start_log()
-    for p in LOCKS.glob("*.lock"):  # left by sessions that ended (the system let go of their locks)
+    for p in server.LOCKS.glob("*.lock"):  # left by sessions that ended (the system let go of their locks)
         f = lock_file(p)
         if f:
             unlock_file(f)
@@ -5060,11 +3665,11 @@ def serve(song_path=None, port=0, open_browser=True, window=True):
             except OSError:  # another app window took it this moment
                 pass
     if song_path:
-        Handler.open_song(song_path)
-    srv = make_server(port)
-    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+        server.Handler.open_song(song_path)
+    srv = server.make_server(port)
+    url = f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}"
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    agent.announce(srv.server_address[1])
+    agent.announce(srv.server_address[1], srv.token)
     if window:
         try:
             import webview
@@ -5080,7 +3685,7 @@ def serve(song_path=None, port=0, open_browser=True, window=True):
             ctypes.windll.user32.MessageBoxW(None, msg, f"VultureTracker {__version__}", 0x40)  # the windowed exe's way to quit
             return 0
         if webview:
-            Handler.window = webview.create_window(f"VultureTracker {__version__}", url, width=1400, height=900, min_size=(1000, 600), background_color="#0a0c0d")
+            server.Handler.window = webview.create_window(f"VultureTracker {__version__}", url, width=1400, height=900, min_size=(1000, 600), background_color="#0a0c0d")
             webview.start(private_mode=False, storage_path=str(PROFILE))
             return 0
     print(f"VultureTracker GUI: {url}  (Ctrl+C to stop)")

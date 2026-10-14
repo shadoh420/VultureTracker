@@ -37,7 +37,10 @@ song.yaml ──build──▶ song.it ──render──▶ .wav / .mp3 / .ogg 
 ## Install
 
 **Windows:** download `vulturetracker-win64.zip` from the [latest release](https://github.com/shadoh420/VultureTracker/releases/latest),
-unzip it and run `vulturetracker.exe`.
+unzip it and run `vulturetracker.exe`. The exe is not code-signed, so Windows SmartScreen may warn about an unknown
+publisher. Check that it is the published file before running it: `certutil -hashfile vulturetracker.exe SHA256` (or
+`Get-FileHash vulturetracker.exe` in PowerShell) must print the SHA-256 listed in the release notes; for 1.6.0 it is
+`d3aea01c19764e2c63d5aa6b0ec7303afc4e732693d415ecbb2fee6efa5e361b`.
 
 **From source** (Python 3.10+; tested on Windows and Linux; outside Windows install libopenmpt, e.g.
 `apt install libopenmpt0t64`):
@@ -49,6 +52,12 @@ pip install -e ".[all]"
 python -m vulturetracker gui demo2/iron_relay.yaml
 ```
 
+The app is a small web server on 127.0.0.1 (port 8723; a second window takes the next free one) shown in its own
+window, or in your browser without pywebview or WebView2. Nothing outside your computer can reach it, and each launch
+makes a token that every request must carry, so another web page cannot use it either. It writes `running.json` (the
+port and that token, for the MCP bridge) and its log, `vulturetracker.log`, to your user folder: `%APPDATA%\VultureTracker`
+on Windows, `~/Library/Application Support/VultureTracker` on macOS, `~/.config/VultureTracker` elsewhere.
+
 ## Use
 
 ```
@@ -59,12 +68,66 @@ python -m vulturetracker import some.xm -o some.yaml       # a module, tab, MIDI
 python -m vulturetracker --help                            # every command
 ```
 
+## What the app writes beside your song
+
+For `song.yaml` the app keeps, in the same folder:
+
+- `song.tryout.json`: the tryout's candidates, ratings, mutes and the unwritten mix;
+- `song.notes.json` and `song.notes.md`: your listening notes (notes made against an older version of the song move to
+  `song.notes-<hash>.json` and `.md`);
+- `song.history.json`: the undo history and checkpoints, and `song.recovery.json` while a save is under way;
+- `.tryout/`: rendered audio, a cache that is pruned (to 2 GiB) and safe to delete;
+- `takes/`: recordings from the RECORD tab;
+- new WAVs the song may come to use: FLAC, AIFF, OGG and MP3 files converted to WAV, processed or sliced samples,
+  recipe renders (`<name>-r1.wav`, ...), PAINT, FAUST and agent renders (`agent-*.wav` and `.yaml`). These are part of
+  the song once it plays them.
+
+In a git repository of songs, this keeps the app's working files out and the song's sounds in:
+
+```
+*.tryout.json
+*.notes.json
+*.notes.md
+*.notes-*.json
+*.notes-*.md
+*.history.json
+*.recovery.json
+.tryout/
+```
+
+Keep `takes/` too if you want the raw recordings under version control; leave it out otherwise.
+
+## Working with an AI agent
+
+Optional, and off until you choose a provider. The **AGENT** button opens a chat panel; in its SETTINGS pick Claude Code
+(your own sign-in, no key), the Anthropic API, Gemini, or a local OpenAI-compatible server (Ollama, LM Studio,
+llama.cpp). The model edits the open song only through the app's tools: each edit is one undo step, faders and
+approved material are left alone, sounds are offered as tryout candidates, and file paths reach only the song's folder
+and your sample library folders. Replacing earlier exports needs your ALLOW REPLACE first.
+
+Other agents (Claude Code, Claude Desktop, any MCP client) can use the same tools on the song open in the app:
+
+```
+claude mcp add vulturetracker -- python -m vulturetracker mcp
+```
+
+**What leaves your computer:** what you type in the chat and what the tools read for the model (the song's text:
+patterns, names, the module message and comments; your listening notes; file names in your sample library) go to the
+provider you chose, and to nothing else. A local server keeps it on your machine. The panel says this once per
+provider before the first message.
+
+**Where the key lives:** in the OS credential store when the `keyring` package works (`pip install -e ".[agent]"`), else
+in `agent.json` in your user folder as plain text; SETTINGS says which. With no key stored, the Anthropic API uses
+`ANTHROPIC_API_KEY` and Gemini `GOOGLE_API_KEY` or `GEMINI_API_KEY`, and SETTINGS names the variable.
+**To turn it off:** set the provider to *off* in SETTINGS (FORGET KEY drops the stored key), and close the panel with
+the AGENT button.
+
 ## Privacy and security
 
 The app is a local server on 127.0.0.1 with no telemetry. It goes online only for downloads you start (checked against
 pinned SHA-256 digests) and for the AGENT panel, which sends the open song to the provider you chose. Settings and API
-keys stay in your user folder. Each release lists the SHA-256 of its files (`certutil -hashfile vulturetracker.exe
-SHA256` on Windows); the exe is not code-signed. [SECURITY.md](SECURITY.md) explains private vulnerability reports.
+keys stay in your user folder. Each release lists the SHA-256 of its files (Install says how to check the exe).
+[SECURITY.md](SECURITY.md) explains private vulnerability reports.
 
 ## Reporting a problem
 

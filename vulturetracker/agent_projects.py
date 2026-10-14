@@ -2,11 +2,17 @@
 import copy
 from pathlib import Path
 
-from .agent import tool, _integer, _boolean, _approved_channels, _voice_guard
+from .agent import tool, _integer, _boolean, _approved_channels, _voice_guard, reach
 from . import phrases
 
 
 def _path(st, value):
+    return reach(st, value)
+
+
+def _new_path(st, value):
+    """Where create_project and collect_project write: anywhere, since both make only new files and folders (an existing
+    destination is refused) and collect must go outside the song's folder; everything else they read is the project's."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError('give a file or folder path')
     return ((st.base_dir if st else Path.cwd()) / Path(value).expanduser()).resolve()
@@ -134,7 +140,7 @@ def phrase_diff(st, a):
 @tool('project_status', 'Inspect the open project path, compile/read-only/external-change status and each sample '
       'file path/existence. With no song open, returns the app start screen recent/demo paths.', {})
 def project_status(st, a):
-    from .gui import start_snapshot
+    from .server import start_snapshot
     if st is None:
         return start_snapshot()
     with st.lock:
@@ -155,7 +161,7 @@ def create_project(st, a):
     if sample:
         from .wavload import read_wav
         read_wav(sample)
-    path = create_song(_path(st, a['path']), _integer(a.get('channels', 8), 1, 64, 'channels'), sample)
+    path = create_song(_new_path(st, a['path']), _integer(a.get('channels', 8), 1, 64, 'channels'), sample)
     return {'path': str(path), 'summary': 'new project created; use open_project to switch to it'}
 
 
@@ -178,7 +184,7 @@ def import_project(st, a):
       'Opening is not a song undo step. Use import_project first for modules/MIDI/tabs.',
       {'path': {'type': 'string'}}, ['path'])
 def open_project(st, a):
-    from .gui import Handler
+    from .server import Handler
     if Handler.state is not st:
         raise ValueError('the open project changed; inspect project_status again')
     path = _path(st, a['path'])
@@ -204,7 +210,7 @@ def open_project(st, a):
       {'destination': {'type': 'string'}, 'zip': {'type': 'boolean'}}, ['destination'])
 def collect_project(st, a):
     from .project import collect
-    return collect(st, _path(st, a['destination']), _boolean(a, 'zip'))
+    return collect(st, _new_path(st, a['destination']), _boolean(a, 'zip'))
 
 
 @tool('relink_hints', 'For each sample slot whose file is missing: up to three WAVs of the same name from the sample '
@@ -212,7 +218,7 @@ def collect_project(st, a):
       'the missing file (the same file, moved), then those sharing more of its folders. Reads only; relink_samples '
       'applies a choice.', {})
 def relink_hints(st, a):
-    from .gui import Handler
+    from .server import Handler
     return st.relink_hints(Handler.lib())
 
 

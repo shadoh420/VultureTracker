@@ -15,7 +15,7 @@ from unittest import mock
 
 os.environ['VT_WORKERS'] = '1'
 
-from vulturetracker import api, arrangement, export, gui, library, synth
+from vulturetracker import api, arrangement, export, gui, library, server, synth
 from vulturetracker.itreader import import_it
 from vulturetracker.itwriter import write_it
 from vulturetracker.model import Cell, Channel, Envelope, Instrument, Loop, Module, Pattern, Sample
@@ -297,12 +297,12 @@ class TestRelease080(unittest.TestCase):
         self.assertEqual([Path(p).name for p in synth._wavs(proj, '*.wav', 'test')], ['a.wav'])
 
     def test_unexpected_server_error_is_answered(self):
-        old = gui.Handler.state
-        gui.Handler.state = self.state()
-        srv = gui._Server(('127.0.0.1', 0), gui.Handler)
+        old = server.Handler.state
+        server.Handler.state = self.state()
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
-            req = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/api/relink', data=b'{}')
+            req = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/api/relink', data=b'{}', headers={'X-VT-Token': srv.token})
             with mock.patch.object(gui.State, 'relink', side_effect=RuntimeError('boom')), \
                     mock.patch('traceback.print_exc'), self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(req, timeout=5)
@@ -312,7 +312,7 @@ class TestRelease080(unittest.TestCase):
         finally:
             srv.shutdown()
             srv.server_close()
-            gui.Handler.state = old
+            server.Handler.state = old
 
     # ---- the audit's suspicions confirmed on 2026-10-01 (scratch/audit-080/agentF)
 
@@ -368,15 +368,16 @@ class TestRelease080(unittest.TestCase):
         self.assertEqual(st.save_upload('nul.wav', data).name, '_nul.wav')
 
     def test_a_rating_takes_stars_0_to_5_and_a_bad_stored_one_keeps_notes_saving(self):
-        old = gui.Handler.state
-        st = gui.Handler.state = self.state()
+        old = server.Handler.state
+        st = server.Handler.state = self.state()
         st.meta['slot'] = 1
         st.add_candidates('cand.wav')
-        srv = gui._Server(('127.0.0.1', 0), gui.Handler)
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
 
         def post(act, body):
-            req = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/api/{act}', data=json.dumps(body).encode())
+            req = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/api/{act}', data=json.dumps(body).encode(),
+                                         headers={'X-VT-Token': srv.token})
             try:
                 with urllib.request.urlopen(req, timeout=10) as r:
                     return r.status
@@ -391,7 +392,7 @@ class TestRelease080(unittest.TestCase):
         finally:
             srv.shutdown()
             srv.server_close()
-            gui.Handler.state = old
+            server.Handler.state = old
 
     def test_recipe_numbers_read_as_the_song_reads_them_and_names_as_written(self):
         (self.dir / 'r.yaml').write_text('out_dir: out\nsamples:\n  010: {file: a.wav, note: C-5}\n  08: {file: a.wav, note: C-5}\n'

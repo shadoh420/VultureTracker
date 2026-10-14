@@ -15,7 +15,7 @@ from unittest import mock
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from vulturetracker import agent, agent_context, api, gui, mcp
+from vulturetracker import agent, agent_context, api, gui, mcp, server
 from vulturetracker.notation import format_cell
 from vulturetracker.wavload import write_wav
 
@@ -114,7 +114,7 @@ class AgentTests(unittest.TestCase):
         from vulturetracker.library import Library
         st = self.state()
         lib = Library(self.dir / 'library.json')
-        with mock.patch.object(gui.Handler, 'library', lib):
+        with mock.patch.object(server.Handler, 'library', lib):
             def wait(job):
                 self.assertNotIn('error', job, job)
                 lib.job.join(5)
@@ -141,7 +141,7 @@ class AgentTests(unittest.TestCase):
         from vulturetracker.library import Library
         st = self.state()
         lib, event = Library(self.dir / 'library.json'), threading.Event()
-        with mock.patch.object(gui.Handler, 'library', lib):
+        with mock.patch.object(server.Handler, 'library', lib):
             lib.scan([str(self.dir)])
             first = agent.run(st, 'search_library', {'limit': 1})
             second = agent.run(st, 'search_library', {'offset': first['next_offset'], 'limit': 1})
@@ -584,7 +584,7 @@ class AgentTests(unittest.TestCase):
         self.assertIn('error', agent.run(st, 'slice_sample', {'number': num, 'points': [0, 22050], 'grid_bpm': 120}))
 
         lib = Library(self.dir / 'index.json')
-        with mock.patch.object(gui.Handler, 'library', lib):
+        with mock.patch.object(server.Handler, 'library', lib):
             self.assertEqual(self.batch4(st, 'relink_hints')['hints'], {})
 
     def test_transform_refuses_a_lane_column(self):
@@ -1173,7 +1173,7 @@ class AgentTests(unittest.TestCase):
     def test_stop_discards_late_response_and_allows_next_message(self):
         st = self.state()
         before = self.read()
-        agent.save_settings({'provider':'openai', 'model':'fixture'})
+        agent.save_settings({'provider':'openai', 'model':'fixture', 'base_url':'http://localhost:8080/v1'})
         started, release, returned = threading.Event(), threading.Event(), threading.Event()
         def delayed(*args):
             started.set()
@@ -1206,7 +1206,7 @@ class AgentTests(unittest.TestCase):
 
     def test_stop_between_tools_keeps_valid_history_and_completed_edit(self):
         st = self.state()
-        agent.save_settings({'provider':'openai','model':'fixture'})
+        agent.save_settings({'provider':'openai','model':'fixture','base_url':'http://localhost:8080/v1'})
         reply = {'choices':[{'message':{'role':'assistant','tool_calls':[
             {'id':'a','function':{'name':'set_module','arguments':'{"key":"key","value":"D major"}'}},
             {'id':'b','function':{'name':'undo','arguments':'{}'}}]}}]}
@@ -1227,7 +1227,7 @@ class AgentTests(unittest.TestCase):
     def test_chat_discovers_tools_then_edits_and_undoes_through_wrapper(self):
         st = self.state()
         original = self.read()
-        agent.save_settings({'provider': 'openai', 'model': 'fixture'})
+        agent.save_settings({'provider': 'openai', 'model': 'fixture', 'base_url':'http://localhost:8080/v1'})
         def call(name, args):
             return {'choices': [{'message': {'role': 'assistant', 'tool_calls': [
                 {'id': name, 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}}]}}]}
@@ -1285,7 +1285,7 @@ class AgentTests(unittest.TestCase):
 
     def test_failed_or_stopped_compaction_preserves_context(self):
         st=self.state()
-        agent.save_settings({'provider':'openai','model':'fixture'})
+        agent.save_settings({'provider':'openai','model':'fixture','base_url':'http://localhost:8080/v1'})
         chat=agent.Chat()
         with mock.patch.object(agent,'compatible_request',return_value={'choices':[{'message':{'role':'assistant','content':'Prior reply'}}]}):
             chat.send(st,'prior request')
@@ -1488,11 +1488,13 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(argv[argv.index("--system-prompt") + 1], agent.SYSTEM)
             self.assertNotIn("--append-system-prompt", argv)
             self.assertIn("--disable-slash-commands", argv)
-            self.assertEqual(argv[argv.index("--setting-sources") + 1], "user")
+            self.assertEqual(argv[argv.index("--setting-sources") + 1], "")  # no settings files: no rules, hooks, plugins
+            self.assertIn("--strict-mcp-config", argv)                        # and no MCP server but the app's
             settings = json.loads(argv[argv.index("--settings") + 1])
             self.assertEqual(settings, {"claudeMdExcludes": ["**"], "autoMemoryEnabled": False, "disableAllHooks": True})
             cfg = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["vulturetracker"]
             self.assertEqual(cfg["args"][-2:], ["--port", "8765"])
+            self.assertIn("VT_TOKEN", cfg["env"])  # the bridge's token for the app's API (server._Server.token)
             self.assertNotIn("--resume", argv)
             self.assertEqual(chat.session, "s1")
             chat.send(st, "and the tempo?")                                   # the next message resumes the session
@@ -1635,7 +1637,8 @@ class AgentTests(unittest.TestCase):
                 def local_connection(s):
                     _, model, key = real_connection(s)
                     return f"http://127.0.0.1:{port}/v1", model, key
-                agent.save_settings({"provider": provider, "model": "test-model", "api_key": "fixture-key"})
+                agent.save_settings({"provider": provider, "model": "test-model", "api_key": "fixture-key",
+                                     **({"base_url": "http://localhost:8080/v1"} if provider == "openai" else {})})
                 with mock.patch.object(agent, "connection", side_effect=local_connection):
                     chat = self._chat(st, "Edit one note, check it, refuse approved notes, and undo")
                 self.assertFalse(chat.busy)

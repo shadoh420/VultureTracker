@@ -28,11 +28,13 @@ jobs:
         with:
           python-version: "3.14"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: requirements-build.txt
       - name: Install
-        # everything the exe packs: the package with all its extras (pedalboard, mido, pywebview, sounddevice,
-        # PyGuitarPro, numpy, imageio-ffmpeg), Pillow for the icon, PyInstaller
-        run: python -m pip install -q ".[all]" Pillow pyinstaller
+        # everything the exe packs, pinned with SHA-256 digests (requirements-build.txt: pedalboard, mido, pywebview,
+        # sounddevice, PyGuitarPro, numpy, imageio-ffmpeg, Pillow for the icon, PyInstaller), then the package itself
+        run: |
+          python -m pip install -q --require-hashes -r requirements-build.txt
+          python -m pip install -q --no-deps --no-build-isolation .
       - name: Build
         run: python tools/build_exe.py
       - name: Check

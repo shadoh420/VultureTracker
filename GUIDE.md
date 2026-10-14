@@ -673,8 +673,9 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   `game_loop:true` writes WAV/OGG/FLAC loop metadata for the whole song or named section, not the audition row loop.
   Follow the returned `job_id` with `export_status`; only `done` confirms published files, and compiler warnings are
   separate from failures. `cancel_export` requires that ID and can cancel queued/rendering work, not final publication.
-  Exports use a frozen snapshot; replacing existing outputs requires explicit `replace:true`, and source assets remain
-  protected. The app retains the current/latest job, also visible in RENDER & EXPORT.
+  Exports use a frozen snapshot; replacing existing outputs requires explicit `replace:true`, which the tool refuses
+  until the owner presses ALLOW REPLACE in the AGENT panel (it allows one export within two minutes), and source assets
+  remain protected. A `destination` must be inside the song's folder. The app retains the current/latest job, also visible in RENDER & EXPORT.
 - **Edit existing sounds** with `edit_instrument` (mapping, envelopes or their `lfo`, `filter_mode`, microtuning with
   `tuning` and `keymap_file`, Scala files beside the song, and note behavior) and `edit_sample`
   (name, tuning, loops, vibrato, format or an explicitly requested WAV replacement). Omitted fields stay unchanged;
@@ -795,13 +796,17 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
 For example: “Save a checkpoint called Before flanger, create a channel called Melody, then solo it and loop order 8
 rows 0–59.” The agent can do each step through the same tools in chat or MCP.
 
-No tool moves a fader, a channel's volume or pan, or the mix volume, and approved material is protected. Each song
+No tool moves a fader, a channel's volume or pan, or the mix volume, and approved material is protected. A path a tool
+is given must lie inside the song's folder or one of the sample library's folders (MAP adds folders); anything else is
+refused (`create_project` and `collect_project` write only new files, so their destinations may be anywhere). Text in
+the song (names, comments, the message, listening notes) is data to the model, never instructions. Each song
 edit is one undo step (audition settings and checkpoint saves are separate), and a pattern an agent writes is marked
 `by: agent` (`you and agent` when it had notes before; the owner's later edit makes it that too). Two ways in:
 
 - **Claude Code (or any MCP client):** `claude mcp add vulturetracker -- python -m vulturetracker mcp`, then ask it
-  about the song open in the app. The MCP server finds the running app through `running.json` in the user folder
-  (`--port` names another). Its calls show in the AGENT panel's ACTIVITY.
+  about the song open in the app. The MCP server finds the running app through `running.json` in the user folder,
+  which holds its port and the token each launch makes (`--port` names another app window; its token is then the one
+  `VT_TOKEN` gives, as the app's own Claude Code gets it). Its calls show in the AGENT panel's ACTIVITY.
 - **The AGENT panel** (top right): a chat with a model of your choice, optional. SETTINGS picks **Claude Code (your
   subscription)**: the `claude` you are signed in to, run headless with this song's tools as its only tools (no API key,
   no per-token bill; it counts toward your plan's usage; install Claude Code and sign in once first), or the Anthropic API

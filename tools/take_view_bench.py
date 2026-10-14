@@ -29,7 +29,7 @@ orders: [p]
 
 
 def bench(wav, label):
-    from vulturetracker import gui
+    from vulturetracker import gui, sample_edit
     with tempfile.TemporaryDirectory() as tmp:
         d = Path(tmp)
         (d / "take.wav").write_bytes(Path(wav).read_bytes())
@@ -44,7 +44,7 @@ def bench(wav, label):
                     break
                 time.sleep(0.1)
             n = st.sample_view(1, 0, 1, 16)["frames"]  # not timed: only to learn the length (this reads the WAV)
-            gui.wav_array.cache_clear()
+            sample_edit.wav_array.cache_clear()
             print(f"{label}: {n} frames; the app's own compile {time.perf_counter() - t0:.1f} s")
             for name, a, b, cols in (("first view (reads the WAV)", 0, None, 1500), ("whole take again", 0, None, 1500),
                                      ("zoom to the middle tenth", n // 2, n // 2 + n // 10, 1500),

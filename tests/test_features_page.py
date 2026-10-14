@@ -14,7 +14,7 @@ try:
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 except ImportError:  # pragma: no cover
     sync_playwright = None
-from vulturetracker import agent, gui
+from vulturetracker import agent, gui, server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
@@ -29,8 +29,8 @@ class TestFeaturesPage(unittest.TestCase):
             write_wav(d / 'a.wav', RATE, [sine(440)])
             write_wav(d / 'b.wav', RATE, [sine(880)])
             (d / 'song.yaml').write_bytes(text.encode())
-            st = gui.Handler.state = gui.State(d / 'song.yaml')
-            srv = gui._Server(('127.0.0.1', 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / 'song.yaml')
+            srv = server._Server(('127.0.0.1', 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -40,7 +40,8 @@ class TestFeaturesPage(unittest.TestCase):
                         browser = p.chromium.launch(**({'executable_path': exe} if exe else {}))
                     except PlaywrightError as e:
                         self.skipTest(f'no browser to drive the page with: {str(e).splitlines()[0]}')
-                    page = browser.new_page(viewport={'width': 1500, 'height': 900})
+                    # the token as a header on every request, page.request's too (page.url stays the bare address the tests add to)
+                    page = browser.new_page(viewport={'width': 1500, 'height': 900}, extra_http_headers={'X-VT-Token': srv.token})
                     page.on('pageerror', lambda e: errors.append(str(e)))
                     page.goto(f'http://127.0.0.1:{srv.server_address[1]}/')
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
@@ -51,10 +52,10 @@ class TestFeaturesPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                for s in {st, gui.Handler.state}:
+                for s in {st, server.Handler.state}:
                     if s:
                         s.close()
-                gui.Handler.state = None
+                server.Handler.state = None
 
     def settle(self, page):
         page.wait_for_function("EDQ.n===0")
@@ -143,7 +144,7 @@ class TestFeaturesPage(unittest.TestCase):
 
     def test_agent_library_and_synthesis_candidates(self):
         from vulturetracker.library import Library
-        with self.page() as (page, d), mock.patch.object(gui.Handler, 'library', Library(d / 'library.json')):
+        with self.page() as (page, d), mock.patch.object(server.Handler, 'library', Library(d / 'library.json')):
             def call(tool_name, **args):
                 out = page.request.post(page.url + 'api/tool', data={'name': tool_name, 'args': args}).json()
                 if tool_name != 'synthesis_status' or out.get('status') != 'failed':
@@ -161,7 +162,7 @@ class TestFeaturesPage(unittest.TestCase):
             job = call('index_library', roots=[str(d)], replace_roots=True)
             self.assertEqual(wait('library_status', job)['result']['errors'], 0)
             self.assertEqual(call('search_library')['total'], 2,
-                             (call('library_status', job_id=job['job_id']), gui.Handler.library.data))
+                             (call('library_status', job_id=job['job_id']), server.Handler.library.data))
             saved = call('save_sound_recipe', spec={'file': 'a.wav', 'note': 'A-5', 'reverse': True}, name='Reversed')
             job = call('render_synthesis', recipe=saved['recipe'], entry=saved['entry'])
             out = wait('synthesis_status', job)
@@ -633,7 +634,7 @@ class TestFeaturesPage(unittest.TestCase):
             page.evaluate("AG.view='set'; renderAgent()")
             store = page.evaluate("S.chat.settings.key_store")
             self.assertIn(store, ('keyring', 'file'))
-            self.assertIn('credential store' if store == 'keyring' else 'plain text', page.text_content('#ag-store'))
+            self.assertIn('credential store' if store == 'keyring' else 'a plaintext file', page.text_content('#ag-store'))
             self.assertFalse(page.is_visible('#ag-warn'))
             page.fill('#ag-base', 'http://example.com/v1')
             page.click("text=SAVE")
@@ -650,9 +651,9 @@ class TestFeaturesPage(unittest.TestCase):
     def test_agent_session_workflows(self):
         from tests.test_record import fake_recorder
         recorder = fake_recorder()
-        with mock.patch.object(gui.Handler, 'recorder', recorder), \
-                mock.patch.object(gui.Handler, 'pending_recording', None), \
-                mock.patch.object(gui.Handler, 'rec_devices', None), self.page() as (page, d):
+        with mock.patch.object(server.Handler, 'recorder', recorder), \
+                mock.patch.object(server.Handler, 'pending_recording', None), \
+                mock.patch.object(server.Handler, 'rec_devices', None), self.page() as (page, d):
             def call(tool_name, **args):
                 result = page.evaluate("a=>fetch('/api/tool',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(a)}).then(r=>r.json())",
                                        {'name': tool_name, 'args': args})
@@ -718,7 +719,7 @@ class TestFeaturesPage(unittest.TestCase):
                           names: ['kick1', 'snare', 'kick2', 'kick3'], groups: ['drums', 'drums', 'drums', 'more'],
                           points: [[.1, .1], [.5, .5], [.9, .9], [5, 5]], info: [{}, {}, {}, {}]};
               MAP.idx = new Map(MAP.data.paths.map((p, i) => [p, i])); MAP.col = {drums: '#fff', more: '#fff'};
-              const played = []; MAPA.play = () => { played.push(decodeURIComponent(MAPA.src.split('path=')[1])); return Promise.resolve() };
+              const played = []; MAPA.play = () => { played.push(decodeURIComponent(MAPA.src.split('path=')[1].split('&token=')[0])); return Promise.resolve() };
               const sel0 = sel, q = $('map-q'); q.value = 'kick';
               const key = k => q.dispatchEvent(new KeyboardEvent('keydown', {key: k, bubbles: true, cancelable: true}));
               const out = [];

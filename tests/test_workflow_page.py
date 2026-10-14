@@ -7,6 +7,7 @@ import time
 import unittest
 
 from vulturetracker import gui
+from vulturetracker.server import Handler, _Server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
@@ -27,8 +28,8 @@ class TestWorkflowPage(unittest.TestCase):
                 write_wav(original / (name+'.wav'), RATE, [sine(hz)])
             song = original / 'song.yaml'
             song.write_bytes(SONG_BLOCK.encode())
-            st = gui.Handler.state = gui.State(song)
-            server = gui._Server(('127.0.0.1', 0), gui.Handler)
+            st = Handler.state = gui.State(song)
+            server = _Server(('127.0.0.1', 0), Handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             errors, dialogs = [], []
             try:
@@ -37,7 +38,7 @@ class TestWorkflowPage(unittest.TestCase):
                     page = browser.new_page(viewport={'width': 1600, 'height': 1000})
                     page.on('pageerror', lambda e: errors.append(str(e)))
                     page.on('dialog', lambda d: (dialogs.append(d.message), d.accept()))
-                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/')
+                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}')
                     page.wait_for_function('S?.song?.facts && PAT.rows')
                     page.click('[data-t="project"]')
                     page.fill('#checkpoint-name', 'Before arrangement')
@@ -109,7 +110,7 @@ class TestWorkflowPage(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
-                gui.Handler.state = None
+                Handler.state = None
                 for _ in range(200):
                     if not st.jobs.qsize() and not any(r['status'] in ('queued', 'rendering') for r in st.renders.values()):
                         break

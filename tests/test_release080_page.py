@@ -13,6 +13,7 @@ try:
 except ImportError:  # pragma: no cover
     sync_playwright = None
 from vulturetracker import gui
+from vulturetracker.server import Handler, _Server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
@@ -27,11 +28,11 @@ class TestRelease080Page(unittest.TestCase):
             song = folder / 'song.yaml'
             song.write_bytes(SONG_BLOCK.encode())
             original = song.read_bytes()
-            old_state = gui.Handler.state
-            first = gui.Handler.state = gui.State(song)
+            old_state = Handler.state
+            first = Handler.state = gui.State(song)
             first.meta['slot'] = 1
             first.add_candidates('cand*.wav')
-            server = gui._Server(('127.0.0.1', 0), gui.Handler)
+            server = _Server(('127.0.0.1', 0), Handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -39,7 +40,7 @@ class TestRelease080Page(unittest.TestCase):
                     browser = pw.chromium.launch(executable_path=os.environ.get('VT_CHROMIUM') or None)
                     page = browser.new_page(viewport={'width': 1700, 'height': 1100})
                     page.on('pageerror', lambda e: errors.append(str(e)))
-                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/')
+                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}')
                     page.wait_for_function('S?.song?.facts && PAT.rows && S.candidates.length===2')
                     picked = page.evaluate('pick(S.candidates[1].id);sel')
                     page.click('[data-t="pattern"]')
@@ -65,10 +66,10 @@ class TestRelease080Page(unittest.TestCase):
                     page.evaluate("""(p)=>{setEdit(true);EDQ.chain=EDQ.chain.then(()=>new Promise(r=>setTimeout(r,800)));
                         patEdit([{row:1,ch:0,cell:'G-5 01 ... ...'}]);$('newpath').value=p;newSong()}""", str(fresh))
                     for _ in range(200):
-                        if gui.Handler.state is not first and page.evaluate('!EDQ.n'):
+                        if Handler.state is not first and page.evaluate('!EDQ.n'):
                             break
                         time.sleep(0.05)
-                    new = gui.Handler.state
+                    new = Handler.state
                     self.assertIsNot(new, first)
                     self.assertEqual(first.mod.patterns[0].rows[1][0].note, 67)
                     self.assertIsNone(new.mod.patterns[0].rows[1][0].note)
@@ -95,9 +96,9 @@ class TestRelease080Page(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 first.close()
-                if gui.Handler.state is not first:
-                    gui.Handler.state.close()
-                gui.Handler.state = old_state
+                if Handler.state is not first:
+                    Handler.state.close()
+                Handler.state = old_state
 
 
     def test_page_does_what_the_guide_says(self):
@@ -106,9 +107,9 @@ class TestRelease080Page(unittest.TestCase):
             for name, hz in [('a', 440), ('b', 880)]:
                 write_wav(folder / (name + '.wav'), RATE, [sine(hz)])
             (folder / 'song.yaml').write_bytes(SONG_BLOCK.encode())
-            old_state = gui.Handler.state
-            st = gui.Handler.state = gui.State(folder / 'song.yaml')
-            server = gui._Server(('127.0.0.1', 0), gui.Handler)
+            old_state = Handler.state
+            st = Handler.state = gui.State(folder / 'song.yaml')
+            server = _Server(('127.0.0.1', 0), Handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -116,7 +117,7 @@ class TestRelease080Page(unittest.TestCase):
                     browser = pw.chromium.launch(executable_path=os.environ.get('VT_CHROMIUM') or None)
                     page = browser.new_page(viewport={'width': 1180, 'height': 720})  # #app's minimum width
                     page.on('pageerror', lambda e: errors.append(str(e)))
-                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/')
+                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}')
                     page.wait_for_function('S?.song?.facts && PAT.rows')
                     # every tab label on one line, all inside the bar
                     self.assertTrue(page.evaluate("""(()=>{const t=document.querySelector('.tabs');
@@ -179,7 +180,7 @@ class TestRelease080Page(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 st.close()
-                gui.Handler.state = old_state
+                Handler.state = old_state
 
 
 if __name__ == '__main__':

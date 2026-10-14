@@ -149,6 +149,21 @@ class TestCounts(Clean):
         e = self.assertClean(read_module, xm_header(nins=1) + ins, kind=ModReadError)
         self.assertIn("5000 samples", str(e))
 
+    def test_xm_without_patterns_or_orders(self):
+        # the October 2026 external audit's fuzzing (tools/fuzz_import.py): an XM with no pattern and an empty order list
+        # gave the order list a pattern 0 that did not exist (IndexError in module_to_song); it gets an empty one
+        from vulturetracker.itreader import module_to_song
+        from vulturetracker.model import ORDER_SKIP
+        for songlen, orders in ((0, ["p00"]), (1, ["+++"])):  # an order past the patterns is skipped, as libopenmpt does
+            with self.subTest(songlen=songlen):
+                head = bytearray(xm_header())
+                struct.pack_into("<H", head, 64, songlen)
+                mod, _ = read_module(bytes(head))
+                self.assertTrue(all(o < len(mod.patterns) or o >= ORDER_SKIP for o in mod.orders), mod.orders)
+                song = module_to_song(mod, self.dir / "x.yaml", self.dir / "x_s")
+                self.assertEqual(song["orders"], orders)
+                self.assertEqual(song["patterns"]["p00"]["rows"], 64)
+
     def test_s3m_counts(self):
         for data in (s3m_header(npat=65535) + bytes(1 << 20), s3m_header(nins=65535) + bytes(1 << 20)):
             e = self.assertClean(read_module, data, kind=ModReadError)

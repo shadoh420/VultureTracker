@@ -1,4 +1,7 @@
 __pycache__/
+# the owner's local notes for agents (AGENTS.md points to them) and own folder
+AGENTS.local.md
+test/
 *.egg-info/
 scratch/
 vendor/*.zip

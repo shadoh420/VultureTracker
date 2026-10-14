@@ -1,15 +1,17 @@
 """Fuzz the importers with malformed files: truncations, byte flips, header counts of 0 / 1 / 0xFFFF / 0xFFFFFFFF
 (also with the file padded so the count can be read), pointers past the end. Rerun after changing a reader.
 
-    python tools/fuzz_import.py [--format it|xm|s3m|mod|mid|wav|gp5|all] [--seed FILE] [--cases N] [--seconds S]
+    python tools/fuzz_import.py [--format it|xm|s3m|mod|mid|wav|gp5|sf2|pat|all] [--seed FILE] [--cases N] [--seconds S]
                                 [--out DIR] [--full-every N]
 
 Each format runs the function the app calls (itreader.import_it, midiimport.import_midi, gpimport.import_gp,
-wavload.read_wav) in one worker interpreter per format, fed the cases over a pipe. Module formats run the Python reader
+wavload.read_wav, and for a SoundFont or a GUS patch sf2.presets then sf2.import_sf2, as the Instruments tab and
+`import` call them) in one worker interpreter per format, fed the cases over a pipe. Module formats run the Python reader
 alone (read_module + module_to_song) and every --full-every-th case through import_it, which also loads the mutated
 file into libopenmpt (match_level, patched to render 1 s instead of 30 so a case takes milliseconds). A seed is
 `--seed FILE`, else the first of demo2/iron_relay.it, demo/arena.it, tests/fixtures/*.it, a demo compiled on the spot
-(it), or one the test helpers write (xm, s3m, mod, gp5 through tests/, mid through mido, wav through wavload).
+(it), or one the test helpers write (xm, s3m, mod, gp5, sf2 and pat through tests/, mid through mido, wav through
+wavload).
 
 Reported: any exception that is not a ValueError (ITReadError, ModReadError, WavError, ...), SongError or OSError, an
 error with an empty message, a worker silent for over 5 s (killed, counted as a hang), a worker that dies (a native
@@ -36,7 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-FORMATS = ("it", "xm", "s3m", "mod", "mid", "wav", "gp5")
+FORMATS = ("it", "xm", "s3m", "mod", "mid", "wav", "gp5", "sf2", "pat")
 MODULES = ("it", "xm", "s3m", "mod")
 HANG_SECONDS = 5.0
 MEMORY_LIMIT = 1 << 30
@@ -81,6 +83,11 @@ def worker(fmt):
             elif fmt == "wav":
                 from vulturetracker.wavload import read_wav
                 read_wav(src)
+            elif fmt in ("sf2", "pat"):
+                from vulturetracker.sf2 import import_sf2, presets
+                if fmt == "sf2":
+                    presets(data)
+                import_sf2(src, song, samples)
             reply = {"ok": True}
         except (KeyboardInterrupt, SystemExit):
             raise
@@ -213,6 +220,12 @@ def make_seed(fmt, out):
         write_wav(p, 22050, [[(i * 37) % 200 - 100 for i in range(500)], [(i * 53) % 200 - 100 for i in range(500)]], 16,
                   loop=(100, 400, False), root_note=60)
         return p.read_bytes()
+    if fmt in ("sf2", "pat"):
+        from tests import test_modimport as T
+        if fmt == "sf2":
+            return T.bank()[0]
+        sine = [round(8000 * __import__("math").sin(i / 8)) for i in range(400)]
+        return T.write_pat([(sine, 0, 59, 48, 1024, 4, 0), (sine, 60, 127, 72, 1024, 0, 15)])
     if fmt == "gp5":
         from tests import test_gpimport as T
         if T.guitarpro is None:

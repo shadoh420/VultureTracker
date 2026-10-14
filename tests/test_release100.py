@@ -17,7 +17,7 @@ from unittest import mock
 
 os.environ['VT_WORKERS'] = '1'
 
-from vulturetracker import __version__, api, gui
+from vulturetracker import __version__, api, gui, server
 from vulturetracker.__main__ import main
 from vulturetracker.itwriter import write_it
 from vulturetracker.song import SongError, load_song, load_song_text
@@ -52,7 +52,7 @@ class TestVersion(unittest.TestCase):
         self.assertRegex(__version__, r'^\d+\.\d+\.\d+')
         self.assertIn('dynamic = ["version"]', (ROOT / 'pyproject.toml').read_text(encoding='utf-8'))
         self.assertEqual(run_cli('--version')[:2], (0, f'VultureTracker {__version__}\n'))
-        self.assertEqual(gui.start_snapshot()['version'], __version__)
+        self.assertEqual(server.start_snapshot()['version'], __version__)
 
     def test_the_notes_report_names_the_version(self):
         st = self.state()
@@ -74,7 +74,7 @@ class TestDiagnostics(unittest.TestCase):
                     def _send(self, code, body):
                         self.sent = code, body
                 r = Request()
-                gui.Handler._guarded(lambda self: 1 / 0)(r)
+                server.Handler._guarded(lambda self: 1 / 0)(r)
                 self.assertEqual(r.sent[0], 500)
                 self.assertEqual(r.sent[1]['error'], f'ZeroDivisionError: division by zero (details in {gui.LOG})')
                 text = gui.LOG.read_text(encoding='utf-8')
@@ -552,18 +552,19 @@ class TestFaustSaves(unittest.TestCase):
 
     def test_the_code_being_typed_is_kept_with_the_song(self):
         import urllib.request
-        st = gui.Handler.state = self.state()
-        srv = gui._Server(('127.0.0.1', 0), gui.Handler)
+        st = server.Handler.state = self.state()
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         try:
             url = f'http://127.0.0.1:{srv.server_address[1]}/api/'
             urllib.request.urlopen(urllib.request.Request(url + 'faustcode', json.dumps({'code': 'process = _;'}).encode(),
-                                                          {'content-type': 'application/json'}))
-            self.assertEqual(json.loads(urllib.request.urlopen(url + 'state').read())['faust_code'], 'process = _;')
+                                                          {'content-type': 'application/json', 'X-VT-Token': srv.token}))
+            state = urllib.request.urlopen(urllib.request.Request(url + 'state', headers={'X-VT-Token': srv.token})).read()
+            self.assertEqual(json.loads(state)['faust_code'], 'process = _;')
         finally:
             srv.shutdown()
             srv.server_close()
-            gui.Handler.state = None
+            server.Handler.state = None
         self.assertEqual(json.loads((self.dir / 'song.tryout.json').read_text(encoding='utf-8'))['faust_code'], 'process = _;')
 
 

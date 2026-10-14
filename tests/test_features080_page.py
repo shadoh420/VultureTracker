@@ -13,6 +13,7 @@ try:
 except ImportError:  # pragma: no cover
     sync_playwright = None
 from vulturetracker import gui
+from vulturetracker.server import Handler, _Server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
@@ -26,15 +27,15 @@ class TestFeatures080Page(unittest.TestCase):
                 write_wav(folder / (name + '.wav'), RATE, [sine(hz)])
             song = folder / 'song.yaml'
             song.write_bytes(SONG_BLOCK.encode())
-            old_state = gui.Handler.state
-            st = gui.Handler.state = gui.State(song)
-            server = gui._Server(('127.0.0.1', 0), gui.Handler)
+            old_state = Handler.state
+            st = Handler.state = gui.State(song)
+            server = _Server(('127.0.0.1', 0), Handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             errors = []
             try:
                 with sync_playwright() as pw:
                     browser = pw.chromium.launch(executable_path=os.environ.get('VT_CHROMIUM') or None)
-                    url = f'http://127.0.0.1:{server.server_address[1]}/'
+                    url = f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}'
                     context = browser.new_context(viewport={'width': 1700, 'height': 1100})
                     context.grant_permissions(['clipboard-read', 'clipboard-write'], origin=url[:-1])
                     page = context.new_page()
@@ -122,7 +123,7 @@ class TestFeatures080Page(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 st.close()
-                gui.Handler.state = old_state
+                Handler.state = old_state
 
     def test_a_rolled_chord_is_one_chord(self):
         # audit-100 C8: OpenMPT's auto-chord wait (60 ms, View_pat.cpp) starts again at every note, so keys or MIDI notes
@@ -136,9 +137,9 @@ class TestFeatures080Page(unittest.TestCase):
                 write_wav(folder / (name + '.wav'), RATE, [sine(hz)])
             song = folder / 'song.yaml'
             song.write_bytes(four.encode())
-            old_state = gui.Handler.state
-            st = gui.Handler.state = gui.State(song)
-            server = gui._Server(('127.0.0.1', 0), gui.Handler)
+            old_state = Handler.state
+            st = Handler.state = gui.State(song)
+            server = _Server(('127.0.0.1', 0), Handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -146,7 +147,7 @@ class TestFeatures080Page(unittest.TestCase):
                     browser = pw.chromium.launch(executable_path=os.environ.get('VT_CHROMIUM') or None)
                     page = browser.new_page(viewport={'width': 1700, 'height': 1100})
                     page.on('pageerror', lambda e: errors.append(str(e)))
-                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/')
+                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}')
                     page.wait_for_function('S?.song?.facts && PAT.rows')
                     page.click('[data-t="pattern"]')
                     page.evaluate("setEdit(true);$('midi-chord').checked=true;$('lv-step').value=1;$('lv-oct').value=5;"
@@ -168,7 +169,7 @@ class TestFeatures080Page(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 st.close()
-                gui.Handler.state = old_state
+                Handler.state = old_state
 
 
 if __name__ == '__main__':

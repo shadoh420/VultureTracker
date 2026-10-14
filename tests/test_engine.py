@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from vulturetracker import api, gui
+from vulturetracker import api, measure
 from vulturetracker.openmpt import LoadedModule, library_version
 from vulturetracker.wavload import write_wav
 
@@ -123,7 +123,7 @@ class TestEngine(unittest.TestCase):
                 frames = int(lm.duration() * rate)  # one pass: after it the DLL render stops, the engine loops the song
                 ref = np.frombuffer(lm.render(rate, oversample=1), "<i2").astype(int)[: 2 * frames]
                 seek = lm.order_start(1, 2)
-            with LoadedModule(gui.patch_it(it, [0])) as lm:
+            with LoadedModule(measure.patch_it(it, [0])) as lm:
                 ref_muted = np.frombuffer(lm.render(rate, oversample=1), "<i2").astype(int)[: 2 * frames]
             out = subprocess.run([NODE, str(ROOT / "tests" / "engine_check.js"), str(d / "song.it"), str(rate), str(frames), "0", "0", "60"],
                                  capture_output=True, text=True, timeout=60)

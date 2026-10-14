@@ -19,7 +19,7 @@ def _id(value):
       'take list is session-only; older files can be imported with create_sample.',
       {'refresh_devices': {'type': 'boolean'}})
 def recording_status(st, a):
-    from .gui import Handler
+    from .server import Handler
     if Handler.state is not st:
         raise ValueError('inspect the currently open project first')
     return copy.deepcopy(Handler.rec_snapshot(_boolean(a, 'refresh_devices')))
@@ -49,7 +49,7 @@ def _number(a, key, default, low, high):
        'name': {'type': 'string'}, 'trim': {'type': 'boolean'}, 'trim_db': {'type': 'number'},
        'root': {'type': 'boolean'}}, ['action'])
 def control_recording(st, a):
-    from .gui import Handler
+    from .server import Handler
     if Handler.state is not st:
         raise ValueError('the project changed; inspect recording_status first')
     act = a['action']

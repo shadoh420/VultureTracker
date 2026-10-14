@@ -6,7 +6,7 @@ import yaml
 from pathlib import Path
 from unittest import mock
 
-from vulturetracker import agent, gui
+from vulturetracker import agent, gui, server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_INS, RATE, sine
 from tests.test_record import fake_recorder
@@ -22,10 +22,10 @@ class TestAgentSessions(unittest.TestCase):
         self.path.write_bytes(yaml.safe_dump(yaml.safe_load(SONG_INS), sort_keys=False).encode())
         self.st = gui.State(self.path, headless=True)
         self.rec = fake_recorder()
-        self.patches = [mock.patch.object(gui.Handler, 'state', self.st),
-                        mock.patch.object(gui.Handler, 'recorder', self.rec),
-                        mock.patch.object(gui.Handler, 'pending_recording', None),
-                        mock.patch.object(gui.Handler, 'rec_devices', None)]
+        self.patches = [mock.patch.object(server.Handler, 'state', self.st),
+                        mock.patch.object(server.Handler, 'recorder', self.rec),
+                        mock.patch.object(server.Handler, 'pending_recording', None),
+                        mock.patch.object(server.Handler, 'rec_devices', None)]
         for p in self.patches:
             p.start()
 
@@ -102,10 +102,10 @@ class TestAgentSessions(unittest.TestCase):
         for action in ('start', 'open', 'close'):
             self.assertIn('error', agent.run(self.st, 'control_recording', dict(action=action, device=0)))
         with self.assertRaisesRegex(ValueError, 'Save or discard'):
-            gui.Handler.open_song(self.path)
+            server.Handler.open_song(self.path)
         self.call('control_recording', action='stop', trim=False)
         self.assertEqual(len(self.st.takes), 1)
-        self.assertIsNone(gui.Handler.pending_recording)
+        self.assertIsNone(server.Handler.pending_recording)
         # A failed send after a successful WAV save retries the send, not the WAV creation.
         self.call('control_recording', action='start')
         self.rec.stream.feed(.2)
@@ -115,9 +115,9 @@ class TestAgentSessions(unittest.TestCase):
                 raise ValueError('offer failed')
             return original(name, dest)
         with mock.patch.object(self.st, 'send_take', side_effect=send):
-            self.assertIn('error', gui.Handler.rec_command(dict(cmd='stop', trim=False, dest='candidate')))
+            self.assertIn('error', server.Handler.rec_command(dict(cmd='stop', trim=False, dest='candidate')))
         count = len(list(self.st.takes_dir.glob('*.wav')))
-        self.assertFalse(gui.Handler.rec_command(dict(cmd='stop', trim=False, dest='candidate')).get('error'))
+        self.assertFalse(server.Handler.rec_command(dict(cmd='stop', trim=False, dest='candidate')).get('error'))
         self.assertEqual(len(list(self.st.takes_dir.glob('*.wav'))), count)
         self.call('control_recording', action='start')
         self.rec.stream.feed(.1)

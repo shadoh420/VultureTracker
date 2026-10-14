@@ -19,6 +19,49 @@ upstream sources linked below. The source code in the repository stays MIT.
 | zlib (`openmpt-zlib.dll`) by Jean-loup Gailly and Mark Adler | with libopenmpt | zlib License | `vendor/Licenses/License.zlib.txt` |
 | libopenmpt compiled to WebAssembly (`vulturetracker/web/libopenmpt.js` + `.wasm`, the official 0.8.9+release dev.js build, for the live engine) | 0.8.9 | BSD-3-Clause and BSL-1.0, with minimp3 (CC0), miniz (MIT) and stb_vorbis (MIT / public domain) compiled in | `vulturetracker/web/licenses/` |
 
+## Vendored files: digests and sources
+
+The SHA-256 of every third-party file in `vendor/` and `vulturetracker/web/` (a text file hashed with LF line endings, as
+git keeps it; a checkout with CRLF endings hashes the same once they are turned back), checked by `tests/test_vendor.py`;
+a file added to either folder must be added here. `vulturetracker/web/engine-core.js`, `engine-worklet.js` and
+`faust-render.mjs` are this project's own code (MIT) and are not listed.
+
+- **The libopenmpt 0.8.9 dev.js archive:** https://lib.openmpt.org/files/libopenmpt/dev/libopenmpt-0.8.9+release.dev.js.tar.gz
+  (SHA-256 `b2c31cd9c99830997b7a337706509556fd1f5dd27da4b7db62e5a24ec95a2758` for the copy kept in the ignored
+  `tools/libopenmpt-js/`; lib.openmpt.org publishes no digests). `libopenmpt.js` and `libopenmpt.wasm` are its
+  `bin/wasm/` files, `licenses/libopenmpt-license.txt` its `license.txt`, the other licenses its `licenses/`; checked
+  byte for byte against that copy on 2026-10-14.
+- **The libopenmpt 0.8.9 Windows build:** the amd64 DLLs of libopenmpt 0.8.9+r25651 (`libopenmpt.dll` and the
+  `openmpt-*.dll` it loads) and their license texts, from lib.openmpt.org's 0.8.9 Windows downloads
+  (https://lib.openmpt.org/libopenmpt/download/: `libopenmpt-0.8.9+release.dev.windows.vs2022.zip` and
+  `libopenmpt-0.8.9+release.bin.windows.zip` both carry amd64 builds). Which of the two archives the files were taken
+  from was not recorded when they were added, so they have not been checked against either; the digests below pin the
+  files as committed.
+
+| File | SHA-256 | From |
+|---|---|---|
+| `vendor/libopenmpt.dll` | `9fa3131204f44a3b157f22f9f0ae11c5cccb5befa37e91a2476567aa0f4b0d94` | the libopenmpt 0.8.9 Windows build |
+| `vendor/LICENSE.txt` | `ceabc562c8cfb3af0d51e94182947c23bde6c18274e2b21585bdde22d2031e9d` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.mpg123.Authors.txt` | `fb18c9abae864a20f691e949e4c7871c79f5f0861b3a3dcaf5881c3c02cf5cc2` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.mpg123.txt` | `c22482728a634a8dfdb4ff72a96d4c1ed64cd8f3e79335c401751ac591609366` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.mpt.BSD-3-Clause.txt` | `ceabc562c8cfb3af0d51e94182947c23bde6c18274e2b21585bdde22d2031e9d` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.mpt.BSL-1.0.txt` | `c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.ogg.txt` | `d2ab5758336489da61c12cc5bb757da5339c4ae9001f9bb0562b4370249af814` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.Vorbis.txt` | `ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a` | the libopenmpt 0.8.9 Windows build |
+| `vendor/Licenses/License.zlib.txt` | `4026d921213bb2e311d8d42b44ef53361c102d5d45ae32f93f8e52eaee8d068f` | the libopenmpt 0.8.9 Windows build |
+| `vendor/openmpt-mpg123.dll` | `f15edd24576d88fa08a153c4a7f9d9d7956449e4fc67758d660ad35d9e1696df` | the libopenmpt 0.8.9 Windows build |
+| `vendor/openmpt-ogg.dll` | `bbeea26588404a00ae964f1c4aceb6d6474e5885f8337491a4c69e29e8516eb6` | the libopenmpt 0.8.9 Windows build |
+| `vendor/openmpt-vorbis.dll` | `7393d017e2930d57c12c016de21c6fa658f862481758ba394823f6ac5e013df2` | the libopenmpt 0.8.9 Windows build |
+| `vendor/openmpt-zlib.dll` | `966d96e9aaf5cbd9e1b600435af1180a3a643ace17a0e782a5becf378b25445b` | the libopenmpt 0.8.9 Windows build |
+| `vulturetracker/web/libopenmpt.js` | `c5327c1a3acbcc49d034ebe55fb84a0a824e50bc7d7a1a171a9b8dfc79cc4afb` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/libopenmpt.wasm` | `f7e9f2fa9eb5536456dad7df4c72f6cc8fbf245271cd9cf185d891040a085cbf` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/licenses/libopenmpt-license.txt` | `ceabc562c8cfb3af0d51e94182947c23bde6c18274e2b21585bdde22d2031e9d` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/licenses/license.minimp3.txt` | `6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/licenses/license.miniz.txt` | `e2c1aeb66eef9191d8c3feb164db2def2335a61d039bf04ed849f6b042433b30` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/licenses/license.mpt.BSD-3-Clause.txt` | `ceabc562c8cfb3af0d51e94182947c23bde6c18274e2b21585bdde22d2031e9d` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/licenses/license.mpt.BSL-1.0.txt` | `c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566` | the libopenmpt 0.8.9 dev.js archive |
+| `vulturetracker/web/licenses/license.stb_vorbis.txt` | `c09188ae9cde711950ab24031074cbf5ded592a3561d4792436a7d5566b6f305` | the libopenmpt 0.8.9 dev.js archive |
+
 ## Algorithms reimplemented in the source (`vulturetracker/sources.py`)
 
 | Algorithm | Copyright | License |

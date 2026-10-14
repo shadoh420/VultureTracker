@@ -37,7 +37,7 @@ def _ring_out(base, folder, mod, region, muted, mix, tail, loop=False):
     """(standalone IT, audio IT, seconds, seek) of `region`: the audio plays the orders before it for the player's state,
     then the region, then empty patterns through which what still sounds rings out. `loop`: the region plays twice and
     the audio starts at the second pass, so it begins with what its own end leaves ringing, as a looping game plays it."""
-    from .gui import patch_it
+    from .measure import patch_it
     a, r0, b, r1 = map(int, region)
     if not 0 <= a <= b < len(mod.orders) or any(mod.orders[o] >= len(mod.patterns) for o in (a, b)):
         raise ValueError('Region endpoints must be playable orders')
@@ -81,7 +81,8 @@ def _ring_out(base, folder, mod, region, muted, mix, tail, loop=False):
 
 
 def snapshot(song, folder, region=None, mix=None, muted=(), tail=2.0, loop=False):
-    from .gui import patch_it, voice_entry
+    from .measure import patch_it
+    from .sample_edit import voice_entry
     base = copy.deepcopy(song)
     base.pop('sections', None)
     assets = {p.resolve(): digest(p.read_bytes()) for p in api.output_sources(base, folder)}
@@ -244,7 +245,7 @@ def to_midi(it):
 def render(snapshot, silenced=(), cancel=None, rate=RATE, depth=16, repeat=0):
     """The snapshot's audio as interleaved stereo bytes at `rate`: int16, or float32 for `depth` 24 and 'float'.
     `repeat` plays the whole song that many more times (its last pass ends where the song does, the tail silence)."""
-    from .gui import patch_it
+    from .measure import patch_it
     frames = round((snapshot['frames'] / RATE + snapshot['seconds'] * repeat) * rate)
     width = 4 if depth == 16 else 8
     with LoadedModule(patch_it(snapshot['it'] if repeat else snapshot['render_it'], silenced)) as lm:

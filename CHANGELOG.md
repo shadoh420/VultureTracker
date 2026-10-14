@@ -2,6 +2,30 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+The October 2026 external audit's findings, fixed (code-signing the exe stays open):
+
+- The app's server needs a token each launch makes: the window's address carries it, the page sends it with every
+  request, `running.json` in the user folder holds it for the MCP bridge. Requests without it get 401, so a web page's
+  `<img>` or `<audio>` (which sends no Origin) and other accounts on the PC get nothing. `Origin: null` is refused.
+- Agent tools reach files only inside the song's folder and the sample library's folders; `export_song` writes only
+  inside the song's folder and replaces earlier exports only after ALLOW REPLACE in the AGENT panel. Text read from a
+  song is data to the model, never instructions. A tryout glob that matches nothing adds nothing.
+- The AGENT panel says once per provider what it sends and where the key is (OS credential store, a plaintext file, or
+  an environment variable it names); `agent.json` is readable by its owner only on Linux and macOS. The chat's Claude
+  Code loads no settings files (`--setting-sources ""`). The custom-server preset no longer points at Ollama's port.
+- No GET request writes anything (the RECORD tab's poll is a POST); request bodies are capped at 8 MiB (uploads 512
+  MiB); the render cache is pruned to 2 GiB as well as by count; every ffmpeg run passes `-nostdin` and stops after 300 s.
+- Builds and CI install pinned, hashed packages (`requirements-test.txt`, `requirements-build.txt`; `build_exe.py`
+  refuses an environment that differs); THIRD_PARTY.md lists the SHA-256 and source of every vendored libopenmpt file,
+  checked by `tests/test_vendor.py`. `tools/fuzz_import.py` also fuzzes SoundFont banks and GUS patches.
+- `gui.py` split: the HTTP side in `server.py`, measurements in `measure.py`, the Samples and PAINT helpers in
+  `sample_edit.py`. With it, adding candidates saves under the song's lock, `recent.json` is written atomically, and
+  each song has one measuring thread with its own small lock.
+- README: working with an AI agent, what the app writes beside a song (with a `.gitignore`), the local server, checking
+  the exe's SHA-256. pyproject: license, readme, authors, URLs, and `agent` and `build` extras.
+
 ## 1.6.0 (2026-10-14)
 
 - Recipes: `fx:` parameters that take a name reach pedalboard's enums (`resample: {quality: ZeroOrderHold}`, the

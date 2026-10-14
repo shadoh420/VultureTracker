@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from vulturetracker.fileio import user_dir  # noqa: E402  (the folder the app writes running.json to)
 
 
 def free_port():
@@ -23,9 +25,18 @@ def free_port():
         return s.getsockname()[1]
 
 
-def get(url, timeout=5):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
+def get(url, timeout=5, token=""):
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"X-VT-Token": token}), timeout=timeout) as r:
         return r.status, r.read()
+
+
+def app_token(port):
+    """The API token the app on `port` wrote to the user folder's running.json (agent.announce), else ""."""
+    try:
+        run = json.loads((user_dir() / "running.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    return run.get("token", "") if run.get("port") == port else ""
 
 
 def headless(cmd, song, timeout):
@@ -45,7 +56,10 @@ def headless(cmd, song, timeout):
                     fails.append(f"the app exited early with code {proc.returncode} (see {log})")
                     break
                 try:
-                    status, body = get(base + "/api/state")
+                    token = app_token(port)
+                    if not token:
+                        raise OSError("running.json does not name this port yet")
+                    status, body = get(base + "/api/state", token=token)
                     state = json.loads(body)
                     break
                 except (OSError, ValueError):
@@ -56,7 +70,7 @@ def headless(cmd, song, timeout):
                 song_state = state.get("song") or {}
                 print(f"ok /api/state on port {port}: {song_state.get('path', '?')} ({song_state.get('facts', {}).get('title', '?')})")
                 try:
-                    status, page = get(base + "/")
+                    status, page = get(base + "/", token=token)
                     if status != 200 or b"<html" not in page.lower():
                         fails.append(f"GET / returned {status}, {len(page)} bytes without <html")
                     else:

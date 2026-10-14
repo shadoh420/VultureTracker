@@ -17,7 +17,7 @@ try:
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
 except ImportError:  # pragma: no cover
     sync_playwright = None
-from vulturetracker import __version__, faust, gui
+from vulturetracker import __version__, faust, gui, server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG, SONG_INS, sine, RATE
 
@@ -41,8 +41,8 @@ class TestRelease100Page(unittest.TestCase):
             write_wav(d / 'a.wav', RATE, [sine(440)])
             write_wav(d / 'b.wav', RATE, [sine(880)])
             (d / 'song.yaml').write_bytes(text.encode())
-            st = gui.Handler.state = gui.State(d / 'song.yaml')
-            srv = gui._Server(('127.0.0.1', 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / 'song.yaml')
+            srv = server._Server(('127.0.0.1', 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -54,19 +54,19 @@ class TestRelease100Page(unittest.TestCase):
                         self.skipTest(f'no browser to drive the page with: {str(e).splitlines()[0]}')
                     page = browser.new_page(viewport={'width': width, 'height': height})
                     page.on('pageerror', lambda e: errors.append(str(e)))
-                    page.goto(f'http://127.0.0.1:{srv.server_address[1]}/')
+                    page.goto(f'http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}')
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("localStorage.removeItem('uiscale'); localStorage.removeItem('faustcode')")
-                    yield page, gui.Handler.state, d
+                    yield page, server.Handler.state, d
                     browser.close()
                 self.assertEqual(errors, [])
             finally:
                 srv.shutdown()
                 srv.server_close()
-                for s in {st, gui.Handler.state}:
+                for s in {st, server.Handler.state}:
                     if s:
                         s.close()
-                gui.Handler.state = None
+                server.Handler.state = None
 
     def test_version_ui_scale_and_section_rename(self):
         text = SONG + 'sections:\n  intro: [0, 1]  # the start\n'

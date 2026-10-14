@@ -356,7 +356,7 @@ class TestTuning(Base):
                 tuning_ratios(*args)
 
     def test_heard_at_the_scale_pitch_through_copies(self):
-        from vulturetracker.gui import patch_it
+        from vulturetracker.measure import patch_it
         self.scl([d for d in self.ET.replace("700.0", "750.0").split("\n")] + ["2/1"])  # G a quarter-tone sharp
         data = self.build(self.SONG % ("", "G-5"))
         nord, nins, nsmp = struct.unpack_from("<HHH", data, 0x20)

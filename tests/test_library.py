@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
-from vulturetracker import library
+from vulturetracker import library, server
 from vulturetracker.wavload import write_wav
 
 RATE = 44100
@@ -207,16 +207,16 @@ class TestLibrary(unittest.TestCase):
         _write(self.dir / "a.wav", family("saw", 2))
         _write(self.dir / "b.wav", family("hat", 2))
         (self.dir / "song.yaml").write_bytes(SONG.encode())
-        st = gui.Handler.state = gui.State(self.dir / "song.yaml")
-        gui.Handler.library = library.Library(self.dir / "index.json")
-        gui.Handler.library.set_roots([self.dir / "lib"])
-        srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+        st = server.Handler.state = gui.State(self.dir / "song.yaml")
+        server.Handler.library = library.Library(self.dir / "index.json")
+        server.Handler.library.set_roots([self.dir / "lib"])
+        srv = server._Server(("127.0.0.1", 0), server.Handler)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         url = f"http://127.0.0.1:{srv.server_address[1]}"
 
         def call(path, body=None):
             req = urllib.request.Request(url + path, json.dumps(body).encode() if body is not None else None,
-                                         {"content-type": "application/json"})
+                                         {"content-type": "application/json", "X-VT-Token": srv.token})
             with urllib.request.urlopen(req) as r:
                 data = r.read()
             return json.loads(data) if r.headers.get("content-type", "").startswith("application/json") else data
@@ -249,7 +249,7 @@ class TestLibrary(unittest.TestCase):
         finally:
             srv.shutdown()
             srv.server_close()
-            gui.Handler.state = gui.Handler.library = None
+            server.Handler.state = server.Handler.library = None
             st.close()
             for _ in range(400):  # the worker finishes the render it is on before the folder goes
                 if not any(r["status"] == "rendering" for r in st.renders.values()):

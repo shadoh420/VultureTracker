@@ -11,7 +11,7 @@ from unittest import mock
 os.environ['VT_WORKERS'] = '1'
 
 import numpy as np
-from vulturetracker import api, arrangement, gui, history, itreader, mosaic, phrases
+from vulturetracker import api, arrangement, gui, history, itreader, measure, mosaic, phrases, server
 from vulturetracker.itwriter import write_it
 from vulturetracker.model import Cell, Channel, Module, Pattern
 from tests import test_gui as fixtures
@@ -234,11 +234,11 @@ class TestRelease070(unittest.TestCase):
         doc = api.from_yaml(text)
         doc['orders'] = ['p1']
         data = api.compile_song(doc, self.dir)[0]
-        self.assertEqual(gui.channel_levels(data, 2)[0]['db'], -120.0)
+        self.assertEqual(measure.channel_levels(data, 2)[0]['db'], -120.0)
 
     def test_peak_negative_full_scale(self):
         for values in ([-32768], [-32768, 0]):
-            self.assertEqual(gui._peak(np.array(values, dtype='<i2').tobytes()), 1.0)
+            self.assertEqual(measure._peak(np.array(values, dtype='<i2').tobytes()), 1.0)
 
     def test_decimal_yaml_leading_zeros_agree(self):
         for value, expected in [('08', 8), ('010', 10), ('+010', 10), ('-010', -10)]:
@@ -299,23 +299,23 @@ class TestRelease070(unittest.TestCase):
     def test_backing_route_saves_separate_untrimmed_takes(self):
         st = self.song(fixtures.SONG_BLOCK)
         r = fake_recorder()
-        old = gui.Handler.state, gui.Handler.recorder
-        gui.Handler.state, gui.Handler.recorder = st, r
+        old = server.Handler.state, server.Handler.recorder
+        server.Handler.state, server.Handler.recorder = st, r
         try:
             r.open(0, '1', 44100)
-            result = gui.Handler.rec_command({'cmd': 'start', 'backing': True, 'output': 0, 'countin': 0, 'loops': 2})
+            result = server.Handler.rec_command({'cmd': 'start', 'backing': True, 'output': 0, 'countin': 0, 'loops': 2})
             self.assertNotIn('error', result)
             size = len(r.backing['pcm'])
             self.assertGreater(float(np.max(np.abs(r.backing['pcm']))), .01)
             r.stream.feed(2 * size / 44100 + .1)
             self.assertTrue(r.status()['finished'])
-            result = gui.Handler.rec_command({'cmd': 'stop', 'name': 'along', 'trim': True, 'root': False, 'dest': 'keep'})
+            result = server.Handler.rec_command({'cmd': 'stop', 'name': 'along', 'trim': True, 'root': False, 'dest': 'keep'})
             self.assertEqual(len(result['takes']), 2)
             for t in result['takes']:
                 self.assertAlmostEqual(t['seconds'], size / 44100, places=3)
         finally:
             r.close()
-            gui.Handler.state, gui.Handler.recorder = old
+            server.Handler.state, server.Handler.recorder = old
 
 
 class TestDuplexRecording(unittest.TestCase):

@@ -9,7 +9,7 @@ from unittest import mock
 
 import numpy as np
 
-from vulturetracker import dsp, gui, record
+from vulturetracker import dsp, gui, record, server
 from vulturetracker.wavload import read_wav, write_wav
 
 from tests.test_gui import RATE, SONG, SONG_INS, sine
@@ -114,11 +114,11 @@ class TestTakesInTheSong(unittest.TestCase):
 
     def tearDown(self):
         self.st.close()
-        gui.Handler.state = None
-        if gui.Handler.recorder:
-            gui.Handler.recorder.close()
-        gui.Handler.recorder = None
-        gui.Handler.rec_devices = None
+        server.Handler.state = None
+        if server.Handler.recorder:
+            server.Handler.recorder.close()
+        server.Handler.recorder = None
+        server.Handler.rec_devices = None
         self.tmp.cleanup()
 
     def take(self, cents=0.0, seconds=1.0):
@@ -182,8 +182,8 @@ class TestTakesInTheSong(unittest.TestCase):
             st.close()
 
     def test_record_routes(self):
-        gui.Handler.state = self.st
-        H = gui.Handler
+        server.Handler.state = self.st
+        H = server.Handler
         snap = H.rec_snapshot(devices=True)
         self.assertTrue(snap["available"] and snap["fake"])
         self.assertEqual(snap["devices"][0]["name"], "Simulated 2-input interface")
@@ -210,8 +210,8 @@ class TestTakesInTheSong(unittest.TestCase):
 
 
     def test_unsaved_passes_kept_until_saved(self):
-        gui.Handler.state = self.st
-        H = gui.Handler
+        server.Handler.state = self.st
+        H = server.Handler
         spills = self.dir / "recordings"
         with mock.patch.object(record, "spill_dir", lambda: spills):
             H.rec_command({"cmd": "open", "device": 0, "mode": "1"})

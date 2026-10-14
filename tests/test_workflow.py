@@ -13,7 +13,7 @@ from unittest import mock
 
 import yaml
 
-from vulturetracker import api, arrangement, gui, synth
+from vulturetracker import api, arrangement, gui, measure, server, synth
 from vulturetracker import history as history_io
 from vulturetracker.project import collect
 from vulturetracker.phrases import action as phrase_action
@@ -482,7 +482,7 @@ class TestSafety(unittest.TestCase):
                 if file.name == 'audition.wav':
                     self.assertEqual(w.readframes(w.getnframes()), expected)
         self.assertEqual(len(set(frames)), 1)
-        self.assertEqual(frames[0], round(4 * 6 * 2.5 / 125 * gui.RATE))
+        self.assertEqual(frames[0], round(4 * 6 * 2.5 / 125 * measure.RATE))
         st.set_mix({})
         st.meta['solo'] = 1
         muted = export.prepare(st, dict(opts, name='solo', mix='current', mutes='respect'))
@@ -498,7 +498,7 @@ class TestSafety(unittest.TestCase):
                 text = text.replace('01: ... .. ... ... |', f'01: ... .. ... {effect} |', 1)
                 snap = export.snapshot(api.from_yaml(text), self.dir, (0, 0, 0, 3), tail=.05)
                 self.assertAlmostEqual(snap['seconds'], .24, places=6)
-                self.assertEqual(len(export.render(snap)), round(.29*gui.RATE)*4)
+                self.assertEqual(len(export.render(snap)), round(.29*measure.RATE)*4)
         # A later section starts at the raw order number, past the skip marker.
         doc = api.from_yaml(SONG_BLOCK.replace('orders: [p1, p2]', 'orders: [p1, +++, p2]'))
         snap = export.snapshot(doc, self.dir, (2, 0, 2, 3), tail=0)
@@ -579,7 +579,7 @@ class TestSafety(unittest.TestCase):
                 'replace': True}
         job = export.prepare(st, opts)
         start, end = job['snapshot']['loop']
-        self.assertEqual((start, end), (0, round(4 * 6 * 2.5 / 125 * gui.RATE)))
+        self.assertEqual((start, end), (0, round(4 * 6 * 2.5 / 125 * measure.RATE)))
         import numpy as np
         b = np.frombuffer(export.render(job['snapshot'], silenced=[0]), '<i2').reshape(-1, 2).astype(int)
         self.assertGreater(np.abs(b[:2000]).max(), 1000)  # the ring-over from the region's own end
@@ -592,7 +592,7 @@ class TestSafety(unittest.TestCase):
         self.assertIn(b'LOOPSTART=0', tags)
         self.assertIn(f'LOOPLENGTH={end}'.encode(), tags)
         whole = export.prepare(st, dict(opts, region='', tail=0))
-        self.assertEqual(whole['snapshot']['loop'], (0, round(8 * 6 * 2.5 / 125 * gui.RATE)))
+        self.assertEqual(whole['snapshot']['loop'], (0, round(8 * 6 * 2.5 / 125 * measure.RATE)))
         for fmt in ('mp3', 'it'):
             with self.assertRaisesRegex(ValueError, 'game loop'):
                 export.prepare(st, dict(opts, fmt=fmt))
@@ -606,7 +606,7 @@ class TestSafety(unittest.TestCase):
         before = sorted(p.name for p in self.dir.iterdir())
         song = str(self.dir / 'song.yaml')
         self.assertEqual(main(['export', song, '-o', str(self.dir / 'out'), '--loop', '--tail', '0', '--stems']), 0)
-        self.assertEqual(read_wav(self.dir / 'out' / 'song.wav').loops, [(0, round(8 * 6 * 2.5 / 125 * gui.RATE), False)])
+        self.assertEqual(read_wav(self.dir / 'out' / 'song.wav').loops, [(0, round(8 * 6 * 2.5 / 125 * measure.RATE), False)])
         self.assertEqual(len(list((self.dir / 'out' / 'song_stems').iterdir())), 2)
         self.assertEqual(main(['export', song, '-o', str(self.dir / 'out')]), 1)  # exists: --replace
         self.assertEqual(main(['collect', song, str(self.dir.parent / (self.dir.name + '-copy')), '--zip']), 0)
@@ -671,15 +671,15 @@ class TestSafety(unittest.TestCase):
         self.assertEqual(run('checkpoint', 'save', 'Later')[0], 0)
         # the same song opened again in the app stays locked: the new state takes the lock the old one held
         with mock.patch.object(gui, 'remember_song'), mock.patch.object(gui, 'WORKERS', 0):
-            old = gui.Handler.state
+            old = server.Handler.state
             try:
-                gui.Handler.open_song(song)
-                gui.Handler.open_song(song)
-                self.assertTrue(gui.open_in_app(song))
+                server.Handler.open_song(song)
+                server.Handler.open_song(song)
+                self.assertTrue(server.open_in_app(song))
             finally:
-                gui.Handler.state.close()
-                gui.Handler.state = old
-        self.assertFalse(gui.open_in_app(song))
+                server.Handler.state.close()
+                server.Handler.state = old
+        self.assertFalse(server.open_in_app(song))
 
 
 def cli(*args):
@@ -743,7 +743,7 @@ class TestAudit090(unittest.TestCase):
             if not apps:
                 apps.append(self.state())  # the app opens the song while the command works on it
             return real(st, name, action)
-        with mock.patch.object(gui, 'LOCK_WAITS', (0.01,)), mock.patch.object(gui.State, 'checkpoint', checkpoint):
+        with mock.patch.object(server, 'LOCK_WAITS', (0.01,)), mock.patch.object(gui.State, 'checkpoint', checkpoint):
             self.assertEqual(cli('checkpoint', song, 'save', 'cli')[0], 0)
         app = apps[0]
         self.assertIn('read-only', app.read_only)
@@ -759,9 +759,9 @@ class TestAudit090(unittest.TestCase):
         # and the second app wrote its own history over it
         from vulturetracker.fileio import lock_file, unlock_file
         song = self.dir / 'song.yaml'
-        gui.LOCKS.mkdir(parents=True, exist_ok=True)
-        other = lock_file(gui.app_lock_path(song))  # the first app, in another process
-        with mock.patch.object(gui, 'LOCK_WAITS', (0.01,)):
+        server.LOCKS.mkdir(parents=True, exist_ok=True)
+        other = lock_file(server.app_lock_path(song))  # the first app, in another process
+        with mock.patch.object(server, 'LOCK_WAITS', (0.01,)):
             st = self.state()
         self.assertIn('read-only', st.read_only)
         unlock_file(other)  # the first app ends
@@ -770,9 +770,9 @@ class TestAudit090(unittest.TestCase):
             st.checkpoint('app')
         self.assertEqual(list(gui.State(song, headless=True).checkpoints), ['cli'])
         # one that lets go while the app waits: the app takes the lock and edits
-        other = lock_file(gui.app_lock_path(song))
+        other = lock_file(server.app_lock_path(song))
         threading.Timer(0.05, unlock_file, [other]).start()
-        with mock.patch.object(gui, 'LOCK_WAITS', (0.3, 0.3)):
+        with mock.patch.object(server, 'LOCK_WAITS', (0.3, 0.3)):
             st = self.state()
         self.assertIsNone(st.read_only)
         st.checkpoint('app')
@@ -809,7 +809,7 @@ class TestAudit090(unittest.TestCase):
         twice = dict(st.song, orders=['p1', 'p2', 'p1', 'p2'])
         twice.pop('sections')
         with LoadedModule(api.compile_song(twice, self.dir)[0]) as lm:
-            x = np.frombuffer(lm.render(gui.RATE), '<i2')[::2].astype(int)
+            x = np.frombuffer(lm.render(measure.RATE), '<i2')[::2].astype(int)
         clicks = np.nonzero(x > x.max() // 2)[0]
         self.assertEqual(len(clicks), 2)
         length = int(clicks[1] - clicks[0])  # what one pass of the section (and of the song) lasts in the audio

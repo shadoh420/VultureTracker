@@ -12,7 +12,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 sys.path.insert(0, str(ROOT))
-from vulturetracker.gui import measure  # noqa: E402
+from vulturetracker.measure import measure  # noqa: E402
 from vulturetracker.wavload import read_wav  # noqa: E402
 
 

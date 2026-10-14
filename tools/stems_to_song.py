@@ -402,7 +402,7 @@ def delta(render, rec, offset_ms):
     """The SPECTRUM tab's DELTA of the render against the recording (vulturetracker.gui.reference_compare): the median,
     mean, 75th and 90th percentiles of the columns' mean |delta| in dB."""
     import numpy as np
-    from vulturetracker.gui import reference_compare
+    from vulturetracker.measure import reference_compare
     *_, cols, _, _ = reference_compare(str(render), "r", str(rec), "x", offset_ms, 0.0)
     live = np.array(sorted(v for v in cols if v is not None))
     return {"median": float(live[len(live) // 2]), "mean": round(float(live.mean()), 1),

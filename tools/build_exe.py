@@ -1,4 +1,11 @@
-"""Build a standalone vulturetracker.exe (Windows) with PyInstaller: `pip install pyinstaller && python tools/build_exe.py`.
+"""Build a standalone vulturetracker.exe (Windows) with PyInstaller:
+
+    pip install --require-hashes -r requirements-build.txt
+    pip install --no-deps -e .
+    python tools/build_exe.py [--unpinned]
+
+requirements-build.txt pins every package the exe packs, with their SHA-256 digests; the build stops when an installed
+version differs from its pin, unless --unpinned (a trial build; never one to publish).
 
 The exe is the whole CLI; `vulturetracker.exe gui song.yaml` opens the app in its own window (pywebview), or in the
 default browser without it.
@@ -11,11 +18,31 @@ a packed file is unpacked to %TEMP% on every launch. Ship both files; its build 
 dist/vulturetracker-win64.zip is the one-download release: the exe, ffmpeg, LICENSE, THIRD_PARTY.md and the demos whose
 samples are all in git (demo/, demo2/, samples/ and samples/surge/); the app finds them beside the exe."""
 import importlib.util
+import re
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def unpinned():
+    """The packages whose installed version is not requirements-build.txt's pin, one line each."""
+    out = []
+    for name, want in re.findall(r"^([A-Za-z0-9_.-]+)==([^\s;\\]+)", (ROOT / "requirements-build.txt").read_text(encoding="utf-8"), re.M):
+        try:
+            have = version(name)
+        except PackageNotFoundError:
+            have = None
+        if have != want:
+            out.append(f"  {name}: {have or 'not installed'}, pinned {want}")
+    return out
+
+
+if "--unpinned" not in sys.argv[1:] and unpinned():
+    sys.exit("the build environment differs from requirements-build.txt:\n" + "\n".join(unpinned()) +
+             "\ninstall the pins (pip install --require-hashes -r requirements-build.txt) or pass --unpinned for a trial build")
 sep = ";" if sys.platform == "win32" else ":"
 ICO = ROOT / "assets" / "vulturetracker.ico"
 try:  # refresh the exe icon from the master PNG when Pillow is installed (build-time only)

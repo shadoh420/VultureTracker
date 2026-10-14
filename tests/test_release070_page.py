@@ -13,6 +13,7 @@ try:
 except ImportError:  # pragma: no cover
     sync_playwright = None
 from vulturetracker import api, gui, record
+from vulturetracker.server import Handler, _Server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, sine, RATE
 
@@ -32,10 +33,10 @@ class TestRelease070Page(unittest.TestCase):
             short['orders'] = ['short']
             second = folder / 'short.yaml'
             second.write_bytes(api.to_yaml(short).encode())
-            old_state, old_rec = gui.Handler.state, gui.Handler.recorder
-            first = gui.Handler.state = gui.State(song)
-            gui.Handler.recorder = None
-            server = gui._Server(('127.0.0.1', 0), gui.Handler)
+            old_state, old_rec = Handler.state, Handler.recorder
+            first = Handler.state = gui.State(song)
+            Handler.recorder = None
+            server = _Server(('127.0.0.1', 0), Handler)
             threading.Thread(target=server.serve_forever, daemon=True).start()
             errors, dialogs = [], []
             try:
@@ -44,7 +45,7 @@ class TestRelease070Page(unittest.TestCase):
                     page = browser.new_page(viewport={'width': 1700, 'height': 1100})
                     page.on('pageerror', lambda e: errors.append(str(e)))
                     page.on('dialog', lambda d: (dialogs.append(d.message), d.accept()))
-                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/')
+                    page.goto(f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}')
                     page.wait_for_function('S?.song?.facts && PAT.rows')
                     page.click('[data-t="pattern"]')
                     page.evaluate("MIDI.on=true;setEdit(true);CUR.ch=0;CUR.row=1;midiMsg([0x90,62,100]);midiMsg([0x90,65,80])")
@@ -77,7 +78,7 @@ class TestRelease070Page(unittest.TestCase):
                     page.click('[data-t="rec"]')
                     page.wait_for_function('REC.st?.devices?.length')
                     self.assertTrue(page.evaluate('REC.st.fake'))
-                    self.assertIsInstance(gui.Handler.recorder.be, record.FakeBackend)
+                    self.assertIsInstance(Handler.recorder.be, record.FakeBackend)
                     page.click('#rec-open')
                     page.wait_for_function('REC.st?.status.open')
                     page.check('#rec-backing')
@@ -91,8 +92,8 @@ class TestRelease070Page(unittest.TestCase):
                     self.assertEqual(page.text_content('#rec-go'), 'SAVE TAKES')
                     page.click('#rec-go')
                     page.wait_for_function('REC.st?.takes.length===2')
-                    take = gui.Handler.state.takes[0]
-                    response = page.request.get(f'http://127.0.0.1:{server.server_address[1]}/take/' + quote(take['file']))
+                    take = Handler.state.takes[0]
+                    response = page.request.get(f'http://127.0.0.1:{server.server_address[1]}/take/' + quote(take['file']) + '?token=' + server.token)
                     self.assertEqual(response.status, 200)
                     self.assertEqual(response.body(), (folder / 'takes' / take['file']).read_bytes())
                     page.get_by_role('button', name='CALIBRATE LOOPBACK', exact=True).click()
@@ -108,12 +109,12 @@ class TestRelease070Page(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
-                if gui.Handler.recorder:
-                    gui.Handler.recorder.close()
+                if Handler.recorder:
+                    Handler.recorder.close()
                 first.close()
-                if gui.Handler.state:
-                    gui.Handler.state.close()
-                gui.Handler.state, gui.Handler.recorder = old_state, old_rec
+                if Handler.state:
+                    Handler.state.close()
+                Handler.state, Handler.recorder = old_state, old_rec
 
 
 if __name__ == '__main__':

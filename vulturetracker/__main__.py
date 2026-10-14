@@ -39,12 +39,13 @@ HISTORY = ("undo", "redo", "trim-history")  # commands on the song's undo histor
 
 def _open_song(song, write, wait=0.0):
     """(the song opened headless, its lock or None); what the opening noticed goes to stderr. A command that writes holds
-    the song's lock (gui.app_lock_path) to its end, so an app opening the song meanwhile waits for it or opens it
+    the song's lock (server.app_lock_path) to its end, so an app opening the song meanwhile waits for it or opens it
     read-only, and it is refused while an app or another command holds the lock (after `wait` seconds of asking again).
     One that reads holds it while the song is read; a song open in the app is read as it is (an interrupted save's
     journal or a file that does not parse is the app's to reconcile)."""
     from .fileio import lock_file, unlock_file
-    from .gui import LOCKS, State, app_lock_path
+    from .gui import State
+    from .server import LOCKS, app_lock_path
     LOCKS.mkdir(parents=True, exist_ok=True)
     lock, until = lock_file(app_lock_path(song)), time.monotonic() + wait
     while write and lock is None and time.monotonic() < until:

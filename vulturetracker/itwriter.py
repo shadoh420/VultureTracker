@@ -137,7 +137,7 @@ def tuned(mod):
     """The samples and instruments as written when an instrument has `tuning`: a key whose ratio to 12-TET is not 1
     plays a copy of its sample with c5_speed times that ratio, one copy per (sample, ratio), appended after the song's
     samples. Returns (samples, instruments, data_of): sample i's data is sample data_of[i]'s (a copy shares its base's
-    data in the file, so nothing is stored twice and gui.patch_it finds a slot's copies by that data offset)."""
+    data in the file, so nothing is stored twice and measure.patch_it finds a slot's copies by that data offset)."""
     samples, data_of, copies, insts = list(mod.samples), list(range(len(mod.samples))), {}, []
     for ins in mod.instruments or []:
         if not ins.tuning:

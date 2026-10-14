@@ -204,6 +204,20 @@ def _aiff_settings(raw):
     return got
 
 
+FFMPEG_SECONDS = 300  # the longest an ffmpeg run may take (a decode or an export's encode takes seconds)
+
+
+def run_ffmpeg(cmd, **kw):
+    """`cmd` (ffmpeg and its arguments) run with -nostdin (it never reads the console, so it cannot stop for a key) and
+    for at most FFMPEG_SECONDS, its output captured; a run that takes longer is killed and answered as a failed one
+    (returncode -1, the reason in stderr), so every caller's failure path covers it."""
+    try:
+        return subprocess.run([cmd[0], "-nostdin", *cmd[1:]], capture_output=True, timeout=FFMPEG_SECONDS,
+                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), **kw)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, -1, b"", f"ffmpeg took over {FFMPEG_SECONDS} s and was stopped".encode())
+
+
 def to_wav(src, folder, ffmpeg, name=None):
     """A FLAC, AIFF, Ogg Vorbis, Opus or MP3 file as a 16-bit WAV in `folder`, decoded by `ffmpeg`, with what OpenMPT
     keeps from it besides the audio in a smpl chunk: from a FLAC the loops and root note of its embedded RIFF chunks
@@ -217,8 +231,8 @@ def to_wav(src, folder, ffmpeg, name=None):
     got = _flac_settings(raw) if raw[:4] == b"fLaC" else _aiff_settings(raw) if raw[:4] == b"FORM" else {}
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "out.wav"
-        r = subprocess.run([ffmpeg, "-loglevel", "error", "-i", str(src), "-map", "0:a:0", "-c:a", "pcm_s16le", "-bitexact",
-                            "-map_metadata", "-1", str(out)], capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        r = run_ffmpeg([ffmpeg, "-loglevel", "error", "-i", str(src), "-map", "0:a:0", "-c:a", "pcm_s16le", "-bitexact",
+                        "-map_metadata", "-1", str(out)])
         if r.returncode or not out.exists():
             raise WavError(f"{src.name}: ffmpeg could not read it ({r.stderr.decode(errors='replace').strip()[-300:]})")
         data = out.read_bytes()

@@ -15,7 +15,7 @@ from unittest import mock
 
 import numpy as np
 
-from vulturetracker import gui
+from vulturetracker import gui, server
 from vulturetracker.library import read_audio
 from vulturetracker.wavload import write_wav
 
@@ -41,8 +41,8 @@ class TestPage(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         st = fixture.state()
         port = fixture._fake([{"data": [{"id": "local-tool-model"}]}])
-        with mock.patch.object(gui.Handler, "state", st):
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+        with mock.patch.object(server.Handler, "state", st):
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             try:
                 with sync_playwright() as p:
@@ -55,7 +55,7 @@ class TestPage(unittest.TestCase):
                         page = browser.new_page()
                         errors = []
                         page.on("pageerror", lambda e: errors.append(str(e)))
-                        page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                        page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                         page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.chat")
                         page.evaluate("document.body.classList.add('agent-on');AG.view='set';renderAgent()")
                         self.assertEqual(page.locator("#ag-provider option").count(), 7)
@@ -161,9 +161,9 @@ class TestPage(unittest.TestCase):
             write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
             write_wav(d / "b.wav", RATE, [sine(880)])
             (d / "song.yaml").write_bytes(text.encode("utf-8"))
-            st = gui.Handler.state = gui.State(d / "song.yaml")
+            st = server.Handler.state = gui.State(d / "song.yaml")
             self.assertIsNone(st.error)
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             dialogs = []
             try:
@@ -175,7 +175,7 @@ class TestPage(unittest.TestCase):
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page()
                     page.on("dialog", lambda dlg: (dialogs.append(dlg.message), dlg.dismiss()))
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("tab('song')")
                     page.click("#song-mod .tv >> nth=0")   # the title, click to type
@@ -189,7 +189,7 @@ class TestPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                gui.Handler.state = None
+                server.Handler.state = None
                 for _ in range(400):  # the state's worker renders on its own thread: let it finish before the dir goes
                     if not (st.jobs.qsize() or any(r["status"] in ("queued", "rendering") for r in st.renders.values())):
                         break
@@ -209,8 +209,8 @@ class TestPage(unittest.TestCase):
             song = d / "song.yaml"
             song.write_bytes(SONG_BLOCK.encode("utf-8"))
             (d / "song.tryout.json").write_text("{", encoding="utf-8")
-            st = gui.Handler.state = gui.State(song)
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            st = server.Handler.state = gui.State(song)
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             dialogs, text = [], lambda: song.read_bytes().decode("utf-8")  # noqa: E731
             try:
@@ -222,7 +222,7 @@ class TestPage(unittest.TestCase):
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page()
                     page.on("dialog", lambda dlg: (dialogs.append(dlg.message), dlg.dismiss()))
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("tab('pattern')")
                     page.wait_for_function("PAT.rows && PAT.rows.length === 4")
@@ -267,7 +267,7 @@ class TestPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                gui.Handler.state = None
+                server.Handler.state = None
                 for _ in range(400):
                     if not (st.jobs.qsize() or any(r["status"] in ("queued", "rendering") for r in st.renders.values())):
                         break
@@ -291,8 +291,8 @@ class TestPage(unittest.TestCase):
             write_wav(d / "hits.wav", RATE, [np.round(hits * 32767).astype(int).tolist()])
             (d / "song.yaml").write_bytes(SONG_INS.replace("  2: {file: b.wav, name: B tone}\n",
                                                            "  2: {file: b.wav, name: B tone}\n  3: {file: hits.wav, name: Hits}\n").encode())
-            st = gui.Handler.state = gui.State(d / "song.yaml")
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / "song.yaml")
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -304,7 +304,7 @@ class TestPage(unittest.TestCase):
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page(viewport={"width": 1400, "height": 900})
                     page.on("pageerror", lambda e: errors.append(str(e)))
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("tab('smp');SMP_SEL='3';renderSmp()")
                     page.wait_for_function("W.data && W.data.num === 3")
@@ -339,7 +339,7 @@ class TestPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                gui.Handler.state = None
+                server.Handler.state = None
                 st.close()
                 for _ in range(400):
                     if not any(r["status"] in ("queued", "rendering") for r in st.renders.values()):
@@ -357,8 +357,8 @@ class TestPage(unittest.TestCase):
             write_wav(d / "a.wav", RATE, [sine(440)])
             write_wav(d / "b.wav", RATE, [sine(880)])
             (d / "song.yaml").write_bytes(SONG_INS.encode())
-            st = gui.Handler.state = gui.State(d / "song.yaml")
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / "song.yaml")
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -370,7 +370,7 @@ class TestPage(unittest.TestCase):
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page(viewport={"width": 1400, "height": 900})
                     page.on("pageerror", lambda e: errors.append(str(e)))
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("localStorage.removeItem('faustcode'); tab('faust')")
                     page.wait_for_function("$('fa-code').value.length > 0")
@@ -407,7 +407,7 @@ class TestPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                gui.Handler.state = None
+                server.Handler.state = None
                 st.close()
                 for _ in range(400):
                     if not any(r["status"] == "rendering" for r in st.renders.values()):
@@ -426,8 +426,8 @@ class TestPage(unittest.TestCase):
             write_wav(d / "a.wav", RATE, [sine(440)])
             write_wav(d / "b.wav", RATE, [sine(880)])
             (d / "song.yaml").write_bytes(SONG_INS.encode())
-            st = gui.Handler.state = gui.State(d / "song.yaml")
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / "song.yaml")
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             errors = []
             level = "(()=>{const a=FA.an,x=new Float32Array(a.fftSize);a.getFloatTimeDomainData(x);let m=0;for(const v of x)m=Math.max(m,Math.abs(v));return m})()"
@@ -440,7 +440,7 @@ class TestPage(unittest.TestCase):
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page(viewport={"width": 1400, "height": 900})
                     page.on("pageerror", lambda e: errors.append(str(e)))
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("localStorage.removeItem('faustcode'); tab('faust')")
                     page.wait_for_function("$('fa-code').value.length > 0")
@@ -500,7 +500,7 @@ class TestPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                gui.Handler.state = None
+                server.Handler.state = None
                 st.close()
 
     @contextlib.contextmanager
@@ -513,8 +513,8 @@ class TestPage(unittest.TestCase):
             write_wav(d / "a.wav", RATE, [sine(440)])
             write_wav(d / "b.wav", RATE, [sine(880)])
             (d / "song.yaml").write_bytes(song_text.encode())
-            st = gui.Handler.state = gui.State(d / "song.yaml")
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / "song.yaml")
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             errors = []
             try:
@@ -526,14 +526,14 @@ class TestPage(unittest.TestCase):
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page(viewport={"width": 1400, "height": 900})
                     page.on("pageerror", lambda e: errors.append(str(e)))
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     yield page, st, errors
                     browser.close()
             finally:
                 srv.shutdown()
                 srv.server_close()
-                gui.Handler.state = None
+                server.Handler.state = None
                 st.close()
                 for _ in range(400):
                     if not any(r["status"] == "rendering" for r in st.renders.values()):
@@ -663,8 +663,8 @@ class TestPage(unittest.TestCase):
             write_wav(d / "a.wav", RATE, [sine(440)], root_note=69)
             write_wav(d / "b.wav", RATE, [sine(880)])
             (d / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
-            st = gui.Handler.state = gui.State(d / "song.yaml")
-            srv = gui._Server(("127.0.0.1", 0), gui.Handler)
+            st = server.Handler.state = gui.State(d / "song.yaml")
+            srv = server._Server(("127.0.0.1", 0), server.Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             try:
                 with sync_playwright() as p:
@@ -674,7 +674,7 @@ class TestPage(unittest.TestCase):
                     except PlaywrightError as e:
                         self.skipTest(f"no browser to drive the page with: {str(e).splitlines()[0]}")
                     page = browser.new_page()
-                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/")
+                    page.goto(f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}")
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("tab('rec')")
                     page.wait_for_function("REC.st && REC.st.devices && REC.st.devices.length")
@@ -694,9 +694,9 @@ class TestPage(unittest.TestCase):
             finally:
                 srv.shutdown()
                 srv.server_close()
-                if gui.Handler.recorder:
-                    gui.Handler.recorder.close()
-                gui.Handler.state = gui.Handler.recorder = gui.Handler.rec_devices = None
+                if server.Handler.recorder:
+                    server.Handler.recorder.close()
+                server.Handler.state = server.Handler.recorder = server.Handler.rec_devices = None
                 st.close()
 
 

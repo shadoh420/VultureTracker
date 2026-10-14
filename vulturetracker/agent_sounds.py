@@ -11,14 +11,12 @@ import shutil
 import uuid
 from pathlib import Path
 
-from .agent import tool, _integer, _boolean
+from .agent import tool, _integer, _boolean, reach
 from . import api, synth
 
 
 def _path(st, value):
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError('give a file or folder path')
-    return (st.base_dir / value).resolve()
+    return reach(st, value)
 
 
 def _page(a, items):
@@ -35,7 +33,7 @@ _PAGE = {'query': {'type': 'string'}, 'offset': {'type': 'integer'}, 'limit': {'
       'Provide job_id when polling to reject results belonging to a newer UI/agent job. Scans and similarity searches '
       'are asynchronous; done means this job finished, and error means it failed.', {'job_id': {'type': 'string'}})
 def library_status(st, a):
-    from .gui import Handler
+    from .server import Handler
     lib = Handler.lib()
     with lib.lock:
         job_id = getattr(lib, 'job_id', None)
@@ -52,7 +50,7 @@ def library_status(st, a):
       'not the song, and is not song undo history.',
       {'roots': {'type': 'array', 'items': {'type': 'string'}}, 'replace_roots': {'type': 'boolean'}})
 def index_library(st, a):
-    from .gui import Handler
+    from .server import Handler
     lib = Handler.lib()
     roots = None
     replace = _boolean(a, 'replace_roots')
@@ -74,7 +72,7 @@ def index_library(st, a):
       'Returns measured metadata and whether its file stamp is current. No implicit scan or candidate selection. '
       'Use index_library first if empty/stale; use similar_samples for measured timbre similarity.', _PAGE)
 def search_library(st, a):
-    from .gui import Handler
+    from .server import Handler
     from .library import stamp
     lib = Handler.lib()
     words = str(a.get('query', '')).casefold().split()
@@ -99,7 +97,7 @@ def search_library(st, a):
       'for the owner to audition. Distance is a feature-space measurement, not a musical-quality score.',
       {'file': {'type': 'string'}, 'slot': {'type': 'integer'}, 'limit': {'type': 'integer'}})
 def similar_samples(st, a):
-    from .gui import Handler
+    from .server import Handler
     lib = Handler.lib()
     if ('file' in a) == ('slot' in a):
         raise ValueError('give exactly one file or slot')
@@ -230,8 +228,8 @@ def _spec(st, a):
         events, seconds, _ = synth._events(spec, 'sound')
         if not 0 < seconds <= 60 or len(events) > 128 or any(not 0 <= start < end <= 60 for _, _, start, end in events):
             raise ValueError('render 0..60 seconds and at most 128 notes with positive lengths')
-    def paths(value):
-        return [str((base / p).resolve()) for p in value] if isinstance(value, list) else str((base / value).resolve())
+    def paths(value):  # inputs a recipe reads: inside the song's or the recipe's folder or the library's
+        return [str(_path(st, str(base / p))) for p in value] if isinstance(value, list) else str(_path(st, str(base / value)))
     if 'file' in spec:
         spec['file'] = paths(spec['file'])
     if 'resynth' in spec:
@@ -252,7 +250,7 @@ def _spec(st, a):
             f = synth.FAUST_EXAMPLES / name
         spec['faust'] = f.read_text(encoding='utf-8')
     if 'patch' in spec and (base / spec['patch']).is_file():
-        spec['patch'] = str((base / spec['patch']).resolve())
+        spec['patch'] = str(_path(st, str(base / spec['patch'])))
     return spec, rate
 
 
@@ -329,7 +327,7 @@ _MATRIX = {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number
        'range_db': {'type': 'number'}, 'seed': {'type': 'integer'}, 'name': {'type': 'string'},
        'source': {'type': 'string'}, 'file': {'type': ['string', 'null']}})
 def render_paint(st, a):
-    from .gui import paint_args
+    from .sample_edit import paint_args
     import numpy as np
     if 'source' in a:
         a = {**json.loads(_path(st, a['source']).read_text(encoding='utf-8')), **a}
@@ -373,7 +371,8 @@ def cancel_synthesis(st, a):
 
 def render_job(st, job):
     """Publish only after a complete render; cleanup is limited to files reserved by this job."""
-    from .gui import paint_args, png_rgb
+    from .measure import png_rgb
+    from .sample_edit import paint_args
     from . import spectral
     from .wavload import write_wav, read_wav
     import numpy as np

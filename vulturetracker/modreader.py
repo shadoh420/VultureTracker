@@ -111,13 +111,17 @@ def _module(title, nch, fmt):
 
 def _orders(mod, orders, npat):
     """The order list up to '---'; an entry past the patterns becomes '+++' (libopenmpt skips it too), so every later
-    entry keeps its index and a Bxx its target."""
+    entry keeps its index and a Bxx its target. An empty list plays pattern 0, an empty 64-row one when the module has no
+    pattern at all (as the IT reader fills an order's missing pattern)."""
+    npat = min(npat, len(mod.patterns))
     out = []
     for o in orders:
         if o == 0xFF:
             break
         out.append(o if o < npat else ORDER_SKIP)
     mod.orders = out or [0]
+    if not mod.patterns:
+        mod.patterns.append(Pattern("p00", [[Cell() for _ in mod.channels] for _ in range(64)]))
 
 
 def _finish(mod, warn):

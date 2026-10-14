@@ -11,7 +11,6 @@ import subprocess
 import sys
 import threading
 import time
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = "--autoplay-policy=no-user-gesture-required"
@@ -20,7 +19,7 @@ import imageio_ffmpeg  # noqa: E402
 import webview  # noqa: E402
 import win32gui  # noqa: E402
 from PIL import Image, ImageDraw, ImageFont, ImageGrab  # noqa: E402
-from vulturetracker import gui  # noqa: E402
+from vulturetracker import server  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "scratch" / "demo-video"
@@ -350,17 +349,17 @@ if __name__ == "__main__":
     if "--assemble-only" not in sys.argv:
         for f in FRAMES.glob("*.jpg"):
             f.unlink()
-        srv = ThreadingHTTPServer(("127.0.0.1", 0), gui.Handler)
-        url = f"http://127.0.0.1:{srv.server_address[1]}/"
+        srv = server._Server(("127.0.0.1", 0), server.Handler)
+        url = f"http://127.0.0.1:{srv.server_address[1]}/?token={srv.token}"
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        gui.Handler.open_song(str(SONG))                        # warm the render cache before recording
+        server.Handler.open_song(str(SONG))                        # warm the render cache before recording
         for _ in range(600):
-            s = gui.Handler.state.snapshot()
+            s = server.Handler.state.snapshot()
             if s["candidates"] and all(c["status"] == "ready" for c in s["candidates"]):
                 break
             time.sleep(0.5)
         print("cache warm:", sum(1 for c in s["candidates"] if c["status"] == "ready"), "of", len(s["candidates"]), flush=True)
         w = webview.create_window("VultureTracker", url, x=0, y=0, width=W + 16, height=H + 39, on_top=True, background_color="#0a0c0d")
-        gui.Handler.window = w
+        server.Handler.window = w
         webview.start(tour, w)
     assemble()

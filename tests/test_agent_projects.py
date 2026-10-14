@@ -6,7 +6,7 @@ import time
 import unittest
 from unittest import mock
 
-from vulturetracker import agent, api, gui
+from vulturetracker import agent, api, gui, server
 from vulturetracker.wavload import write_wav
 from tests.test_gui import SONG_BLOCK, RATE, sine
 
@@ -22,13 +22,13 @@ class ProjectToolsTests(unittest.TestCase):
         self.st = gui.State(self.path, headless=True)
         self.states = [self.st]
         self.chat = agent.Chat()
-        self.patches = [mock.patch.object(gui.Handler, 'state', self.st),
+        self.patches = [mock.patch.object(server.Handler, 'state', self.st),
                         mock.patch.object(gui, 'CHAT', self.chat), mock.patch.object(gui, 'remember_song')]
         for p in self.patches:
             p.start()
 
     def tearDown(self):
-        for st in set(self.states + [gui.Handler.state]):
+        for st in set(self.states + [server.Handler.state]):
             if st is not None and not st.closed:
                 if not st.headless:
                     for _ in range(100):
@@ -41,7 +41,7 @@ class ProjectToolsTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def call(self, tool_name, **a):
-        out = agent.run(gui.Handler.state, tool_name, a)
+        out = agent.run(server.Handler.state, tool_name, a)
         self.assertNotIn('error', out, out)
         return out
 
@@ -94,18 +94,18 @@ class ProjectToolsTests(unittest.TestCase):
     def test_create_open_and_followup_in_same_chat(self):
         before = self.path.read_bytes()
         made = self.call('create_project', path='new.yaml', channels=3, sample='a.wav')
-        self.assertIs(gui.Handler.state, self.st)
+        self.assertIs(server.Handler.state, self.st)
         self.assertIn('error', agent.run(self.st, 'create_project', dict(path='new.yaml')))
         self.chat.busy = True
         self.chat.tool_state = self.st
         with self.assertRaisesRegex(ValueError, 'Stop the agent'):
-            gui.Handler.open_song(made['path'])
+            server.Handler.open_song(made['path'])
         opened = self.chat._tool(self.st, 'open_project', {'path': made['path']})
         self.assertNotIn('error', opened, opened)
         self.assertTrue(self.st.closed)
         self.assertEqual(self.chat._tool(self.st, 'get_state', {})['path'], made['path'])
         self.assertNotIn('error', self.chat._tool(self.st, 'create_channel', {'name': 'New part'}))
-        self.assertEqual(len(gui.Handler.state.mod.channels), 4)
+        self.assertEqual(len(server.Handler.state.mod.channels), 4)
         self.assertEqual(self.path.read_bytes(), before)
         self.assertIn('error', agent.run(self.st, 'create_channel', {}))
         self.chat.cancel.set()
@@ -117,13 +117,13 @@ class ProjectToolsTests(unittest.TestCase):
                           ('recipe_job', {'status': 'fetching'}), ('ui_state', {'pending_edits': 1})]:
             with mock.patch.object(self.st, attr, val):
                 self.assertIn('error', agent.run(self.st, 'open_project', {'path': made['path']}))
-            self.assertIs(gui.Handler.state, self.st)
-        with mock.patch.object(gui.Handler, 'recorder', mock.Mock(recording=True)):
+            self.assertIs(server.Handler.state, self.st)
+        with mock.patch.object(server.Handler, 'recorder', mock.Mock(recording=True)):
             self.assertIn('error', agent.run(self.st, 'open_project', {'path': made['path']}))
         with mock.patch.object(self.st, 'dirty', return_value=True):
             self.assertIn('error', agent.run(self.st, 'open_project', {'path': made['path']}))
         self.assertIn('error', agent.run(self.st, 'open_project', {'path': 'missing.yaml'}))
-        with mock.patch.object(gui.Handler, 'state', None), mock.patch.object(gui, 'recent_songs', return_value=[]):
+        with mock.patch.object(server.Handler, 'state', None), mock.patch.object(gui, 'recent_songs', return_value=[]):
             self.assertIsNone(self.call('project_status')['song'])
             created = self.call('create_project', path=str(self.dir / 'from-start.yaml'), channels=2)
             self.assertTrue(Path(created['path']).is_file())
@@ -158,7 +158,7 @@ class ProjectToolsTests(unittest.TestCase):
     def test_relink_missing_files_atomically_and_preserve_approvals(self):
         self.st.close()
         self.path.write_text(SONG_BLOCK.replace('a.wav', 'missing.wav'), encoding='utf-8')
-        st = gui.Handler.state = gui.State(self.path, headless=True)
+        st = server.Handler.state = gui.State(self.path, headless=True)
         self.states.append(st)
         self.assertEqual(self.call('project_status')['missing'][0]['slot'], 1)
         before = self.path.read_bytes()
