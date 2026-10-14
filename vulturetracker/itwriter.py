@@ -206,4 +206,10 @@ def write_it(mod: Module) -> bytes:
     for blob in smp_datas:
         out += blob
     assert len(out) == pos
+    modes = [i.filter_mode for i in instruments]
+    if any(m is not None for m in modes):
+        # OpenMPT's instrument extensions, where its loader looks for them (right after the last sample's data):
+        # 'XTPM', then each property as a 4-byte code, a 16-bit size and that many bytes per instrument. Only the
+        # filter mode (code 'FM..', written byte-reversed as OpenMPT does): 0xFF unchanged, 0 low-pass, 1 high-pass.
+        out += b"XTPM" + b"..MF" + struct.pack("<H", 1) + bytes(0xFF if m is None else m for m in modes)
     return bytes(out)

@@ -547,9 +547,65 @@ def _sample(ctx, num, spec, line, base_dir):
 
 INSTRUMENT_KEYS = ["name", "sample", "keymap", "fadeout", "nna", "dct", "dca", "global_volume", "pan",
                    "pitch_pan_separation", "pitch_pan_center", "random_volume", "random_pan", "filter_cutoff",
-                   "filter_resonance", "volume_envelope", "panning_envelope", "pitch_envelope"]
+                   "filter_resonance", "filter_mode", "volume_envelope", "panning_envelope", "pitch_envelope"]
+FILTER_MODES = {"lowpass": 0, "highpass": 1}
 KEYMAP_KEYS = ["notes", "sample", "transpose", "play_note"]
-ENVELOPE_KEYS = ["nodes", "loop", "sustain", "enabled", "carry", "filter"]
+ENVELOPE_KEYS = ["nodes", "lfo", "loop", "sustain", "enabled", "carry", "filter"]
+LFO_KEYS = {"shape": "sine", "period": 16, "depth": None, "centre": None, "delay": 0, "attack": 0, "points": 8, "seed": 0}
+LFO_SHAPES = ("sine", "triangle", "square", "saw", "ramp", "random")
+
+
+def lfo_nodes(spec, lo, hi):
+    """`lfo:` -> (nodes, loop): `centre` held for `delay` ticks, the wave's depth growing over `attack` ticks, then one
+    cycle of `period` ticks (`points` nodes, linear between, and the loop's end) looped for good. ValueError when it
+    does not fit."""
+    import math
+    import random
+    if not isinstance(spec, dict) or set(spec) - set(LFO_KEYS):
+        raise ValueError(f"'lfo' is a mapping of {', '.join(LFO_KEYS)}; got {spec!r}")
+    s = {**LFO_KEYS, **spec}
+    if s["shape"] not in LFO_SHAPES:
+        raise ValueError(f"lfo: shape is one of {', '.join(LFO_SHAPES)}; got {s['shape']!r}")
+    for k in ("period", "delay", "attack", "points", "seed") + tuple(k for k in ("depth", "centre") if s[k] is not None):
+        if isinstance(s[k], bool) or not isinstance(s[k], int):
+            raise ValueError(f"lfo: {k} is a whole number; got {s[k]!r}")
+    points, period, delay, attack = s["points"], s["period"], s["delay"], s["attack"]
+    if not 2 <= points <= 23 or not points < period <= 9999 or not 0 <= delay <= 9999 or not 0 <= attack <= 9999:
+        raise ValueError(f"lfo: points 2-23, period more than points up to 9999 ticks, delay and attack 0-9999 ticks; "
+                         f"got {spec}")
+    depth = s["depth"] if s["depth"] is not None else (hi - lo) // 4
+    centre = s["centre"] if s["centre"] is not None else (hi - depth if lo == 0 else 0)
+    if depth < 0 or not lo <= centre - depth <= centre + depth <= hi:
+        raise ValueError(f"lfo: centre {centre} plus and minus depth {depth} leaves {lo}..{hi}")
+    rng = random.Random(s["seed"])
+    wave = {"sine": lambda p: math.sin(2 * math.pi * p), "triangle": lambda p: 1 - 4 * abs((p + 0.25) % 1 - 0.5),
+            "square": lambda p: 1.0 if p < 0.5 else -1.0, "saw": lambda p: 2 * p - 1, "ramp": lambda p: 1 - 2 * p,
+            }.get(s["shape"])
+    cycle = [rng.uniform(-1, 1) for _ in range(points)] if wave is None else [wave(k / points) for k in range(points)]
+    nodes = [(0, centre)]
+    t = delay
+    if delay:
+        nodes.append((delay, centre))
+    while True:
+        full = t - delay >= attack
+        for k, w in enumerate(cycle):
+            tick = t + round(k * period / points)
+            node = (tick, round(centre + depth * w * min(1.0, (tick - delay) / attack if attack else 1.0)))
+            if tick > nodes[-1][0]:
+                nodes.append(node)
+            else:  # the cycle's first node takes the place of the start (or the delay's end)
+                nodes[-1] = node
+        if full:
+            break
+        t += period
+    start = len(nodes) - points
+    # the loop ends on the value it starts with, so it joins; its end tick plays too (IT's loops include it, as
+    # libopenmpt plays them), so it sits one tick short of a whole period
+    nodes.append((t + period - 1, round(centre + depth * cycle[0])))
+    if len(nodes) > 25 or nodes[-1][0] > 9999:
+        raise ValueError(f"lfo: {len(nodes)} nodes over {nodes[-1][0]} ticks; an envelope holds 25 over 9999 (fewer "
+                         "points, a shorter attack or delay)")
+    return [list(n) for n in nodes], (start, len(nodes) - 1)
 
 
 def _sample_ref(ctx, value, line, samples_by_name, sample_numbers, where):
@@ -592,6 +648,25 @@ def _envelope(ctx, spec, line, kind, where):
     _check_keys(ctx, m, ENVELOPE_KEYS, where)
     lo, hi = (0, 64) if kind == "volume" else (-32, 32)
     nodes = m.get("nodes")
+    if "lfo" in m:
+        if any(k in m for k in ("nodes", "loop", "sustain")):
+            ctx.error(_line(m, "lfo"), f"{where}: 'lfo' makes its own nodes and loop: give no nodes, loop or sustain")
+            raise _Bad
+        try:
+            made, loop = lfo_nodes(m["lfo"], lo, hi)
+        except ValueError as e:
+            ctx.error(_line(m, "lfo"), f"{where}: {e}")
+            raise _Bad
+        nodes = LSeq()
+        for n in made:
+            node = LSeq()
+            node.extend(n)
+            nodes.append(node)
+        nodes.lines = [_line(m, "lfo")] * len(made)
+        m2 = LMap()
+        m2.update({k: v for k, v in m.items() if k != "lfo"}, loop=list(loop))
+        m2.lines, m2.line = m.lines, m.line
+        m = m2
     if not isinstance(nodes, LSeq) or not 1 <= len(nodes) <= 25:
         ctx.error(_line(m, "nodes"), f"{where}: 'nodes' must be a list of 1..25 [tick, value] pairs")
         raise _Bad
@@ -690,6 +765,14 @@ def _instrument(ctx, num, spec, line, samples_by_name, sample_numbers):
         ins.filter_cutoff = _soft(lambda: _int(ctx, m, "filter_cutoff", 0, 127, None, where))
     if m.get("filter_resonance") is not None:
         ins.filter_resonance = _soft(lambda: _int(ctx, m, "filter_resonance", 0, 127, None, where))
+    if m.get("filter_mode") is not None:
+        if m["filter_mode"] not in FILTER_MODES:
+            ctx.error(_line(m, "filter_mode"), f"{where}: filter_mode is lowpass or highpass, got {m['filter_mode']!r}")
+        else:
+            ins.filter_mode = FILTER_MODES[m["filter_mode"]]
+            if ins.filter_cutoff is None and ins.filter_resonance is None:
+                ctx.warn(_line(m, "filter_mode"), f"{where}: filter_mode {m['filter_mode']} filters nothing until a "
+                         "cutoff is set (filter_cutoff, filter_resonance or a Zxx)")
     for key, kind in (("volume_envelope", "volume"), ("panning_envelope", "panning"), ("pitch_envelope", "pitch")):
         setattr(ins, key, _soft(lambda: _envelope(ctx, m.get(key), _line(m, key), kind, f"{where} {key}")))
     if len(ctx.errors) > n_errors:

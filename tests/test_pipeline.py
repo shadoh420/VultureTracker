@@ -181,6 +181,87 @@ class TestInstruments(Base):
         self.assertGreater(rms(env[early]), 0.6 * rms(flat[early]))
         self.assertLess(rms(env[late]), 5)
 
+    def test_lfo_envelope(self):
+        """`lfo:` compiles to plain nodes with a loop, and libopenmpt plays it: a square tremolo of 16 ticks (0.32 s)
+        alternates loud and quiet halves for as long as the note lasts."""
+        from vulturetracker.song import lfo_nodes
+        base = """
+            module: {tempo: 125, speed: 6, channels: 1}
+            samples:
+              1: {file: low.wav, loop: {start: 0}}
+            instruments:
+              1: {name: Lfo, sample: 1, volume_envelope: {lfo: %s}}
+            patterns:
+              p:
+                rows: 64
+                data: |
+                  C-5 01 v64
+            orders: [p]
+        """
+        spec = "{shape: square, period: 16, points: 8, depth: 32, centre: 32}"
+        mod, _ = load_song_text(textwrap.dedent(base % spec), self.dir)
+        env = mod.instruments[0].volume_envelope
+        nodes, loop = lfo_nodes({"shape": "square", "period": 16, "points": 8, "depth": 32, "centre": 32}, 0, 64)
+        self.assertEqual(([list(n) for n in env.nodes], env.loop), (nodes, loop))
+        self.assertEqual((nodes[0], nodes[-1], loop), ([0, 64], [15, 64], (0, 8)))  # IT plays the end tick too
+        out = self.render_left(base % spec)
+        tick = int(0.02 * RATE)
+        for cycle in (0, 5, 20):  # 16 ticks each, so the 20th cycle (6.4 s in) is still in phase
+            t0 = cycle * 16 * tick
+            loud, quiet = rms(out[t0 + tick: t0 + 3 * tick]), rms(out[t0 + 9 * tick: t0 + 11 * tick])
+            self.assertGreater(loud, 8 * quiet, cycle)
+        for bad, said in (("{shape: sine, period: 8, points: 8}", "period more than points"),
+                          ("{attack: 500, period: 16}", "25 over 9999"), ("{depth: 40}", "leaves 0..64")):
+            with self.assertRaises(SongError) as e:
+                load_song_text(textwrap.dedent(base % bad), self.dir)
+            self.assertIn(said, str(e.exception))
+        with self.assertRaises(SongError) as e:
+            load_song_text(textwrap.dedent(base % "{period: 16}").replace("{lfo: {period: 16}}", "{lfo: {period: 16}, nodes: [[0, 64]]}"), self.dir)
+        self.assertIn("give no nodes, loop or sustain", str(e.exception))
+
+    def test_filter_mode_highpass(self):
+        """filter_mode: OpenMPT's instrument extension, written after the sample data as OpenMPT writes it ('XTPM',
+        'FM..' byte-reversed, a 16-bit size, a byte per instrument), played by libopenmpt (bright noise through cutoff
+        60: the high band leads the low one as a high-pass, trails it as a low-pass) and read back on import."""
+        import random
+        import numpy as np
+        from vulturetracker import itreader
+        rng = random.Random(1)
+        write_wav(self.dir / "noise.wav", RATE, [[rng.randint(-16000, 16000) for _ in range(RATE)]])
+        base = """
+            module: {tempo: 125, speed: 6, channels: 1}
+            samples:
+              1: {file: noise.wav}
+            instruments:
+              1: {name: N, sample: 1, filter_cutoff: 60%s}
+              2: {name: M, sample: 1}
+            patterns:
+              p:
+                rows: 32
+                data: |
+                  C-5 01 v64
+            orders: [p]
+        """
+        tilt = {}
+        for mode in ("lowpass", "highpass"):
+            data = self.build(base % f", filter_mode: {mode}")
+            self.assertTrue(data.endswith(b"XTPM..MF\x01\x00" + bytes([("lowpass", "highpass").index(mode), 0xFF])))
+            with LoadedModule(data) as m:
+                x = left(m.render(max_seconds=0.8))[2000:30000]
+            p = np.abs(np.fft.rfft(np.array(x, float))) ** 2
+            f = np.fft.rfftfreq(len(x), 1 / RATE)
+            tilt[mode] = 10 * np.log10(p[f > 4000].sum() / p[f < 1000].sum())
+            mod, warnings = itreader.read_it(data)
+            self.assertEqual([i.filter_mode for i in mod.instruments], [("lowpass", "highpass").index(mode), None])
+            song = itreader.module_to_song(mod, self.dir / "back.yaml", self.dir)
+            self.assertEqual(song["instruments"][1]["filter_mode"], mode)
+        self.assertGreater(tilt["highpass"] - tilt["lowpass"], 30, tilt)
+        self.assertNotIn(b"XTPM", self.build(base % ""))  # no mode: the file is plain IT
+        _, warnings = load_song_text(textwrap.dedent(base % "").replace("filter_cutoff: 60", "filter_mode: highpass"), self.dir)
+        self.assertTrue(any("filters nothing until a cutoff is set" in w for w in warnings), warnings)
+        with self.assertRaises(SongError):
+            load_song_text(textwrap.dedent(base % ", filter_mode: bandpass"), self.dir)
+
     def test_envelope_sustain_holds_until_note_off(self):
         song = api.new_song(channels=1)
         api.add_sample(song, 1, "low.wav", loop={"start": 0})

@@ -530,6 +530,21 @@ class TestFeaturesPage(unittest.TestCase):
             page.fill('#song-message', 'π')
             self.assertIn('outside Latin-1', page.text_content('#song-message-info'))
 
+    def test_lfo_envelope_shown_read_only(self):
+        """An envelope written as lfo: has no nodes for the editor: the Instruments tab shows the lfo as a line, the
+        page stays free of errors, and the remove button takes it out of the song file."""
+        from tests.test_gui import SONG_INS
+        text = SONG_INS.replace("volume_envelope: {nodes: [[0, 64], [3, 50], [9, 20], [20, 0]]}",
+                                "volume_envelope: {lfo: {shape: triangle, period: 12}}")
+        self.assertIn("lfo:", text)
+        with self.page(text) as (page, d):
+            page.evaluate("tab('ins'); INS_SEL='2'; refresh()")
+            page.wait_for_function("document.querySelector('#ins-edit .lfo-note')")
+            self.assertIn('LFO shape triangle, period 12', page.text_content('#ins-edit .lfo-note'))
+            page.click('#ins-edit .lfo-note + .btn')
+            self.settle(page)
+            self.assertNotIn('lfo', (d / 'song.yaml').read_text())
+
     def test_channel_color(self):
         """A channel's colour from the SONG tab: color: in its entry, then the rail, the Pattern tab's header and the
         roll's ghosts take it; the reset button removes it."""

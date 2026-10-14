@@ -121,6 +121,33 @@ def _read_envelope(data, off, signed):
                     bool(flags & 8))
 
 
+def _filter_modes(data, smp_ptrs, pat_ptrs, count):
+    """OpenMPT's instrument extensions: an 'XTPM' block after the last sample's data and the last pattern (searched for
+    from there, as OpenMPT does after compressed data), each property a 4-byte code (ASCII), a 16-bit size and that many
+    bytes per instrument. Returns the filter modes ('FM..': 0xFF unchanged, 0 low-pass, 1 high-pass), or None."""
+    start = 0
+    for p in smp_ptrs:
+        if p and p + 0x4C <= len(data) and data[p + 0x12] & 1:
+            sflags, (length,), (ptr,) = (data[p + 0x12], struct.unpack_from("<I", data, p + 0x30),
+                                         struct.unpack_from("<I", data, p + 0x48))
+            frames = 0 if sflags & 8 else length * (2 if sflags & 4 else 1)  # compressed: its end is searched for
+            start = max(start, ptr + frames * (2 if sflags & 2 else 1))
+    for p in pat_ptrs:
+        if p and p + 2 <= len(data):
+            start = max(start, p + 8 + struct.unpack_from("<H", data, p)[0])
+    ascii_id = lambda code: len(code) == 4 and not any(b & 0x80 for b in code) and any(b & 0x60 for b in code)  # noqa: E731
+    at = data.find(b"XTPM", start)
+    while at >= 0 and not ascii_id(data[at + 4: at + 8]):
+        at = data.find(b"XTPM", at + 1)
+    pos = at + 4 if at >= 0 else len(data)
+    while pos + 6 <= len(data) and ascii_id(data[pos: pos + 4]) and data[pos: pos + 4] != b"STPM":
+        size = struct.unpack_from("<H", data, pos + 4)[0]
+        if data[pos: pos + 4] == b"..MF" and size and pos + 6 + size * count <= len(data):
+            return [data[pos + 6 + i * size] for i in range(count)]  # the low byte of each little-endian value
+        pos += 6 + size * count
+    return None
+
+
 def _read_samples_data(data, off, length, flags, cvt):
     is16 = bool(flags & 2)
     nch = 2 if flags & 4 else 1
@@ -288,6 +315,8 @@ def read_it(data: bytes):
             ins.panning_envelope = _read_envelope(data, p + 0x182, True)
             ins.pitch_envelope = _read_envelope(data, p + 0x1D4, True)
             mod.instruments.append(ins)
+        for ins, fm in zip(mod.instruments, _filter_modes(data, smp_ptrs, pat_ptrs, len(mod.instruments)) or []):
+            ins.filter_mode = fm if fm in (0, 1) else None
 
     # the grid every pattern will take (64 wide while reading; a zero pointer or a bad row count an empty 64-row one),
     # summed before any is made so a header claiming thousands is refused at once
@@ -615,6 +644,8 @@ def module_to_song(mod: Module, song_path, samples_dir) -> dict:
                 d["filter_cutoff"] = ins.filter_cutoff
             if ins.filter_resonance is not None:
                 d["filter_resonance"] = ins.filter_resonance
+            if ins.filter_mode is not None:
+                d["filter_mode"] = ("lowpass", "highpass")[ins.filter_mode]
             for key, env, default in (("volume_envelope", ins.volume_envelope, 64),
                                       ("panning_envelope", ins.panning_envelope, 0),
                                       ("pitch_envelope", ins.pitch_envelope, 0)):

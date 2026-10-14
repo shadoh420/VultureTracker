@@ -176,5 +176,57 @@ class TestFaustAudit100(unittest.TestCase):
             self.assertGreater(float(x[0, at] - x[0, at - 1]), 0.9, at)  # the note's full step, on its own frame
 
 
+EXAMPLES = ("acid", "kick", "marimba", "nylon", "opl2", "organ", "pluck")
+
+
+class TestFaustExamples(unittest.TestCase):
+    def test_shipped_listed_and_found(self):
+        """The examples: each takes the note's controls, SAMPLING.md lists each, the exe and the wheel pack them, and
+        `faust: NAME.dsp` finds them when no such file is beside the recipe (render stubbed: no node needed)."""
+        import re
+        root = Path(synth.__file__).resolve().parent.parent
+        self.assertEqual(sorted(p.stem for p in synth.FAUST_EXAMPLES.glob("*.dsp")), list(EXAMPLES))
+        guide = (root / "SAMPLING.md").read_text(encoding="utf-8")
+        for name in EXAMPLES:
+            code = (synth.FAUST_EXAMPLES / f"{name}.dsp").read_text(encoding="utf-8")
+            for control in ("gain", "gate") + (() if name == "kick" else ("freq",)):
+                self.assertRegex(code, rf'{control} = (hslider|button)\("{control}"', (name, control))
+            self.assertIn(f"| `{name}.dsp` |", guide)
+        self.assertIn("faust_examples", (root / "tools" / "build_exe.py").read_text(encoding="utf-8"))
+        self.assertIn("faust_examples/*.dsp", (root / "pyproject.toml").read_text(encoding="utf-8"))
+        seen = []
+        real = faust.render
+        faust.render = lambda code, **kw: (seen.append(code), (np.full((1, 4410), 0.5), []))[1]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                d = Path(tmp)
+                (d / "pluck.dsp").write_text(SINE)  # a file beside the recipe comes first
+                (d / "r.yaml").write_text("out_dir: .\nsamples:\n  a: {faust: organ.dsp, trim: false}\n"
+                                          "  b: {faust: pluck.dsp, trim: false}\n")
+                synth.render_recipe(d / "r.yaml", log=lambda s: None)
+                self.assertEqual(seen, [(synth.FAUST_EXAMPLES / "organ.dsp").read_text(encoding="utf-8"), SINE])
+                (d / "r.yaml").write_text("out_dir: .\nsamples:\n  a: {faust: nope.dsp}\n")
+                with self.assertRaisesRegex(synth.RecipeError, re.escape("acid.dsp, kick.dsp")):
+                    synth.render_recipe(d / "r.yaml", log=lambda s: None)
+        finally:
+            faust.render = real
+
+    @unittest.skipUnless(READY, "needs node and faustwasm")
+    def test_every_example_renders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "r.yaml").write_text("out_dir: out\nsamples:\n" + "".join(
+                f"  {n}: {{faust: {n}.dsp, note: {'A-3' if n in ('acid', 'kick') else 'C-5'}, hold: 0.5, tail: 0.5}}\n"
+                for n in EXAMPLES))
+            log = []
+            synth.render_recipe(d / "r.yaml", log=log.append)
+            for n in EXAMPLES:
+                x, rate, _ = read_audio(str(d / "out" / f"{n}.wav"))
+                self.assertTrue(np.isfinite(x).all() and np.abs(x).max() > 0.1, n)
+            text = "\n".join(log)
+            for n in ("organ", "opl2", "pluck", "nylon", "marimba"):  # in tune (the acid sweep pulls the estimate flat)
+                self.assertNotIn(f"'{n}' sounds about", text)
+
+
 if __name__ == "__main__":
     unittest.main()

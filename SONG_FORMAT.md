@@ -228,6 +228,7 @@ instruments:
 | `random_pan` | 0–64 | 0 | random pan variation |
 | `filter_cutoff` | 0–127 | none | if set, enables the resonant low-pass filter at this cutoff |
 | `filter_resonance` | 0–127 | none | filter resonance (used with `filter_cutoff`) |
+| `filter_mode` | `lowpass` `highpass` | none | `highpass` turns the instrument's resonant filter into a high-pass (from its cutoff up). OpenMPT's extension, written where OpenMPT writes it: libopenmpt and OpenMPT play it, Impulse Tracker and other players play a low-pass. Added after 1.5.2: a song that sets it says so with `requires:`. Without `filter_cutoff`, `filter_resonance` or a `Zxx` it filters nothing (`check` warns). |
 | `volume_envelope` | envelope | none | values 0–64 |
 | `panning_envelope` | envelope | none | values -32 (left) to 32 (right), added to the channel pan |
 | `pitch_envelope` | envelope | none | values -32–32 in half-semitones (-2 = one semitone down). Add `filter: true` to make it a filter-cutoff envelope instead. |
@@ -246,10 +247,24 @@ Envelope: `{nodes: [[tick, value], ...], sustain: <i or [a, b]>, loop: [a, b], e
   (section 3), so envelope speed follows the tempo.
 - `sustain: i` holds at node `i` while the note is held; `sustain: [a, b]` loops between nodes `a` and
   `b` until note-off. After note-off the envelope continues to its end.
-- `loop: [a, b]` loops between those nodes forever (after sustain is released).
+- `loop: [a, b]` loops between those nodes forever (after sustain is released). A loop plays its end node's tick
+  too, then the start's: from tick 0 to tick 16 it repeats every 17 ticks (Impulse Tracker's rule, and libopenmpt's).
 - `enabled: false` keeps the nodes but turns the envelope off (the `S78`/`S7A`/`S7C` effects can turn it on).
 - `carry: true` makes a new note continue from the previous note's envelope position instead of
   restarting it. This is an OpenMPT extension: libopenmpt honours it, Impulse Tracker ignores it.
+- `lfo: {shape, period, depth, centre, delay, attack, points, seed}` in place of `nodes`, `loop` and `sustain`: a
+  low-frequency oscillator written as nodes when the song compiles (added after 1.5.2: a song that uses it says so
+  with `requires:`). `shape` is `sine` (default), `triangle`, `square`, `saw`, `ramp` (a falling saw) or `random`
+  (`points` values drawn from `seed`, the same each cycle); `period` is the cycle in ticks (default 16; more than
+  `points`); `depth` how far it swings each way (default a quarter of the envelope's range: 16 for volume, 16 for pan
+  and pitch, where pitch counts half-semitones, so 16 is eight semitones); `centre` the value it swings around (default:
+  64 - depth for volume, so the peaks reach full volume; 0 for pan and pitch); `delay` ticks at the centre before it
+  starts; `attack` ticks over which its depth grows from nothing; `points` nodes per cycle (default 8), linear between,
+  so a square or a saw changes over one point's spacing (more points, sharper edges). After the delay and the attack,
+  one cycle is looped for good, ending on the value it starts with. An envelope holds 25 nodes, so `points` + the
+  attack's cycles + 3 must fit: an attack longer than a few periods does not. With `filter: true` on the pitch envelope
+  it moves the filter cutoff. `enabled` and `carry` work as for nodes. Vibrato from the pattern (`Hxy`, `Uxy`) or from a
+  sample's `vibrato:` needs no envelope.
 - When the volume envelope reaches its last node, the note's fadeout starts. A note-off (`===`) starts
   the fadeout immediately only if the instrument has no volume envelope or its envelope loops. A
   note whose envelope ends above 0 with `fadeout: 0` keeps sounding at that level until it's cut or

@@ -85,6 +85,7 @@ class Instrument:
     random_pan: int = 0            # 0..64
     filter_cutoff: int | None = None     # 0..127
     filter_resonance: int | None = None  # 0..127
+    filter_mode: int | None = None       # OpenMPT's extension: None unchanged, 0 low-pass, 1 high-pass
     volume_envelope: Envelope | None = None
     panning_envelope: Envelope | None = None
     pitch_envelope: Envelope | None = None

@@ -19,6 +19,14 @@ upstream sources linked below. The source code in the repository stays MIT.
 | zlib (`openmpt-zlib.dll`) by Jean-loup Gailly and Mark Adler | with libopenmpt | zlib License | `vendor/Licenses/License.zlib.txt` |
 | libopenmpt compiled to WebAssembly (`vulturetracker/web/libopenmpt.js` + `.wasm`, the official 0.8.9+release dev.js build, for the live engine) | 0.8.9 | BSD-3-Clause and BSL-1.0, with minimp3 (CC0), miniz (MIT) and stb_vorbis (MIT / public domain) compiled in | `vulturetracker/web/licenses/` |
 
+## Algorithms reimplemented in the source (`vulturetracker/sources.py`)
+
+| Algorithm | Copyright | License |
+|---|---|---|
+| [sfxr](https://www.drpetter.se/project_sfxr.html): its synthesis and its seven generators (the `sfxr:` recipe source) | Copyright (c) 2007 Tomas Pettersson | MIT: the same text as [LICENSE](LICENSE), under that copyright line |
+| [PADsynth](https://zynaddsubfx.sourceforge.io/doc/PADsynth/PADsynth.htm), the algorithm (the `additive:` recipe source) | Nasca Octavian Paul | public domain (his page: the algorithm, its examples and implementations "are released under Public Domain") |
+| [DrumSynth](https://sourceforge.net/projects/drumsynth/) 2.0 by Paul Kellett (mda-vst.com): its sections and their rendering, from his `ds2wav` and help file (the `drum:` recipe source; no presets are included) | Copyright (c) 2007 Paul Kellett | MIT (his release offers MIT or GPL-2.0-or-later): the same text as [LICENSE](LICENSE), under that copyright line |
+
 ## Only inside the exe (Python packages packed by PyInstaller)
 
 | Component | Version | License | License text |

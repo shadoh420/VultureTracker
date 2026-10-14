@@ -32,6 +32,8 @@ def selfcheck():
     pkg = Path(importlib.import_module("vulturetracker").__file__).parent
     for name in ("gui.html", "icon.png", "SONG_FORMAT.md"):  # build_exe's --add-data (SONG_FORMAT.md sits beside the checkout)
         check(name, lambda n=name: f"{next(p for p in (pkg / n, pkg.parent / n) if p.exists()).stat().st_size} bytes")
+    check("faust_examples", lambda: f"{len(list((pkg / 'faust_examples').glob('*.dsp')))} .dsp files"
+          if (pkg / "faust_examples" / "pluck.dsp").exists() else _missing(pkg / "faust_examples"))
     check("web", lambda: f"{len(list((pkg / 'web').glob('*.*')))} files" if (pkg / "web" / "libopenmpt.wasm").exists() else _missing(pkg / "web"))
     check("libopenmpt", lambda: importlib.import_module("vulturetracker.openmpt").library_version())
     check("plugins", lambda: f"{len(importlib.import_module('vulturetracker.plugins').EFFECTS)} DMO effects")

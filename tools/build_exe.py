@@ -30,6 +30,7 @@ cmd = [
     "--add-data", f"{ROOT / 'vulturetracker' / 'icon.png'}{sep}vulturetracker",
     "--add-data", f"{ROOT / 'SONG_FORMAT.md'}{sep}vulturetracker",  # the Pattern tab's effect help reads its tables
     "--add-data", f"{ROOT / 'vulturetracker' / 'web'}{sep}vulturetracker/web",  # the live engine (libopenmpt wasm, worklet)
+    "--add-data", f"{ROOT / 'vulturetracker' / 'faust_examples'}{sep}vulturetracker/faust_examples",  # faust: name.dsp
     "--icon", str(ICO),
     "--collect-submodules", "vulturetracker",
     "--collect-all", "pedalboard", "--hidden-import", "mido",  # the synth host for the RECIPE box (GPL-3)

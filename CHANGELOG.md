@@ -54,6 +54,25 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   typed, with the Latin-1 and length warnings `check` gives.
 - Channels: an optional `color: "#rrggbb"` (set from the SONG tab's channel list) colours the channel in the rail, the
   Pattern tab's header and the roll's ghosts; the .it does not hold it.
+- Recipes: `wave:`, a looped chip or drawn cycle (pulse, saw, square, triangle, the NES triangle and noise, a Game Boy
+  table, any table) summed from its harmonics under a ceiling, in tune to 0.1 cent; and `mip:` on any source, copies
+  band-limited per octave and stored at matching rates, with the song's `samples:`/`keymap:` printed to paste.
+- Recipes: `sfxr:`, Tomas Pettersson's sfxr (MIT) reimplemented: its parameters by name and its seven generators as
+  `preset` + `seed`, reproducible, rendered at its eight sub-steps per frame and resampled instead of averaged.
+- Recipes: `drum:`, Paul Kellett's DrumSynth 2.0 (MIT) reimplemented from his renderer and help file: tone with sweep
+  and droop, noise, two overtones (mixed, FM, ring, 808 cymbal), two noise bands, distortion and a resonant
+  filter as YAML sections, or a user's own `.ds` file.
+- Recipes: `additive:`, Nasca Octavian Paul's PADsynth (public domain): each harmonic a Gaussian band, random phases from
+  a seed, one inverse FFT, so the pad loops exactly over its whole length.
+- Recipes: seven Faust examples shipped with the app and usable as `faust: NAME.dsp`: a Karplus-Strong pluck with a pick
+  position, a nylon guitar, a marimba, a drawbar organ, a two-operator OPL2-style FM voice with its four waves, an
+  acid bass through a diode ladder, and a kick with start, end, slope, envelope and drive.
+- Instruments: `lfo:` in place of an envelope's nodes (sine, triangle, square, saw, ramp or random; period, depth,
+  centre, delay, attack), written as envelope nodes and a loop when the song compiles, so the module is plain IT;
+  the Instruments tab shows it as a line. Envelope loops play their end tick too (Impulse Tracker's rule), and the
+  lfo's loop is placed for it.
+- Instruments: `filter_mode: highpass` (or `lowpass`), OpenMPT's instrument extension written after the sample data as
+  OpenMPT writes it (`XTPM`, `FM..`), played by libopenmpt as a high-pass, and read back on import.
 
 ## 1.5.2 (2026-10-10)
 

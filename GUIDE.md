@@ -226,7 +226,11 @@ on (live notes are entered on their row, never a tick, here). SPLIT HERE is Open
 the cursor's on into a new pattern, the source shortened, the new pattern inserted after every order playing the
 source. Two deliberate differences: no `C00` break is written, as an IT pattern here may have 1-200 rows (OpenMPT pads
 an IT pattern to its 32-row minimum and breaks it early), and the view stays on the shortened pattern (OpenMPT moves to
-the new order). Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
+the new order). An instrument's `filter_mode` is written as OpenMPT writes its instrument extensions
+(`InstrumentExtensions.cpp`): an `XTPM` block right after the last sample's data, where `Load_it.cpp` looks for it, with
+the `FM..` property (its code byte-reversed, as OpenMPT writes it), a 16-bit size and a byte per instrument (0xFF
+unchanged, 0 low-pass, 1 high-pass); libopenmpt takes the mode at each note whose instrument filter is on
+(`HandleNoteChangeFilter`), and the import reads the block back the way the loader does. Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
 its Edit menu's Undo entries (the names are the app's own words). COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
 hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
 import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. A FLAC, AIFF, OGG
@@ -378,7 +382,8 @@ turns an optional one off), NNA, DCT and DCA. NOTES → SAMPLE SLOTS: one slot f
 ranges (C-0..B-4) each playing a slot at its own pitch, transposed (+12) or at one pitch (C-5, for drums); the strip
 shows the slot every one of the 120 notes plays. The volume, panning and pitch (or, with `filter`, filter-cutoff)
 envelopes are graphs: drag a node, click empty space to add one, right-click a node to remove it; SUSTAIN takes a node
-(2) or a span (1-3), LOOP a span, and `carry` and on/off are checkboxes. SAMPLE SLOTS adds a slot for a WAV (typed or
+(2) or a span (1-3), LOOP a span, and `carry` and on/off are checkboxes. An envelope written as an `lfo:` (SONG_FORMAT.md)
+shows as one line with its settings and is edited in the song file (its ✕ removes it). SAMPLE SLOTS adds a slot for a WAV (typed or
 BROWSE…); swapping a slot's WAV stays the Tryout tab's job. Settings the Tryout's INSTRUMENT panel holds unwritten for
 an instrument are written or reset there first. A pattern with no notes, and every pattern in edit mode, shows all
 its channels.

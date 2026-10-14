@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from . import notation
+from . import notation, sources
 from .fileio import protect_outputs
 from .fileio import user_dir
 from .wavload import write_wav
@@ -29,8 +29,10 @@ def tools_dir(root):
 
 TOOLS = tools_dir(ROOT)
 DEFAULT_SURGE = TOOLS / "surge-xt" / "Surge Synth Team"
+FAUST_EXAMPLES = Path(__file__).resolve().parent / "faust_examples"  # `faust: pluck.dsp` with no such file beside the recipe
 RECIPE_KEYS = ["out_dir", "sample_rate", "defaults", "samples"]
-SAMPLE_KEYS = ["patch", "file", "resynth", "faust", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
+SOURCE_KEYS = ("patch", "file", "resynth", "faust", "wave", "sfxr", "drum", "additive")  # a sample has exactly one
+SAMPLE_KEYS = ["patch", "file", "resynth", "faust", "wave", "sfxr", "drum", "additive", "mip", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
                "hold", "tail", "params", "gain", "normalize", "mono", "trim", "loop", "fade_out", "reverse", "root_offset"]
 
 
@@ -481,7 +483,9 @@ def _pedalboard_effects():
     return effects, enums
 
 
-def _post(audio, spec, rate, log=lambda s: None):
+def _post(audio, spec, rate, log=lambda s: None, cycle=None):
+    """The rendered take printed into int16: `fx`, mono, reverse, trim, loop, fade, normalize, gain. `cycle` is a source's
+    own loop in frames (start, end, pingpong): kept exact, never trimmed or faded. Returns (pcm, loop)."""
     import numpy as np
     x = np.asarray(audio, dtype=np.float64)
     if spec.get("fx"):
@@ -498,7 +502,7 @@ def _post(audio, spec, rate, log=lambda s: None):
         x = x.mean(axis=0, keepdims=True)
     if spec.get("reverse", False):
         x = x[:, ::-1]
-    trim = spec.get("trim", True)
+    trim = spec.get("trim", True) and cycle is None
     if trim:
         level = np.abs(x).max(axis=0)
         thresh = level.max() * 10 ** (-60 / 20)
@@ -508,7 +512,9 @@ def _post(audio, spec, rate, log=lambda s: None):
             end = idx[-1] + 1 if not spec.get("loop") else x.shape[1]
             x = x[:, start:end]
     loop = None
-    if spec.get("loop"):
+    if cycle is not None:
+        x, loop = x[:, :cycle[1]], tuple(cycle)
+    elif spec.get("loop"):
         lp = spec["loop"]
         s, e = int(float(lp["start"]) * rate), int(float(lp["end"]) * rate)
         xf = int(float(lp.get("crossfade", 0.0)) * rate)
@@ -548,11 +554,25 @@ def expand(recipe):
         unknown = set(spec) - set(SAMPLE_KEYS)
         if unknown:
             raise RecipeError(f"{where}: unknown keys {sorted(unknown)} (allowed: {', '.join(SAMPLE_KEYS)})")
-        if sum(k in spec for k in ("patch", "file", "resynth", "faust")) != 1:
+        if sum(k in spec for k in SOURCE_KEYS) != 1:
             raise RecipeError(f"{where}: needs exactly one of 'patch' (a synth), 'file' (audio file), 'resynth' "
-                              "(a target rebuilt from a corpus) or 'faust' (Faust code, or a .dsp file)")
+                              "(a target rebuilt from a corpus), 'faust' (Faust code, or a .dsp file), 'wave' (a "
+                              "looped cycle), 'sfxr' (a sound effect), 'drum' (DrumSynth sections, or a .ds file) or 'additive' (a "
+                              "PADsynth pad)")
         merged = {**defaults, **spec}
-        if "faust" in spec and "notes" not in spec and not any(k in merged for k in ("note", "chord", "phrase")):
+        for key in ("wave", "additive"):
+            if key in spec:
+                if any(k in merged for k in ("chord", "phrase", "loop")):
+                    raise RecipeError(f"{where}: '{key}' loops itself at its note: it takes note or notes, not chord, "
+                                      "phrase or loop")
+                _source_check(lambda: getattr(sources, key)(spec[key], 60, 44100), where)
+        if "sfxr" in spec:
+            _source_check(lambda: sources.sfxr_params(spec["sfxr"]), where)
+        if "drum" in spec and not isinstance(spec["drum"], str):  # a .ds file is read when it renders
+            _source_check(lambda: sources.drum_sections(spec["drum"], "."), where)
+        if "mip" in merged:
+            _source_check(lambda: sources.mip_plan(merged["mip"], 44100, 60), where)
+        if any(k in spec for k in ("faust", "wave", "additive")) and "notes" not in spec and not any(k in merged for k in ("note", "chord", "phrase")):
             merged["note"] = "C-5"
         if "resynth" in spec:
             rs = spec["resynth"]
@@ -566,10 +586,10 @@ def expand(recipe):
                    or lp.get("type", "forward") not in ("forward", "pingpong")):
             raise RecipeError(f"{where}: loop is {{start, end, crossfade, type}} (seconds; type forward or pingpong), "
                               f"got {lp}")
-        if "file" in spec or "resynth" in spec:
+        if any(k in spec for k in ("file", "resynth", "sfxr", "drum")):
             if "notes" in spec or "chord" in spec or "phrase" in spec:
-                raise RecipeError(f"{where}: 'file' and 'resynth' samples take 'note' (the recorded pitch), not "
-                                  "notes/chord/phrase")
+                raise RecipeError(f"{where}: 'file', 'resynth', 'sfxr' and 'drum' samples take 'note' (the pitch they are "
+                                  "played at), not notes/chord/phrase")
             yield name, merged
             continue
         if "notes" in spec:
@@ -582,6 +602,13 @@ def expand(recipe):
             if not any(k in merged for k in ("note", "chord", "phrase")):
                 raise RecipeError(f"{where}: needs one of note, notes, chord, phrase")
             yield name, merged
+
+
+def _source_check(fn, where):
+    try:
+        return fn()
+    except sources.SourceError as e:
+        raise RecipeError(f"{where}: {e}")
 
 
 def _load_recipe(path):
@@ -607,7 +634,7 @@ def _load_recipe(path):
 def _job_root(name, spec):
     """(output name, sounding root) of one expanded job, without rendering it."""
     where = f"sample '{name}'"
-    root = (_note(spec.get("note", "C-5"), where) if any(k in spec for k in ("file", "resynth"))
+    root = (_note(spec.get("note", "C-5"), where) if any(k in spec for k in ("file", "resynth", "sfxr", "drum"))
             else _events(spec, where)[2])
     root += int(spec.get("root_offset", 0))  # patches that sound in a different octave than the key played
     if not 0 <= root < 120:
@@ -716,6 +743,7 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
     """One expanded sample of the recipe at `path` rendered and written (to `file`, default out_dir/<name>.wav)."""
     name, root = _job_root(name, spec)
     where = f"sample '{name}'"
+    cycle = None  # a source's own loop, in frames
     if "file" in spec:
         files = spec["file"] if isinstance(spec["file"], list) else [spec["file"]]
         source = " + ".join(Path(f).name for f in files)
@@ -727,25 +755,36 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
         audio, source = _resynth(path, spec, rate, where, log)
     elif "faust" in spec:
         audio, source = _faust(path, spec, rate, where)
+    elif "wave" in spec:
+        audio, cycle, source = _source_check(lambda: sources.wave(spec["wave"], root, rate), where)
+    elif "additive" in spec:
+        audio, cycle, source = _source_check(lambda: sources.additive(spec["additive"], root, rate), where)
+    elif "sfxr" in spec:
+        audio, source = _source_check(lambda: sources.sfxr(spec["sfxr"], rate), where)
+    elif "drum" in spec:
+        audio, source = _source_check(lambda: sources.drum(spec["drum"], path.parent, rate), where)
     else:
         events, seconds, _ = _events(spec, where)
         source = spec["patch"]
         surge.load(spec["patch"])
         surge.set_params(spec.get("params"))
         audio = surge.render(events, seconds)
-    pcm, loop = _post(audio, spec, rate, log)
+    pcm, loop = _post(audio, spec, rate, log, cycle)
     if not pcm.any():
         raise RecipeError(f"{where}: '{source}' rendered silence (try a longer hold or another note)")
     file = Path(file) if file else out_dir / f"{name}.wav"
     file.parent.mkdir(parents=True, exist_ok=True)
-    write_wav(file, rate, [ch.tolist() for ch in pcm], 16, loop=loop, root_note=root)
+    if not spec.get("mip"):
+        write_wav(file, rate, [ch.tolist() for ch in pcm], 16, loop=loop, root_note=root)
     secs = pcm.shape[1] / rate
     log(f"{file.name:28s} {secs:6.2f} s  {'stereo' if pcm.shape[0] == 2 else 'mono  '}  "
         f"root {notation.format_note(root)}{'  loop %.2f-%.2f s' % (loop[0] / rate, loop[1] / rate) if loop else ''}"
         f"  <- {source}")
+    if spec.get("mip"):
+        _mip(spec, name, root, rate, pcm, loop, file, path, where, log)
     mono = pcm.astype(float).mean(axis=0) / 32768
     # A file sample without a note: is taken as unpitched (drums); everything else gets its pitch checked.
-    est = (None if ("file" in spec or "resynth" in spec) and "note" not in spec
+    est = (None if any(k in spec for k in sources.SOURCES) or ("file" in spec or "resynth" in spec) and "note" not in spec
            else estimate_pitch(mono[int(0.05 * rate):], rate))
     if est and est[1] < 0.1:
         off = 12 * __import__("math").log2(est[0] / (440 * 2 ** ((root - 69) / 12)))
@@ -755,8 +794,33 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
     return file, root, loop
 
 
+def _mip(spec, name, root, rate, pcm, loop, file, path, where, log):
+    """`mip:` the render written as one copy per step of keys (sources.mip_plan), each resampled to the rate that
+    band-limits it (a loop resampled with it, the rate nudged so the loop stays whole frames), then the song blocks."""
+    import numpy as np
+    from .resample import place_loops, resample
+    plan = _source_check(lambda: sources.mip_plan(spec["mip"], rate, root), where)
+    copies = []
+    for c, r, width, lo, hi in plan:
+        if loop:
+            m = max(2, int((loop[1] - loop[0]) * r / rate))  # whole frames, never wider than planned
+            r = max(1, round(rate * m / (loop[1] - loop[0])))
+        loops = [loop] if loop else []
+        x = np.array([resample(ch.astype(float), rate, r, loops=loops) for ch in pcm])
+        x = np.clip(np.rint(x), -32768, 32767).astype(np.int16)
+        f = file if c == 0 else file.with_name(f"{file.stem}_o{c}.wav")
+        write_wav(f, r, [ch.tolist() for ch in x], 16, loop=place_loops(loops, rate, r)[0] if loop else None,
+                  root_note=root)
+        copies.append((os.path.relpath(f, path.parent).replace("\\", "/"), notation.format_note(root), lo, hi))
+        log(f"  mip {f.name}: {r} Hz, under {width:.0f} Hz, keys {notation.format_note(lo)}..{notation.format_note(hi)}")
+    log("  paste into the song (paths from the recipe's folder):")
+    for line in sources.mip_blocks(copies, name):
+        log("    " + line)
+
+
 def _faust(path, spec, rate, where):
-    """The `faust:` source (faust.py): its code (or a .dsp file beside the recipe) compiled and its note, chord or
+    """The `faust:` source (faust.py): its code (or a .dsp file beside the recipe, else one of the examples shipped in
+    faust_examples/) compiled and its note, chord or
     phrase rendered a voice per note: the pitch on a `freq` control, the velocity on `gain`, a `gate` button held for the
     note's length (`hold` s for a note or chord), `tail` s more after the last; `params` on the controls by label.
     Returns (channels x frames, label)."""
@@ -764,8 +828,11 @@ def _faust(path, spec, rate, where):
     code = str(spec["faust"])
     if "\n" not in code and code.strip().lower().endswith(".dsp"):
         f = path.parent / code.strip()
+        if not f.is_file() and (FAUST_EXAMPLES / code.strip()).is_file():
+            f = FAUST_EXAMPLES / code.strip()
         if not f.is_file():
-            raise RecipeError(f"{where}: faust: no such file {f}")
+            raise RecipeError(f"{where}: faust: no such file {f} (the examples: "
+                              f"{', '.join(sorted(p.name for p in FAUST_EXAMPLES.glob('*.dsp')))})")
         code = f.read_text(encoding="utf-8")
     events, seconds, _ = _events(spec, where)
     notes = [{"note": n, "start": a, "length": b - a, "velocity": v} for n, v, a, b in events]

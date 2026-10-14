@@ -125,6 +125,11 @@ samples:
 | `file` | | instead of `patch`: an audio file (WAV, FLAC, AIFF, OGG, MP3; relative to the recipe), or a list of files mixed together (e.g. close and overhead mics of one drum hit). Resampled to `sample_rate`. |
 | `resynth` | | instead of `patch` or `file`: a target WAV rebuilt from blocks of other WAVs (see below) |
 | `faust` | | instead of `patch`: Faust code, or a `.dsp` file beside the recipe, rendered a voice per note (see below) |
+| `wave` | | instead of `patch`: one looped cycle of a chip or drawn waveform, band-limited by construction (see below) |
+| `sfxr` | | instead of `patch`: a sound effect from sfxr's synthesis, a preset drawn from a seed (see below) |
+| `additive` | | instead of `patch`: a PADsynth pad, harmonics as bands of noise in one exact loop (see below) |
+| `drum` | | instead of `patch`: DrumSynth's sections (tone, noise, overtones, noise bands, distortion, filter), or a `.ds` file (see below) |
+| `mip` | none | any source: copies band-limited per octave (or `step`) and the song's `samples:`/`keymap:` to paste (see below) |
 | `start`, `length` | 0, all | `file` and `resynth` (its target): seconds to skip, and seconds to keep (effects tails still ring past `length`) |
 | `note` | | `patch`: the key to play, in tracker names (`C-5` = MIDI 60 = middle C). `file`: the pitch recorded in the file (default `C-5`) |
 | `notes` | | a list of keys, rendering one file per key (for multisampled instruments) |
@@ -151,8 +156,9 @@ Unpitched sounds (drums, noise) aren't checked, and neither are `file` samples w
 (taken as drums). For recorded files this checks the `note:` you
 gave, and it is how file names were confirmed to be scientific pitch: VSCO's `E3` is tracker `E-4`.
 
-Every sample needs exactly one of `patch`, `file`, `resynth` or `faust`. `file` and `resynth` samples take `note` (never
-`notes`, `chord` or `phrase`); `hold`, `velocity` and `params` only apply to patches and `faust`.
+Every sample needs exactly one of `patch`, `file`, `resynth`, `faust`, `wave`, `sfxr`, `drum` or `additive`. `file`, `resynth`,
+`sfxr` and `drum` samples take `note` (never `notes`, `chord` or `phrase`), and `wave` and `additive` take `note` or `notes` (never `chord`, `phrase` or `loop`); `hold`,
+`velocity` and `params` only apply to patches and `faust`.
 
 ## Faust code (`faust:`)
 
@@ -187,6 +193,25 @@ in `faust.yaml` beside the song (`out_dir: .`, so the entry writes that very WAV
 because the tab renders without them: `synth faust.yaml --only NAME` renders it again, and in the app the slot's
 RECIPE box shows it.
 
+The app ships examples to start from, used as `faust: NAME.dsp` when no file of that name sits beside the recipe (their
+code is in `vulturetracker/faust_examples/`; copy one beside the recipe to change it). Each takes `freq`, `gain` and
+`gate` from the notes, and its other controls through `params`:
+
+| file | what | controls (`params`) |
+|---|---|---|
+| `pluck.dsp` | Karplus-Strong string (`pm.ks`) plucked by a noise burst combed at the pick position | `position` (0.02-0.5 from the end), `damping`, `burst` (s) |
+| `nylon.dsp` | nylon-string guitar (`pm.nylonGuitar`) | `position` |
+| `marimba.dsp` | marimba bar and resonator tube (`pm.marimba`'s parts) | `position` (0-4), `cutoff` (the mallet, Hz), `sharpness`, `decay` (the ring, s) |
+| `organ.dsp` | drawbar organ: nine sines at the tonewheel footages, each 0-8, with a key click | `bar1`-`bar9` (16' to 1'; default 008800000: `bar1` sounds an octave below the note), `click` |
+| `opl2.dsp` | two-operator FM in the manner of the OPL2 chip, its four waves (sine, half, absolute, quarter sine) | `mod_wave`, `car_wave` (0-3), `mod_mult`, `car_mult`, `index`, `mod_decay` |
+| `acid.dsp` | saw through a diode ladder (`ve.diodeLadder`) swept down at each note | `cutoff`, `envmod`, `decay`, `resonance`, `accent` |
+| `kick.dsp` | a sine falling from `start` to `end` Hz with a decay and tanh drive; the note's pitch leaves it alone | `start`, `end`, `slope` (s), `env` (s), `dist` |
+
+```yaml
+  pluck: {faust: pluck.dsp, notes: [E-3, E-4], hold: 0.8, tail: 1.5, params: {position: 0.12}}
+  kick: {faust: kick.dsp, hold: 0.5, params: {start: 220, end: 42, dist: 0.4}}
+```
+
 ## Resynthesis from a corpus (`resynth:`)
 
 ```yaml
@@ -212,6 +237,124 @@ corpus is read (the files in order, each from its start); `seed` (default 0) mak
 is mono, at the recipe's `sample_rate`; the rest of the chain (`fx`, `trim`, `loop`, `normalize`) follows as for any
 sample. Numpy only: no synth and no pedalboard are needed unless `fx:` is used. `synth` logs how many blocks and
 distinct corpus blocks were used.
+
+## Waves (`wave:`) and band-limited copies (`mip:`)
+
+```yaml
+  chip:
+    wave: {shape: pulse, duty: 0.125}  # pulse saw square triangle tri4 lfsr gb table
+    notes: [C-4]                       # the cycle's pitch (default C-5)
+    mip: {octaves: 4}                  # chip.wav, chip_o1.wav ... chip_o4.wav, and the song blocks printed
+  wavetable:
+    wave: {table: [0, 6, 12, 15, 12, 6, 0, -6, -12, -15, -12, -6]}   # one cycle drawn in steps
+  noise:
+    wave: {shape: lfsr, short: true}   # the NES noise channel's 93-step period
+```
+
+A `wave` is one cycle of a waveform, looped: the sample is the fewest whole cycles that fit whole frames within 0.1
+cent of the note (a C-5 takes 9 cycles in 1517 frames), with the loop on exactly those frames, so it never drifts or
+clicks. It is summed from the shape's harmonics at or under `ceiling` (default 18000 Hz) and has no DC, so it is
+band-limited by construction: nothing in it aliases, and `check` measures it like any sample. Shapes: `pulse` (`duty`
+0-1, default 0.5), `saw`, `square`, `triangle`; `tri4`, the NES triangle's 32 steps of 4 bits; `gb`, a Game Boy wave
+table (`table`: 32 whole numbers 0-15); `table`, any list of numbers drawn as equal steps (scaled to full range); and
+`lfsr`, one period of the NES noise channel's 15-bit shift register (32767 steps, or 93 with `short: true`), a step per
+frame at the recipe's rate, the note naming the pitch it plays at. `frames: N` draws `pulse`, `saw`, `square` or
+`triangle` as N equal steps, the way a wavetable chip stores it. The staircase of a step table is kept up to the
+ceiling. `fx` runs on the stored cycles: memoryless effects (`waveshape`, `bitcrush`) keep the loop seamless, a delay or
+a reverb does not.
+
+A single cycle with harmonics up to 18 kHz can only be played at its root and below: played up, its harmonics pass the
+ceiling, and `check` says so (`mip` exists for this; playing it far below the root raises the images warning). `mip:
+{octaves, ceiling, step}` (defaults 3, 18000 Hz, 12 semitones; `mip: true` takes them all) works on any source: the
+render is written as `octaves` + 1 copies, the first serving every key up to `step` - 1 semitones above the root, each
+next one the following `step` keys (a boundary key takes the narrower copy). Each copy is band-limited so that its
+highest key lifts it exactly to the ceiling, and stored at twice that width (the base copy of a C-4 at about 19 kHz,
+each further octave at half the rate), as the references store samples low and play them octaves up; a loop is
+resampled with it and stays whole frames (the rate nudged to keep it so). The log ends with the `samples:` and
+`instruments:` blocks to paste into the song, paths from the recipe's folder (renumber the samples to free slots; with
+a `notes:` list each key gets its own copies and block). With them a song plays the sound on every key the copies cover
+with no ceiling warning (four octaves of copies of a C-4 reach B-8). A song's `sample_rate: 44100` resamples the copies up again when it compiles, band-limited, so they
+cost nothing in the module.
+
+## Pads (`additive:`)
+
+```yaml
+  pad:
+    additive: {harmonics: [1, 0.5, 0.6, 0.2, 0.3, 0.1], bandwidth_cents: 60, bandwidth_scale: 1, loop_seconds: 4, seed: 2}
+    notes: [C-4, C-5]
+```
+
+Nasca Octavian Paul's PADsynth algorithm (public domain; from his description, zynaddsubfx.sourceforge.io): every
+harmonic of the note is a Gaussian band of frequencies, `bandwidth_cents` wide (default 40) at the first harmonic and
+`h ** bandwidth_scale` times that at the h-th (default 1: as wide in cents at every harmonic; 0 keeps them equal in Hz,
+above 1 the high ones spread more), never narrower than one bin; every bin of the spectrum gets a random phase from
+`seed` (default 0), and one inverse FFT turns it into `loop_seconds` (default 3) of sound. The result is a chorus-like
+pad with no beating pattern that repeats, and it loops exactly: the loop is the whole sample and its end runs into its
+start. `harmonics` is a list of amplitudes (the first is the fundamental; 0 leaves one out) or a count (amplitudes 1/h,
+default 16). As in PADsynth the amplitude is per hertz, so a wider band is quieter: a harmonic's power falls as its
+band widens. Harmonics, and bins, over `ceiling` (default 18000 Hz) are left out, so `mip` can make the higher copies.
+Like `wave`, it takes `note` or `notes` (default C-5), not `chord`, `phrase` or `loop`, and is not pitch-checked.
+
+## Sound effects (`sfxr:`)
+
+```yaml
+  zap1: {sfxr: {preset: laser, seed: 1}}
+  zap2: {sfxr: {preset: laser, seed: 2}}
+  coin: {sfxr: {preset: pickup, seed: 7, p_env_decay: 0.5}}     # a preset with one parameter changed
+  tone: {sfxr: {wave_type: square, p_base_freq: 0.35, p_duty: 0.6, p_freq_ramp: 0.2}}
+```
+
+The synthesis of [sfxr](https://www.drpetter.se/project_sfxr.html) by Tomas Pettersson (DrPetter; MIT, reimplemented
+from his source): one oscillator (`wave_type` square, saw, sine or noise, or 0-3) with a slide and a slide of the slide,
+a duty sweep, an arpeggio jump, vibrato and repeat, a phaser, a resonant low-pass and a high-pass with sweeps, and an
+attack, sustain, punch and decay envelope. Parameters go by sfxr's names, the same in jsfxr, each 0 to 1 (the ramps,
+`p_arp_mod` and `p_pha_offset` -1 to 1): `p_env_attack`, `p_env_sustain`, `p_env_punch`, `p_env_decay`, `p_base_freq`,
+`p_freq_limit`, `p_freq_ramp`, `p_freq_dramp`, `p_vib_strength`, `p_vib_speed`, `p_arp_mod`, `p_arp_speed`, `p_duty`,
+`p_duty_ramp`, `p_repeat_speed`, `p_pha_offset`, `p_pha_ramp`, `p_lpf_freq`, `p_lpf_ramp`, `p_lpf_resonance`,
+`p_hpf_freq`, `p_hpf_ramp`; unnamed ones keep sfxr's defaults. `preset` is one of sfxr's generator buttons (`pickup` or
+`coin`, `laser` or `shoot`, `explosion`, `powerup`, `hit` or `hurt`, `jump`, `blip` or `select`), its random choices
+drawn from `seed` (default 0), so a seed always gives the same sound: write several seeds as candidates and pick by ear.
+The parameters named beside it replace the preset's. sfxr runs eight sub-steps of its oscillator and filters per 1/44100
+s frame and averages them, which folds what lies above 22 kHz back down; here the sub-steps are kept as a 352.8 kHz
+stream and resampled to the recipe's rate, band-limited. The sound ends where sfxr's does (its envelope's end, or the
+frequency limit). `note` (default C-5) only names the pitch it is played at; sfxr samples are not pitch-checked.
+
+## Drums (`drum:`)
+
+```yaml
+  kick:
+    drum:
+      tone: {level: 181, f1: 600, f2: 50, droop: 50, phase: 90, envelope: [[0, 100], [3000, 40], [15000, 0]]}
+      noise: {level: 40, slope: -50, envelope: '0,100 500,0'}
+  hat:
+    drum:
+      noiseband: {level: 120, f: 9000, df: 80, envelope: '0,100 2000,0'}
+      general: {filter: 1, highpass: 1, filterenv: '0,60 2000,60'}
+  mine: {drum: kits/mine.ds}     # your own DrumSynth file, beside the recipe
+```
+
+The drum maker of Paul Kellett's DrumSynth 2.0 (mda-vst.com; MIT, reimplemented from his renderer and help file), built
+on the circuits of early drum machines: a section is a sound generator with its own envelope, and the sections are
+summed. A section given in the mapping is on (`on: 0` turns it off); a `.ds` file beside the recipe is read as
+DrumSynth reads it (an INI file whose `[General]` `Version` is DrumSynth 1 or 2; its sections need `On=1`), so a sound
+saved from DrumSynth renders here. Keys are DrumSynth's names in any case, and a key left out takes DrumSynth's default. Envelopes are
+`time,level` points in a string (`'0,100 3000,40 15000,0'`, as in a `.ds` file) or a list of pairs, times in frames at
+44100 Hz (DrumSynth's rate: 4410 is a tenth of a second), levels 0-100, linear between points; a section stops at its
+last point. Levels go up to 255 and square: 181 is full scale. The sound is rendered at 44100 Hz as DrumSynth does,
+then resampled to the recipe's rate.
+
+| section | keys (default) |
+|---|---|
+| `tone` | a sine swept from `f1` (200 Hz) to `f2` (120 Hz) over its envelope; `droop` (0: a straight sweep; higher reaches F2 sooner), `phase` (90 degrees: the start phase, 0 starts on a click-free zero), `level` (128), `envelope` |
+| `noise` | white noise; `slope` (0; -100 to 100: darker to brighter, not tuned by `tuning`), `level` (0), `envelope` |
+| `overtones` | two oscillators `f1` (200) and `f2` (120) Hz, `wave1`/`wave2` (0 sine, 1 rectified sine, 2 triangle, 3 saw, 4 square), `track1`/`track2` (1: follow the tone's sweep as a ratio of its F1), `method` (2; 0 mixed, 1 the second modulates the first's frequency, 2 ring modulation, 3 the 808 cymbal: six pulse trains between the two periods through a band-pass that `envelope2` sweeps), `param` (50: the balance; the drive for 1 and 2, the resonance for 3), `filter` (1: the master filter on the overtones only), `level` (128), `envelope1`, `envelope2` |
+| `noiseband`, `noiseband2` | a band of noise around `f` (1000 Hz), `df` (50) wide, `level` (128), `envelope` |
+| `distortion` | `clipping` (0 dB of gain into the clip), `bits` (0; each step takes two bits off), `rate` (0; 1-6 hold every 2, 3, 4, 8, 10 or 20 frames) |
+| `general` | `tuning` (0 semitones), `stretch` (100: % of every envelope's length, 20-1000), `level` (0 dB), `filter` (1: the master filter on everything), `resonance` (0-100), `highpass` (1: a high-pass instead), `filterenv` (the cutoff, 0-100; it holds its last level) |
+
+`note` (default C-5) names the pitch the sample is played at, as for a recorded drum; drums are not pitch-checked. The
+noise sections fill the band to half the rate: play such a drum at its root or below (`check` measures it like any
+sample).
 
 ## Printed effects (`fx:`)
 
