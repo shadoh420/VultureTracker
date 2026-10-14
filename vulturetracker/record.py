@@ -517,7 +517,11 @@ def spill(takes, rate, song, loops=0):
     import json
     d = spill_dir()
     d.mkdir(parents=True, exist_ok=True)
-    sid = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}-{int(time.time() * 1000) % 1000:03d}"
+    base = time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}-{int(time.time() * 1000) % 1000:03d}"
+    sid, n = base, 1
+    while (d / f"{sid}.json").exists():  # two spills in one millisecond: never the same id (one would replace the other)
+        n += 1
+        sid = f"{base}-{n}"
     files = []
     for i, take in enumerate(takes):
         np.save(d / f"{sid}-{i + 1}.npy", np.asarray(take, np.float32))

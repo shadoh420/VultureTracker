@@ -46,9 +46,13 @@ class TestAgentSessions(unittest.TestCase):
         save) or forgets one, and only an id it lists."""
         import numpy as np
         from vulturetracker import record
+        import time
+        now = time.time()
         with mock.patch.object(record, 'spill_dir', lambda: self.d / 'recordings'):
-            keep = record.spill([np.zeros((1, 4410), np.float32)], 44100, str(self.path))
-            drop = record.spill([np.zeros((1, 4410), np.float32)], 44100, str(self.path))
+            with mock.patch.object(record.time, 'time', lambda: now):  # two in one millisecond: each keeps its own id
+                keep = record.spill([np.zeros((1, 4410), np.float32)], 44100, str(self.path))
+                drop = record.spill([np.zeros((1, 4410), np.float32)], 44100, str(self.path))
+            self.assertNotEqual(keep, drop)
             self.assertEqual({s['id'] for s in self.call('recording_status')['unsaved']}, {keep, drop})
             for act in ('recover', 'forget'):
                 self.assertTrue(agent.run(self.st, 'control_recording', {'action': act, 'id': 'nope'}).get('error'))
