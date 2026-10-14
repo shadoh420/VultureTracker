@@ -34,6 +34,26 @@ What changed in each VultureTracker release (the GitHub release notes, without t
 - Recipes: `bandlimit: {hz}` in `fx:`, the compiler's own steep sinc low-pass, so a sample measures as wide as asked.
 - Import: the Guitar Pro and MIDI placeholder plucks are band-limited at 9 kHz by that sinc (a 24 dB per octave
   low-pass before), so their keymaps meet the ceiling check they were laid out for.
+- AUTOMATE on the Pattern tab's SELECTION bar: a curve (linear, S-curve, exponential or steps) from FROM to TO written
+  as plain `Zxx`, `Xxx`, `Mxx`, `Vxx`, `Txx` or `vNN` cells every n rows, one undo step. INTERPOLATE is now OpenMPT's:
+  the note and instrument columns too, one empty end filled from the other, rows holding another command left alone,
+  OpenMPT's rounding, and with no selection the span around the cursor.
+- REC OFF in the live bar: with it on, letting go of a piano key or a MIDI key in edit mode writes a note-off on the
+  channel its note went to, at the row playing (or the cursor), as OpenMPT's Record Note Off does; a chord's notes each
+  end on their own channel.
+- GROW and SHRINK on the SELECTION bar (Alt+E, Alt+D): OpenMPT's Grow and Shrink Selection, the rows spread two apart
+  or packed into half the span, the overflow dropped and counted.
+- ARP and STRUM in COMPOSE: ARP plays each note the owner wrote on a channel as the root of an arpeggio (the CHORD
+  shape over 1-4 octaves; up, down, up-down, down-up or random; a step every n rows; seeded skips; a gate as `SCx` or a
+  note-off row), STRUM delays a chord's voices one after another by n ticks (`SDx`).
+- LENGTH on the SELECTION bar: FILL (legato), SET n rows, CUT HERE and GLUE; in the roll, a note's right edge drags its
+  length and its body drags it in rows. An approved pattern refuses them.
+- SPLIT HERE in the Pattern tab: OpenMPT's Split Pattern, the rows from the cursor on a new pattern played after every
+  order of the source; sections widen to take it in and `Bxx` jumps follow.
+- SONG SETTINGS: a MESSAGE box for the IT song message, written to `module: message` as a literal block exactly as
+  typed, with the Latin-1 and length warnings `check` gives.
+- Channels: an optional `color: "#rrggbb"` (set from the SONG tab's channel list) colours the channel in the rail, the
+  Pattern tab's header and the roll's ghosts; the .it does not hold it.
 
 ## 1.5.2 (2026-10-10)
 

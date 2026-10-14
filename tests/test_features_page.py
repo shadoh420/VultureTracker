@@ -387,6 +387,168 @@ class TestFeaturesPage(unittest.TestCase):
               renderRoll();return [$('roll-from').value, document.querySelectorAll('#roll .rnote.from').length]})()"""),
                              ['prev', 2])
 
+    def test_automate_and_interpolate(self):
+        """AUTOMATE writes a curve over the selection (hex values, as the cells show them); INTERPOLATE with no selection
+        fills the cursor's column between the nearest values above and below (OpenMPT's sweep)."""
+        with self.page() as (page, d):
+            page.evaluate("tab('pattern'); setEdit(true); CUR.ch=0; showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows && PAT.fo")
+            page.evaluate("SEL={o:CUR.o,a:{row:0,ch:0,col:0},b:{row:3,ch:0,col:4}};renderPat()")
+            page.select_option('#au-target', 'Z')
+            page.fill('#au-from', '00')
+            page.fill('#au-to', '30')
+            page.fill('#au-every', '3')
+            page.click('text=AUTOMATE')
+            self.settle(page)
+            self.assertEqual([r[0][-3:] for r in page.evaluate("PAT.rows")], ['Z00', '...', '...', 'Z30'])
+            self.assertIn("automate: 2 cells", page.text_content('#sel-msg'))
+            page.evaluate("SEL=null;CUR.row=1;CUR.col=3;renderPat()")
+            page.click('text=INTERPOLATE')
+            self.settle(page)
+            self.assertEqual([r[0][-3:] for r in page.evaluate("PAT.rows")], ['Z00', 'Z10', 'Z20', 'Z30'])
+            self.assertIn("03: ... .. ... Z30", (d / 'song.yaml').read_text())
+
+    def test_record_note_off(self):
+        """REC OFF (OpenMPT's TempStopNote): letting go of a piano key writes ^^^ (samples only) at the cursor on the
+        note's channel; a release after a newer note on that channel is ignored; a filled cell is never overwritten; a
+        MIDI chord's releases each go to the channel their note took."""
+        with self.page() as (page, d):
+            page.evaluate("tab('pattern'); setEdit(true); CUR.ch=0; CUR.row=0; CUR.col=0; showPattern(0); renderPat();"
+                          "$('lv-oct').value='5'; $('lv-step').value='1'; $('midi-chord').checked=false;"
+                          "$('lv-recoff').checked=true")
+            page.wait_for_function("PAT.rows && PAT.fo")
+            col = "PAT.rows.map(r=>r[%d].slice(0,6))"
+            page.keyboard.down('z')                       # C-5 on row 0, the cursor to row 1
+            page.keyboard.up('z')                         # ^^^ at the cursor
+            self.settle(page)
+            self.assertEqual(page.evaluate(col % 0), ['C-5 01', '^^^ ..', '... ..', '... ..'])
+            page.evaluate("CUR.row=2;renderPat()")
+            page.keyboard.down('z')                       # C-5 on row 2
+            page.keyboard.down('x')                       # D-5 on row 3: a newer note on the channel
+            page.keyboard.up('z')                         # ignored
+            page.keyboard.up('x')                         # row 3 is the last: the cursor stays on D-5's cell, filled
+            self.settle(page)
+            self.assertEqual(page.evaluate(col % 0), ['C-5 01', '^^^ ..', 'C-5 01', 'D-5 01'])
+            page.evaluate("$('midi-chord').checked=true; MIDI.on=true; CUR.row=0; CUR.ch=0; renderPat();"
+                          "midiMsg([0x90,64,100]); midiMsg([0x90,60,100])")  # a chord: C-5 on channel 1, E-5 on 2
+            page.wait_for_function("!MIDI.pending && EDQ.n===0")
+            self.settle(page)
+            page.evaluate("CUR.row=1; CUR.ch=1; renderPat(); midiMsg([0x80,60,0])")  # C-5's off on its own channel
+            self.settle(page)
+            self.assertEqual(page.evaluate(col % 0)[:2], ['C-5 01', '^^^ ..'])
+            page.evaluate("CUR.row=3; renderPat(); midiMsg([0x80,64,0])")  # row 2 holds C-5 02
+            self.settle(page)
+            self.assertEqual(page.evaluate(col % 1), ['E-5 01', '... ..', 'C-5 02', '^^^ ..'])
+
+    def test_grow_and_shrink(self):
+        """GROW spreads the selection two rows apart and the selection follows; Alt+D (SHRINK) packs it back."""
+        with self.page() as (page, d):
+            song = (d / 'song.yaml').read_text()
+            page.evaluate("tab('pattern'); CUR.ch=1; showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows && PAT.fo")
+            page.evaluate("SEL={o:CUR.o,a:{row:1,ch:1,col:0},b:{row:2,ch:1,col:4}};renderPat()")
+            page.click('text=GROW')
+            self.settle(page)
+            self.assertEqual([r[1][:6] for r in page.evaluate("PAT.rows")], ['... ..', '... ..', '... ..', 'C-5 02'])
+            self.assertEqual(page.evaluate("[selNorm().r0, selNorm().r1]"), [1, 3])
+            page.keyboard.press('Alt+d')
+            self.settle(page)
+            self.assertEqual((d / 'song.yaml').read_text(), song)
+
+    def test_arp_and_strum(self):
+        """ARP plays the selected channel's notes as arpeggios of the CHORD shape; CHORD with STRUM delays its voices."""
+        with self.page() as (page, d):
+            page.evaluate("tab('pattern'); CUR.ch=0; showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows && PAT.fo")
+            page.evaluate("SEL={o:CUR.o,a:{row:0,ch:0,col:0},b:{row:3,ch:0,col:4}};renderPat()")
+            page.select_option('#cmp-chord', 'maj')
+            page.click('text=ARP')
+            self.settle(page)
+            self.assertEqual([r[0][:6] for r in page.evaluate("PAT.rows")], ['C-5 01', 'E-5 01', 'G-5 01', 'C-5 01'])
+            page.evaluate("SEL=null;CUR.row=0;CUR.ch=0;renderPat()")
+            page.select_option('#cmp-chord', '5')
+            page.fill('#cmp-strum', '2')
+            page.click('#selbar >> text=CHORD')
+            self.settle(page)
+            self.assertEqual(page.evaluate("PAT.rows[0][1]"), 'G-5 01 ... SD2')
+            self.assertIn("00: C-5 01 ... ... | G-5 01 ... SD2", (d / 'song.yaml').read_text())
+
+    def test_note_lengths_and_roll_drags(self):
+        """SET LENGTH from the SELECTION bar; in the roll a note's right edge sets its length and its body moves it in
+        rows; an approved pattern refuses both."""
+        with self.page() as (page, d):
+            page.evaluate("tab('pattern'); setEdit(true); CUR.ch=0; CUR.row=0; showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows && PAT.fo")
+            page.fill('#len-n', '2')
+            page.click('#selbar >> text=SET')
+            self.settle(page)
+            col = "PAT.rows.map(r=>r[0].slice(0,6))"
+            self.assertEqual(page.evaluate(col), ['C-5 01', '... ..', '^^^ ..', '... ..'])
+            page.evaluate("rollToggle()")
+            page.wait_for_function("document.querySelectorAll('#roll .rnote:not(.ghost)').length===1")
+            drag = """((dx,edge)=>{const n=document.querySelector('#roll .rnote:not(.ghost)'),b=n.getBoundingClientRect(),
+              x=edge?b.right-1:b.left+3,y=b.top+4;rollDown({button:0,preventDefault(){},shiftKey:false,target:n,clientX:x,clientY:y});
+              dispatchEvent(new MouseEvent('mousemove',{clientX:x+dx*ROLL.RW*zf(),clientY:y}));dispatchEvent(new MouseEvent('mouseup'))})"""
+            page.evaluate(f"{drag}(1,true)")          # the right edge one row on: three rows long
+            self.settle(page)
+            self.assertEqual(page.evaluate(col), ['C-5 01', '... ..', '... ..', '^^^ ..'])
+            page.evaluate(f"{drag}(1,false)")         # the body one row later; its note-off would land past row 3
+            self.settle(page)
+            self.assertEqual(page.evaluate(col), ['... ..', 'C-5 01', '... ..', '^^^ ..'])
+            page.evaluate("tab('song')")
+            page.click('#song-pats .ms >> nth=0')     # approve p1
+            self.settle(page)
+            page.evaluate("tab('pattern'); renderPat(); renderRoll()")
+            page.evaluate(f"{drag}(-1,true)")
+            self.assertIn('approved', page.text_content('#rollhint'))
+            page.click('#selbar >> text=FILL')
+            self.settle(page)
+            self.assertEqual(page.evaluate(col), ['... ..', 'C-5 01', '... ..', '^^^ ..'])
+
+    def test_split_here(self):
+        with self.page() as (page, d):
+            page.evaluate("tab('pattern'); CUR.ch=0; showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows && PAT.fo")
+            page.evaluate("CUR.row=0; renderPat()")
+            page.click('text=SPLIT HERE')               # row 0: refused in the bar, nothing written
+            self.assertIn('row 1 or later', page.text_content('#sel-msg'))
+            page.evaluate("CUR.row=2; renderPat()")
+            page.click('text=SPLIT HERE')
+            self.settle(page)
+            page.wait_for_function("S.structure.orders.join()==='p1,p1_2,p2'")
+            self.assertIn("split: 'p1' keeps rows 0-1", page.text_content('#sel-msg'))
+            self.assertIn("orders: [p1, p1_2, p2]", (d / 'song.yaml').read_text())
+
+    def test_song_message(self):
+        """MESSAGE in SONG SETTINGS writes module: message as a block when the box loses focus; outside Latin-1 it warns."""
+        with self.page() as (page, d):
+            page.evaluate("tab('song'); renderSongTab()")
+            page.fill('#song-message', 'line one\nline two')
+            page.evaluate("$('song-message').blur()")
+            self.settle(page)
+            self.assertIn("  message: |-\n    line one\n    line two\n", (d / 'song.yaml').read_text())
+            page.fill('#song-message', 'π')
+            self.assertIn('outside Latin-1', page.text_content('#song-message-info'))
+
+    def test_channel_color(self):
+        """A channel's colour from the SONG tab: color: in its entry, then the rail, the Pattern tab's header and the
+        roll's ghosts take it; the reset button removes it."""
+        with self.page() as (page, d):
+            page.evaluate("tab('song'); renderSongTab()")
+            page.eval_on_selector('#song-ch .stem >> nth=1 >> .chcol', "e=>{e.value='#a3803a';e.dispatchEvent(new Event('change'))}")
+            self.settle(page)
+            self.assertIn('    - {name: B, pan: 40, color: "#a3803a"}\n', (d / 'song.yaml').read_text())
+            page.evaluate("tab('pattern'); setFocus('all'); showPattern(0); renderPat()")
+            page.wait_for_function("PAT.rows")
+            self.assertIn('163, 128, 58', page.evaluate("getComputedStyle(document.querySelectorAll('.pathead span')[2]).boxShadow"))
+            page.evaluate("CUR.ch=0; rollToggle()")
+            page.wait_for_function("document.querySelector('#roll .rnote.ghost')")
+            self.assertIn('163, 128, 58', page.evaluate("document.querySelector('#roll .rnote.ghost').style.background"))
+            page.evaluate("tab('song'); renderSongTab()")
+            page.click('#song-ch .stem >> nth=1 >> text=↺')
+            self.settle(page)
+            self.assertNotIn('color', (d / 'song.yaml').read_text())
+
     def test_paint_undo(self):
         with self.page() as (page, d):
             page.evaluate("tab('paint')")

@@ -1314,10 +1314,32 @@ class TestGui(unittest.TestCase):
         self.assertEqual(col(0, 0)[3], "C-5 01 ... SD2")
         st.song_edit([{"op": "layers", "pattern": 0, "chans": [0], "r0": 0, "r1": 3, "instruments": [2, 1]}])
         self.assertEqual([c[:6] for c in col(0, 0)], ["C-5 02", "... ..", "C-5 01", "C-5 02"])
+        r = st.song_edit([{"op": "automate", "pattern": 0, "r0": 0, "r1": 3, "chans": [0], "target": "Z", "from": 0,
+                           "to": 0x30, "every": 3}])
+        self.assertEqual(r, {"report": "automate: 1 cell in pattern 'p1', 1 left alone (another command there)"})
+        st.undo()  # the groove's SD2 on row 3 stays
+        st.song_edit([{"op": "automate", "pattern": 0, "r0": 0, "r1": 2, "chans": [0], "target": "Z", "from": 0,
+                       "to": 0x20, "every": 2}])
+        r = st.song_edit([{"op": "interpolate", "pattern": 0, "r0": 1, "cols": [[0, [3]]], "sweep": True}])
+        self.assertEqual(r, {"report": "interpolate: 1 cell in pattern 'p1'"})  # OpenMPT's sweep: rows 0 to 2
+        self.assertEqual([c[-3:] for c in col(0, 0)], ["Z00", "Z10", "Z20", "SD2"])
+        with self.assertRaises(ValueError):  # on the start value: nothing to interpolate
+            st.song_edit([{"op": "interpolate", "pattern": 0, "r0": 0, "cols": [[0, [3]]], "sweep": True}])
+        r = st.song_edit([{"op": "grow", "pattern": 0, "r0": 1, "r1": 3, "cols": [[0, [0, 1, 2, 3]]]}])
+        self.assertEqual(r, {"report": "grow: 2 cells in pattern 'p1', 1 row past the pattern's end dropped, "
+                                       "note delays (SDx) keep their ticks"})
+        st.undo()
+        r = st.song_edit([{"op": "cut_here", "pattern": 0, "r0": 1, "chans": [0, 1]}])  # channel 2 is silent there
+        self.assertEqual(r, {"report": "cut_here: 1 cell in pattern 'p1'"})
+        self.assertEqual(col(0, 0)[1], "^^^ .. ... Z10")
+        st.song_edit([{"op": "mark", "what": "pattern", "key": "p1", "approved": True}])
+        with self.assertRaisesRegex(ValueError, "approved"):  # the note-length tools leave an approved pattern alone
+            st.song_edit([{"op": "set_length", "pattern": 0, "chans": [0], "length": 2}])
+        st.undo()
         with self.assertRaises(ValueError):  # a triad from channel 1 needs three channels; the song has two
             st.song_edit([{"op": "chord", "pattern": 0, "ch": 0, "shape": "maj"}])
         st.song_edit([{"op": "chord", "pattern": 0, "ch": 0, "r0": 0, "r1": 0, "shape": "5"}])  # a power chord fits
-        self.assertEqual(st.pattern_rows(0)["rows"][0][:2], ["C-5 02 ... ...", "G-5 02 ... ..."])
+        self.assertEqual(st.pattern_rows(0)["rows"][0][:2], ["C-5 02 ... Z00", "G-5 02 ... ..."])
         for bad in ({"op": "groove", "pattern": 0, "ticks": [6]}, {"op": "euclid", "pattern": None, "ch": 0, "hits": 1,
                     "steps": 2}, {"op": "layers", "pattern": 1, "chans": [5], "instruments": [1]}):
             with self.assertRaises(ValueError, msg=bad):
@@ -1325,6 +1347,58 @@ class TestGui(unittest.TestCase):
         while st.snapshot()["undo"]:
             st.undo()
         self.assertEqual(read(), SONG_BLOCK)
+
+    def test_split_pattern(self):
+        # OpenMPT's Split Pattern: rows from the cursor's on go to a new pattern, after each order playing the source; a
+        # section around those orders widens to take it in; jumps follow; one undo step
+        song = SONG_BLOCK.replace("orders: [p1, p2]", "orders: [p1, p2, p1]\nsections: {intro: [0, 1], end: [2, 3]}")
+        song = song.replace("      03: ... .. ... ... | ... .. ... ...\n  p2:", "      03: ... .. ... B02 | ... .. ... ...\n  p2:")
+        (self.dir / "song.yaml").write_bytes(song.encode("utf-8"))
+        st = self.state()
+        r = st.song_edit([{"op": "pattern_split", "pattern": 0, "row": 2}])
+        self.assertEqual(r, {"report": "split: 'p1' keeps rows 0-1, 'p1_2' has the 2 from row 2, after each of its 2 orders"})
+        self.assertEqual(st.song["orders"], ["p1", "p1_2", "p2", "p1", "p1_2"])
+        self.assertEqual(st.song["sections"], {"intro": [0, 2], "end": [3, 5]})
+        self.assertEqual(st.pattern_rows(0)["rows"], [["C-5 01 ... ...", "... .. ... ..."], ["... .. ... ...", "... .. ... ..."]])
+        self.assertEqual(st.pattern_rows(2)["rows"], [["... .. ... ...", "C-5 02 ... ..."], ["... .. ... B03", "... .. ... ..."]])
+        with self.assertRaises(ValueError):
+            st.song_edit([{"op": "pattern_split", "pattern": 0, "row": 0}])
+        st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_bytes().decode("utf-8"), song)
+
+    def test_song_message_block(self):
+        # module: message written as a literal block, exactly as typed: no final newline, one, several, a first line
+        # that starts with a space, '#' lines; cleared, the key goes; one undo step each
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+        for text in ("Nadir\n# not a comment\n  indented: yes", "two lines\nend\n", "trailing\n\n\n", " leading space\nx",
+                     "tab\there ünïcödé: ok"):
+            st.song_edit([{"op": "module", "key": "message", "value": text}])
+            self.assertEqual(st.song["module"]["message"], text)
+            self.assertEqual(st.mod.message, text)
+        self.assertIn("  message: |-\n    tab\there", (self.dir / "song.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(st.snapshot()["structure"]["module"]["message"], "tab\there ünïcödé: ok")
+        st.song_edit([{"op": "module", "key": "message", "value": ""}])
+        self.assertNotIn("message", st.song["module"])
+        while st.snapshot()["undo"]:
+            st.undo()
+        self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK)
+
+    def test_channel_color(self):
+        # color: "#rrggbb" on a channel entry, for the app (not in the .it): written and removed in place, one undo step;
+        # an unquoted one (# starts a YAML comment) or another shape is an error
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.encode("utf-8"))
+        st = self.state()
+        st.song_edit([{"op": "channel_color", "ch": 1, "color": "#A3803A"}])
+        self.assertIn('    - {name: B, pan: 40, color: "#a3803a"}\n', (self.dir / "song.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(st.facts["channel_colors"], ["", "#a3803a"])
+        st.song_edit([{"op": "channel_color", "ch": 1, "color": ""}])
+        self.assertEqual((self.dir / "song.yaml").read_text(encoding="utf-8"), SONG_BLOCK)
+        with self.assertRaises(ValueError):
+            st.song_edit([{"op": "channel_color", "ch": 0, "color": "red"}])
+        for bad in ("- name: A\n      color: #a3803a", "- {name: A, color: '#a3803'}", "- {name: A, color: 7}"):
+            with self.assertRaisesRegex(Exception, "color", msg=bad):  # unquoted, # starts a comment: null
+                gui.load_song_text(SONG_BLOCK.replace("- {name: A}", bad), self.dir)
 
     def test_render_rows_into_a_new_slot(self):
         # rows of a pattern rendered as they play, one channel alone, then ringing out: a new slot, one undo step

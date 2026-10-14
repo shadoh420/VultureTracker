@@ -227,7 +227,7 @@ MODULE_KEYS = ["title", "tempo", "speed", "global_volume", "mix_volume", "separa
                "old_effects", "compatible_gxx", "channels", "message", "sample_rate", "rows_per_beat", "rows_per_bar",
                "plugins", "macros", "key", "ceiling"]
 KEY_RE = re.compile(r"([A-Ga-g])([#b]?)\s+(major|minor|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian)", re.I)
-CHANNEL_KEYS = ["name", "pan", "volume", "muted", "plugin", "approved"]
+CHANNEL_KEYS = ["name", "pan", "volume", "muted", "plugin", "approved", "color"]
 
 
 def _plugins(ctx, m, mod):
@@ -372,6 +372,12 @@ def _module(ctx, m, mod):
                 ch.pan = _int(ctx, c, "pan", 0, 64, 32, w)
             ch.volume = _int(ctx, c, "volume", 0, 64, 64, w)
             ch.muted = _bool(ctx, c, "muted", False, w)
+            color = c.get("color")
+            if "color" in c:
+                if not (isinstance(color, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", color)):
+                    ctx.error(_line(c, "color"), f'{w}: \'color\' is a quoted "#rrggbb" (unquoted, # starts a comment), got {color!r}')
+                else:
+                    ch.color = color.lower()
             _marks(ctx, c, w)
             plug = c.get("plugin", 0)
             if plug:

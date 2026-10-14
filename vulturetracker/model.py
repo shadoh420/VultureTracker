@@ -98,6 +98,7 @@ class Channel:
     volume: int = 64               # 0..64
     muted: bool = False
     plugin: int = 0                # the mix plugin it plays through (1.., Module.plugins), 0 none
+    color: str = ""                # "#rrggbb" for the app's rail, headers and roll (not stored in the .it)
 
 
 @dataclass

@@ -81,7 +81,7 @@ a letter.
 | `old_effects` | bool | false | IT "old effects" mode (keep false) |
 | `compatible_gxx` | bool | false | IT "compatible Gxx" mode (keep false) |
 | `channels` | 1–64, or list | required | channel count, or one entry per channel |
-| `message` | text | none | song message stored in the file (at most 65534 characters, IT's limit) |
+| `message` | text | none | song message stored in the file (at most 65534 characters, IT's limit; Latin-1, other characters stored as `?`); several lines as a literal block (`message: \|`), which the app's MESSAGE box writes |
 | `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points and `c5_speed` follow, and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
 | `plugins` | mapping | none | mix plugins: OpenMPT's built-in DMO effects (section 3.1) |
 | `macros` | mapping | none | SFx macros `SF0`..`SFF` of the embedded MIDI configuration, e.g. `SF1: F0F080z` (section 3.1) |
@@ -98,6 +98,7 @@ Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 | `muted` | bool | false | channel starts muted |
 | `plugin` | plugin number | none | the mix plugin the channel plays through (section 3.1) |
 | `approved` | bool | false | the owner's mark: the agent tools leave this channel alone |
+| `color` | `"#rrggbb"`, quoted | none | the channel's colour in the app (the rail, the Pattern tab's header, the roll's ghosts); not stored in the .it, as `name` is kept only for the app. Quote it: unquoted, `#` starts a YAML comment. Added after 1.5.2: a song that sets it says so with `requires:` |
 
 **Timing.** A tick lasts `2.5 / tempo` seconds. A row lasts `speed` ticks. With speed 6 and 4 rows
 per beat, BPM = tempo. In general `BPM = tempo × 24 / (speed × rows_per_beat)`. Envelopes and

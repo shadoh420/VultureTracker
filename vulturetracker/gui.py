@@ -391,6 +391,7 @@ def facts_of(mod, warnings, it=None):
         "channels": [c.name or f"Ch {i + 1}" for i, c in enumerate(mod.channels)],
         "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels], "mix_volume": mod.mix_volume,
         "channel_plugins": [c.plugin for c in mod.channels], "plugins": plugins.to_song(mod.plugins),
+        "channel_colors": [c.color for c in mod.channels],
         "macros": {f"SF{n:X}": t for n, t in sorted(mod.macros.items())},
         "key": mod.key, "key_report": _key_report(mod),
         "patterns": len(mod.patterns), "duration": duration, "orders": orders, "use": use,
@@ -2364,7 +2365,17 @@ class State:
     # per line, module settings as `key: value` lines); a batch of ops is one undo step, compiled before it is written
 
     MODULE_KEYS = {"title": None, "key": None, "tempo": (32, 255), "speed": (1, 255), "global_volume": (0, 128), "mix_volume": (0, 128),
-                   "separation": (0, 128), "rows_per_beat": (1, 255), "rows_per_bar": (1, 255)}
+                   "separation": (0, 128), "rows_per_beat": (1, 255), "rows_per_bar": (1, 255), "message": None}
+
+    @staticmethod
+    def _block_scalar(key, value, ind):
+        """`key: |` and `value` as a YAML literal block at indentation `ind`: `|-` without a final newline, `|+` keeping
+        several, an indentation indicator when the first line starts with a space."""
+        chomp = "" if value.endswith("\n") and not value.endswith("\n\n") else "+" if value.endswith("\n") else "-"
+        body = (value[:-1] if value.endswith("\n") else value).split("\n")
+        first = next((t for t in body if t.strip()), "")
+        head = f"{' ' * ind}{key}: |{'2' if first.startswith(' ') else ''}{chomp}\n"
+        return [head] + [f"{' ' * (ind + 2)}{t}\n" if t else "\n" for t in body]
 
     def _encoded(self, text, crlf=None, bom=None):
         crlf = self.crlf if crlf is None else crlf
@@ -2671,6 +2682,27 @@ class State:
             j = self._pattern_key(lines, old)
             lines[j] = re.sub(r"^(\s*)(['\"]?).+?\2(\s*:)", lambda m: m.group(1) + self._yname(name) + m.group(3), lines[j], count=1)
             orders[:] = [name if o == old else o for o in orders]
+        elif kind == "pattern_split":  # OpenMPT's Split Pattern: the rows from `row` on become a new pattern, played after
+            # each order that plays the source; sections around those orders widen to take it, jumps (Bxx) follow
+            from types import SimpleNamespace
+            self._need_compiled()
+            pat = self.mod.patterns[self.pattern_at(op["pattern"])]
+            row, n = int(op.get("row") or 0), len(pat.rows)
+            if not 1 <= row < n:
+                raise ValueError(f"split at a row from 1 to {n - 1}: the rows from it go to a new pattern")
+            if self.pattern_entry(pat.name).get("approved"):
+                raise ValueError(f"pattern '{pat.name}' is approved: clear its mark in the SONG tab before splitting it")
+            names = {k for _, k in self._children(lines, self._top(lines, "patterns"))}
+            new = next(f"{pat.name}_{i}" for i in itertools.count(2) if f"{pat.name}_{i}" not in names)
+            self._song_op(lines, orders, {"op": "pattern_new", "name": new, "rows": n - row}, remap)
+            self._edit_block(lines, None, [{"row": r - row, "ch": ch, "cell": format_cell(c)} for r in range(row, n)
+                                           for ch, c in enumerate(pat.rows[r]) if not c.is_empty()],
+                             pat=SimpleNamespace(name=new, rows=range(n - row)))
+            self._song_op(lines, orders, {"op": "pattern_rows", "name": pat.name, "rows": row}, remap)
+            k = orders.count(pat.name)
+            orders[:] = [x for o in orders for x in ([o, new] if o == pat.name else [o])]
+            self._report.append(f"split: '{pat.name}' keeps rows 0-{row - 1}, '{new}' has the {n - row} from row {row}, "
+                                f"after each of its {k} order{'s' * (k != 1)}")
         elif kind == "pattern_delete":
             name = str(op["name"])
             if name in orders:
@@ -2699,6 +2731,18 @@ class State:
             if not m or not m.group(4):
                 raise ValueError(f"channel {i + 1} is not a one-line '- {{...}}' entry: rename it in the YAML")
             self._redump(lines, items[i], m, {"name": self._yname(name) if name else '""'}, keys=("name",))
+        elif kind == "channel_color":  # `color: "#rrggbb"` on the channel's entry, for the app only; "" removes it
+            head, items = self._channel_lines(lines)
+            i, color = self._chan(items, op["ch"]), str(op.get("color") or "").strip().lower()
+            m = self._entry(lines[items[i]], "-")
+            if not m or not m.group(4):
+                raise ValueError(f"channel {i + 1} is not a one-line '- {{...}}' entry: colour it in the YAML")
+            if color and not re.fullmatch(r"#[0-9a-f]{6}", color):
+                raise ValueError(f"a colour is #rrggbb, got {color!r}")
+            if color:
+                self._redump(lines, items[i], m, {"color": f'"{color}"'}, keys=("color",))
+            else:
+                lines[items[i]] = re.sub(r",\s*color:\s*['\"][^'\"]*['\"]|color:\s*['\"][^'\"]*['\"]\s*,?\s*", "", lines[items[i]], count=1)
         elif kind == "channel_add":
             head, items = self._channel_lines(lines)
             if len(items) >= 64:
@@ -2741,7 +2785,8 @@ class State:
             remap.append(lambda k, order=order: order.index(k))
         elif kind == "echo":
             self._echo(lines, orders, op, remap)
-        elif kind in ("groove", "euclid", "chord", "layers"):
+        elif kind in ("groove", "euclid", "chord", "layers", "interpolate", "automate", "grow", "shrink", "arp", "fill",
+                      "set_length", "cut_here", "glue"):
             self._compose(lines, op)
         elif kind == "render_sample":
             self._render_sample(lines, orders, op, remap)
@@ -2950,7 +2995,18 @@ class State:
                 raise ValueError("module is written on one line: write it as a block to edit its settings here")
             kids = self._children(lines, mod)
             at = next((i for i, k in kids if k == key), None)
-            if at is not None:
+            if key == "message":  # the song message, several lines: a literal block scalar, the text exactly as typed
+                value = str(value).replace("\r\n", "\n").replace("\r", "\n")
+                ind = self._ind(lines[kids[0][0]]) if kids else 2
+                new = self._block_scalar(key, value, ind) if value else []
+                if at is not None:
+                    lines[at:self._span(lines, at)] = new
+                else:
+                    at = self._span(lines, mod)
+                    lines[at:at] = new
+                if value and (api.from_yaml("".join(lines)).get("module") or {}).get("message") != value:
+                    lines[at:at + len(new)] = [f"{' ' * ind}message: {json.dumps(value)}\n"]  # what a block cannot hold
+            elif at is not None:
                 lines[at] = re.sub(rf"^(\s*{key}\s*:\s*)([^#\n]*?)(\s*(#.*)?\n?)$", lambda m: m.group(1) + text + m.group(3), lines[at])
             else:
                 lines.insert(mod + 1, f"{' ' * (self._ind(lines[kids[0][0]]) if kids else 2)}{key}: {text}\n")
@@ -3270,12 +3326,17 @@ class State:
         """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
         delays) and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
         rows r0..r1, or in every pattern (pattern null); `euclid` (ch, hits, steps, rotate, every, prob, seed) and `chord`
-        (ch, shape, inversion) in one pattern. Part of the song edit's one undo step, with a report of what changed."""
+        (ch, shape, inversion; strum ticks, down) and `arp` (ch, shape, octaves, direction, every, gate, skip, seed) in one
+        pattern; `fill`, `set_length` (length), `cut_here` (r0: the row) and `glue` over `chans` in one pattern, which
+        an approved pattern refuses; `interpolate` (cols: [[channel, [fields 0-3]], ...]; with `sweep`, the span
+        found from row r0 in the one column, as OpenMPT does with no selection) and `automate` (chans, target, from, to,
+        shape, every), `grow` and `shrink` (cols, OpenMPT's) in one pattern. Part of the song edit's one undo step, with a report of what changed."""
         from . import compose
         self._need_compiled()
         mod, kind, nch = self.mod, op["op"], len(self.mod.channels)
         whole = op.get("pattern") is None
-        if whole and kind in ("euclid", "chord"):
+        if whole and kind in ("euclid", "chord", "interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length",
+                              "cut_here", "glue"):
             raise ValueError(f"{kind} works on a selection in one pattern")
         chans = [int(c) for c in op["chans"]] if op.get("chans") is not None else list(range(nch))
         ch = int(op.get("ch", chans[0] if chans else 0))
@@ -3293,7 +3354,14 @@ class State:
                 smp = mod.instruments[cell.instrument - 1].keymap[cell.note][1]
             return mod.samples[smp - 1].volume if 0 < smp <= len(mod.samples) else None
 
+        def columns():  # [[channel, [fields 0-3]], ...]: the selection's columns per channel
+            cols = [(int(c), [int(f) for f in fs]) for c, fs in op.get("cols") or []]
+            if not cols or not all(0 <= c < nch and fs and all(0 <= f <= 3 for f in fs) for c, fs in cols):
+                raise ValueError(f"{kind}: give the channels and their columns")
+            return cols
+
         written = skipped = 0
+        extra = []
         for idx in range(len(mod.patterns)) if whole else [self.pattern_at(op["pattern"])]:
             rows = mod.patterns[idx].rows
             r0 = 0 if whole else max(0, int(op.get("r0") or 0))
@@ -3307,7 +3375,62 @@ class State:
                 cells = compose.euclid(rows, ch, r0, r1, int(op["hits"]), int(op["steps"]), int(op.get("rotate") or 0),
                                        int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)))
             elif kind == "chord":
-                cells = compose.chord(rows, ch, r0, r1, op.get("shape") or "maj", int(op.get("inversion") or 0), nch)
+                shape = op.get("shape") or "maj"
+                cells = compose.chord(rows, ch, r0, r1, shape, int(op.get("inversion") or 0), nch)
+                if int(op.get("strum") or 0):  # STRUM: the chord's voices delayed one after another, on the rows as written
+                    from .notation import parse_cell
+                    tmp = [list(rw) for rw in rows]
+                    for c in cells:
+                        tmp[c["row"]][c["ch"]] = parse_cell(c["cell"])
+                    more, s, held = compose.strum(tmp, ch, r0, r1, len(compose._shape(shape)), int(op["strum"]),
+                                                  mod.speed, bool(op.get("down")))
+                    cells = list({(c["row"], c["ch"]): c for c in cells + more}.values())
+                    skipped += s
+                    if held:
+                        extra.append(f"{held} voice{'s' * (held != 1)} held at {min(15, mod.speed - 1)} ticks (SDx goes "
+                                     f"no further at speed {mod.speed})")
+            elif kind in ("fill", "set_length", "cut_here", "glue"):
+                name = mod.patterns[idx].name
+                if self.pattern_entry(name).get("approved"):
+                    raise ValueError(f"pattern '{name}' is approved: its notes keep their lengths (clear its mark in the "
+                                     "SONG tab first)")
+                from .model import NOTE_CUT, NOTE_OFF
+                off = NOTE_OFF if insmode else NOTE_CUT
+                if kind == "fill":
+                    cells, _ = compose.fill(rows, chans, r0, r1)
+                elif kind == "set_length":
+                    cells, s = compose.set_length(rows, chans, r0, r1, int(op.get("length") or 0), off)
+                    if s:
+                        extra.append(f"{s} note{'s' * (s != 1)} would end past the pattern, left alone")
+                elif kind == "cut_here":
+                    cells = compose.cut_here(rows, chans, r0, off)
+                else:
+                    cells, _ = compose.glue(rows, chans, r0, r1)
+            elif kind == "arp":
+                from .model import NOTE_CUT, NOTE_OFF
+                gate = op.get("gate") or 0
+                cells = compose.arp(rows, ch, r0, r1, op.get("shape") or "maj", int(op.get("octaves") or 1),
+                                    op.get("direction") or "up", int(op.get("every") or 1),
+                                    gate if gate == "off" else int(gate), int(op.get("skip") or 0), int(op.get("seed", 1)),
+                                    NOTE_OFF if insmode else NOTE_CUT)
+            elif kind == "interpolate":
+                cols = columns()
+                span = compose.sweep(rows, cols[0][0], r0, cols[0][1][0]) if op.get("sweep") else (r0, r1)
+                cells = compose.interpolate(rows, cols, *span, default_volume) if span else []
+            elif kind == "automate":
+                cells, s = compose.automate(rows, chans, r0, r1, str(op.get("target")), int(op["from"]), int(op["to"]),
+                                            op.get("shape") or "linear", int(op.get("every") or 1))
+                skipped += s
+            elif kind in ("grow", "shrink"):
+                cols = columns()
+                if kind == "grow":
+                    cells, lost, _ = compose.grow(rows, cols, r0, r1)
+                    if lost:
+                        extra.append(f"{lost} row{'s' * (lost != 1)} past the pattern's end dropped")
+                else:
+                    cells, _ = compose.shrink(rows, cols, r0, r1)
+                if any(compose._is_delay(rows[r][c]) for r in range(r0, r1 + 1) for c, _ in cols):
+                    extra.append("note delays (SDx) keep their ticks")
             else:
                 cells = compose.layers(rows, chans, r0, r1, op.get("instruments") or [], op.get("mode") or "cycle",
                                        default_volume)
@@ -3317,9 +3440,14 @@ class State:
         where = "the song" if whole else f"pattern '{mod.patterns[int(op['pattern'])].name}'"
         if not written:
             raise ValueError(f"{kind}: nothing to change in {where}" + (
-                f" ({skipped} notes carry another effect, which a delay would replace)" if skipped else ""))
+                f" ({skipped} notes carry another effect, which a delay would replace)" if skipped and kind == "groove" else
+                f" ({skipped} hold another command there)" if skipped else "") + (
+                " (each column needs a value at an end of the selection, or with no selection the cursor between two)"
+                if kind == "interpolate" else ""))
         msg = f"{kind}: {written} cell{'s' if written != 1 else ''} in {where}"
-        msg += f", {skipped} notes left undelayed (they carry another effect)" if skipped else ""
+        msg += (f", {skipped} notes left undelayed (they carry another effect)" if kind == "groove" else
+                f", {skipped} left alone (another command there)") if skipped else ""
+        msg += "".join(f", {e}" for e in extra)
         self._report.append(msg)
 
     def _write_orders(self, lines, orders):
@@ -3463,9 +3591,10 @@ class State:
 
     def song_edit(self, ops, guard=None):
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
-        channel_rename, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
+        pattern_split, channel_rename, channel_color, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
         sample_set (the whole entry), sample_file (the slot pointed at another WAV), sample_delete, sample_process (an edit of the slot's audio written as a new WAV beside the song,
-        the slot pointed at it), echo, groove, euclid, chord, layers, render_sample (rows rendered into a new slot), sample_slice) to the song text as one undo step. The tryout's
+        the slot pointed at it), echo, groove, euclid, chord, layers, arp, interpolate, automate, grow, shrink, fill,
+        set_length, cut_here, glue, render_sample (rows rendered into a new slot), sample_slice) to the song text as one undo step. The tryout's
         channel mutes and unwritten faders follow a channel that moves or goes; its section and loop are dropped when they
         fall outside a changed order list."""
         with self.lock:
@@ -3487,7 +3616,8 @@ class State:
                     # A replacement at one position (e.g. Make unique) retains that occurrence's identity.
                     if len(before) == len(orders):
                         origins = [i if o is None and i not in origins else o for i, o in enumerate(origins)]
-                    reorder(self, lines, before, orders, origins, meta)
+                    reorder(self, lines, before, orders, origins, meta,
+                            widen=any(op.get("op") == "pattern_split" for op in ops))  # a split's part joins its sections
                     self._write_orders(lines, orders)
                 loaded = load_song_text("".join(lines), self.base_dir, str(self.song_path))
             except Exception:

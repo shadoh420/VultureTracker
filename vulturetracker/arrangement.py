@@ -87,14 +87,22 @@ def occurrence_map(before, after):
     return out
 
 
-def mapped_span(span, mapping):
+def mapped_span(span, mapping, origins=None):
+    """A span of orders after a reorder; None when its orders no longer stand together. With `origins` (a split's), new
+    orders (origin None) between or right after the span's own are taken into it: a split pattern's second part."""
     ids = [mapping.get(i) for i in range(*span)]
-    if not ids or any(i is None for i in ids) or ids != list(range(ids[0], ids[0] + len(ids))):
+    if not ids or any(i is None for i in ids):
         return None
-    return [ids[0], ids[-1] + 1]
+    if ids != list(range(ids[0], ids[0] + len(ids))):
+        if origins is None or ids != sorted(ids) or any(origins[k] is not None for k in range(ids[0], ids[-1]) if k not in ids):
+            return None
+    end = ids[-1] + 1
+    while origins is not None and end < len(origins) and origins[end] is None:
+        end += 1
+    return [ids[0], end]
 
 
-def reorder(state, lines, before, after, origins, meta):
+def reorder(state, lines, before, after, origins, meta, widen=False):
     if len(origins) != len(after) or any(i is not None and (type(i) is not int or not 0 <= i < len(before)) for i in origins):
         raise ValueError('invalid order occurrence mapping')
     mapping = {}
@@ -112,7 +120,7 @@ def reorder(state, lines, before, after, origins, meta):
             lines[i] = api._JUMP.sub(lambda m: _jump(m, mapping), body) + sep + comment
     sections = {}
     for name, span in (state.song.get('sections') or {}).items():
-        mapped = mapped_span(span, mapping)
+        mapped = mapped_span(span, mapping, origins if widen else None)
         if mapped is None:
             raise ValueError(f'This would split/remove section {name}; change its boundaries or remove its name first')
         sections[name] = mapped

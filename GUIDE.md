@@ -164,7 +164,11 @@ made elsewhere. While the live engine plays, each edit is swapped in where it pl
 view stays on the pattern being edited. A song whose patterns are written by a generator loses these edits when the
 generator is rerun. For quoted or compact patterns, click MAKE EDITABLE to write their compiled cells as a
 literal `data: |` block. This is one undo step; undo restores the original notation. Conversion replaces that
-pattern's notation and its internal comments; a flow-style `patterns: {...}` mapping is expanded as a whole.
+pattern's notation and its internal comments; a flow-style `patterns: {...}` mapping is expanded as a whole. SPLIT
+HERE makes the rows from the cursor's on (row 1 or later) a new pattern, named after this one with `_2` (or the next
+free number), played right after every order that plays this one, which keeps the rows above the cursor; a section
+around those orders takes the new order in, a jump (`Bxx`) follows the orders it pointed at, and an approved pattern
+refuses it. One step for Ctrl+Z.
 
 **MIDI input.** Click MIDI in the live bar to switch MIDI input on: the first time, the window asks whether the page
 may use MIDI devices (Allow; the answer is kept, and MIDI stays on at the next launch until it is clicked off). A MIDI
@@ -177,7 +181,12 @@ enters its note at the cursor with the INS instrument, and with VEL→VOL its ve
 then the cursor moves STEP rows. While the live engine plays the pattern on show, a key records instead: its note goes
 into the cursor's channel at the row playing when it went down, and the cursor follows (the piano keys on the
 computer keyboard record the same way); with QUANT above 0 it goes to the nearest multiple of QUANT rows instead
-(Following OpenMPT, below). With CHORD checked, a note arriving within 60 ms of the one before joins its chord (timed from each
+(Following OpenMPT, below). With REC OFF checked (kept for the next launch), letting go of a key in edit mode writes a
+note-off on the channel its note went to (each note of a chord on its own channel): `===` in a song with instruments,
+`^^^` with samples only, at the row playing while the song plays (QUANT applies) or at the cursor while it is stopped,
+so a held note gets its length. It never overwrites a cell with a note, instrument or volume; a key tapped and let go
+within one row while the song plays puts its note-off one row on; a release after a newer note went to that channel is
+ignored. With CHORD checked, a note arriving within 60 ms of the one before joins its chord (timed from each
 note, so a rolled chord stays one), and the chord is captured together, lowest first, across consecutive channels starting at the
 cursor, the computer's piano keys too; with Shift held (OpenMPT's chord modifier) every key struck joins the chord,
 written when Shift is let go, CHORD checked or not. The chord is one undo step and advances STEP only once. If it
@@ -198,7 +207,26 @@ modifier. QUANT in the live bar is OpenMPT's record quantize (`recordQuantizeRow
 or chord recorded while the song plays goes to the nearest multiple of QUANT rows, a tie to the later one; past the
 pattern's end it goes to row 0 of the next order's pattern (of the same pattern while F6 loops it, as with OpenMPT's
 pattern loop; the last row when no order follows); and where the cell
-already holds a note it goes one row on (OpenMPT's grace note), voice by voice. Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
+already holds a note it goes one row on (OpenMPT's grace note), voice by voice. INTERPOLATE is OpenMPT's `Interpolate`
+(View_pat.cpp) for the note, instrument, volume and effect columns: its `IsInterpolationPossible` test, its rounding (C's
+truncating division with a half-step bias), a two-nibble effect moved nibble by nibble, `D`, `K` and `L` sliding into one
+another, and its sweep with no selection. Three deliberate differences: one button interpolates every column the
+selection covers (OpenMPT has a command per column, Ctrl+J and Ctrl+K for volume and effect); where the note column's
+start is empty, OpenMPT reads the end's note into an instrument slot, and the app takes the end's instrument; and an
+empty volume end next to a note counts from that note's default volume, where OpenMPT reads the start's. GROW and
+SHRINK are OpenMPT's `OnGrowSelection` and `OnShrinkSelection` (Alt+E, Alt+D, its default keys), quirks included: a
+grown row dropped past the end leaves the row before its place as it was, and SHRINK's kept row takes the next row's
+fields even when that row lies just past the selection. REC OFF is OpenMPT's Record Note Off (`TempStopNote`): the
+note-off goes to the channel the note took, at the edit position (the row playing while recording, record quantize
+applied), never over a note, instrument or volume, one row on for a key tapped within a row, skipped once the channel's
+last note is another, `===` with instruments and `^^^` without (OpenMPT's choice for IT), the instrument and volume left
+empty; for a piano key only while the cursor is in the note or instrument column. Two deliberate differences there: one
+toggle covers the piano keys and MIDI (OpenMPT has one for each), and no `SDx` is written for the tick the key went up
+on (live notes are entered on their row, never a tick, here). SPLIT HERE is OpenMPT's `OnSplitPattern`: the rows from
+the cursor's on into a new pattern, the source shortened, the new pattern inserted after every order playing the
+source. Two deliberate differences: no `C00` break is written, as an IT pattern here may have 1-200 rows (OpenMPT pads
+an IT pattern to its 32-row minimum and breaks it early), and the view stays on the shortened pattern (OpenMPT moves to
+the new order). Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
 its Edit menu's Undo entries (the names are the app's own words). COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
 hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
 import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. A FLAC, AIFF, OGG
@@ -255,10 +283,34 @@ pastes them), CUT (Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overw
 MPTM or S3M module paste too, the first pattern of several, values this notation lacks left empty and counted), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
 end of the pattern, e.g. one bar of hats over eight), CLEAR
 (Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
-cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: the volume column and the effect,
-from the first selected row to the last, per channel, where both ends carry the same command) and AMPLIFY (the
+cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: OpenMPT's, in each selected column,
+note, instrument, volume and effect alike, from the first selected row to the last, where both ends carry the same
+command or one end is empty and the other's value fills the span; a row holding another command is left alone; with no
+selection, the cursor's column between the nearest value at or above the cursor and the next one below), GROW and
+SHRINK (Alt+E, Alt+D: OpenMPT's; GROW spreads the selected rows two apart over twice the span, blanking the rows
+between and overwriting what was there, and drops a row that would land past the pattern's end, counted in the bar;
+SHRINK keeps every second row, packed into the first half of the span, a field left empty there taking the next row's,
+and clears the rest; the selection then covers the new span; note delays `SDx` keep their ticks, which the bar says
+when there are any), AUTOMATE (a
+curve written as plain cells over the selected rows and channels, or the cursor's channel over the whole pattern: TARGET
+`Zxx` cutoff or the SFx macro, `Xxx` pan, `Mxx` channel volume, `Vxx` global volume or `Txx` tempo (these two are
+song-wide, so only the first channel gets them; `Txx` takes 20-FF, below that it is a tempo slide), or the volume column
+`vNN`; FROM and TO in the target's own digits, hex for an effect as its cell shows it; SHAPE LINEAR, S-CURVE (slow at
+both ends), EXP (equal ratios per row, 0 counted as 1) or STEPS (equal steps, one per written row, the last at TO; one step, when EVERY passes the selection, is FROM);
+a value every EVERY rows from the first, the last selected row always at TO except with STEPS; a cell holding another
+command in that column is left alone and counted; one step for Ctrl+Z) and AMPLIFY (the
 volume column by a percentage; a note without a volume gets one, counted from 64, the usual default) and HUMANIZE
-(each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). ECHO is the
+(each note's volume moved at random within ± the given amount, from 64 when it has none, kept within 1–64). LENGTH
+works on the selected channels' rows (the cursor's channel over the whole pattern with no selection) and leaves an
+approved pattern alone: FILL removes every note-off, cut or fade between a note (also one sounding into the selection
+from above) and the next note, so the notes run legato (a volume or effect on that row stays; an end after the last
+note stays, and FILL cannot tell a rest you meant from a length, so it acts on the selection only and counts); SET n
+makes each note n rows long, its note-off moved there (`===` with instruments, `^^^` with samples only; a note whose
+next note comes sooner sounds to it; one whose end would fall past the pattern is left alone and counted); CUT HERE
+writes a note-off at the cursor's row on every selected channel where a note is sounding into it; GLUE removes a
+restrike of the same note (its own instrument or none, no volume, no effect) that comes right after the note or its
+note-off, with that note-off, so the two become one note (a restrike with a volume or an effect is an accent and stays).
+ECHO is the
 tracker delay: the selected channel's notes (or, with no selection, the cursor's whole channel) are copied into another
 channel ROWS later (and TICKS later on top, as `SDx` on each note), each at the given percent of its volume (its own
 `vNN`, else the sample's default volume where the cell names an instrument, else the channel's last); in THIS PATTERN or
@@ -277,7 +329,15 @@ every EVERY rows, each hit kept with the given percent (seeded: the same setting
 are cleared. CHORD stacks each note of the selected channel (or the cursor's cell) into the chosen chord over that
 channel and the ones to its right, with the note's instrument and volume, INV lowest tones moved up an octave; note-offs
 are copied across so the chord ends whole, and a chord that needs more channels than the song has is refused (add them
-in the SONG tab). LAYERS rewrites the instrument column of each note: CYCLE takes the listed instruments in turn, note
+in the SONG tab). STRUM above 0 delays the chord's voices one after another by that many ticks (`SDx`), the lowest first
+(UP) or the highest (DN): a voice whose cell carries another effect stays undelayed, and a delay past 15 ticks or past
+the row (speed - 1 ticks) is held there; the bar counts both. ARP plays each note of the selected channel (from the
+cursor down with no selection) as the root of an arpeggio of the CHORD shape over OCT octaves: a note every EVERY rows
+up to the channel's next note, note-off or cut, going UP, DOWN, UP-DOWN or DOWN-UP (the turning notes once) or RANDOM,
+SKIP leaving out that percent of the steps after the first (seeded, so the same settings write the same cells); every
+step keeps the root's instrument and volume, and an effect or volume already on its row; GATE 1-15 cuts each note after
+that many ticks (`SCx`, where the effect column is free), OFF puts a note-off on the row after each note (`^^^` in a
+song without instruments). The roots are the notes you wrote: ARP never invents one. LAYERS rewrites the instrument column of each note: CYCLE takes the listed instruments in turn, note
 by note down each channel (round-robin), BY VOLUME picks by the note's volume, the list running quietest to loudest.
 GROOVE and LAYERS work on the selected channels (every channel with no selection), in THIS PATTERN or the WHOLE SONG.
 RENDER → SLOT renders the selected rows and channels (with no selection: the whole pattern, the channels the mixer lets
@@ -291,13 +351,18 @@ into every match. Every command is one step for Ctrl+Z, a song-wide replace incl
 
 **The Song tab** edits the song's structure, each change written into the song file in place and undone by Ctrl+Z (or ↶)
 in the Pattern tab. SONG SETTINGS: click the title, tempo, speed, global volume, mix volume or stereo separation to
-type it (a trailing comment on its line stays). ORDER LIST: click an entry to select it (a double-click, or EDIT ▸, opens
+type it (a trailing comment on its line stays). MESSAGE under it is the IT song message (OpenMPT's Comments tab):
+plain text, written to `module: message` as a literal block (`message: |`) exactly as typed when the box loses focus,
+one step for Ctrl+Z, emptied to remove it; the line under the box counts the characters and, as `check` does, warns
+when some are outside Latin-1 (stored as `?` in the .it) or past IT's 65534. ORDER LIST: click an entry to select it (a double-click, or EDIT ▸, opens
 it in the Pattern tab); ◀ ▶ move it, REMOVE, DUPLICATE (the same pattern again after it), CLONE PATTERN (a copy of its
 pattern under a new name takes its place, so it can change without touching the other orders that play the pattern),
 INSERT or SET a pattern (or a `+++` skip, a `---` end) from the list, NEW PATTERN (empty, the given rows, after the
 selected entry). PATTERNS: click a name to rename it (the order list follows) or its row count to change it (rows past a
 new end are removed); CLONE; DELETE (click twice) only when no order plays it. CHANNELS: click a name to rename it;
-▲ ▼ move a channel (its cells move in every pattern, and so do its tryout mute and unwritten faders); ✕ (click twice)
+the colour box beside it gives the channel its own colour (`color:` in its entry; the rail, the Pattern tab's header and
+the roll's ghosts take it, ↺ goes back to the colour its name gives it; a song with it needs an app that knows the key,
+see SONG_FORMAT.md); ▲ ▼ move a channel (its cells move in every pattern, and so do its tryout mute and unwritten faders); ✕ (click twice)
 removes it and its cells in every pattern; + CHANNEL adds one at the end. The order list is written in the layout it
 has: on one line (`orders: [a, b]`), or as a block with one `- name` per line, where an entry that stays keeps its
 trailing comment and the comment lines above it (a flow list across several lines becomes one line, and is refused when
@@ -515,8 +580,11 @@ and libopenmpt play the plugins; other trackers play those channels dry.
 up, rows across, bar and beat lines from the song's rows per beat and bar), the other channels' notes dimmed behind it
 (GHOSTS) and a lane under it for the volume column. It is the same cells as the tracker grid, edited the same way:
 with EDIT on, a click places a note with the INS instrument (dragging right gives it a length, ending in a note-off on
-a free row), dragging a note up or down transposes it, a right-click deletes it (its effect stays), Shift+click writes
-a note-off, and a click in the lane sets the note's volume. SCALE LOCK puts a click on the nearest note of the song's
+a free row), dragging a note up or down transposes it, dragging it sideways moves it in rows (onto an empty cell; its
+whole cell moves, and its note-off with it where that row is free), dragging its right edge sets its length (as SET
+LENGTH does: the note-off moves there, a note whose next note comes sooner sounding to it), a right-click deletes it
+(its effect stays), Shift+click writes a note-off, and a click in the lane sets the note's volume. In an approved
+pattern the roll refuses the length and row drags, as the SELECTION bar's LENGTH tools do. SCALE LOCK puts a click on the nearest note of the song's
 key and shades the pitches outside it. GHOST FROM draws another pattern's notes, all its channels, under this one in a
 third shade (amber), so a verse's bass shows under the chorus lead: the previous or the next order's pattern, or any
 pattern by name. They are never editable; where the two patterns differ in length the drawing stops at the shorter
