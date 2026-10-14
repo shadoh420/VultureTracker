@@ -207,6 +207,46 @@ def collect_project(st, a):
     return collect(st, _path(st, a['destination']), _boolean(a, 'zip'))
 
 
+@tool('relink_hints', 'For each sample slot whose file is missing: up to three WAVs of the same name from the sample '
+      'library index (index_library first), same:true when the contents match the digest an undo step recorded for '
+      'the missing file (the same file, moved), then those sharing more of its folders. Reads only; relink_samples '
+      'applies a choice.', {})
+def relink_hints(st, a):
+    from .gui import Handler
+    return st.relink_hints(Handler.lib())
+
+
+@tool('import_soundfont', 'A SoundFont 2 preset (or a GUS .pat patch) as a NEW instrument, read the way OpenMPT reads a '
+      'bank (key ranges, tuning, loops, envelope, stereo pairs; velocity layers keep the loudest, a drum kit is one '
+      'instrument). Without preset: lists the bank\'s presets [bank, preset, name] and changes nothing. With preset '
+      '(and bank, default 0): its zones become WAVs in a new folder beside the song, new sample slots and one new '
+      'instrument, one undo step. Converts a sample-mode song to instruments first, as create_instrument does.',
+      {'path': {'type': 'string'}, 'preset': {'type': 'integer'}, 'bank': {'type': 'integer'}}, ['path'])
+def import_soundfont(st, a):
+    from .sf2 import presets
+    path = _path(st, a['path'])
+    if path.suffix.lower() not in ('.sf2', '.pat') or not path.is_file():
+        raise ValueError('path must be an existing .sf2 or .pat file')
+    data = path.read_bytes()
+    found = [[0, 0, 'the patch']] if data[:8] == b'GF1PATCH' else [list(x) for x in presets(data)]
+    if 'preset' not in a:
+        return {'path': str(path), 'presets': found, 'summary': f'{len(found)} presets; give preset (and bank) to add one'}
+    bank, preset = _integer(a.get('bank', 0), 0, 128, 'bank'), _integer(a['preset'], 0, 127, 'preset')
+    if not any(b == bank and p == preset for b, p, _ in found):
+        raise ValueError(f'no preset {bank}:{preset} in {path.name}')
+    with st.lock:
+        st._writable()
+        st._need_compiled()
+        ops = [{'op': 'sf2_preset', 'path': str(path), 'bank': bank, 'preset': preset}]
+        if st.mod.instruments is None:  # one instrument per sample first, as create_instrument converts
+            if _approved_channels(st) or any(st.pattern_entry(p.name).get('approved') for p in st.mod.patterns):
+                raise ValueError('sample-to-instrument mode conversion affects approved material; the owner must convert it first')
+            ops.insert(0, {'op': 'instruments_from_samples'})
+        old = set(st.song.get('instruments') or {}) if st.mod.instruments is not None else set(range(1, len(st.mod.samples) + 1))
+        result = st.song_edit(ops)
+        return {**result, 'instruments': sorted(set(st.song.get('instruments') or {}) - old)}
+
+
 @tool('relink_samples', 'Relink sample file paths as ONE undo step; links maps slot numbers to WAV paths. Works '
       'when missing files prevent compilation. Preserves sample settings and implicit names. All replacements must '
       'validate together. Approved sounds are protected; an uncompiled song with approved material needs owner repair.',

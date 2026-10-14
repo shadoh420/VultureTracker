@@ -4,6 +4,7 @@ JSON-RPC; and the chat panel's loop against stand-in servers for the Anthropic A
 (no network, no tokens spent)."""
 import io
 import json
+import math
 import os
 import sys
 import tempfile
@@ -15,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from vulturetracker import agent, agent_context, api, gui, mcp
+from vulturetracker.notation import format_cell
 from vulturetracker.wavload import write_wav
 
 from tests.test_gui import RATE, SONG_BLOCK, sine
@@ -188,6 +190,25 @@ class AgentTests(unittest.TestCase):
         # The generated recipe is discoverable after the owner uses its WAV.
         recipes = agent.run(st, 'synthesis_catalog', {'action': 'recipes'})['results']
         self.assertIn(out['file'], [r['file'] for r in recipes])
+
+    def test_new_sources_faust_examples_and_mip_copies(self):
+        """synthesis_catalog lists phase 4's sources and the shipped Faust examples; a spec's `faust: NAME.dsp` falls
+        back to them as recipes do; a `wave:` render with `mip:` reports its copies and the blocks to paste."""
+        from vulturetracker import agent_sounds, synth
+        st = self.state()
+        cat = agent.run(st, 'synthesis_catalog', {'action': 'sources'})
+        self.assertTrue({'wave', 'sfxr', 'drum', 'additive'} <= set(cat['sources']))
+        self.assertIn('pluck.dsp', cat['faust_examples'])
+        spec, _ = agent_sounds._spec(st, {'spec': {'faust': 'pluck.dsp', 'note': 'C-5', 'hold': 0.5}})
+        self.assertEqual(spec['faust'], (synth.FAUST_EXAMPLES / 'pluck.dsp').read_text(encoding='utf-8'))
+        with self.assertRaises(OSError):  # only an example's own name, never a path into the app's folder
+            agent_sounds._spec(st, {'spec': {'faust': '../faust_examples/pluck.dsp', 'note': 'C-5'}})
+        out = self.sound_job(st, 'render_synthesis', spec={'wave': {'shape': 'saw'}, 'note': 'C-3', 'hold': 0.5,
+                                                            'mip': {'octaves': 2}}, name='saw')
+        self.assertEqual(out['status'], 'done', out)
+        self.assertEqual(len(out['mip_files']), 2)  # two lower-rate copies beside the WAV (out['file'] is the first)
+        self.assertTrue(all(Path(f).is_file() for f in out['mip_files']))
+        self.assertTrue(any('keymap' in line for line in out['log']), out['log'])
 
     def test_synthesis_failure_cancel_and_close_publish_nothing(self):
         from vulturetracker import synth
@@ -423,6 +444,158 @@ class AgentTests(unittest.TestCase):
         self.batch4(st, 'transform_patterns', action='clear', selections=selections, fields=['effect'])
         self.assertEqual(st.mod.patterns[1].rows[0][0].effect, 0)
         self.assertEqual(st.mod.patterns[1].rows[0][0].note, 54)
+
+    def test_selection_bar_tools(self):
+        """transform_patterns runs the Pattern tab's SELECTION-bar tools through the page's own dispatch
+        (State.compose_cells): each one undo step, marked by the agent; an approved pattern and a lane's column refuse."""
+        st = self.state()
+        col = lambda ch=0: [format_cell(r[ch]) for r in st.mod.patterns[0].rows]  # noqa: E731
+        call = lambda ch=1, rows=(), **kw: self.batch4(st, 'transform_patterns', selections=[dict({'pattern': 'p1', 'channels': [ch]}, **dict(zip(('from_row', 'to_row'), rows)))], **kw)  # noqa: E731
+        n = len(st.history)
+        call(action='automate', target='Z', **{'from': 0, 'to': 0x30}, every=3)
+        self.assertEqual([c[-3:] for c in col()], ['Z00', '...', '...', 'Z30'])
+        self.assertEqual(len(st.history), n + 1)
+        self.assertEqual(st.pattern_entry('p1').get('by'), 'you and agent')
+        call(action='interpolate', fields=['effect'])
+        self.assertEqual([c[-3:] for c in col()], ['Z00', 'Z10', 'Z20', 'Z30'])
+        call(action='set_length', length=2)
+        self.assertEqual(col()[2][:3], '^^^')
+        self.assertIn('nothing to change', agent.run(st, 'transform_patterns', dict(  # a lone note: nothing to glue
+            action='glue', selections=[{'pattern': 'p1', 'channels': [1]}]))['error'])
+        self.batch4(st, 'undo')
+        self.batch4(st, 'undo')
+        call(action='cut_here', rows=(1,))
+        self.assertEqual(col()[1][:3], '^^^')
+        self.batch4(st, 'undo')
+        r = call(action='arp', shape='maj', direction='up', every=1, **{'gate': 0})
+        self.assertEqual([c[:3] for c in col()], ['C-5', 'E-5', 'G-5', 'C-5'])
+        self.batch4(st, 'undo')
+        call(ch=2, action='grow', rows=(1, 2), fields=['note', 'instrument'])  # OpenMPT's: row 2 lands on row 3
+        self.assertEqual([c[:6] for c in col(1)], ['... ..', '... ..', '... ..', 'C-5 02'])
+        self.batch4(st, 'undo')
+        r = call(action='chord', shape='5', strum=2, overwrite=True)
+        self.assertEqual(format_cell(st.mod.patterns[0].rows[0][1])[:3], 'G-5')
+        self.assertEqual(format_cell(st.mod.patterns[0].rows[0][1])[-3:], 'SD2')
+        self.batch4(st, 'undo')
+        for bad in (dict(action='arp', selections=[{'pattern': 'p1', 'channels': [1, 2]}]),
+                    dict(action='automate', target='Z', selections=[{'pattern': 'p1'}]),
+                    dict(action='set_length', length=0, selections=[{'pattern': 'p1'}]),
+                    dict(action='glue', selections=[{'pattern': 'p2', 'channels': [2]}])):
+            before, n = st.text, len(st.history)
+            self.assertIn('error', agent.run(st, 'transform_patterns', bad), bad)
+            self.assertEqual((st.text, len(st.history)), (before, n))
+        st.song_edit([{'op': 'mark', 'what': 'pattern', 'key': 'p1', 'approved': True}])
+        self.assertIn('approved', agent.run(st, 'transform_patterns', dict(action='fill', selections=[{'pattern': 'p1'}]))['error'])
+
+    def test_pattern_split_lanes_channel_color_and_message(self):
+        """edit_pattern splits (OpenMPT's) and sets automation lanes (compiled; a bad lane or one on an approved channel
+        refused, nothing written); edit_channel colours a channel; set_module writes the module message."""
+        st = self.state()
+        self.batch4(st, 'edit_pattern', action='automation', pattern='p1',
+                    lanes=[{'target': 'Z', 'channel': 'A', 'rows': [0, 3], 'from': 0, 'to': 0x30, 'every': 3}])
+        self.assertIn("    automation:\n      - {target: Z, channel: A, rows: [0, 3], from: 0, to: 48, every: 3}\n", self.read())
+        self.assertEqual(format_cell(st.mod.patterns[0].rows[3][0])[-3:], 'Z30')
+        self.batch4(st, 'edit_pattern', action='automation', pattern='p1',
+                    lanes=[{'target': 'v', 'channel': 2, 'from': 64, 'to': 0}])  # replaces the lane
+        self.assertEqual(self.read().count('automation:'), 1)
+        self.assertEqual(st.mod.patterns[0].lanes[(3, 1)], ('v', 1))
+        before, n = st.text, len(st.history)
+        for bad in ([{'target': 'Q', 'channel': 1, 'from': 0, 'to': 1}], [{'target': 'Z', 'channel': 1, 'from': 0, 'to': 1, 'speed': 2}], 'x'):
+            self.assertIn('error', agent.run(st, 'edit_pattern', {'action': 'automation', 'pattern': 'p1', 'lanes': bad}))
+            self.assertEqual((st.text, len(st.history)), (before, n))
+        self.batch4(st, 'edit_pattern', action='automation', pattern='p1', lanes=[])
+        self.assertNotIn('automation:', self.read())
+        self.batch4(st, 'edit_pattern', action='split', pattern='p1', row=2)
+        self.assertEqual([(p.name, len(p.rows)) for p in st.mod.patterns][:3], [('p1', 2), ('p2', 4), ('p1_2', 2)])
+        self.assertIn('error', agent.run(st, 'edit_pattern', {'action': 'split', 'pattern': 'p2', 'row': 0}))
+        self.batch4(st, 'edit_channel', action='color', channel=2, color='#3366FF')
+        self.assertIn('color: "#3366ff"', self.read())
+        self.batch4(st, 'set_module', key='message', value='line one\nline two')
+        self.assertEqual(st.mod.message, 'line one\nline two')
+        st.song_edit([{'op': 'mark', 'what': 'channel', 'key': 1, 'approved': True}])  # key: the 0-based index, channel B
+        self.assertIn('approved', agent.run(st, 'edit_channel', {'action': 'color', 'channel': 2, 'color': '#000000'})['error'])
+        self.assertIn('approved', agent.run(st, 'edit_pattern', {'action': 'automation', 'pattern': 'p2',
+                                                                'lanes': [{'target': 'Z', 'channel': 'B', 'from': 0, 'to': 9}]})['error'])
+
+    def test_edit_instrument_lfo_filter_mode_and_tuning(self):
+        """edit_instrument passes phase 4's lfo envelopes and filter_mode and phase 6's tuning/keymap_file, compiled;
+        a tuning path outside the song's folder or of another kind is refused."""
+        st = self.state()
+        self.batch4(st, 'create_instrument', name='Lead', sample=1)
+        n = max(st.song['instruments'])
+        (self.dir / 'q.scl').write_text('q\n12\n' + '\n'.join(f'{100 * i}.0' for i in range(1, 7)) + '\n750.0\n'
+                                         + '\n'.join(f'{100 * i}.0' for i in range(8, 12)) + '\n2/1\n')
+        self.batch4(st, 'edit_instrument', number=n, changes={
+            'filter_mode': 'highpass', 'filter_cutoff': 60, 'tuning': 'q.scl',
+            'volume_envelope': {'lfo': {'shape': 'triangle', 'period': 16, 'depth': 16, 'centre': 40}}})
+        ins = st.mod.instruments[n - 1]
+        self.assertEqual(ins.filter_mode, 1)
+        self.assertAlmostEqual(ins.tuning[67], 2 ** (50 / 1200), 9)
+        self.assertGreater(len(ins.volume_envelope.nodes), 2)
+        before, k = st.text, len(st.history)
+        for bad in ({'tuning': '../q.scl'}, {'tuning': 'q.txt'}, {'keymap_file': 'C:/x.kbm'}, {'filter_mode': 'bandpass'}):
+            self.assertIn('error', agent.run(st, 'edit_instrument', {'number': n, 'changes': bad}), bad)
+            self.assertEqual((st.text, len(st.history)), (before, k))
+        self.batch4(st, 'edit_instrument', number=n, clear=['tuning'])
+        self.assertIsNone(st.mod.instruments[n - 1].tuning)
+
+    def test_soundfont_export_slice_relink_and_unsaved_passes(self):
+        """Phase 5 through the agent: import_soundfont lists a bank's presets, then adds one as an instrument (a
+        sample-mode song converted in the same undo step); export_song takes MIDI and the render settings (checked as
+        the panel's are); inspect_sample snaps slices to a grid; slice_sample writes a pattern on the grid;
+        relink_hints reads the library index (unsaved passes: test_agent_sessions, on the fake recorder)."""
+        from tests.test_modimport import bank
+        from vulturetracker.library import Library
+        (self.dir / 'bank.sf2').write_bytes(bank()[0])
+        st = self.state()
+        listed = self.batch4(st, 'import_soundfont', path='bank.sf2')
+        self.assertIn([0, 0, 'Keys'], listed['presets'])
+        before, n = st.text, len(st.history)
+        self.assertEqual(st.text, before)
+        self.assertIn('error', agent.run(st, 'import_soundfont', {'path': 'bank.sf2', 'preset': 99}))
+        self.assertIn('error', agent.run(st, 'import_soundfont', {'path': 'song.yaml', 'preset': 0}))
+        added = self.batch4(st, 'import_soundfont', path='bank.sf2', preset=0)
+        self.assertEqual(len(st.history), n + 1)  # the conversion to instruments and the preset: one undo step
+        self.assertEqual(st.song['instruments'][added['instruments'][0]]['name'], 'Keys')
+        self.batch4(st, 'undo')
+        self.assertEqual(st.text, before)
+
+        for bad in ({'format': 'mp3', 'depth': 'float'}, {'format': 'wav', 'rate': 12345}, {'format': 'mid', 'master_lufs': -14}):
+            self.assertIn('error', agent.run(st, 'export_song', bad), bad)
+        out = self.batch4(st, 'export_song', format='mid', destination='out')
+        self.assertTrue(any(f.endswith('.mid') for f in out['job']['planned_files']), out)
+        for _ in range(300):
+            job = agent.run(st, 'export_status', {})['job']
+            if job['status'] not in ('queued', 'rendering', 'publishing'):
+                break
+            time.sleep(.05)
+        self.assertEqual(job['status'], 'done', job)
+        self.assertEqual((self.dir / 'out' / 'song.mid').read_bytes()[:4], b'MThd')
+
+        tone = [round(20000 * math.sin(2 * math.pi * 330 * i / RATE)) if i % 11025 < 2000 else 0 for i in range(RATE * 2)]
+        write_wav(self.dir / 'loop.wav', RATE, [tone])
+        self.batch4(st, 'create_sample', file='loop.wav', name='loop')
+        num = max(st.song['samples'])
+        sl = self.batch4(st, 'inspect_sample', number=num, analysis='slices', slice_mode='equal', value=4, bpm=120, snap=8)
+        self.assertEqual(sl['slices']['points'], [0, 22050, 44100, 66150])  # eighths at 120 BPM: 0.25 s
+        self.assertIn('error', agent.run(st, 'inspect_sample', {'number': num, 'analysis': 'slices', 'bpm': 120}))
+        self.batch4(st, 'slice_sample', number=num, points=sl['slices']['points'], pattern=True, channel=2, grid_bpm=120)
+        self.assertIn('loop_slices', [p.name for p in st.mod.patterns])
+        self.assertIn('error', agent.run(st, 'slice_sample', {'number': num, 'points': [0, 22050], 'grid_bpm': 120}))
+
+        lib = Library(self.dir / 'index.json')
+        with mock.patch.object(gui.Handler, 'library', lib):
+            self.assertEqual(self.batch4(st, 'relink_hints')['hints'], {})
+
+    def test_transform_refuses_a_lane_column(self):
+        lane = "    automation:\n      - {target: Z, channel: 1, rows: [0, 3], from: 0, to: 0x30}\n"
+        (self.dir / "song.yaml").write_bytes(SONG_BLOCK.replace("  p1:\n    rows: 4\n", "  p1:\n    rows: 4\n" + lane, 1).encode())
+        st = self.state()
+        result = agent.run(st, 'transform_patterns', dict(action='automate', target='Z', **{'from': 0x40, 'to': 0x10},
+                                                           selections=[{'pattern': 'p1', 'channels': [1]}]))
+        self.assertIn("automation lane 1's", result['error'])
+        self.batch4(st, 'transform_patterns', action='transpose', semitones=1, selections=[{'pattern': 'p1', 'channels': [1]}])
+        self.assertIn(lane, self.read())
 
     def test_composition_helpers_and_guard_on_chord_destinations(self):
         st = self.state()

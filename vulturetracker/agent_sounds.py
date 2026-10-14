@@ -137,8 +137,15 @@ def synthesis_catalog(st, a):
             surge = str(synth.surge_paths()[0])
         except synth.SynthMissing:
             surge = None
-        return {'sources': ['patch', 'file', 'faust', 'resynth', 'paint'], 'sample_keys': synth.SAMPLE_KEYS,
+        from .sources import SOURCES
+        return {'sources': ['patch', 'file', 'faust', 'resynth', 'paint', *SOURCES], 'sample_keys': synth.SAMPLE_KEYS,
                 'resynth_defaults': synth.RESYNTH_KEYS,
+                'faust_examples': sorted(p.name for p in synth.FAUST_EXAMPLES.glob('*.dsp')),
+                'notes': {'wave/sfxr/drum/additive': 'computed in numpy, no plugin (SAMPLING.md)',
+                          'faust: NAME.dsp': 'a file beside the song, else one of faust_examples',
+                          'mip': 'on any source: band-limited copies per octave written beside the WAV; the job '
+                                 'lists them (mip_files) and its log holds the samples/keymap blocks to paste',
+                          'file: KIT.h2drumkit': 'a Hydrogen kit, with instrument and layer (or layers)'},
                 'dependencies': {'surge': surge, 'dexed': str(synth.DEXED_VST3) if synth.DEXED_VST3.exists() else None,
                     'obxd': str(synth.OBXD_VST3) if synth.OBXD_VST3.exists() else None,
                     'faustwasm': faust.have(), 'node': shutil.which('node')},
@@ -239,7 +246,11 @@ def _spec(st, a):
             if not low <= value <= high:
                 raise ValueError(f'resynth {key} must be {low}..{high}')
     if 'faust' in spec and '\n' not in str(spec['faust']) and str(spec['faust']).strip().lower().endswith('.dsp'):
-        spec['faust'] = (base / spec['faust'].strip()).read_text(encoding='utf-8')
+        name = spec['faust'].strip()
+        f = base / name  # beside the song, else one of the examples shipped with the app, as synth._faust looks
+        if not f.is_file() and (synth.FAUST_EXAMPLES / name).is_file() and Path(name).name == name:
+            f = synth.FAUST_EXAMPLES / name
+        spec['faust'] = f.read_text(encoding='utf-8')
     if 'patch' in spec and (base / spec['patch']).is_file():
         spec['patch'] = str((base / spec['patch']).resolve())
     return spec, rate
@@ -387,7 +398,11 @@ def render_job(st, job):
             source = out.with_suffix('.yaml')
             _save_recipe(source, data['spec'], data['rate'])
             paths.append(source)
-            synth.render_one(source, source.stem, out=out, log=log)
+            try:
+                synth.render_one(source, source.stem, out=out, log=log)
+            finally:  # `mip:` copies beside the WAV are this job's files too (kept on success, removed on failure)
+                mips = sorted(out.parent.glob(out.stem + '_o*.wav'))
+                paths += mips
         else:
             pic = paint_args(data['picture'])
             rate, root, loop = 44100, None, None
@@ -424,6 +439,7 @@ def render_job(st, job):
                 terminal = 'cancelled'
             else:
                 job.update(status='done', file=str(out), recipe=str(source), files=[str(p) for p in paths],
+                           **({'mip_files': [str(p) for p in mips]} if data['kind'] == 'recipe' and mips else {}),
                            root=wav.root, sample_rate=wav.rate, frames=len(wav.channels[0]),
                            summary='new audio assets ready; offer_samples for the owner to audition')
                 paths = []

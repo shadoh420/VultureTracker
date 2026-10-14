@@ -37,8 +37,11 @@ def _number(a, key, default, low, high):
       'from recording_status. Start supports pre-roll or backing/section/count-in/loop passes/latency compensation. '
       'Stop saves NEW WAVs, default keep (no sound selection); manage_take offers or creates slots separately. A failed '
       'save stays in memory for another stop or explicit discard. Close/reopen cannot discard an unsaved take. '
-      'Request stop_playback first and wait for its UI acknowledgement before recording against silence.',
-      {'action': {'enum': ['open', 'mode', 'start', 'stop', 'discard', 'close']},
+      'Request stop_playback first and wait for its UI acknowledgement before recording against silence. Passes an '
+      'earlier session finished but never saved are listed in recording_status as unsaved (kept 7 days): recover '
+      'brings one back as the take to stop/save (id), forget deletes it, only when the owner asked to discard it.',
+      {'action': {'enum': ['open', 'mode', 'start', 'stop', 'discard', 'close', 'recover', 'forget']},
+       'id': {'type': 'string'},
        'device': {'type': 'integer'}, 'mode': {'enum': ['1', '2', 'mono', 'stereo']},
        'rate': {'type': 'integer'}, 'exclusive': {'type': 'boolean'}, 'preroll': {'type': 'number'},
        'backing': {'type': 'boolean'}, 'output': {'type': 'integer'}, 'section': {'type': 'string'},
@@ -50,9 +53,14 @@ def control_recording(st, a):
     if Handler.state is not st:
         raise ValueError('the project changed; inspect recording_status first')
     act = a['action']
-    if act not in ('open', 'mode', 'start', 'stop', 'discard', 'close'):
+    if act not in ('open', 'mode', 'start', 'stop', 'discard', 'close', 'recover', 'forget'):
         raise ValueError('unknown recording action')
     b = {'cmd': act}
+    if act in ('recover', 'forget'):
+        from . import record
+        if a.get('id') not in {s['id'] for s in record.spilled()}:
+            raise ValueError('id must name an unsaved pass from recording_status')
+        b['id'] = a['id']
     if act in ('open', 'mode'):
         mode = a.get('mode', '1')
         if mode not in ('1', '2', 'mono', 'stereo'):

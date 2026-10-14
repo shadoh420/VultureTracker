@@ -121,12 +121,14 @@ def create_channel(st, a):
                 "summary": f"added empty channel {len(st.mod.channels)}: {st.mod.channels[-1].name}"}
 
 
-@tool("edit_channel", "Rename, move or remove a channel (1-based). Moves carry its notes, Rack route, pan, volume "
+@tool("edit_channel", "Rename, colour (color: '#rrggbb', '' removes it; the app's colour, not in the .it), move or "
+      "remove a channel (1-based). Moves carry its notes, Rack route, pan, volume "
       "and audition faders/mutes. Removing a populated channel requires remove_notes:true, only when the owner asked "
       "to delete its contents. Approved channels cannot be changed or shifted; approved patterns block moves/removal. "
       "Returns old-to-new channel numbers (null means removed). One undo step.",
-      {"action": {"type": "string", "enum": ["rename", "move", "remove"]}, "channel": {"type": "integer"},
-       "name": {"type": "string"}, "to": {"type": "integer"}, "remove_notes": {"type": "boolean"}}, ["action", "channel"])
+      {"action": {"type": "string", "enum": ["rename", "color", "move", "remove"]}, "channel": {"type": "integer"},
+       "name": {"type": "string"}, "color": {"type": "string"}, "to": {"type": "integer"},
+       "remove_notes": {"type": "boolean"}}, ["action", "channel"])
 def edit_channel(st, a):
     with st.lock:
         st._need_compiled()
@@ -139,6 +141,10 @@ def edit_channel(st, a):
             if not isinstance(name, str) or not 1 <= len(name.strip()) <= 20:
                 raise ValueError("channel name must be 1-20 characters")
             op["name"] = name.strip()
+        elif action == "color":
+            if not isinstance(a.get("color"), str):
+                raise ValueError("color is '#rrggbb', or '' to remove it")
+            op["color"] = a["color"]
         elif action == "move":
             dest = _channel(st, a.get("to"))
             op["to"] = dest
@@ -150,10 +156,10 @@ def edit_channel(st, a):
             affected = set(range(c, len(order)))
             order.pop(c)
         else:
-            raise ValueError("action must be rename, move or remove")
+            raise ValueError("action must be rename, color, move or remove")
         if affected & _approved_channels(st):
             raise ValueError("that changes or shifts an approved channel")
-        if action != "rename" and any(st.pattern_entry(p.name).get("approved") for p in st.mod.patterns):
+        if action not in ("rename", "color") and any(st.pattern_entry(p.name).get("approved") for p in st.mod.patterns):
             raise ValueError("approved patterns prevent moving/removing their channel columns")
         st.song_edit([op])
         mapping = {i + 1: order.index(i) + 1 if i in order else None for i in range(len(order) + (action == "remove"))}
@@ -272,11 +278,13 @@ def _voice_usage(st, kind, n):
             "references_truncated": len(cells) > 100}
 
 
-_ENV_SCHEMA = {"type": "object", "properties": {
+_ENV_SCHEMA = {"type": "object", "description": "nodes, or an lfo the compiler expands into looped nodes", "properties": {
     "nodes": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}},
+    "lfo": {"type": "object", "properties": {"shape": {"type": "string", "enum": ["sine", "triangle", "square", "saw", "ramp", "random"]},
+            **{k: {"type": "integer"} for k in ("period", "depth", "centre", "delay", "attack", "points", "seed")}}},
     "loop": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
     "sustain": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
-    **{k: {"type": "boolean"} for k in ("enabled", "carry", "filter")}}, "required": ["nodes"]}
+    **{k: {"type": "boolean"} for k in ("enabled", "carry", "filter")}}}
 _INS_FIELDS = {"name": {"type": "string"}, "sample": {"type": "integer"},
     "keymap": TOOLS["create_instrument"][1]["properties"]["keymap"],
     **{k: {"type": "integer"} for k in ("fadeout", "pitch_pan_separation", "random_volume", "random_pan",
@@ -285,6 +293,9 @@ _INS_FIELDS = {"name": {"type": "string"}, "sample": {"type": "integer"},
     "nna": {"type": "string", "enum": ["cut", "continue", "off", "fade"]},
     "dct": {"type": "string", "enum": ["off", "note", "sample", "instrument"]},
     "dca": {"type": "string", "enum": ["cut", "off", "fade"]},
+    "filter_mode": {"type": "string", "enum": ["lowpass", "highpass"]},
+    "tuning": {"type": "string", "description": "a Scala .scl beside the song (microtuning)"},
+    "keymap_file": {"type": "string", "description": "a Scala .kbm beside the song, laying tuning on the keys"},
     **{k: _ENV_SCHEMA for k in ("volume_envelope", "panning_envelope", "pitch_envelope")}}
 _LOOP_SCHEMA = {"type": "object", "properties": {"start": {"type": "integer"}, "end": {"type": "integer"},
                 "type": {"type": "string", "enum": ["forward", "pingpong"]}}, "required": ["start", "end"]}
@@ -306,6 +317,10 @@ def _edit_voice(st, a, kind, fields):
             raise ValueError("unknown or owner-controlled field; mixer volume, static pan and approval are not editable here")
         if set(changes) & set(clear) or not (changes or clear):
             raise ValueError("give changes or clear, without setting and clearing the same field")
+        for key, suffix in (("tuning", ".scl"), ("keymap_file", ".kbm")):  # Scala files beside the song, nothing else
+            v = changes.get(key)
+            if v is not None and (not isinstance(v, str) or not v.lower().endswith(suffix) or Path(v).is_absolute() or ".." in Path(v).parts):
+                raise ValueError(f"{key} is a {suffix} file beside the song (a relative path inside its folder)")
         entry = copy.deepcopy(st.song[kind][n])
         for key in clear:
             entry.pop(key, None)
@@ -317,7 +332,10 @@ def _edit_voice(st, a, kind, fields):
 @tool("edit_instrument", "Patch one instrument's mapping, envelopes or behavior; omitted fields stay unchanged. "
       "Nested maps/envelopes are replaced as whole fields. clear removes optional fields. To switch a sample mapping "
       "to a keymap, clear sample (and vice versa). Envelopes use [tick,value] nodes and [first,last] node indices for "
-      "loop/sustain; volume values 0..64, pan/pitch -32..32. Approved voices and unwritten instrument edits are "
+      "loop/sustain, or an lfo {shape, period, depth, centre, delay, attack, points, seed} the compiler expands into "
+      "looped nodes; volume values 0..64, pan/pitch -32..32. filter_mode highpass turns the resonant filter into a "
+      "high-pass (OpenMPT's extension). tuning (a Scala .scl) and keymap_file (a .kbm) beside the song retune the "
+      "instrument (octave-repeating scales over 12 keys). Approved voices and unwritten instrument edits are "
       "protected. Static pan and global volume stay the owner's. One undo step.",
       {"number": {"type": "integer"}, "changes": {"type": "object", "properties": _INS_FIELDS},
        "clear": {"type": "array", "items": {"type": "string", "enum": list(_INS_FIELDS)}}}, ["number"])
@@ -366,11 +384,14 @@ def _sample_span(st, n, a):
 
 @tool("inspect_sample", "Read source WAV dimensions, settings, loop points and all usage counts (first 100 pattern "
       "references shown). Optional analysis proposes loop points or slice starts without editing. Source-frame bounds "
-      "use an exclusive end. Slice mode equal uses value as count (1..60); onsets uses sensitivity (0..100). "
+      "use an exclusive end. Slice mode equal uses value as count (1..60); onsets uses sensitivity (0..100); bpm "
+      "with snap (4, 8, 16, 32) moves the points to that grid, as SLICE's SNAP does; the result's bpm is the span's "
+      "tempo guessed from its length. "
       "Loop analysis examines the whole sample. Analysis is measurement, not listening.",
       {"number": {"type": "integer"}, "analysis": {"type": "string", "enum": ["info", "loop", "slices"]},
        "start": {"type": "integer"}, "end": {"type": "integer"},
-       "slice_mode": {"type": "string", "enum": ["equal", "onsets"]}, "value": {"type": "integer"}}, ["number"])
+       "slice_mode": {"type": "string", "enum": ["equal", "onsets"]}, "value": {"type": "integer"},
+       "bpm": {"type": "number"}, "snap": {"type": "integer", "enum": [4, 8, 16, 32]}}, ["number"])
 def inspect_sample(st, a):
     with st.lock:
         n = _slot(st, "samples", a["number"])
@@ -385,7 +406,11 @@ def inspect_sample(st, a):
             mode, value = a.get("slice_mode", "onsets"), a.get("value", 50)
             if mode not in ("equal", "onsets") or type(value) is not int or not (1 if mode == "equal" else 0) <= value <= (60 if mode == "equal" else 100):
                 raise ValueError("equal: 1..60 parts; onsets: 0..100 sensitivity")
-            out["slices"] = st.slice_points(n, mode, value, start, end)
+            bpm, snap = a.get("bpm"), a.get("snap")
+            if (bpm is None) != (snap is None) or bpm is not None and (not isinstance(bpm, (int, float)) or not 20 <= bpm <= 999
+                                                                     or snap not in (4, 8, 16, 32)):
+                raise ValueError("bpm (20-999) and snap (4, 8, 16, 32) go together")
+            out["slices"] = st.slice_points(n, mode, value, start, end, bpm, snap)
         elif action != "info":
             raise ValueError("analysis must be info, loop or slices")
         return out
@@ -448,9 +473,12 @@ def process_sample(st, a):
 @tool("slice_sample", "Cut a sample into new slots using explicit source-frame points and an exclusive end. "
       "Use inspect_sample analysis:slices to find points first. Original sample/notes stay unchanged. Every slice must "
       "be at least 32 frames. kit preserves source pitch; multi detects pitches and needs instrument mode. In instrument "
-      "mode also creates a kit/multisample instrument. New WAVs receive a short fade at their ends. One undo step.",
+      "mode also creates a kit/multisample instrument. New WAVs receive a short fade at their ends. pattern:true also "
+      "writes a new pattern (not in the order list) playing the slices in order from `channel`, at their own timing, "
+      "or with grid_bpm (the sample's tempo) each on the row its beat reaches at the song's tempo. One undo step.",
       {"number": {"type": "integer"}, "points": {"type": "array", "items": {"type": "integer"}},
-       "end": {"type": "integer"}, "mode": {"type": "string", "enum": ["kit", "multi"]}}, ["number", "points"])
+       "end": {"type": "integer"}, "mode": {"type": "string", "enum": ["kit", "multi"]},
+       "pattern": {"type": "boolean"}, "channel": {"type": "integer"}, "grid_bpm": {"type": "number"}}, ["number", "points"])
 def slice_sample(st, a):
     with st.lock:
         n = _slot(st, "samples", a["number"])
@@ -462,7 +490,14 @@ def slice_sample(st, a):
         if points != sorted(set(points)) or points[0] < 0 or any(b - a < 32 for a, b in zip(points, points[1:] + [end])):
             raise ValueError("points must increase, stay inside the sample, and leave at least 32 frames per slice")
         old = {k: set(st.song.get(k) or {}) for k in ("samples", "instruments")}
-        result = st.song_edit([{"op": "sample_slice", "num": n, "points": points, "end": end, "mode": a.get("mode", "kit")}])
+        op = {"op": "sample_slice", "num": n, "points": points, "end": end, "mode": a.get("mode", "kit")}
+        if _boolean(a, "pattern"):
+            op.update(pattern=True, ch=_channel(st, a.get("channel", 1)))
+            if a.get("grid_bpm") is not None:
+                op["grid_bpm"] = a["grid_bpm"]
+        elif "grid_bpm" in a or "channel" in a:
+            raise ValueError("channel and grid_bpm are for pattern:true")
+        result = st.song_edit([op])
         return {"ok": True, **{k: sorted(set(st.song.get(k) or {}) - old[k]) for k in old}, **result}
 
 
@@ -771,12 +806,18 @@ def edit_section(st, a):
                 "summary": f"section {action}: {name}"}
 
 
-@tool("edit_pattern", "Rename, resize (1-200 rows), delete an unused pattern, or materialize shorthand into explicit "
-      "editable cells. Pattern is a NAME. Resize refuses to discard nonempty rows unless discard_rows=true. "
-      "Approved patterns cannot be edited. Dependencies are compiled before saving; materialize retains authorship. "
-      "One undo step. With approved channels, structural changes may require the owner to use the Pattern tab.",
-      {"action": {"type": "string", "enum": ["rename", "resize", "delete", "materialize"]},
+@tool("edit_pattern", "Rename, resize (1-200 rows), delete an unused pattern, materialize shorthand into explicit "
+      "editable cells (an automation: lane becomes plain cells), split (OpenMPT's Split Pattern: rows from `row` on "
+      "become a new pattern played after each order of this one), or set its automation lanes (`lanes`, replacing "
+      "them; [] removes them): each {target Z/X/M/V/T or v, channel number or name, rows [first, last], from, to, "
+      "shape linear/scurve/exp/steps, every}, a curve the compiler writes into the cells on every compile; a lane owns "
+      "its column on its rows (a written cell there is refused). Pattern is a NAME. Resize refuses to discard nonempty "
+      "rows unless discard_rows=true. Approved patterns cannot be edited. Dependencies are compiled before saving; "
+      "materialize retains authorship. One undo step. With approved channels, structural changes may require the owner "
+      "to use the Pattern tab.",
+      {"action": {"type": "string", "enum": ["rename", "resize", "delete", "materialize", "split", "automation"]},
        "pattern": {"type": "string"}, "new_name": {"type": "string"}, "rows": {"type": "integer"},
+       "row": {"type": "integer"}, "lanes": {"type": "array", "items": {"type": "object"}},
        "discard_rows": {"type": "boolean"}}, ["action", "pattern"])
 def edit_pattern(st, a):
     with st.lock:
@@ -800,6 +841,20 @@ def edit_pattern(st, a):
                 if any(not c.is_empty() for row in p.rows[rows:] for c in row) and not _boolean(a, "discard_rows"):
                     raise ValueError("shortening removes nonempty rows; request discard_rows=true deliberately")
                 op = {"op": "pattern_rows", "name": p.name, "rows": rows}
+            elif action == "split":
+                op = {"op": "pattern_split", "pattern": i, "row": _integer(a.get("row"), 1, len(p.rows) - 1, "row")}
+            elif action == "automation":
+                lanes = a.get("lanes")
+                if not isinstance(lanes, list) or any(set(x) - {"target", "channel", "rows", "from", "to", "shape", "every"}
+                                                      for x in lanes if isinstance(x, dict)):
+                    raise ValueError("lanes is a list of {target, channel, rows, from, to, shape, every}")
+                locked = _approved_channels(st)
+                for x in lanes:
+                    ch = x.get("channel", 1)
+                    ch = ch - 1 if type(ch) is int else next((k for k, c in enumerate(st.mod.channels) if c.name == ch), -1)
+                    if ch in locked:
+                        raise ValueError(f"channel {ch + 1} is approved by the owner")
+                op = {"op": "pattern_automation", "name": p.name, "lanes": lanes}
             else:
                 raise ValueError("unknown pattern action")
             st.song_edit([op], guard=_edit_guard(st))
@@ -871,13 +926,23 @@ def write_patterns(st, a):
         return _write_groups(st, groups)
 
 
+COMPOSE_ACTIONS = ("interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length", "cut_here", "glue")
+
+
 @tool("transform_patterns", "Transform named pattern selections atomically (one undo step), each pattern once even "
       "if repeated in orders. Inclusive row bounds; channels are 1-based. transpose clamps real notes to C-0..B-9, "
       "preserving off/cut/fade. replace matches exact field text with * and ? wildcards (case sensitive). clear uses "
       "fields (default all). groove preserves other effects and reports skipped notes. chord/euclid require one source "
-      "channel; chord writes adjacent channels and needs overwrite=true for occupied destinations. layers takes slot "
-      "numbers in the current instrument/sample mode. Inline/flow YAML patterns may need materializing first.",
-      {"action": {"type": "string", "enum": ["transpose", "clear", "replace", "groove", "euclid", "chord", "layers"]},
+      "channel; chord writes adjacent channels and needs overwrite=true for occupied destinations, strum delays its "
+      "voices by that many ticks each (down: from the top). layers takes slot numbers in the current instrument/sample "
+      "mode. The Pattern tab's SELECTION-bar tools, the page's own code: interpolate (OpenMPT's, per selected channel "
+      "and fields), automate (target Z/X/M/V/T or v for the volume column, from, to, shape linear/scurve/exp/steps, "
+      "every), grow and shrink (OpenMPT's, per selected channel and fields), arp (one channel: shape, octaves, "
+      "direction up/down/updown/downup/random, every, gate rows or 'off', skip, seed), fill (legato), set_length "
+      "(length rows), cut_here (a note-off at from_row) and glue. A lane-owned column (a pattern's automation:) "
+      "refuses other values. Inline/flow YAML patterns may need materializing first.",
+      {"action": {"type": "string", "enum": ["transpose", "clear", "replace", "groove", "euclid", "chord", "layers",
+                                             *COMPOSE_ACTIONS]},
        "selections": {"type": "array", "items": _SCOPE}, "semitones": {"type": "integer"},
        "fields": {"type": "array", "items": {"type": "string", "enum": list(_FIELDS)}},
        "match": {"type": "object", "properties": {k: {"type": "string"} for k in _FIELDS}},
@@ -887,7 +952,12 @@ def write_patterns(st, a):
        "probability": {"type": "integer"}, "seed": {"type": "integer"}, "shape": {"type": "string"},
        "inversion": {"type": "integer"}, "overwrite": {"type": "boolean"},
        "instruments": {"type": "array", "items": {"type": "integer"}},
-       "mode": {"type": "string", "enum": ["cycle", "volume"]}}, ["action", "selections"])
+       "mode": {"type": "string", "enum": ["cycle", "volume"]}, "strum": {"type": "integer"}, "down": {"type": "boolean"},
+       "target": {"type": "string", "enum": ["Z", "X", "M", "V", "T", "v"]}, "from": {"type": "integer"},
+       "to": {"type": "integer"}, "octaves": {"type": "integer"},
+       "direction": {"type": "string", "enum": ["up", "down", "updown", "downup", "random"]},
+       "gate": {"type": ["integer", "string"]}, "skip": {"type": "integer"}, "length": {"type": "integer"}},
+      ["action", "selections"])
 def transform_patterns(st, a):
     import re
     from . import compose
@@ -895,8 +965,9 @@ def transform_patterns(st, a):
     with st.lock:
         st._writable()
         action, groups, seen, skipped = a["action"], [], set(), 0
-        if action not in ("transpose", "clear", "replace", "groove", "euclid", "chord", "layers"):
+        if action not in ("transpose", "clear", "replace", "groove", "euclid", "chord", "layers", *COMPOSE_ACTIONS):
             raise ValueError("unknown transform")
+        notes = []
         fields = a.get("fields", list(_FIELDS))
         if not fields or any(f not in _FIELDS for f in fields):
             raise ValueError("fields must name note, instrument, volume or effect")
@@ -922,12 +993,32 @@ def transform_patterns(st, a):
                         _integer(a.get("rotate", 0), -64, 64, "rotate"), _integer(a.get("every", 1), 1, 64, "every"),
                         _integer(a.get("probability", 100), 0, 100, "probability"),
                         _integer(a.get("seed", 1), 0, 2147483647, "seed"))
+                elif a.get("strum"):  # the page's STRUM: compose.chord, then the voices delayed (State.compose_cells)
+                    cells, n, more = st.compose_cells(i, {"op": "chord", "pattern": i, "r0": r0, "r1": r1, "ch": chans[0],
+                        "shape": a.get("shape", "maj"), "inversion": _integer(a.get("inversion", 0), 0, 5, "inversion"),
+                        "strum": _integer(a["strum"], 0, 15, "strum"), "down": _boolean(a, "down")})
+                    skipped, notes = skipped + n, notes + more
                 else:
                     cells = compose.chord(rows, chans[0], r0, r1, a.get("shape", "maj"),
                                           _integer(a.get("inversion", 0), 0, 5, "inversion"), len(st.mod.channels))
+                if action == "chord":
                     if not _boolean(a, "overwrite") and any(c["ch"] != chans[0] and
                             not rows[c["row"]][c["ch"]].is_empty() and format_cell(rows[c["row"]][c["ch"]]) != c["cell"] for c in cells):
                         raise ValueError("chord would overwrite occupied destination cells; request overwrite=true")
+            elif action in COMPOSE_ACTIONS:  # the SELECTION bar's tools: the page's dispatch (State.compose_cells)
+                op = {"op": action, "pattern": i, "r0": r0, "r1": r1, "chans": chans, "ch": chans[0],
+                      "cols": [[c, [_FIELDS.index(f) for f in fields]] for c in chans]}
+                if action == "arp" and len(chans) != 1:
+                    raise ValueError("arp requires one source channel")
+                for k in ("target", "from", "to", "shape", "every", "octaves", "direction", "gate", "skip", "seed", "length"):
+                    if k in a:
+                        op[k] = a[k]
+                if action == "automate" and not all(type(op.get(k)) is int for k in ("from", "to")):
+                    raise ValueError("automate needs integer from and to (the target's own values: hex 0x7F is 127)")
+                if action == "set_length":
+                    op["length"] = _integer(a.get("length"), 1, 256, "length")
+                cells, n, more = st.compose_cells(i, op)
+                skipped, notes = skipped + n, notes + more
             elif action == "layers":
                 slots = st.song.get("instruments" if st.mod.instruments is not None else "samples") or {}
                 numbers = a["instruments"]
@@ -956,8 +1047,12 @@ def transform_patterns(st, a):
                                 parts[_FIELDS.index(f)] = value
                         cells.append({"row": r, "ch": ch, "cell": " ".join(parts)})
             groups.append((i, cells))
+        if action in COMPOSE_ACTIONS and not any(cells for _, cells in groups):
+            raise ValueError(f"{action}: nothing to change in the selection" + (f" ({skipped} cells hold another command)" if skipped else ""))
         result = _write_groups(st, groups)
         result["skipped_notes"] = skipped
+        if notes:
+            result["notes"] = notes
         return result
 
 
@@ -1013,10 +1108,11 @@ def copy_pattern_region(st, a):
         return _write_groups(st, list(groups.items()))
 
 
-SETTABLE = ("tempo", "speed", "title", "rows_per_beat", "rows_per_bar", "key")
+SETTABLE = ("tempo", "speed", "title", "rows_per_beat", "rows_per_bar", "key", "message")
 
 
-@tool("set_module", f"A song setting: one of {', '.join(SETTABLE)} (key: e.g. 'A minor', 'D dorian'). Not the "
+@tool("set_module", f"A song setting: one of {', '.join(SETTABLE)} (key: e.g. 'A minor', 'D dorian'; message: the "
+      "module's message text, lines kept, Latin-1 as IT stores it). Not the "
       "levels: mix volume and global volume are the owner's. One undo step.",
       {"key": {"type": "string", "enum": list(SETTABLE)}, "value": {"type": ["string", "integer"]}}, ["key", "value"])
 def set_module(st, a):
@@ -1140,14 +1236,21 @@ def edit_effect(st, a):
         return {**result, "plugin": n, "summary": f"{action} plugin {n} (one undo step)"}
 
 
-@tool("export_song", "Start an export using RENDER & EXPORT's immutable snapshot. Formats: IT, WAV, MP3, OGG, FLAC. "
+@tool("export_song", "Start an export using RENDER & EXPORT's immutable snapshot. Formats: IT, WAV, MP3, OGG, FLAC, MID "
+      "(the notes as a type 1 MIDI file, as OpenMPT exports one). rate 22050-96000 Hz, depth 16, 24 (WAV/FLAC) or "
+      "'float' (WAV), bitrate (MP3 32-320 kbit/s), quality (OGG -1 to 10), repeat (0-16 more passes of the whole song), "
+      "master_lufs (-40 to -5: one gain on the song and its stems, never past master_ceiling dBTP, -1 by default; the "
+      "owner's choice, so only when asked). "
       "Can include aligned stems and an IT alongside audio. region is an existing named section; omit for whole song. "
       "game_loop writes loop metadata for WAV/OGG/FLAC over that section (or whole song), not the audition row loop. "
       "Defaults: saved mix, ignore audition mutes, no replacement. current mix includes unwritten faders and selected "
       "candidate; respect mutes includes solo. These choices affect only the export. replace:true only when the owner "
       "asked to replace previous outputs; source assets stay protected. Returns job_id and planned paths; use "
       "export_status until done/failed/cancelled. Warnings are not export failures.",
-      {"format": {"type": "string", "enum": ["it", "wav", "mp3", "ogg", "flac"]},
+      {"format": {"type": "string", "enum": ["it", "wav", "mp3", "ogg", "flac", "mid"]},
+       "rate": {"type": "integer"}, "depth": {"type": ["integer", "string"]}, "bitrate": {"type": "integer"},
+       "quality": {"type": "number"}, "repeat": {"type": "integer"}, "master_lufs": {"type": "number"},
+       "master_ceiling": {"type": "number"},
        "destination": {"type": "string", "description": "Folder; relative paths are beside the song"},
        "name": {"type": "string", "description": "Filename stem without extension"},
        "region": {"type": "string"}, "game_loop": {"type": "boolean"}, "tail": {"type": "number", "minimum": 0, "maximum": 10},
@@ -1158,8 +1261,8 @@ def export_song(st, a):
     with st.lock:
         if set(a) - set(TOOLS["export_song"][1]["properties"]):
             raise ValueError("unknown export option; use the tool's documented options")
-        if a.get("format") not in ("it", "wav", "mp3", "ogg", "flac"):
-            raise ValueError("format must be it, wav, mp3, ogg or flac")
+        if a.get("format") not in ("it", "wav", "mp3", "ogg", "flac", "mid"):
+            raise ValueError("format must be it, wav, mp3, ogg, flac or mid")
         for k in ("game_loop", "song", "stems", "include_it", "replace"):
             if k in a and type(a[k]) is not bool:
                 raise ValueError(f"{k} must be true or false")

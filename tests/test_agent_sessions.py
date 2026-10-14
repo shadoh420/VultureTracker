@@ -41,6 +41,22 @@ class TestAgentSessions(unittest.TestCase):
         self.assertFalse(out.get('error'), out)
         return out
 
+    def test_unsaved_passes_recovered_or_forgotten(self):
+        """recording_status lists passes an earlier session kept unsaved; control_recording recovers one (the take to
+        save) or forgets one, and only an id it lists."""
+        import numpy as np
+        from vulturetracker import record
+        with mock.patch.object(record, 'spill_dir', lambda: self.d / 'recordings'):
+            keep = record.spill([np.zeros((1, 4410), np.float32)], 44100, str(self.path))
+            drop = record.spill([np.zeros((1, 4410), np.float32)], 44100, str(self.path))
+            self.assertEqual({s['id'] for s in self.call('recording_status')['unsaved']}, {keep, drop})
+            for act in ('recover', 'forget'):
+                self.assertTrue(agent.run(self.st, 'control_recording', {'action': act, 'id': 'nope'}).get('error'))
+            self.call('control_recording', action='forget', id=drop)
+            self.assertEqual([s['id'] for s in record.spilled()], [keep])
+            self.call('control_recording', action='recover', id=keep)
+            self.assertTrue(self.call('recording_status')['status']['pending_save'])
+
     def capture(self, **opts):
         if not self.rec.stream:
             self.call('control_recording', action='open', device=0)

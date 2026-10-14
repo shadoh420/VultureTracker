@@ -2765,6 +2765,26 @@ class State:
             orders[:] = [x for o in orders for x in ([o, new] if o == pat.name else [o])]
             self._report.append(f"split: '{pat.name}' keeps rows 0-{row - 1}, '{new}' has the {n - row} from row {row}, "
                                 f"after each of its {k} order{'s' * (k != 1)}")
+        elif kind == "pattern_automation":  # the pattern's `automation:` lanes replaced (none: the key goes); the compile
+            # that follows checks them (song.py _lanes); the page has no lane editor, the agent's edit_pattern writes them
+            name, lanes = str(op["name"]), op.get("lanes") or []
+            if not isinstance(lanes, list) or not all(isinstance(x, dict) for x in lanes):
+                raise ValueError("lanes is a list of {target, channel, rows, from, to, shape, every}")
+            j = self._pattern_key(lines, name)
+            if lines[j].split("#")[0].split(":", 1)[1].strip():
+                raise ValueError(f"pattern '{name}' is written as one block: give it 'rows:' and 'data: |' first")
+            kids = self._children(lines, j)
+            ind = " " * (self._ind(lines[kids[0][0]]) if kids else self._ind(lines[j]) + 2)
+            at = next((i for i, k in kids if k == "automation"), None)
+            if at is not None:
+                end = self._span(lines, at)
+                while end < len(lines) and self._ind(lines[end]) == len(ind) and lines[end].lstrip().startswith("- "):
+                    end += 1  # a list written at the key's own indentation
+                del lines[at:end]
+            if lanes:
+                lines[j + 1:j + 1] = [f"{ind}automation:\n"] + [
+                    f"{ind}  - {yaml.safe_dump(x, default_flow_style=True, sort_keys=False, width=1000).strip()}\n" for x in lanes]
+            self._report.append(f"pattern '{name}': {len(lanes)} automation lane{'s' * (len(lanes) != 1)}")
         elif kind == "pattern_delete":
             name = str(op["name"])
             if name in orders:
@@ -3391,22 +3411,13 @@ class State:
             words += f", {len(dropped)} left out (past 200 rows, or every channel taken on their row)"
         return words
 
-    def _compose(self, lines, op):
-        """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
-        delays) and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
-        rows r0..r1, or in every pattern (pattern null); `euclid` (ch, hits, steps, rotate, every, prob, seed) and `chord`
-        (ch, shape, inversion; strum ticks, down) and `arp` (ch, shape, octaves, direction, every, gate, skip, seed) in one
-        pattern; `fill`, `set_length` (length), `cut_here` (r0: the row) and `glue` over `chans` in one pattern, which
-        an approved pattern refuses; `interpolate` (cols: [[channel, [fields 0-3]], ...]; with `sweep`, the span
-        found from row r0 in the one column, as OpenMPT does with no selection) and `automate` (chans, target, from, to,
-        shape, every), `grow` and `shrink` (cols, OpenMPT's) in one pattern. Part of the song edit's one undo step, with a report of what changed."""
+    def compose_cells(self, idx, op):
+        """One pattern's cells for a composition op (the ops `_compose` writes; see there), computed on the compiled
+        rows and not written: (cells, skipped, extra notes for the report). The agent's transform_patterns calls it too,
+        so the page and the agent run one dispatch."""
         from . import compose
-        self._need_compiled()
         mod, kind, nch = self.mod, op["op"], len(self.mod.channels)
         whole = op.get("pattern") is None
-        if whole and kind in ("euclid", "chord", "interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length",
-                              "cut_here", "glue"):
-            raise ValueError(f"{kind} works on a selection in one pattern")
         chans = [int(c) for c in op["chans"]] if op.get("chans") is not None else list(range(nch))
         ch = int(op.get("ch", chans[0] if chans else 0))
         if not chans or not all(0 <= c < nch for c in chans + [ch]):
@@ -3429,80 +3440,101 @@ class State:
                 raise ValueError(f"{kind}: give the channels and their columns")
             return cols
 
+        skipped, extra = 0, []
+        rows = mod.patterns[idx].rows
+        r0 = 0 if whole else max(0, int(op.get("r0") or 0))
+        r1 = len(rows) - 1 if whole or op.get("r1") is None else min(len(rows) - 1, int(op["r1"]))
+        if kind == "groove":
+            cells, s = compose.groove(rows, chans, r0, r1, op.get("ticks") or [], mod.speed)
+            skipped += s
+        elif kind == "euclid":
+            if not 1 <= int(op["steps"]) <= 64:
+                raise ValueError("a Euclidean rhythm has 1-64 steps")
+            cells = compose.euclid(rows, ch, r0, r1, int(op["hits"]), int(op["steps"]), int(op.get("rotate") or 0),
+                                   int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)))
+        elif kind == "chord":
+            shape = op.get("shape") or "maj"
+            cells = compose.chord(rows, ch, r0, r1, shape, int(op.get("inversion") or 0), nch)
+            if int(op.get("strum") or 0):  # STRUM: the chord's voices delayed one after another, on the rows as written
+                from .notation import parse_cell
+                tmp = [list(rw) for rw in rows]
+                for c in cells:
+                    tmp[c["row"]][c["ch"]] = parse_cell(c["cell"])
+                more, s, held = compose.strum(tmp, ch, r0, r1, len(compose._shape(shape)), int(op["strum"]),
+                                              mod.speed, bool(op.get("down")))
+                cells = list({(c["row"], c["ch"]): c for c in cells + more}.values())
+                skipped += s
+                if held:
+                    extra.append(f"{held} voice{'s' * (held != 1)} held at {min(15, mod.speed - 1)} ticks (SDx goes "
+                                 f"no further at speed {mod.speed})")
+        elif kind in ("fill", "set_length", "cut_here", "glue"):
+            name = mod.patterns[idx].name
+            if self.pattern_entry(name).get("approved"):
+                raise ValueError(f"pattern '{name}' is approved: its notes keep their lengths (clear its mark in the "
+                                 "SONG tab first)")
+            from .model import NOTE_CUT, NOTE_OFF
+            off = NOTE_OFF if insmode else NOTE_CUT
+            if kind == "fill":
+                cells, _ = compose.fill(rows, chans, r0, r1)
+            elif kind == "set_length":
+                cells, s = compose.set_length(rows, chans, r0, r1, int(op.get("length") or 0), off)
+                if s:
+                    extra.append(f"{s} note{'s' * (s != 1)} would end past the pattern, left alone")
+            elif kind == "cut_here":
+                cells = compose.cut_here(rows, chans, r0, off)
+            else:
+                cells, _ = compose.glue(rows, chans, r0, r1)
+        elif kind == "arp":
+            from .model import NOTE_CUT, NOTE_OFF
+            gate = op.get("gate") or 0
+            cells = compose.arp(rows, ch, r0, r1, op.get("shape") or "maj", int(op.get("octaves") or 1),
+                                op.get("direction") or "up", int(op.get("every") or 1),
+                                gate if gate == "off" else int(gate), int(op.get("skip") or 0), int(op.get("seed", 1)),
+                                NOTE_OFF if insmode else NOTE_CUT)
+        elif kind == "interpolate":
+            cols = columns()
+            span = compose.sweep(rows, cols[0][0], r0, cols[0][1][0]) if op.get("sweep") else (r0, r1)
+            cells = compose.interpolate(rows, cols, *span, default_volume) if span else []
+        elif kind == "automate":
+            cells, s = compose.automate(rows, chans, r0, r1, str(op.get("target")), int(op["from"]), int(op["to"]),
+                                        op.get("shape") or "linear", int(op.get("every") or 1))
+            skipped += s
+        elif kind in ("grow", "shrink"):
+            cols = columns()
+            if kind == "grow":
+                cells, lost, _ = compose.grow(rows, cols, r0, r1)
+                if lost:
+                    extra.append(f"{lost} row{'s' * (lost != 1)} past the pattern's end dropped")
+            else:
+                cells, _ = compose.shrink(rows, cols, r0, r1)
+            if any(compose._is_delay(rows[r][c]) for r in range(r0, r1 + 1) for c, _ in cols):
+                extra.append("note delays (SDx) keep their ticks")
+        else:
+            cells = compose.layers(rows, chans, r0, r1, op.get("instruments") or [], op.get("mode") or "cycle",
+                                   default_volume)
+        return cells, skipped, extra
+
+    def _compose(self, lines, op):
+        """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
+        delays) and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
+        rows r0..r1, or in every pattern (pattern null); `euclid` (ch, hits, steps, rotate, every, prob, seed) and `chord`
+        (ch, shape, inversion; strum ticks, down) and `arp` (ch, shape, octaves, direction, every, gate, skip, seed) in one
+        pattern; `fill`, `set_length` (length), `cut_here` (r0: the row) and `glue` over `chans` in one pattern, which
+        an approved pattern refuses; `interpolate` (cols: [[channel, [fields 0-3]], ...]; with `sweep`, the span
+        found from row r0 in the one column, as OpenMPT does with no selection) and `automate` (chans, target, from, to,
+        shape, every), `grow` and `shrink` (cols, OpenMPT's) in one pattern. Part of the song edit's one undo step, with a report of what changed."""
+        self._need_compiled()
+        mod, kind = self.mod, op["op"]
+        whole = op.get("pattern") is None
+        if whole and kind in ("euclid", "chord", "interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length",
+                              "cut_here", "glue"):
+            raise ValueError(f"{kind} works on a selection in one pattern")
         written = skipped = 0
         extra = []
         for idx in range(len(mod.patterns)) if whole else [self.pattern_at(op["pattern"])]:
-            rows = mod.patterns[idx].rows
-            r0 = 0 if whole else max(0, int(op.get("r0") or 0))
-            r1 = len(rows) - 1 if whole or op.get("r1") is None else min(len(rows) - 1, int(op["r1"]))
-            if kind == "groove":
-                cells, s = compose.groove(rows, chans, r0, r1, op.get("ticks") or [], mod.speed)
-                skipped += s
-            elif kind == "euclid":
-                if not 1 <= int(op["steps"]) <= 64:
-                    raise ValueError("a Euclidean rhythm has 1-64 steps")
-                cells = compose.euclid(rows, ch, r0, r1, int(op["hits"]), int(op["steps"]), int(op.get("rotate") or 0),
-                                       int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)))
-            elif kind == "chord":
-                shape = op.get("shape") or "maj"
-                cells = compose.chord(rows, ch, r0, r1, shape, int(op.get("inversion") or 0), nch)
-                if int(op.get("strum") or 0):  # STRUM: the chord's voices delayed one after another, on the rows as written
-                    from .notation import parse_cell
-                    tmp = [list(rw) for rw in rows]
-                    for c in cells:
-                        tmp[c["row"]][c["ch"]] = parse_cell(c["cell"])
-                    more, s, held = compose.strum(tmp, ch, r0, r1, len(compose._shape(shape)), int(op["strum"]),
-                                                  mod.speed, bool(op.get("down")))
-                    cells = list({(c["row"], c["ch"]): c for c in cells + more}.values())
-                    skipped += s
-                    if held:
-                        extra.append(f"{held} voice{'s' * (held != 1)} held at {min(15, mod.speed - 1)} ticks (SDx goes "
-                                     f"no further at speed {mod.speed})")
-            elif kind in ("fill", "set_length", "cut_here", "glue"):
-                name = mod.patterns[idx].name
-                if self.pattern_entry(name).get("approved"):
-                    raise ValueError(f"pattern '{name}' is approved: its notes keep their lengths (clear its mark in the "
-                                     "SONG tab first)")
-                from .model import NOTE_CUT, NOTE_OFF
-                off = NOTE_OFF if insmode else NOTE_CUT
-                if kind == "fill":
-                    cells, _ = compose.fill(rows, chans, r0, r1)
-                elif kind == "set_length":
-                    cells, s = compose.set_length(rows, chans, r0, r1, int(op.get("length") or 0), off)
-                    if s:
-                        extra.append(f"{s} note{'s' * (s != 1)} would end past the pattern, left alone")
-                elif kind == "cut_here":
-                    cells = compose.cut_here(rows, chans, r0, off)
-                else:
-                    cells, _ = compose.glue(rows, chans, r0, r1)
-            elif kind == "arp":
-                from .model import NOTE_CUT, NOTE_OFF
-                gate = op.get("gate") or 0
-                cells = compose.arp(rows, ch, r0, r1, op.get("shape") or "maj", int(op.get("octaves") or 1),
-                                    op.get("direction") or "up", int(op.get("every") or 1),
-                                    gate if gate == "off" else int(gate), int(op.get("skip") or 0), int(op.get("seed", 1)),
-                                    NOTE_OFF if insmode else NOTE_CUT)
-            elif kind == "interpolate":
-                cols = columns()
-                span = compose.sweep(rows, cols[0][0], r0, cols[0][1][0]) if op.get("sweep") else (r0, r1)
-                cells = compose.interpolate(rows, cols, *span, default_volume) if span else []
-            elif kind == "automate":
-                cells, s = compose.automate(rows, chans, r0, r1, str(op.get("target")), int(op["from"]), int(op["to"]),
-                                            op.get("shape") or "linear", int(op.get("every") or 1))
-                skipped += s
-            elif kind in ("grow", "shrink"):
-                cols = columns()
-                if kind == "grow":
-                    cells, lost, _ = compose.grow(rows, cols, r0, r1)
-                    if lost:
-                        extra.append(f"{lost} row{'s' * (lost != 1)} past the pattern's end dropped")
-                else:
-                    cells, _ = compose.shrink(rows, cols, r0, r1)
-                if any(compose._is_delay(rows[r][c]) for r in range(r0, r1 + 1) for c, _ in cols):
-                    extra.append("note delays (SDx) keep their ticks")
-            else:
-                cells = compose.layers(rows, chans, r0, r1, op.get("instruments") or [], op.get("mode") or "cycle",
-                                       default_volume)
+            cells, s, more = self.compose_cells(idx, op)
+            skipped += s
+            extra += more
             if cells:
                 self._edit_block(lines, idx, cells)
                 written += len(cells)
@@ -3658,7 +3690,11 @@ class State:
         preset's envelope. One undo step; the WAVs go again when the edit is refused."""
         from . import sf2
         from .itreader import _safe, _sanitize, module_to_song
-        if self.mod.instruments is None:
+        try:  # the instruments as the text stands in this edit (the agent converts a sample-mode song in the same step)
+            written = {int(k) for _, k in self._children(lines, self._top(lines, "instruments")) if str(k).isdigit()}
+        except ValueError:
+            written = set()
+        if self.mod.instruments is None and not written:
             raise ValueError("a SoundFont preset is an instrument: this song plays samples directly (no instruments)")
         src = Path(str(op["path"]))
         src = src if src.is_absolute() else self.base_dir / src
@@ -3685,7 +3721,7 @@ class State:
             ins["sample"] += first - 1
         for e in ins.get("keymap") or []:
             e["sample"] += first - 1
-        num = max((int(k) for k in (self.song.get("instruments") or {})), default=0) + 1
+        num = max({int(k) for k in (self.song.get("instruments") or {})} | written, default=0) + 1
         self._song_op(lines, orders, {"op": "instrument_new", "num": num, "entry": ins}, remap)
         self._report.append(f"instrument {num:02d} '{ins['name']}' from {src.name}, slots {first:02d}-{first + len(mod.samples) - 1:02d} "
                             f"in {folder.name}/: " + "; ".join(warnings))

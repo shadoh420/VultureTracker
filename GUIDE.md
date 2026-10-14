@@ -647,14 +647,15 @@ pattern by name. They are never editable; where the two patterns differ in lengt
 (`vulturetracker/agent.py`): read the song and a pattern (`song_overview`, `read_pattern`) and what the compiler
 says of it (`check`), read the owner's selection
 (`get_selection`: the rows and channels selected in the Pattern tab, with what sounds there), write cells
-(`write_cells`), set the order list (`set_orders`), add a pattern (`new_pattern`), set the tempo, speed, title or key
-(`set_module`), set the rack's plugins (`set_plugins`, with `describe_effects` listing their parameters), measure
+(`write_cells`), set the order list (`set_orders`), add a pattern (`new_pattern`), set the tempo, speed, title, key or
+the module's message (`set_module`), set the rack's plugins (`set_plugins`, with `describe_effects` listing their parameters), measure
 (`measure`, below), cue a place in the app and play it (`cue`), offer WAVs as tryout candidates (`offer_samples`), read
 the listening notes (`read_notes`), check the key (`key_check`), `undo` and `redo`. It can also:
 
 - **Add an empty channel** with `create_channel` (optional name, up to 64 channels). The returned channel number is
   ready for `write_cells`; existing notes and routing stay in place.
-- **Rename, move or remove channels** with `edit_channel`. Channel numbers are 1-based; moves carry notes, routing,
+- **Rename, colour, move or remove channels** with `edit_channel` (`color: "#rrggbb"`, `""` to remove it; the app's
+  colour only). Channel numbers are 1-based; moves carry notes, routing,
   pan, volume and audition faders/mutes. The result maps old numbers to new ones. Removing notes requires
   `remove_notes:true` and the owner's request. Approved channels cannot be changed or shifted; approved patterns
   block moves/removal. Each operation is undoable.
@@ -664,15 +665,18 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   without either they are silent. Creating the first instrument converts existing samples to instruments at the same
   numbers before adding the new one, in one undo step. Conversion is refused with approved material. Existing slots
   are never overwritten; `offer_samples` remains the tool for proposing tryout choices.
-- **Export songs and stems** with `export_song`: IT, WAV, MP3, OGG or FLAC, an optional named section, aligned stems,
-  and optional IT alongside audio. Defaults are saved mix, ignored audition mutes and no replacement. Choose
+- **Export songs and stems** with `export_song`: IT, WAV, MP3, OGG, FLAC or MIDI (`mid`), an optional named section,
+  aligned stems, and optional IT alongside audio; `rate`, `depth` (16, 24 or `float`), `bitrate`, `quality` and `repeat`
+  as RENDER & EXPORT takes them, and `master_lufs`/`master_ceiling` for NORMALISE (the owner's choice, so only when
+  asked). Defaults are saved mix, ignored audition mutes and no replacement. Choose
   `mix:current` to include unwritten faders and the selected candidate, and `mutes:respect` to include solo/mutes.
   `game_loop:true` writes WAV/OGG/FLAC loop metadata for the whole song or named section, not the audition row loop.
   Follow the returned `job_id` with `export_status`; only `done` confirms published files, and compiler warnings are
   separate from failures. `cancel_export` requires that ID and can cancel queued/rendering work, not final publication.
   Exports use a frozen snapshot; replacing existing outputs requires explicit `replace:true`, and source assets remain
   protected. The app retains the current/latest job, also visible in RENDER & EXPORT.
-- **Edit existing sounds** with `edit_instrument` (mapping, envelopes and note behavior) and `edit_sample`
+- **Edit existing sounds** with `edit_instrument` (mapping, envelopes or their `lfo`, `filter_mode`, microtuning with
+  `tuning` and `keymap_file`, Scala files beside the song, and note behavior) and `edit_sample`
   (name, tuning, loops, vibrato, format or an explicitly requested WAV replacement). Omitted fields stay unchanged;
   nested fields are replaced whole, and `clear` removes optional fields. Mixer volume and static pan remain the owner's.
   `delete_slot` removes only unreferenced sample/instrument definitions, without renumbering or deleting audio files.
@@ -683,7 +687,10 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   writes a new WAV and preserves the original; exceeding full scale causes reported attenuation. Level processing
   requires the owner's request. Approved sounds and voices used by approved material are protected (conservatively,
   any approved pattern protects all played voices because notes can carry into it).
-  `slice_sample` creates kit or multisample slots from explicit frame points; `render_sample` creates a slot from
+  `inspect_sample`'s slice analysis takes SLICE's `bpm` and `snap` (the points moved to that grid; it returns the
+  tempo guessed from the span's length). `slice_sample` creates kit or multisample slots from explicit frame points,
+  and with `pattern:true` a pattern playing them from `channel`, on the song's grid when `grid_bpm` gives the sample's
+  tempo; `render_sample` creates a slot from
   inclusive pattern rows, including current mix settings. Both retain original notes and samples. Each edit is undoable.
 - **Find sounds** with `index_library`, `library_status`, `search_library` and `similar_samples`. Scans add supplied
   folders to the shared index by default; `replace_roots:true` replaces them deliberately. Only WAVs are indexed.
@@ -693,7 +700,10 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
 - **Synthesize sounds** with `synthesis_catalog` (sources/dependencies, installed patches, patch parameters and nearby
   recipes), `read_sound_recipe`, `save_sound_recipe` and `render_synthesis`. Recipe edits create a new version beside
   the song; `changes` replaces top-level fields, `clear` removes fields, and relative input paths keep their original
-  meaning. Each render uses one entry/note and supports patch, file, Faust and resynth sources. `render_paint` creates
+  meaning. Each render uses one entry/note and supports patch, file (a Hydrogen kit too), Faust and resynth sources
+  and the numpy ones (`wave`, `sfxr`, `drum`, `additive`); `faust: NAME.dsp` falls back to the examples shipped with the
+  app, which `synthesis_catalog` lists; with `mip` the job also returns the copies (`mip_files`) and its log the
+  `samples:`/`keymap:` blocks to paste. `render_paint` creates
   a WAV, PNG and reusable settings JSON; optional `file` applies the picture as a spectral filter. Its `source` reloads
   saved Paint settings, with supplied fields overriding them. `read_sound_recipe` can inspect those settings too.
   Poll `synthesis_status` with the job ID; only `done` returns usable output paths. `cancel_synthesis` suppresses
@@ -710,8 +720,10 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   `read_phrase` returns summaries, or up to 32 rows of one alternative with `offset`/`limit`. Renders use frozen
   sounds and mix; stale comparisons can still render but need recapture before editing or acceptance. These
   draft/assets operations are outside song undo. Ratings and final acceptance stay with you in PHRASES.
-- **Manage projects** with `project_status`, `create_project`, `import_project`, `open_project`, `collect_project`
-  and `relink_samples`. Create/import/collect return new paths without switching songs. Imports use the app's
+- **Manage projects** with `project_status`, `create_project`, `import_project`, `open_project`, `collect_project`,
+  `relink_hints` (for each missing sample, same-named WAVs from the library index, `same` when the contents match the
+  digest an undo step recorded) and `relink_samples`. `import_soundfont` lists a SoundFont's (or GUS patch's) presets,
+  or adds one as a new instrument, one undo step (a sample-mode song is converted to instruments in the same step). Create/import/collect return new paths without switching songs. Imports use the app's
   module, Guitar Pro or MIDI importer and preserve the source; collisions get numbered output names. Collection
   uses a new external folder, optionally a ZIP, and checks frozen phrase assets. `open_project` switches the app
   and subsequent agent tools to that YAML; it refuses external changes, pending page edits or active recording/
@@ -725,12 +737,15 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   `to` is a boundary in the original order list. Moves remap jumps and audition loops; independent pattern copies
   are the duplication default. Shared copies with internal jumps are refused. Deleting a section removes its name,
   not its orders. Overlapping sections or changes to approved material are refused before writing.
-- **Maintain patterns** with `edit_pattern`: rename, resize, delete unused patterns, or materialize shorthand into
-  explicit cells. Resizing is 1-200 rows; removing nonempty rows requires `discard_rows:true`. Materializing preserves
+- **Maintain patterns** with `edit_pattern`: rename, resize, delete unused patterns, materialize shorthand into
+  explicit cells (automation lanes become plain cells), split (OpenMPT's Split Pattern, from `row`), or set the
+  pattern's `automation:` lanes (`lanes`, replacing them; `[]` removes them; a lane on an approved channel is refused). Resizing is 1-200 rows; removing nonempty rows requires `discard_rows:true`. Materializing preserves
   authorship and approval marks. Approved patterns cannot be edited by the agent; with an approved channel, structural
   changes such as renaming/resizing/deleting patterns may require the owner to use the Pattern tab.
 - **Transform selections** with `transform_patterns`: transpose, clear selected fields, wildcard find/replace,
-  groove delays, Euclidean rhythms, chords and instrument/sample layers. Selections name each pattern once and use
+  groove delays, Euclidean rhythms, chords (with `strum`) and instrument/sample layers, and the SELECTION bar's own
+  tools through the page's code: `interpolate`, `automate`, `grow`, `shrink`, `arp`, `fill`, `set_length`, `cut_here`
+  and `glue` (a lane-owned column refuses other values). Selections name each pattern once and use
   inclusive row bounds and 1-based channels; repeated orders share the edit. Chords write adjacent channels and need
   `overwrite:true` for occupied destinations. Groove keeps other effects and reports skipped notes.
   `copy_pattern_region` copies or moves rectangular regions (optionally selected fields) using a snapshot for overlaps;
@@ -756,7 +771,8 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   offer it as a candidate, create a tuned slot, or combine pitched takes into a multisample. Saved WAVs persist;
   the take list lasts for the session. Failed saves retain unsaved passes in memory for **RETRY SAVE** or explicit
   discard. Passes that are finished but not yet saved (a backing track's passes done, a save that failed) are also
-  copied, exactly, to the user folder's `recordings/` and removed once saved or discarded; passes a closed or crashed
+  copied, exactly, to the user folder's `recordings/` and removed once saved or discarded (`recording_status` lists
+  them as `unsaved`; `control_recording` `recover` brings one back, `forget` deletes it, only on the owner's word); passes a closed or crashed
   session left there show under UNSAVED TAKES on the RECORD tab, with RECOVER (back as the take to save, beside the
   song open now) and DISCARD, and go after 7 days. Input reopen/close and project switches refuse unsaved takes.
 - **Update listening notes** with `update_listening_note`: add at an explicit order/row, update text/tag/channels,

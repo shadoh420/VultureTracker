@@ -107,6 +107,13 @@ What changed in each VultureTracker release (the GitHub release notes, without t
 - Instruments: microtuning, `tuning: scale.scl` and `keymap_file: map.kbm` (Scala's formats) for scales that repeat at
   the octave over 12 keys; the .it plays each retuned key through a copy of its sample at that pitch, sharing the
   sample's data.
+- Agents: the tools reach what phases 3-6 added to the app: `transform_patterns` runs the SELECTION bar's INTERPOLATE,
+  AUTOMATE, GROW, SHRINK, ARP, FILL, SET LENGTH, CUT HERE and GLUE and chord STRUM through the page's own code;
+  `edit_pattern` splits a pattern and sets its automation lanes; `edit_channel` colours, `set_module` writes the message;
+  `edit_instrument` takes `lfo` envelopes, `filter_mode`, `tuning` and `keymap_file`; the recipe tools list and render
+  the numpy sources, the shipped Faust examples and `mip` copies; new `import_soundfont` and `relink_hints`;
+  `export_song` exports MIDI with the render settings; slices snap to a grid and can write a pattern on it;
+  `control_recording` recovers or forgets unsaved passes.
 
 ## 1.5.2 (2026-10-10)
 
