@@ -259,6 +259,34 @@ built):
 | `mp3_compressor` | `vbr_quality` 2 (0 best to 10 worst): MP3 codec artefacts |
 | `gsm_full_rate_compressor` | `quality` WindowedSinc8: the GSM phone codec at 8 kHz |
 
+Eight more are VultureTracker's own (numpy; no pedalboard needed for a recipe that uses only these). They mix freely
+with the ones above and every item runs in the list's order:
+
+```yaml
+    fx:
+      - waveshape: {shape: foldback, drive_db: 9}           # folds the peaks: new harmonics
+      - bandlimit: {hz: 6000}                               # nothing above 6 kHz: playable an octave and a half up
+      - multitap: {bpm: 165, step: 3/16, taps: [[-6, 3000, 0.7], [-12, 2000, -0.7]]}  # two panned, darker echoes
+```
+
+| effect | parameters (defaults) |
+|---|---|
+| `bandlimit` | `hz`: nothing above it (the compiler's own 1023-tap sinc, a transition about 0.5 % of the rate wide, the stop band under -74 dB), so `check` measures the sample `hz` wide. pedalboard's `resample` is about as clean (a 20000 target leaves 10.6 kHz); its `lowpass_filter` (12 dB per octave) and `ladder_filter` leave content far above their cutoff that `check` counts (a 6 kHz `lowpass_filter` measures 22 kHz wide) |
+| `multitap` | `bpm` and `step` (a note length in whole notes, `3/16` a dotted eighth) set the gap; `taps` [[gain_db, lowpass_hz, pan], ...] (pan -1 left to 1 right, ignored on a `mono: true` take; the last two optional), or `count` taps each `decay_db_per_tap` (-6) quieter and low-passed by `lowpass_hz` once more than the one before, `pingpong` alternating right and left. The dry take stays. Tempo-synced echoes printed into the sample, so the tryout can swap the whole figure; the echoes are at the recipe's `bpm`, not the song's |
+| `waveshape` | `shape` (`tanh`, `sine`, `foldback`, `rectify`, `half_rectify`, `soft`) or `curve` [[in, out], ...] from 0 to 1 (linear between points, the sign kept), `drive_db` 0, `mix` 1 |
+| `slew` | `up_db` 0, `down_db` 0 (how far each frame may rise or fall: -20 dB is 0.1 of full scale a frame), `drive_db` 0, `shape` (one of `waveshape`'s): the soft corners of a slow amplifier. A Python loop: a few seconds of sample take a second |
+| `shift` | `hz` (negative moves down), `ring` 0 (1: ring modulation by a `hz` sine instead), `mix` 1: every partial moved by the same Hz, so a harmonic sound turns inharmonic (bells, metal, ±1 Hz for a slow beat) |
+| `stereo` | `matrix` [[ll, lr], [rl, rr]], then `width` 1 (0 mono, 2 twice as wide: the side scaled), then `haas_ms` 0 (the right channel delayed, up to 30), then `swap` false. Needs two channels (not `mono: true`). A Haas delay prints a sample that loses level summed to mono: the correlation meter shows it |
+| `dispersion` | `stages` 8, `hz` 1000, `q` 0.7: that many all-passes in series, each frequency delayed by its own amount at its own level, so a click becomes a chirp |
+| `granular` | `grain_ms` 80, `density` 4 (grains overlapping), `pitch_st` 0, `jitter` 0 (semitones at random per grain), `spray_ms` 0 (read that far either side at random), `shape` `hann` (or `triangle`, `rect`), `seed` 0: a cloud of grains at the same length; the same seed gives the same cloud |
+
+`fx_tail` grows by itself to fit the last echo tap, the Haas delay and a dispersion's chirp. Anti-aliasing:
+`waveshape`, `slew`, `shift` up and `granular` up widen the sample's band, and `check` warns when a note then lifts it
+over the song's ceiling (18 kHz unless `module: ceiling` says otherwise). Put a `bandlimit` or a `resample` after them
+(or render the recipe at a lower `sample_rate`: the compiler's resampler band-limits it the same way). The effects run at the recipe's rate, so what they create above half of it folds back down inside the take:
+drive a shape gently, low-pass before a `shift` or a `granular` pitch up, or render the source at a higher
+`sample_rate` first.
+
 The order of processing is: source → `start`/`length` → peak-normalise to -1 dBFS → pad with `fx_tail`
 seconds of silence → `fx` → `mono` → `reverse` → trim silence → `loop` → `fade_out` → `normalize`/`gain`.
 The input is normalised first, so `bitcrush` and `distortion` act the same whatever the recording level.

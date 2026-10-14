@@ -79,7 +79,9 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
   Storing a sample at a low rate and playing it octaves up, as the references do, is fine. Playing a bright sample more
   than about three semitones below its root is not: libopenmpt's 8-tap interpolator lets images of the top of its band
   through under 20 kHz (about -20 dB for full-band content). `check` warns when a sample's lowest note leaves images
-  within 60 dB of it; play it higher, add a lower multisample, or set `sample_rate: 88200`. The spectrogram check stays:
+  within 60 dB of it; play it higher, add a lower multisample, or set `sample_rate: 88200`. It also warns when a
+  sample's highest note lifts its content (where its spectrum comes within 60 dB of its loudest band) over `module:
+  ceiling`, 18 kHz unless the song sets the drums' own. The spectrogram check stays:
   nothing above the drums' ceiling. (Until 2026-09-22 the limit was about seven semitones above the root.)
 - **Follow OpenMPT (since 2026-10-01).** Where the app does something OpenMPT also does (note and chord entry, the
   keyboard, the clipboard, what an effect means, how a module imports), it behaves as OpenMPT does, checked against

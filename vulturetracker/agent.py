@@ -393,7 +393,8 @@ def inspect_sample(st, a):
 
 _PROCESS_PARAMS = {"gain": {"db"}, "lowpass": {"hz", "slope"}, "highpass": {"hz", "slope"},
     "eq": {"hz", "db", "q"}, "loudness": {"db"}, "pitch": {"semitones"}, "stretch": {"percent"},
-    "denoise": {"na", "nb", "db", "sens"}, "truncate": {"db", "min_ms", "keep_ms"}}
+    "denoise": {"na", "nb", "db", "sens"}, "truncate": {"db", "min_ms", "keep_ms"},
+    "granular": {"grain_ms", "density", "pitch_st", "jitter", "spray_ms", "seed"}}
 _PROCESS_ACTIONS = ["trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade", "auto_loop", *_PROCESS_PARAMS]
 
 
@@ -402,13 +403,15 @@ _PROCESS_ACTIONS = ["trim", "fade_in", "fade_out", "normalize", "reverse", "dc",
       "trim keeps the span. auto_loop sets loop points without rewriting audio; crossfade uses frames at the current "
       "loop seam (both operate on the whole sample, no span). Effects params: gain db [-60,24]; lowpass/highpass hz, "
       "slope 12/24; eq hz,db [-24,24],q [.1,20]; loudness db [-60,0] RMS; pitch semitones [-24,24]; stretch percent "
-      "[25,400]; denoise na/nb noise frames (at least 2048),db [0,60],sens [1,8]; truncate db [-120,0],min_ms,keep_ms. "
+      "[25,400]; denoise na/nb noise frames (at least 2048),db [0,60],sens [1,8]; truncate db [-120,0],min_ms,keep_ms; "
+      "granular grain_ms [5,1000],density [1,32],pitch_st [-24,24],jitter [0,24] st,spray_ms [0,2000],seed (a cloud of "
+      "grains, length kept). "
       "Gain/normalize/loudness only when the owner requests audio-level processing; mixer settings never change. "
       "Loops follow trim/stretch/full reverse; effects exceeding full scale are attenuated and reported. "
       "Refuses approved sounds and sounds used by approved material.",
       {"number": {"type": "integer"}, "action": {"type": "string", "enum": _PROCESS_ACTIONS},
        "start": {"type": "integer"}, "end": {"type": "integer"}, "frames": {"type": "integer"},
-       "params": {"type": "object", "properties": {k: {"type": "integer" if k in ("na", "nb") else "number"}
+       "params": {"type": "object", "properties": {k: {"type": "integer" if k in ("na", "nb", "seed") else "number"}
                                                    for k in sorted(set().union(*_PROCESS_PARAMS.values()))}}},
       ["number", "action"])
 def process_sample(st, a):

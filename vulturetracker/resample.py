@@ -184,6 +184,24 @@ def image_level(channels, rate, ceiling=19845.0):
     return 10 * math.log10(images / direct + 1e-30) if direct > 0 else None
 
 
+def spectral_edge(channels, floor_db=-60.0, size=2048):
+    """A sample's bandwidth: the top of the highest frequency bin whose power, summed over Blackman-windowed frames
+    (half overlapping), comes within `floor_db` of the loudest bin's; in cycles per stored frame (0 to 0.5; times the
+    playback rate gives Hz). None for silence. The window keeps the sample's abrupt start and end from spreading 40 to
+    60 dB down across every frequency, as one FFT of the whole sample does."""
+    x = np.asarray(channels, float)
+    if x.ndim != 2 or not x.shape[1]:
+        return None
+    if x.shape[1] < size:
+        x = np.pad(x, ((0, 0), (0, size - x.shape[1])))
+    starts = range(0, x.shape[1] - size + 1, size // 2)
+    w = np.blackman(size)
+    p = sum((np.abs(np.fft.rfft(x[:, s:s + size] * w, axis=-1)) ** 2).sum(axis=0) for s in starts)
+    if p.max() <= 0:
+        return None
+    return (np.nonzero(p >= p.max() * 10 ** (floor_db / 10))[0][-1] + 1) / size
+
+
 def resample_pcm(channels, rate_in, rate_out, bits=16, loops=()):
     """Integer PCM channels (lists) resampled and clipped back to `bits`; `loops` as for `resample`."""
     lim = 2 ** (bits - 1)

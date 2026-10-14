@@ -154,6 +154,109 @@ class TestFilesAndFx(unittest.TestCase):
                 list(expand({"samples": {"x": {"file": "a.wav", "patch": "P"}}}))
 
 
+@unittest.skipIf(np is None, "numpy not installed")
+class TestPrintedFx(unittest.TestCase):
+    """The numpy effects of `fx:` (dsp.PRINTED), measured: where echoes land, what a curve does to a sine, where a
+    shift moves a partial, that an all-pass keeps the spectrum's level."""
+    R = 44100
+
+    def tone(self, hz=1000, ch=2):
+        t = np.arange(self.R) / self.R
+        return (0.5 * np.sin(2 * np.pi * hz * t)).astype(np.float32)[None].repeat(ch, 0)
+
+    def run_fx(self, item, x):
+        from vulturetracker.synth import fx_chain
+        y = fx_chain([item])(x, self.R)
+        self.assertTrue(np.isfinite(y).all())
+        self.assertEqual(y.shape, x.shape)
+        return y
+
+    def peak_hz(self, y):
+        return np.fft.rfftfreq(y.shape[-1], 1 / self.R)[1 + np.abs(np.fft.rfft(y[0]))[1:].argmax()]  # not DC
+
+    def test_multitap(self):
+        x = np.zeros((2, self.R), np.float32)
+        x[:, 0] = 1
+        y = self.run_fx({"multitap": {"bpm": 120, "step": "3/16", "taps": [[-6], [-12, None, -1]]}}, x)
+        d = int(round(0.375 * self.R))  # a dotted eighth at 120
+        self.assertAlmostEqual(float(y[0, d]), 10 ** (-6 / 20), places=3)
+        d2 = int(round(0.75 * self.R))
+        self.assertAlmostEqual(float(y[1, d2]), 0, places=3)               # the second tap panned hard left
+        self.assertAlmostEqual(float(y[0, d2]), np.sqrt(2) * 10 ** (-12 / 20), places=3)
+        y = self.run_fx({"multitap": {"bpm": 120, "step": "3/16", "count": 2, "pingpong": True, "lowpass_hz": 2000}}, x)
+        self.assertGreater(abs(y[1, d:d + 50]).max(), 10 * abs(y[0, d:d + 50]).max())  # the first tap right
+        out, _ = _post(np.eye(1, self.R // 10), {"fx": [{"multitap": {"bpm": 60, "step": "1/4", "count": 3}}],
+                                                 "fx_tail": 0.1, "trim": False}, self.R)
+        self.assertGreaterEqual(out.shape[1], 3 * self.R)                    # fx_tail stretched to the third tap
+
+    def test_waveshape_and_slew(self):
+        x = self.tone()
+        self.assertTrue(np.allclose(self.run_fx({"waveshape": {"curve": [[0, 0], [1, 1]]}}, x), x, atol=1e-6))
+        self.assertEqual(self.peak_hz(self.run_fx({"waveshape": {"shape": "rectify"}}, x)), 2000)  # full-wave: 2f
+        folded = self.run_fx({"waveshape": {"shape": "foldback", "drive_db": 12}}, x)
+        self.assertLessEqual(abs(folded).max(), 1.0 + 1e-6)
+        slow = self.run_fx({"slew": {"up_db": -40, "down_db": -40}}, x)
+        self.assertLessEqual(np.abs(np.diff(slow[0])).max(), 0.01 + 1e-6)
+        from vulturetracker.synth import fx_chain
+        for bad in ({"waveshape": {}}, {"waveshape": {"curve": [[0, 0], [0, 1]]}}, {"slew": {"shape": "x"}}):
+            with self.assertRaises(RecipeError):
+                fx_chain([bad])
+
+    def test_shift_stereo_dispersion(self):
+        x = self.tone()
+        self.assertEqual(self.peak_hz(self.run_fx({"shift": {"hz": 100}}, x)), 1100)
+        ring = np.abs(np.fft.rfft(self.run_fx({"shift": {"hz": 100, "ring": 1}}, x)[0]))
+        self.assertGreater(ring[900], 100 * ring[1000])                          # ring modulation: f -/+ 100
+        self.assertAlmostEqual(ring[900], ring[1100], delta=ring[900] * 0.01)
+        x2 = np.stack([x[0], np.roll(x[0], 300)])
+        mono = self.run_fx({"stereo": {"width": 0}}, x2)
+        self.assertTrue(np.allclose(mono[0], mono[1]))
+        haas = self.run_fx({"stereo": {"haas_ms": 10}}, x)
+        self.assertTrue(np.allclose(haas[1, 441:], x[1, :-441]))
+        self.assertTrue(np.allclose(self.run_fx({"stereo": {"swap": True}}, x2), x2[::-1]))
+        with self.assertRaises(ValueError):
+            from vulturetracker import dsp
+            dsp.stereo(x[:1], self.R)
+        click = np.zeros((1, self.R), np.float32)
+        click[0, 100] = 1
+        smeared = self.run_fx({"dispersion": {"stages": 128, "hz": 1000, "q": 0.7}}, click)
+        self.assertLess(abs(smeared).max(), 0.5)                                  # the click spread out in time
+        level = lambda y: np.abs(np.fft.rfft(y[0], 4 * self.R))[100:8000]        # noqa: E731
+        self.assertTrue(np.allclose(level(smeared), level(click), rtol=0.02))     # at every frequency's own level
+
+    def test_bandlimit_is_what_check_measures(self):
+        """bandlimit leaves a sample as wide as asked by check's own measure (resample.spectral_edge, -60 dB of the
+        loudest bin); white noise measures full band, and a short sample's abrupt ends do not widen it."""
+        from vulturetracker.resample import spectral_edge
+        noise = np.random.default_rng(0).uniform(-0.5, 0.5, (2, self.R)).astype(np.float32)
+        self.assertAlmostEqual(spectral_edge(noise) * self.R, self.R / 2, delta=30)
+        self.assertAlmostEqual(spectral_edge(self.run_fx({"bandlimit": {"hz": 9000}}, noise)) * self.R, 9000, delta=300)
+        self.assertAlmostEqual(spectral_edge(self.tone(1000)[:, :3000]) * self.R, 1000, delta=400)
+
+    def test_granular(self):
+        x = self.tone()
+        up = self.run_fx({"granular": {"pitch_st": 12, "seed": 3}}, x)
+        self.assertEqual(self.peak_hz(up), 2000)
+        again = self.run_fx({"granular": {"pitch_st": 12, "seed": 3, "jitter": 0}}, x)
+        self.assertTrue(np.array_equal(up, again))                               # the seed repeats the cloud
+        cloud = self.run_fx({"granular": {"jitter": 2, "spray_ms": 50, "seed": 1}}, x)
+        self.assertFalse(np.array_equal(cloud, up))
+
+    def test_order_matters(self):
+        """The dispatcher runs numpy and pedalboard effects in list order."""
+        try:
+            import pedalboard  # noqa: F401
+        except ImportError:
+            self.skipTest("pedalboard not installed")
+        x = self.tone(3000)
+        a = self.run_fx({"waveshape": {"shape": "rectify"}}, x)
+        from vulturetracker.synth import fx_chain
+        b = fx_chain([{"lowpass_filter": {"cutoff_frequency_hz": 1000}}, {"waveshape": {"shape": "rectify"}}])(x, self.R)
+        c = fx_chain([{"waveshape": {"shape": "rectify"}}, {"lowpass_filter": {"cutoff_frequency_hz": 1000}}])(x, self.R)
+        self.assertFalse(np.allclose(b, c, atol=1e-3))
+        self.assertEqual(self.peak_hz(a), 6000)
+
+
 class TestDx7(unittest.TestCase):
     def test_packed_voice_maps_to_dexed_parameters(self):
         from vulturetracker.synth import dx7_voice_names, dx7_voice_params

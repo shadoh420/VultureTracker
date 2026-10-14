@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .dsp import lowpass
+from .dsp import bandlimit
 from .resample import resample
 from .song import it_text
 
@@ -193,7 +193,7 @@ class Placeholders:
                 root = 12 * oc
                 x = pluck(440 * 2 ** ((root - 69) / 12), 2.5 if kind == "bass" else 2.0,
                           damping=0.998 if kind == "bass" else 0.996, bright=0.2 if kind == "bass" else 0.6, seed=oc)
-                x = lowpass(x[None], 44100, 9000)[0]  # 9 kHz wide: nine semitones up stays under 18 kHz
+                x = bandlimit(x[None], 44100, 9000)[0]  # 9 kHz wide: nine semitones up stays under 18 kHz
                 n = self.add_sample(f"{kind}_{note_name(root).replace('-', '').lower()}", x, root)
                 lo, hi = (0 if oc == 2 else root - 2), (119 if oc == 8 else root + 9)
                 keymap.append({"notes": f"{note_name(lo)}..{note_name(hi)}", "sample": n})

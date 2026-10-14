@@ -1,4 +1,5 @@
 """Song file (YAML) -> Module, with line-referenced validation errors."""
+import math
 import re
 import threading
 import unicodedata
@@ -224,7 +225,7 @@ def _numbered(ctx, m, where):
 
 MODULE_KEYS = ["title", "tempo", "speed", "global_volume", "mix_volume", "separation", "linear_slides",
                "old_effects", "compatible_gxx", "channels", "message", "sample_rate", "rows_per_beat", "rows_per_bar",
-               "plugins", "macros", "key"]
+               "plugins", "macros", "key", "ceiling"]
 KEY_RE = re.compile(r"([A-Ga-g])([#b]?)\s+(major|minor|ionian|dorian|phrygian|lydian|mixolydian|aeolian|locrian)", re.I)
 CHANNEL_KEYS = ["name", "pan", "volume", "muted", "plugin", "approved"]
 
@@ -329,6 +330,7 @@ def _module(ctx, m, mod):
             setattr(mod, key, fn())
         except _Bad:
             pass
+    mod.ceiling = _soft(lambda: _int(ctx, m, 'ceiling', 1000, 96000, 18000, where), 18000)
     beat = _soft(lambda: _int(ctx, m, 'rows_per_beat', 1, 255, 4, where), 4)
     bar = _soft(lambda: _int(ctx, m, 'rows_per_bar', 1, 255, 16, where), 16)
     mod.row_highlight = (beat, bar)
@@ -418,6 +420,7 @@ _WAVS = {}       # stamp -> the WAV as read (WavData, channels as arrays)
 _RESAMPLED = {}  # (stamp, rate, bits, loops) -> channels resampled to the module's sample_rate
 _DATA = {}       # (stamp, rate, loops, stereo, bits) -> the channels as the module stores them (Sample.source)
 _IMAGES = {}     # (Sample.source, playback rate) -> image_level (None: no image under 20 kHz)
+_EDGES = {}      # Sample.source -> spectral_edge, cycles per stored frame
 _UNSEEN = object()
 _PATTERNS = {}   # (name, data text, style, line, rows, channels) -> (rows of cells, line numbers): an edit changes one
 _MEMO_SIZE = 96  # entries per memo (patterns: 8 times as many)
@@ -502,6 +505,7 @@ def _sample(ctx, num, spec, line, base_dir):
     smp.filename = path.name[:12]
     stereo = _bool(ctx, m, "stereo", False, where)
     smp.bits = _enum(ctx, m, "bits", {8: 8, 16: 16}, wav.out_bits, where)
+    smp.rate = wav.rate
     smp.source = (stamp, stereo, smp.bits)
     smp.data = _DATA.get(smp.source)
     if smp.data is None:
@@ -783,9 +787,9 @@ def _pattern(ctx, name, spec, line, num_channels):
     return Pattern(str(name), grid), lines
 
 
-def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest):
+def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest, highest):
     """Cross-reference checks that need the whole module. `declared`: instrument (or, in sample
-    mode, sample) numbers defined in the song. `lowest` collects sample number -> (the lowest
+    mode, sample) numbers defined in the song. `lowest` and `highest` collect sample number -> (the lowest or highest
     note it plays, line, place) for `_check_images`."""
     insmode = mod.instruments is not None
     kind = "instrument" if insmode else "sample"
@@ -809,6 +813,8 @@ def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest):
                                        f"{last_ins[ch]:02d} '{ins.name}' keymap (plays silence)")
                 if smp and (smp not in lowest or play < lowest[smp][0]):
                     lowest[smp] = (play, line, at)
+                if smp and (smp not in highest or play > highest[smp][0]):
+                    highest[smp] = (play, line, at)
             letter = chr(ord("A") + cell.effect - 1) if cell.effect else ""
             if letter == "B" and cell.param >= len(mod.orders):
                 ctx.error(line, f"{at}: B{cell.param:02X} jumps to order {cell.param} but the order list has {len(mod.orders)} entries")
@@ -946,27 +952,29 @@ def compile_tree(tree, ctx, base_dir) -> Module:
     except ValueError as e:
         ctx.error(_line(tree, 'sections'), str(e))
 
-    lowest = {}
+    lowest, highest = {}, {}
     from .itwriter import PATTERN_BYTES, packed_size
     for pat, lines in zip(mod.patterns, pat_lines):
         _check_pattern_refs(ctx, mod, pat, lines, f"pattern '{pat.name}'",
-                            instrument_numbers if mod.instruments is not None else sample_numbers, lowest)
+                            instrument_numbers if mod.instruments is not None else sample_numbers, lowest, highest)
         size = packed_size(pat, len(mod.channels))
         if size > PATTERN_BYTES:
             ctx.error(_line(pats, pat.name), f"pattern '{pat.name}': {size} bytes of cell data; IT holds at most "
                                              f"{PATTERN_BYTES} per pattern (fewer rows, channels or filled cells)")
-    _check_images(ctx, mod, lowest)
+    _check_images(ctx, mod, lowest, highest)
     return mod
 
 
 IMAGE_LIMIT = -60   # dB: the loudest interpolation images a sample's lowest note may leave under 20 kHz
 
 
-def _check_images(ctx, mod, lowest):
+def _check_images(ctx, mod, lowest, highest):
     """Warn when a note plays a sample so far below its stored rate that the player's interpolation images reach the
-    audible band (resample.image_level): a bright sample stored at 44.1 kHz does from about four semitones down."""
+    audible band (resample.image_level): a bright sample stored at 44.1 kHz does from about four semitones down. And
+    when a note above the root lifts the sample's content over `module: ceiling` (AGENTS.md's rule: bandwidth times the
+    transposition ratio under about 18 kHz; resample.spectral_edge)."""
     try:
-        from .resample import image_level
+        from .resample import image_level, spectral_edge
     except ImportError:     # no numpy, nothing to measure with
         return
     # ponytail: the lowest note only; slides, vibrato and pitch envelopes that go lower are not checked
@@ -984,6 +992,24 @@ def _check_images(ctx, mod, lowest):
                            f"stored rate that its interpolation images reach {db:.0f} dB under 20 kHz (limit "
                            f"{IMAGE_LIMIT}); play it higher, add a lower multisample, or store it at a higher rate "
                            f"(module sample_rate: 88200)")
+    # ponytail: the highest note only; slides, vibrato, arpeggios and pitch envelopes that go higher are not checked
+    for num, (note, line, at) in sorted(highest.items()):
+        smp = mod.samples[num - 1] if num <= len(mod.samples) else None
+        rate = smp.c5_speed * 2 ** ((note - 60) / 12) if smp else 0
+        if not smp or not smp.data or rate <= (smp.rate or smp.c5_speed) * 1.0001:  # at or below its root
+            continue
+        edge = _EDGES.get(smp.source, _UNSEEN) if smp.source else _UNSEEN
+        if edge is _UNSEEN:
+            edge = spectral_edge(smp.data)
+            if smp.source:
+                _remember(_EDGES, smp.source, edge)
+        top = edge * rate if edge else 0
+        if top > mod.ceiling:
+            up = 12 * math.log2(rate / (smp.rate or smp.c5_speed))
+            ctx.warn(line, f"{at}: {notation.format_note(note)} plays sample {num:02d} '{smp.name}' {up:.0f} semitones "
+                           f"above its root, which lifts its content to {top / 1000:.1f} kHz, over the ceiling of "
+                           f"{mod.ceiling / 1000:g} kHz (module ceiling); play it lower, add a higher multisample, or "
+                           f"store it narrower (bandlimit or resample in its recipe's fx, or a lower sample_rate)")
 
 
 MAX_YAML_DEPTH = 100  # real songs nest six levels

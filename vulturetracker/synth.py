@@ -386,31 +386,67 @@ def load_files(files, rate, where):
     return out
 
 
+class FxChain(list):
+    """The `fx:` stages in list order, each called (x, rate) -> x: pedalboard plugins and dsp.PRINTED effects mixed.
+    `tail` is the padding (seconds) the printed effects need after the take."""
+    tail = 0.0
+
+    def __call__(self, x, rate):
+        import numpy as np
+        for stage in self:
+            x = np.asarray(stage(x, rate), dtype=np.float32)
+        return x
+
+
+class _Printed:
+    """One dsp.PRINTED effect with its parameters."""
+
+    def __init__(self, name, fn, params):
+        self.name, self.fn, self.params = name, fn, params
+
+    def __call__(self, x, rate):
+        try:
+            return self.fn(x, rate, **self.params)
+        except ValueError as e:  # what only the take shows (a stereo effect on a mono: true take)
+            raise RecipeError(str(e) if str(e).startswith(f"{self.name}:") else f"{self.name}: {e}")
+
+    def __repr__(self):
+        return f"<{self.name} {self.params}>"
+
+
 def fx_chain(fx, where="fx"):
-    """`fx:` list -> pedalboard.Pedalboard. Items are an effect name or {name: {parameter: value}}; names are
-    pedalboard's effect classes in any case, with or without underscores (highpass_filter = HighpassFilter)."""
+    """`fx:` list -> FxChain. Items are an effect name or {name: {parameter: value}}: one of dsp.PRINTED (numpy:
+    multitap, waveshape, slew, shift, stereo, dispersion, granular), or pedalboard's effect classes in any case, with or
+    without underscores (highpass_filter = HighpassFilter). They run in the list's order."""
     if not fx:  # nothing to print: no pedalboard needed (a numpy-only source renders without it)
         return lambda x, rate: x
-    import pedalboard
-    effects = {n.lower(): getattr(pedalboard, n) for n in dir(pedalboard)
-               if isinstance(getattr(pedalboard, n), type) and issubclass(getattr(pedalboard, n), pedalboard.Plugin)
-               and not n.startswith("_") and n not in ("Plugin", "Pedalboard", "Chain", "Mix", "PluginContainer",
-                                                       "ExternalPlugin", "VST3Plugin", "AudioUnitPlugin",
-                                                       "IIRFilter")}  # IIRFilter: the shelves' base, not constructible
-    # pybind11 enums by parameter name (Resample's and GSMFullRateCompressor's quality, LadderFilter's mode), so a
-    # YAML string reaches them: quality: ZeroOrderHold, mode: HPF24.
-    enums = {a.lower(): getattr(c, a) for c in effects.values() for a in dir(c)
-             if isinstance(getattr(c, a), type) and hasattr(getattr(c, a), "__members__")}
-    chain = []
+    import inspect
+    from . import dsp
+    chain, effects, enums = FxChain(), None, None
     for item in fx or []:
         if not isinstance(item, str) and not (isinstance(item, dict) and len(item) == 1):
             raise RecipeError(f"{where}: each fx item is one effect, e.g. {{reverb: {{room_size: 0.7}}}}; got {item}")
         name, params = (item, {}) if isinstance(item, str) else (next(iter(item)), next(iter(item.values())) or {})
-        cls = effects.get(str(name).lower().replace("_", ""))  # Reverb, reverb, HighpassFilter, highpass_filter
-        if cls is None:
-            raise RecipeError(f"{where}: unknown effect '{name}' (available: {', '.join(sorted(effects))})")
         if not isinstance(params, dict):
             raise RecipeError(f"{where}: {name}: parameters are a mapping, e.g. {{{name}: {{...}}}}; got {params}")
+        if str(name).lower() in dsp.PRINTED:
+            fn, tail = dsp.PRINTED[str(name).lower()]
+            try:
+                inspect.signature(fn).bind(None, None, **params)
+                stage = _Printed(str(name).lower(), fn, dict(params))
+                stage(_probe(), 44100)  # the values checked now, not after a slow render
+                chain.tail += tail(**params) if tail else 0.0
+            except (TypeError, ValueError) as e:
+                said = str(e).startswith(f"{str(name).lower()}:")  # dsp's own messages name the effect
+                raise RecipeError(f"{where}: {e}" if said else f"{where}: {name}: {e}")
+            chain.append(stage)
+            continue
+        if effects is None:
+            effects, enums = _pedalboard_effects()
+        cls = effects.get(str(name).lower().replace("_", ""))  # Reverb, reverb, HighpassFilter, highpass_filter
+        if cls is None:
+            raise RecipeError(f"{where}: unknown effect '{name}' (available: "
+                              f"{', '.join(sorted(dsp.PRINTED) + sorted(effects))})")
         params = dict(params)
         for k, v in params.items():
             if isinstance(v, str) and str(k).lower() in enums:
@@ -422,7 +458,27 @@ def fx_chain(fx, where="fx"):
             chain.append(cls(**params))
         except (TypeError, ValueError, RuntimeError) as e:
             raise RecipeError(f"{where}: {name}: {e}")
-    return pedalboard.Pedalboard(chain)
+    return chain
+
+
+def _probe():
+    import numpy as np
+    return np.zeros((2, 256), np.float32)
+
+
+def _pedalboard_effects():
+    """(pedalboard's effect classes by lower-case name, its pybind11 enums by parameter name)."""
+    import pedalboard
+    effects = {n.lower(): getattr(pedalboard, n) for n in dir(pedalboard)
+               if isinstance(getattr(pedalboard, n), type) and issubclass(getattr(pedalboard, n), pedalboard.Plugin)
+               and not n.startswith("_") and n not in ("Plugin", "Pedalboard", "Chain", "Mix", "PluginContainer",
+                                                       "ExternalPlugin", "VST3Plugin", "AudioUnitPlugin",
+                                                       "IIRFilter")}  # IIRFilter: the shelves' base, not constructible
+    # pybind11 enums by parameter name (Resample's and GSMFullRateCompressor's quality, LadderFilter's mode), so a
+    # YAML string reaches them: quality: ZeroOrderHold, mode: HPF24.
+    enums = {a.lower(): getattr(c, a) for c in effects.values() for a in dir(c)
+             if isinstance(getattr(c, a), type) and hasattr(getattr(c, a), "__members__")}
+    return effects, enums
 
 
 def _post(audio, spec, rate, log=lambda s: None):
@@ -432,11 +488,12 @@ def _post(audio, spec, rate, log=lambda s: None):
         # Effects run on the take peak-normalized to -1 dBFS (so bitcrush and distortion act the same at any
         # recording level) plus fx_tail seconds of silence, so reverb and delay tails ring out; trimming below
         # then cuts whatever stays silent.
-        pad = int(float(spec.get("fx_tail", 1.0)) * rate)
+        chain = fx_chain(spec["fx"])
+        pad = int(max(float(spec.get("fx_tail", 1.0)), chain.tail + 0.1) * rate)  # the last echo tap fits
         x = np.pad(x, ((0, 0), (0, pad))) * (0.891 / max(np.abs(x).max(), 1e-9))
         if x.shape[0] == 1 and not spec.get("mono", False):
             x = np.repeat(x, 2, axis=0)  # stereo effects (reverb width, chorus) need two channels
-        x = fx_chain(spec["fx"])(x.astype(np.float32), rate).astype(np.float64)
+        x = chain(x.astype(np.float32), rate).astype(np.float64)
     if spec.get("mono", False):
         x = x.mean(axis=0, keepdims=True)
     if spec.get("reverse", False):

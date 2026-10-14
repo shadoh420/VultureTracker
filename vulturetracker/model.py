@@ -50,6 +50,7 @@ class Sample:
     vibrato_depth: int = 0         # 0..64
     vibrato_rate: int = 0          # 0..255 (sweep)
     filename: str = ""
+    rate: int = field(default=0, compare=False)  # frames per second `data` is stored at (0: unknown; c5_speed is its root)
     source: tuple | None = field(default=None, compare=False, repr=False)  # the memo key of `data` (file stamp and
     #                                                          conversion) when compiled from a WAV: measurements memoise on it
 
@@ -103,6 +104,7 @@ class Channel:
 class Module:
     title: str = ""
     key: str = ""                  # the song's key, e.g. "A minor" (for people and agents; not stored in the .it)
+    ceiling: int = 18000           # Hz: how high a sample played above its root may reach (`check` only; not in the .it)
     speed: int = 6
     tempo: int = 125
     global_volume: int = 128       # 0..128

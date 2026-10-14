@@ -21,6 +21,19 @@ What changed in each VultureTracker release (the GitHub release notes, without t
   third shade, clipped at the shorter pattern and never editable.
 - GitHub: a bug report form (version, steps, the app's log, the song if shareable) and a "Reporting a problem"
   section in README.
+- `check` warns when a note plays a sample so far above its root that its content (the top of its spectrum, within
+  60 dB of its loudest band) passes `module: ceiling` (18 kHz by default), the upward half of the anti-aliasing rule.
+  It finds two such notes in demo2 (Iron Relay) and one in demo3 (Undertow); the demos are unchanged.
+- Recipes: `fx:` runs its items in list order and mixes pedalboard's effects with eight of VultureTracker's own
+  (numpy): `bandlimit` (below), `multitap` (tempo-synced echoes, each tap with its gain, low-pass and pan, or
+  ping-pong), `waveshape` (a curve or tanh, sine, foldback, rectify, half_rectify, soft), `slew`, `shift`
+  (frequency shifter and ring modulator), `stereo` (matrix, width, Haas delay, swap), `dispersion` (all-pass smear) and `granular`. `fx_tail`
+  grows to fit their tails; a bad parameter is reported before any rendering.
+- Samples tab: GRANULAR in EFFECTS (grain, density, pitch, jitter, spray), also the agent's `process_sample`.
+- Tests: a `../samples/x.wav` path through Collect Samples, a hard-driven render's frames, the reader's NaN refusal.
+- Recipes: `bandlimit: {hz}` in `fx:`, the compiler's own steep sinc low-pass, so a sample measures as wide as asked.
+- Import: the Guitar Pro and MIDI placeholder plucks are band-limited at 9 kHz by that sinc (a 24 dB per octave
+  low-pass before), so their keymaps meet the ceiling check they were laid out for.
 
 ## 1.5.2 (2026-10-10)
 

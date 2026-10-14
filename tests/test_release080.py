@@ -147,6 +147,38 @@ class TestRelease080(unittest.TestCase):
             song.write_bytes(fixtures.SONG.replace('file: a.wav', 'file: bad.wav').encode())
             self.assertIn('bad.wav: the float samples hold NaN or infinite values', api.check(song)['errors'][0])
 
+    def test_review_regressions(self):
+        """From the LMMS review (scratch/lmms-review): a NaN WAV is refused by the reader itself, a sample beside the
+        song's folder (../samples/x.wav) survives Collect Samples, and a song driven hard renders finite, bounded frames."""
+        import numpy as np
+        from vulturetracker.resample import decimate, lowpass_fir
+        from vulturetracker.wavload import WavError, read_wav
+        float_wav(self.dir / 'nan.wav', [0.0, float('nan'), 0.5])
+        with self.assertRaisesRegex(WavError, 'NaN or infinite'):
+            read_wav(self.dir / 'nan.wav')
+        (self.dir / 'proj' / 'song').mkdir(parents=True)
+        (self.dir / 'proj' / 'samples').mkdir()
+        shutil.copy2(self.dir / 'a.wav', self.dir / 'proj' / 'samples' / 'x.wav')
+        shutil.copy2(self.dir / 'b.wav', self.dir / 'proj' / 'song' / 'b.wav')
+        (self.dir / 'proj' / 'song' / 'song.yaml').write_bytes(
+            fixtures.SONG.replace('file: a.wav', 'file: ../samples/x.wav').encode())
+        st = gui.State(self.dir / 'proj' / 'song' / 'song.yaml')
+        self.states.append(st)
+        with tempfile.TemporaryDirectory() as dest:
+            collect(st, Path(dest) / 'copy')
+            copied = Path(dest) / 'copy' / 'song.yaml'
+            self.assertIn('file: "samples/x.wav"', copied.read_text())   # inside the copy, no ../ left
+            self.assertTrue(api.check(copied)['ok'])
+        loud = fixtures.SONG.replace('module: {title: T,', 'module: {title: T, mix_volume: 128, global_volume: 128,')
+        loud = loud.replace('... .. ... ... | C-5 02 ... ...', 'C-5 01 v64 ... | C-5 02 v64 ...')
+        (self.dir / 'loud.yaml').write_bytes(loud.encode())
+        api.render(self.dir / 'loud.yaml', self.dir / 'loud.wav', base_dir=self.dir)
+        frames = np.array(read_wav(self.dir / 'loud.wav').channels)
+        self.assertGreater(np.abs(frames).max(), 1000)
+        self.assertFalse((frames == -32768).all(axis=0).any())     # a NaN cast to int16 would read as -32768
+        square = np.tile(np.array([[32767, 32767], [-32768, -32768]], np.int16), (4096, 1))
+        self.assertTrue(np.isfinite(decimate(square, 2, lowpass_fir(0.225))).all())
+
     def test_names_made_from_non_ascii_files_and_tracks_compile(self):
         shutil.copy2(self.dir / 'a.wav', self.dir / 'Böse Bass.wav')
         song = self.dir / 'song.yaml'

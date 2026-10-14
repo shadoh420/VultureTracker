@@ -104,7 +104,8 @@ def gain(x, db):
 
 
 def _spectral(x, response):
-    """`x` (channels x frames) filtered by the real magnitude `response(freq in cycles per frame)`, zero-phase."""
+    """`x` (channels x frames) filtered by `response(freq in cycles per frame)`: a real magnitude filters zero-phase,
+    a complex one (dispersion's all-passes) also delays each frequency by its own amount."""
     n = x.shape[-1]
     size = 1 << int(np.ceil(np.log2(max(2, 2 * n))))  # padded: the filter's ringing does not wrap around
     f = np.fft.rfftfreq(size)
@@ -489,3 +490,244 @@ def measure_mix(x, rate):
     db = lambda v: round(20 * float(np.log10(v)), 2) if v > 0 else None  # noqa: E731
     return {"lufs": lufs, "true_peak_dbtp": db(tp), "peak_dbfs": db(sp), "correlation": corr,
             "seconds": round(x.shape[1] / rate, 2)}
+
+
+# ---------------------------------------------------------------- printed effects for a recipe's `fx:` (synth.py)
+# Each takes the padded take (channels x frames, peak -1 dBFS) and the rate, and returns the same shape. `tail(**p)` is
+# the seconds of padding an effect needs after the take, so `fx_tail` covers it. Ideas from LMMS's MultitapEcho,
+# WaveShaper, SlewDistortion, FrequencyShifter, StereoEnhancer/StereoMatrix, Dispersion and GranularPitchShifter,
+# reimplemented from the algorithms; no LMMS code.
+
+def _fraction(v, what):
+    """3/16, '3/16', 0.1875 -> 0.1875."""
+    if isinstance(v, str) and "/" in v:
+        a, _, b = v.partition("/")
+        v = float(a) / float(b)
+    v = float(v)
+    if not 0 < v <= 16:
+        raise ValueError(f"{what} is a note length in whole notes, e.g. 3/16 (a dotted eighth), got {v}")
+    return v
+
+
+def _pan_gains(pan):
+    """Equal-power gains (left, right) for pan -1 (left) to 1 (right), 1 each in the centre."""
+    a = (min(1.0, max(-1.0, float(pan))) + 1) * np.pi / 4
+    return np.sqrt(2) * np.cos(a), np.sqrt(2) * np.sin(a)
+
+
+def _one_pole(f, hz, rate, times=1):
+    """A one-pole low-pass's magnitude at f (cycles per frame), `times` in series; hz None or 0: flat."""
+    return 1.0 if not hz else (1 / np.sqrt(1 + (f * rate / float(hz)) ** 2)) ** times
+
+
+def _taps(bpm, step, taps, count, decay_db_per_tap, lowpass_hz, pingpong):
+    if taps is None:
+        if not count:
+            raise ValueError("multitap: give taps: [[gain_db, lowpass_hz, pan], ...] or count:")
+        taps = [[decay_db_per_tap * (k + 1), lowpass_hz, (1 if k % 2 == 0 else -1) if pingpong else 0]
+                for k in range(int(count))]
+    if not 1 <= len(taps) <= 32:
+        raise ValueError("multitap: 1 to 32 taps")
+    out = []
+    for t in taps:
+        t = list(t) + [None, 0][len(t) - 1:] if isinstance(t, (list, tuple)) and 1 <= len(t) <= 3 else None
+        if t is None:
+            raise ValueError("multitap: each tap is [gain_db] or [gain_db, lowpass_hz] or [gain_db, lowpass_hz, pan]")
+        out.append((float(t[0]), t[1] and float(t[1]), float(t[2] or 0)))
+    return out
+
+
+def multitap(x, rate, bpm, step, taps=None, count=None, decay_db_per_tap=-6.0, lowpass_hz=None, pingpong=False):
+    """Echoes every `step` (a note length in whole notes at `bpm` quarter notes a minute): tap k at (k + 1) steps with
+    its own gain, one-pole low-pass and pan (`taps`), or `count` taps each `decay_db_per_tap` quieter and low-passed
+    once more than the one before, alternating right and left with `pingpong`. The dry take stays."""
+    if not 20 <= float(bpm) <= 999:
+        raise ValueError("multitap: bpm is 20 to 999")
+    gap = _fraction(step, "multitap: step") * 4 * 60 / float(bpm)
+    plan = _taps(bpm, step, taps, count, decay_db_per_tap, lowpass_hz, pingpong)
+    n, out = x.shape[1], x.astype(np.float64)
+    size = 1 << int(np.ceil(np.log2(max(2, 2 * n))))
+    X, f = np.fft.rfft(x, size, axis=-1), np.fft.rfftfreq(size)
+    for k, (db, hz, pan) in enumerate(plan):
+        d = int(round((k + 1) * gap * rate))
+        if d >= n:
+            break
+        times = k + 1 if taps is None else 1
+        echo = np.fft.irfft(X * _one_pole(f, hz, rate, times), size, axis=-1)[:, :n - d] * 10 ** (db / 20)
+        if x.shape[0] == 2 and pan:
+            gl, gr = _pan_gains(pan)
+            echo = echo * np.array([[gl], [gr]])
+        out[:, d:] += echo
+    return out.astype(x.dtype)
+
+
+def _multitap_tail(bpm, step, taps=None, count=None, **_):
+    return _fraction(step, "multitap: step") * 4 * 60 / float(bpm) * (len(taps) if taps is not None else int(count or 0))
+
+
+SHAPES = {
+    "tanh": np.tanh,
+    "sine": lambda u: np.sin(np.pi / 2 * np.clip(u, -1, 1)),
+    "foldback": lambda u: 1 - np.abs(np.mod(u + 1, 4) - 2),
+    "rectify": lambda u: np.minimum(np.abs(u), 1),
+    "half_rectify": lambda u: np.clip(u, 0, 1),
+    "soft": lambda u: u / (1 + np.abs(u)),
+}
+
+
+def waveshape(x, rate, curve=None, shape=None, drive_db=0.0, mix=1.0):
+    """Each sample through a transfer curve: `curve` [[in, out], ...] from 0 to 1 (linear between points, the sign
+    kept), or a named `shape` (SHAPES), after `drive_db` of gain; `mix` of it over the dry take."""
+    if (curve is None) == (shape is None):
+        raise ValueError(f"waveshape: give curve: [[0, 0], [0.3, 0.6], [1, 1]] or shape: one of {', '.join(SHAPES)}")
+    u = x.astype(np.float64) * 10 ** (float(drive_db) / 20)
+    if shape is not None:
+        if shape not in SHAPES:
+            raise ValueError(f"waveshape: shape is one of {', '.join(SHAPES)}, got {shape!r}")
+        y = SHAPES[shape](u)
+    else:
+        pts = np.asarray(curve, float)
+        if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 2 or np.any(np.diff(pts[:, 0]) <= 0) \
+                or pts[0, 0] < 0 or pts[-1, 0] > 1:
+            raise ValueError("waveshape: curve is two or more [in, out] points with rising inputs from 0 to 1")
+        y = np.sign(u) * np.interp(np.minimum(np.abs(u), 1), pts[:, 0], pts[:, 1])
+    m = float(mix)
+    return (m * y + (1 - m) * x).astype(x.dtype)
+
+
+def slew(x, rate, up_db=0.0, down_db=0.0, drive_db=0.0, shape=None):
+    """Each sample may rise at most 10^(up_db/20) and fall at most 10^(down_db/20) from the one before (full scale 1:
+    -20 dB allows 0.1 a frame), the soft corners of a slow amplifier; then `drive_db` and an optional SHAPES `shape`."""
+    if shape is not None and shape not in SHAPES:
+        raise ValueError(f"slew: shape is one of {', '.join(SHAPES)}, got {shape!r}")
+    up, down = 10 ** (float(up_db) / 20), 10 ** (float(down_db) / 20)
+    y = np.empty(x.shape, np.float64)
+    for c, ch in enumerate(x.astype(np.float64)):
+        prev, row = 0.0, y[c]
+        for i, v in enumerate(ch.tolist()):  # ponytail: a Python loop, a few seconds of sample per second; numba if slow
+            d = v - prev
+            prev += up if d > up else -down if d < -down else d
+            row[i] = prev
+    y *= 10 ** (float(drive_db) / 20)
+    return (SHAPES[shape](y) if shape else y).astype(x.dtype)
+
+
+def _analytic(x, size):
+    """The analytic signal (Hilbert transform by FFT): the negative frequencies zeroed, the positive doubled."""
+    X = np.fft.fft(x, size, axis=-1)
+    h = np.zeros(size)
+    h[0] = 1
+    h[1:(size + 1) // 2] = 2
+    if size % 2 == 0:
+        h[size // 2] = 1
+    return np.fft.ifft(X * h, axis=-1)
+
+
+def shift(x, rate, hz, mix=1.0, ring=0.0):
+    """Every partial moved by `hz` (a frequency shifter: inharmonic, unlike a pitch shift; negative moves down), with
+    `ring` (0 to 1) of ring modulation by a `hz` sine crossfaded in, and `mix` of the result over the dry take."""
+    n = x.shape[1]
+    t = np.arange(n) / rate
+    carrier = np.exp(2j * np.pi * float(hz) * t)
+    shifted = np.real(_analytic(x.astype(np.float64), 1 << int(np.ceil(np.log2(max(2, 2 * n)))))[:, :n] * carrier)
+    r, m = float(ring), float(mix)
+    if not (0 <= r <= 1 and 0 <= m <= 1):
+        raise ValueError("shift: ring and mix are 0 to 1")
+    wet = (1 - r) * shifted + r * x * np.cos(2 * np.pi * float(hz) * t)
+    return (m * wet + (1 - m) * x).astype(x.dtype)
+
+
+def stereo(x, rate, width=1.0, haas_ms=0.0, swap=False, matrix=None):
+    """A stereo take reshaped: `matrix` [[ll, lr], [rl, rr]] (out = matrix x in), then the side scaled by `width`
+    (0 mono, 1 as is, 2 twice as wide), then the right channel delayed `haas_ms` (0 to 30), then `swap`."""
+    if x.shape[0] != 2:
+        raise ValueError("stereo: the take is mono here (mono: true or a mono source with mono kept); it needs two channels")
+    y = x.astype(np.float64)
+    if matrix is not None:
+        mt = np.asarray(matrix, float)
+        if mt.shape != (2, 2):
+            raise ValueError("stereo: matrix is [[ll, lr], [rl, rr]]")
+        y = mt @ y
+    w = float(width)
+    if not 0 <= w <= 4:
+        raise ValueError("stereo: width is 0 to 4")
+    mid, side = (y[0] + y[1]) / 2, (y[0] - y[1]) / 2 * w
+    y = np.stack([mid + side, mid - side])
+    d = int(round(float(haas_ms) * rate / 1000))
+    if not 0 <= float(haas_ms) <= 30:
+        raise ValueError("stereo: haas_ms is 0 to 30")
+    if d:
+        y[1] = np.concatenate([np.zeros(d), y[1]])[:y.shape[1]]
+    return (y[::-1] if swap else y).astype(x.dtype)
+
+
+def dispersion(x, rate, stages=8, hz=1000.0, q=0.7):
+    """`stages` second-order all-passes (the RBJ cookbook's) at `hz` in series: every frequency kept at its level and
+    delayed by its own amount, so a transient becomes a chirp. Applied as one complex response (_spectral)."""
+    stages, hz, q = int(stages), float(hz), float(q)
+    if not (1 <= stages <= 256 and 20 <= hz < rate / 2 and 0.05 <= q <= 20):
+        raise ValueError("dispersion: stages 1 to 256, hz 20 to below half the rate, q 0.05 to 20")
+    w0 = 2 * np.pi * hz / rate
+    alpha = np.sin(w0) / (2 * q)
+    b = np.array([1 - alpha, -2 * np.cos(w0), 1 + alpha])
+    a = b[::-1]
+
+    def response(f):
+        z = np.exp(-2j * np.pi * f)
+        return ((b[0] + b[1] * z + b[2] * z * z) / (a[0] + a[1] * z + a[2] * z * z)) ** stages
+    return _spectral(x, response)
+
+
+def _dispersion_tail(stages=8, hz=1000.0, q=0.7, **_):
+    return int(stages) * 2 * float(q) / (np.pi * float(hz)) * 4  # four times the group delay at hz
+
+
+GRAIN_SHAPES = {"hann": np.hanning, "triangle": np.bartlett, "rect": np.ones}
+
+
+def granular(x, rate, grain_ms=80.0, density=4.0, pitch_st=0.0, jitter=0.0, spray_ms=0.0, shape="hann", seed=0):
+    """A cloud of grains: every grain_ms / density a grain of `grain_ms` read from near the same time (`spray_ms`
+    either side at random), played `pitch_st` semitones up or down (each `jitter` semitones more or less at random),
+    shaped by a `shape` window and overlap-added; the length stays. Linear interpolation between frames: low-pass
+    what a pitch up would lift over the ceiling first. `seed` makes the cloud repeatable."""
+    g = int(float(grain_ms) * rate / 1000)
+    if not (5 <= float(grain_ms) <= 1000 and 1 <= float(density) <= 32 and -24 <= float(pitch_st) <= 24
+            and 0 <= float(jitter) <= 24 and 0 <= float(spray_ms) <= 2000):
+        raise ValueError("granular: grain_ms 5 to 1000, density 1 to 32, pitch_st -24 to 24, jitter 0 to 24, "
+                         "spray_ms 0 to 2000")
+    if shape not in GRAIN_SHAPES:
+        raise ValueError(f"granular: shape is one of {', '.join(GRAIN_SHAPES)}")
+    n = x.shape[1]
+    win = GRAIN_SHAPES[shape](g) if g > 1 else np.ones(1)
+    hop = max(1, int(g / float(density)))
+    rng = np.random.default_rng(int(seed))
+    src = x.astype(np.float64)
+    out, norm = np.zeros((x.shape[0], n + g)), np.zeros(n + g)
+    spray = float(spray_ms) * rate / 1000
+    for t in range(0, n, hop):
+        ratio = 2 ** ((float(pitch_st) + rng.uniform(-1, 1) * float(jitter)) / 12)
+        pos = min(max(0.0, t + rng.uniform(-1, 1) * spray), n - 1) + np.arange(g) * ratio
+        ok = pos < n - 1
+        i = pos.astype(int).clip(0, n - 2)
+        frac = pos - i
+        grain = (src[:, i] * (1 - frac) + src[:, i + 1] * frac) * (win * ok)
+        out[:, t:t + g] += grain
+        norm[t:t + g] += win
+    return (out[:, :n] / np.maximum(norm[:n], 1e-3 * win.max())).astype(x.dtype)
+
+
+def bandlimit(x, rate, hz):
+    """Nothing above `hz` left: the compiler's own linear-phase sinc (resample.lowpass_fir, 1023 taps, a transition
+    about 0.5 % of the rate wide, the stop band under -74 dB), steep enough that `check`'s upward ceiling measures the
+    sample as `hz` wide. pedalboard's filters and resample leave more above their cutoff than that."""
+    from .resample import fir_filter, lowpass_fir
+    if not 100 <= float(hz) < rate / 2:
+        raise ValueError("bandlimit: hz is 100 to below half the rate")
+    h = lowpass_fir(float(hz) / rate)
+    return np.stack([fir_filter(ch, h) for ch in x]).astype(x.dtype)
+
+
+# name -> (function, tail in seconds from its parameters or None)
+PRINTED = {"bandlimit": (bandlimit, None), "multitap": (multitap, _multitap_tail), "waveshape": (waveshape, None), "slew": (slew, None),
+           "shift": (shift, None), "stereo": (stereo, lambda haas_ms=0, **_: float(haas_ms) / 1000),
+           "dispersion": (dispersion, _dispersion_tail), "granular": (granular, None)}

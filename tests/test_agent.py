@@ -575,7 +575,8 @@ class AgentTests(unittest.TestCase):
                      {"action": "lowpass", "params": {"hz": -1}},
                      {"action": "trim", "start": True}, {"action": "auto_loop", "frames": 1},
                      {"action": "gain", "params": {"unrecognized": 1}},
-                     {"action": "denoise", "params": {"na": 0, "nb": 999999}}]:
+                     {"action": "denoise", "params": {"na": 0, "nb": 999999}},
+                     {"action": "granular", "params": {"grain_ms": 1}}, {"action": "granular", "params": {"shape": 1}}]:
             self.assertIn("error", agent.run(st, "process_sample", {"number": 1, **args}))
             self.assertEqual(self.read(), before)
             self.assertEqual(set(self.dir.glob("*.wav")), files)

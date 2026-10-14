@@ -85,6 +85,7 @@ a letter.
 | `sample_rate` | 4000–192000 | none | resample every sample to this rate when compiling (band-limited; loop points and `c5_speed` follow, and each loop is resampled as it plays, so its wrap stays seamless). Samples stored at the playback rate neither image nor alias in the player near their root; a bright sample played more than about three semitones below it still images under 20 kHz, and `check` warns when those images come within 60 dB of it (88200 clears them). The file grows accordingly. Needs numpy. |
 | `plugins` | mapping | none | mix plugins: OpenMPT's built-in DMO effects (section 3.1) |
 | `macros` | mapping | none | SFx macros `SF0`..`SFF` of the embedded MIDI configuration, e.g. `SF1: F0F080z` (section 3.1) |
+| `ceiling` | 1000–96000 | 18000 | Hz: how high `check` lets a sample's content reach when a note plays it above its root (the top of its spectrum, where it comes within 60 dB of its loudest band, times the transposition ratio); set it to the drums' own top to keep every sound under them. For `check` only, not stored in the .it. Added after 1.5.2: a song that sets it says so with `requires:` |
 | `key` | text | none | the song's key, e.g. `A minor`, `F# major`, `D dorian` (major, minor and the seven modes): for people and agents, not stored in the .it |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`

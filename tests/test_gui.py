@@ -1470,8 +1470,11 @@ class TestGui(unittest.TestCase):
         gap = np.concatenate([x[:, :rate // 4], np.zeros((1, rate), np.float32), x[:, :rate // 4]], axis=1)
         y, _ = g.process_wav(gap, "truncate", 0, gap.shape[1], {"loop": None}, params={"db": -50, "min_ms": 200, "keep_ms": 100}, rate=rate)
         self.assertAlmostEqual(y.shape[1] / rate, 0.6, delta=0.011)  # the second of silence shortened to 0.1 s
+        y, lp = g.process_wav(x, "granular", 0, rate, loops, params={"pitch_st": 12, "jitter": 0}, rate=rate)
+        self.assertEqual((y.shape, lp), (x.shape, loops))             # a cloud an octave up, the length kept
+        self.assertAlmostEqual(f0(y), 880, delta=15)                  # grains overlap with their phases unaligned
         for action, params in (("gain", {"db": 99}), ("eq", {"hz": 1000, "db": 6, "q": 0}), ("stretch", {"percent": 10}),
-                               ("truncate", {"db": -90})):
+                               ("truncate", {"db": -90}), ("granular", {"density": 99})):
             with self.assertRaises(ValueError, msg=action):
                 g.process_wav(x, action, 0, rate, loops, params=params, rate=rate)
         # through the song: a new WAV beside the song, the slot pointed at it, undone in one step

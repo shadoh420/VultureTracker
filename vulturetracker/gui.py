@@ -780,7 +780,7 @@ def entry_loops(entry, w):
 
 
 SAMPLE_ACTIONS = ("trim", "fade_in", "fade_out", "normalize", "reverse", "dc", "crossfade", "gain", "lowpass", "highpass",
-                  "eq", "loudness", "pitch", "stretch", "truncate", "denoise", "spectral_mask")
+                  "eq", "loudness", "pitch", "stretch", "truncate", "denoise", "spectral_mask", "granular")
 
 
 def _splice(x, a, b, seg, loops):
@@ -811,8 +811,9 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
     reverse of the whole sample. The effects (dsp.py; `params` their settings, `rate` the WAV's) work on the span too:
     gain (db), lowpass / highpass (hz, slope 12 or 24), eq (hz, db, q), loudness (db: the RMS target), pitch
     (semitones, the length kept), stretch (percent, the pitch kept), denoise (the noise learned from frames na..nb of
-    `x`, turned down by up to db, sens its threshold over the noise) and truncate (silences under db dBFS longer than
-    min_ms shortened to keep_ms); the last two change the length, and the loops move with the audio. Crossfade: the last `frames` of the loop fade (equal power) into the audio just before
+    `x`, turned down by up to db, sens its threshold over the noise), truncate (silences under db dBFS longer than
+    min_ms shortened to keep_ms) and granular (grain_ms, density, pitch_st, jitter, spray_ms, seed: dsp.granular, the
+    length kept); stretch and truncate change the length, and the loops move with the audio. Crossfade: the last `frames` of the loop fade (equal power) into the audio just before
     its start, so the wrap is seamless (the synth recipes' crossfade). Returns (x, loops)."""
     import numpy as np
     x, loops, n = x.copy(), dict(loops), x.shape[1]
@@ -847,7 +848,7 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
             raise ValueError("crossfade needs audio before the loop start: move the loop start later")
         t = np.linspace(0, np.pi / 2, xf, endpoint=False, dtype=np.float32)
         x[:, e - xf:e] = x[:, e - xf:e] * np.cos(t) + x[:, s - xf:s] * np.sin(t)
-    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch", "denoise", "spectral_mask"):
+    elif action in ("gain", "lowpass", "highpass", "eq", "loudness", "pitch", "denoise", "spectral_mask", "granular"):
         from . import dsp
         q = params or {}
 
@@ -874,6 +875,9 @@ def process_wav(x, action, a, b, loops, frames=0, params=None, rate=44100):
             from . import spectral
             pic = paint_args(q)
             y = spectral.spectral_mask(seg, rate, pic["amp"], pic["fmin"], pic["fmax"], pic["scale"], pic["range_db"])
+        elif action == "granular":
+            y = dsp.granular(seg, rate, num("grain_ms", 5, 1000, 80), num("density", 1, 32, 4), num("pitch_st", -24, 24, 0),
+                             num("jitter", 0, 24, 0), num("spray_ms", 0, 2000, 0), seed=int(num("seed", 0, 2 ** 31, 0)))
         elif action == "denoise":
             na, nb = int(num("na", 0, n)), int(num("nb", 0, n))
             if nb - na < 2048:

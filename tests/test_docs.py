@@ -18,9 +18,10 @@ def read(name):
 
 
 def section(text, start, end):
-    """The text from the line holding `start` to the next line holding `end`."""
+    """The text from `start` to the next `end` (or to the end of the text)."""
     i = text.index(start)
-    return text[i:text.index(end, i + len(start))]
+    j = text.find(end, i + len(start))
+    return text[i:j if j >= 0 else None]
 
 
 class TestDocs(unittest.TestCase):
@@ -53,6 +54,11 @@ class TestDocs(unittest.TestCase):
         text = section(read("GUIDE.md"), "**Agents: the AGENT panel and MCP.**", "\n## ")
         self.assertGreater(len(agent.TOOLS), 50)
         self.assertEqual([n for n in sorted(agent.TOOLS) if f"`{n}`" not in text], [])
+
+    def test_every_printed_effect_is_in_sampling(self):
+        from vulturetracker import dsp
+        table = section(read("SAMPLING.md"), "## Printed effects", "\n## ")
+        self.assertEqual([n for n in dsp.PRINTED if f"| `{n}` |" not in table], [])
 
     def test_ci_runs_every_test_module(self):
         """tests.yml: one run per ref (a newer push cancels the older), pip cached, and every tests/test_*.py in the

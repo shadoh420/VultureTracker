@@ -326,6 +326,14 @@ class TestPage(unittest.TestCase):
                     page.click("#t-smp span.btn:text-is('STRETCH')")
                     page.wait_for_function(f"W.data && W.data.frames === {2 * frames} && W.a === 0 && W.b === {2 * frames}",
                                            timeout=20000)
+                    page.fill("#fx-gpitch", "12")  # GRANULAR: a new WAV of the same length, the slot pointed at it
+                    page.click("#t-smp span.btn:text-is('GRANULAR')")
+                    for _ in range(400):
+                        if "granular" in str(st.song["samples"][4].get("file")):
+                            break
+                        time.sleep(0.05)
+                    self.assertIn("granular", str(st.song["samples"][4].get("file")))
+                    page.wait_for_function(f"!EDQ.n && W.data && W.data.frames === {2 * frames}", timeout=20000)
                     browser.close()
                 self.assertEqual(errors, [])
             finally:

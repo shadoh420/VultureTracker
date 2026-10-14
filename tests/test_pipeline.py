@@ -368,6 +368,43 @@ class TestValidation(Base):
         self.assertFalse(warned("C-4 01", ", sample_rate: 88200"))    # stored at twice the rate: above 20 kHz again
         self.assertFalse(warned("C-3 02"))                            # a 2.2 kHz tone two octaves down: images too weak
 
+    def test_pitch_up_past_the_ceiling_warns(self):
+        """AGENTS.md's upward rule: content times the transposition ratio stays under `module: ceiling` (18 kHz). A
+        full-band sample warns as soon as it plays above its root; one 4.4 kHz wide may play two octaves up, not three."""
+        import random
+        rng = random.Random(1)
+        write_wav(self.dir / "noise.wav", RATE, [[rng.randint(-20000, 20000) for _ in range(RATE // 2)]])
+        tones = [sum(v) // 3 for v in zip(sine(1000), sine(3000), sine(4300))]
+        write_wav(self.dir / "narrow.wav", RATE, [tones])
+        write_wav(self.dir / "low.wav", 11025, [sine(1000)[:11025]])
+
+        def warned(cell, module=""):
+            text = f"""
+                module: {{channels: 1{module}}}
+                samples: {{1: {{file: noise.wav}}, 2: {{file: narrow.wav}}, 3: {{file: low.wav, base_note: A-5}}}}
+                patterns: {{p: "{cell}\n"}}
+                orders: [p]
+            """
+            return [w for w in load_song_text(textwrap.dedent(text), self.dir)[1] if "over the ceiling" in w]
+
+        self.assertEqual(warned("C-5 01"), [])                         # at its root: the sample as it is
+        self.assertIn("2 semitones above its root", warned("D-5 01")[0])
+        self.assertEqual(warned("C-7 02"), [])                         # 4.3 kHz x 4 = 17.2 kHz
+        self.assertTrue(warned("C-8 02"))                              # x 8 = 34 kHz
+        self.assertTrue(warned("C-7 02", ", ceiling: 16000"))          # a lower ceiling of the song's own
+        self.assertEqual(warned("A-6 03"), [])                         # a 1 kHz tone stored at 11 kHz, an octave up
+        with self.assertRaises(SongError):
+            warned("C-5 01", ", ceiling: 10")
+
+    def test_image_level_grows_with_the_drop(self):
+        from vulturetracker.resample import image_level
+        import random
+        rng = random.Random(2)
+        noise = [[rng.uniform(-1, 1) for _ in range(8192)]]
+        levels = [image_level(noise, 44100 * 2 ** (-s / 12)) for s in range(4, 37)]
+        self.assertTrue(all(lv is not None for lv in levels))
+        self.assertTrue(all(b >= a - 0.5 for a, b in zip(levels, levels[1:])), levels)  # further down: louder images
+
     def test_c5_speed_follows_resampling(self):
         # c5_speed is given for the WAV as written: resampling 22050 -> 44100 doubles it, so the pitch stays
         write_wav(self.dir / "half.wav", 22050, [sine(441)])
@@ -540,7 +577,11 @@ class TestDemo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             res = api.build(ROOT / "demo2" / "iron_relay.yaml", Path(tmp) / "iron_relay.it")
         self.assertEqual(res["mismatches"], [])
-        self.assertEqual(res["warnings"], [])
+        # the upward ceiling check's two findings in the demo (a sound change is the owner's call): the lead, 8.4 kHz
+        # wide, at A-6, and the arp phrase, 19.6 kHz wide, two semitones up; nothing else
+        self.assertEqual([w.split("warning: ")[1].rsplit(" '", 1)[0] for w in res["warnings"]],
+                         ["pattern 'b2', row 96, channel 15: A-6 plays sample 13",
+                          "pattern 'intro', row 64, channel 8: E-4 plays sample 14"])
         self.assertEqual(res["libopenmpt"]["channels"], 16)
 
 

@@ -337,8 +337,11 @@ source untouched), points the slot at it and keeps the loops with the audio (a t
 sample mirrors them); undo points the slot back, and the WAVs stay on disk. EFFECTS → NEW WAV work the same way, on the
 selection or the whole sample: GAIN (dB), LOW-PASS and HIGH-PASS (Hz, 12 or 24 dB per octave), EQ (one bell band: Hz,
 dB, Q), LOUDNESS (the RMS of what sounds brought to a dBFS target, never past full scale), PITCH (semitones at the same
-length), STRETCH (percent of the length at the same pitch; loops move with the audio) and TRUNCATE SILENCE (every
-silence under the dBFS level and longer than MIN shortened to KEEP). LEARN NOISE takes the selection as a stretch where
+length), STRETCH (percent of the length at the same pitch; loops move with the audio), TRUNCATE SILENCE (every
+silence under the dBFS level and longer than MIN shortened to KEEP) and GRANULAR (a cloud of grains at the same length:
+every GRAIN / DENSITY a grain of GRAIN ms read from near the same time, SPRAY ms either side at random, PITCH semitones
+up or down, each JITTER semitones more or less at random; a recipe's `fx: granular` is the same effect with a `seed`
+and a window `shape`). LEARN NOISE takes the selection as a stretch where
 only the noise sounds (hiss, hum, the room; at least 50 ms) and DENOISE then turns down every frequency of the selection
 (else the whole sample) that is not well above that noise, by up to REDUCE dB (SENS: how far over the noise a sound must
 be to stay, 2 = 6 dB); the gain is smoothed so what is left does not warble, the same for both channels, and the phase
@@ -555,7 +558,7 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   References in unused patterns and instrument maps also block deletion.
 - **Process samples** with `inspect_sample` first: it reports source-frame dimensions, usage and optional loop/slice
   suggestions. `process_sample` exposes trim, fades, normalize, reverse, DC removal, loop crossfade/auto-loop, gain,
-  low/high-pass, EQ, RMS loudness, pitch, stretch, tail truncation and denoise. Frame ends are exclusive. Processing
+  low/high-pass, EQ, RMS loudness, pitch, stretch, tail truncation, denoise and granular. Frame ends are exclusive. Processing
   writes a new WAV and preserves the original; exceeding full scale causes reported attenuation. Level processing
   requires the owner's request. Approved sounds and voices used by approved material are protected (conservatively,
   any approved pattern protects all played voices because notes can carry into it).
@@ -955,7 +958,8 @@ python tests/fetch_fixtures.py   # optional: downloads OpenMPT's IT test modules
   is removed instead of folding into the audible range. Two things still create false frequencies inside a module:
   playing a sample far above what its content allows (its bandwidth times the transposition ratio should stay under
   about 18 kHz: a sample 4.5 kHz wide may play two octaves up, one 9 kHz wide one octave; render multisamples with
-  `notes:` and a keymap for the rest), playing a bright sample more than about three semitones below its root (`check`
+  `notes:` and a keymap for the rest; `check` warns when a sample's highest note lifts the top of its spectrum, where
+  it comes within 60 dB of its loudest band, over `module: ceiling`, 18 kHz by default), playing a bright sample more than about three semitones below its root (`check`
   warns when the images of its lowest note come within 60 dB), and low-rate samples interpolated by the player (the module setting
   `sample_rate: 44100` resamples every sample to the playback rate at compile time, band-limited, which removes that
   imaging in every player at the cost of file size). `vulturetracker/resample.py` holds the resampler.
