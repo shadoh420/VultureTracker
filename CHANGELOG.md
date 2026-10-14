@@ -2,7 +2,7 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.7.0 (2026-10-14)
 
 The October 2026 external audit's findings, fixed (code-signing the exe stays open):
 

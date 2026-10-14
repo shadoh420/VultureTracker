@@ -1,2 +1,2 @@
 """VultureTracker. `__version__` is the one place the version is set (pyproject.toml reads it from here)."""
-__version__ = "1.6.0"
+__version__ = "1.7.0"
