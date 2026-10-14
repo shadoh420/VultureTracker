@@ -3,38 +3,44 @@
 <img src="assets/vulturetracker.png" width="88" align="right" alt="">
 
 Tracker music as text, with a tracker built on it. A song is a readable YAML file that compiles to an Impulse Tracker
-module (`.it`), checked by libopenmpt and playable in OpenMPT, Schism Tracker or anything built on libopenmpt. The app
-edits that same file in place: every change is checked by compiling the whole song before it is written, and can be
-undone. People, scripts and AIs edit songs the same way.
+module (`.it`), checked by libopenmpt and playable in OpenMPT or Schism Tracker. The app edits that same file in place;
+every change compiles before it is written and can be undone, so people, scripts and AI agents edit songs the same way.
 
 ```
-song.yaml ──build──▶ song.it ──render──▶ song.wav / .mp3 / .ogg / .flac
+song.yaml ──build──▶ song.it ──render──▶ .wav / .mp3 / .ogg / .flac / .mid
 ```
 
-<p align="center"><img src="assets/screenshot-pattern.png" width="900" alt="Pattern tab: the pattern editor with the live bar, the edit tools and the composition helpers"></p>
+<p align="center"><img src="assets/screenshot-pattern.png" width="900" alt="Pattern tab: the pattern editor with coloured channels, two automation lanes drawn dimmed, and the selection and composition tools"></p>
 <p align="center"><img src="assets/screenshot-tryout.png" width="900" alt="Tryout tab: candidate sounds rendered inside the song and measured against the current sample"></p>
-<p align="center"><img src="assets/screenshot-samples.png" width="900" alt="Samples tab: a waveform with its loop and a selection, the edits and effects that write new WAVs, and the sample's properties"></p>
+<p align="center"><img src="assets/screenshot-spectrum.png" width="900" alt="Spectrum tab: the song's spectrogram with each order's short-term loudness and stereo correlation underneath"></p>
 
 ## What it does
 
-- **A tracker on a text file:** patterns, instruments with envelopes, samples and the order list, with OpenMPT's keys,
-  MIDI input and a live engine (libopenmpt in the page) that plays every edit where it is.
+- **A tracker on a text file:** patterns, instruments and the order list with OpenMPT's keys and behaviour, MIDI input,
+  and a live engine that plays every edit. Automation lanes, microtuning (Scala `.scl`/`.kbm`), arpeggios, strums,
+  grooves and OpenMPT's interpolate, grow and shrink.
 - **Choosing sounds in context:** the Tryout renders candidate samples inside the song and measures them; a mixer,
-  listening notes, and a sample library searched by timbre.
-- **Making sounds:** a sample editor with effects and slicing, recording from an audio interface, Faust code, pictures
-  painted into sound, and sample recipes rendered from free synths ([SAMPLING.md](SAMPLING.md)).
-- **In and out:** imports IT, XM, S3M, MOD, Guitar Pro 3-5 and MIDI files and WAV, FLAC, AIFF, OGG and MP3 samples;
-  exports WAV, MP3, OGG and FLAC, stems and game loops.
-- **Files that stay right:** undo history and checkpoints kept with the song, every song from 0.6 on opening unchanged
-  in every 1.x ([SONG_FORMAT.md](SONG_FORMAT.md)), and a command line that does what the app does.
+  listening notes, and a sample library mapped by timbre.
+- **Making sounds:** a sample editor with effects and slicing, recording from an audio interface, Faust, painted
+  spectra, and recipes rendered from free synths or built-in sources (chip waves, sfxr, DrumSynth, PADsynth)
+  ([SAMPLING.md](SAMPLING.md)).
+- **Measuring, not guessing:** loudness (LUFS, true peak, LRA) per order, a spectrogram against a reference recording,
+  and checks that warn before a sample aliases.
+- **In and out:** imports IT, XM, S3M, MOD, Guitar Pro 3-5, MIDI, SoundFont 2 and GUS patches and common audio formats
+  (and Hydrogen drum kits as sample sources); exports WAV (up to 96 kHz, 24-bit or float), MP3, OGG, FLAC, MIDI, stems
+  and game loops, with optional loudness normalising.
+- **Agents:** an AGENT panel and an MCP server give an AI the same tools as the page, with the owner's approved
+  material protected.
+- **Files that stay right:** undo history and checkpoints kept with the song, and every song from 0.6 on opening
+  unchanged in every 1.x ([SONG_FORMAT.md](SONG_FORMAT.md)).
 
 ## Install
 
 **Windows:** download `vulturetracker-win64.zip` from the [latest release](https://github.com/shadoh420/VultureTracker/releases/latest),
-unzip it anywhere and run `vulturetracker.exe`. The start screen lists two demo songs.
+unzip it and run `vulturetracker.exe`.
 
-**From source** (Python 3.10+; every push runs the tests on Windows with Python 3.14 and on Linux with 3.10 and 3.14,
-macOS is untested; outside Windows install libopenmpt, e.g. `apt install libopenmpt0t64`):
+**From source** (Python 3.10+; tested on Windows and Linux; outside Windows install libopenmpt, e.g.
+`apt install libopenmpt0t64`):
 
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
@@ -43,67 +49,50 @@ pip install -e ".[all]"
 python -m vulturetracker gui demo2/iron_relay.yaml
 ```
 
-[GUIDE.md](GUIDE.md#setup) says what each extra adds and what stays Windows-only.
-
-## Privacy and security
-
-The app is a local HTTP server bound to 127.0.0.1 only. It has no telemetry and makes no network call except the
-downloads you start (Surge XT, Dexed, faustwasm, verified against pinned SHA-256 digests) and the AGENT panel's chat,
-which sends the open song's text to the provider you chose (the Anthropic API, a local OpenAI-compatible server, or
-Claude Code on your own login). Its settings and any API key stay in your user folder (`%APPDATA%\VultureTracker` on
-Windows), never beside a song. [SECURITY.md](SECURITY.md) says how to report a vulnerability privately.
-
-**Verify the download:** each release's body lists the SHA-256 of `vulturetracker.exe`, `ffmpeg.exe` and
-`vulturetracker-win64.zip`. On Windows run `certutil -hashfile vulturetracker.exe SHA256`, elsewhere
-`sha256sum vulturetracker.exe`, and compare with the release page. The exe is not code-signed.
-
 ## Use
 
 ```
 python -m vulturetracker gui song.yaml                     # the app (no song: open, new song, import)
 python -m vulturetracker check song.yaml                   # validate; errors show file:line
 python -m vulturetracker build song.yaml --render song.wav # compile, verify with libopenmpt, render
-python -m vulturetracker import some.xm -o some.yaml       # a module, a Guitar Pro tab or a MIDI file -> song file
+python -m vulturetracker import some.xm -o some.yaml       # a module, tab, MIDI file or SoundFont -> song file
 python -m vulturetracker --help                            # every command
 ```
 
+## Privacy and security
+
+The app is a local server on 127.0.0.1 with no telemetry. It goes online only for downloads you start (checked against
+pinned SHA-256 digests) and for the AGENT panel, which sends the open song to the provider you chose. Settings and API
+keys stay in your user folder. Each release lists the SHA-256 of its files (`certutil -hashfile vulturetracker.exe
+SHA256` on Windows); the exe is not code-signed. [SECURITY.md](SECURITY.md) explains private vulnerability reports.
+
 ## Reporting a problem
 
-Open an issue with the bug form (https://github.com/shadoh420/VultureTracker/issues/new/choose): the version, the steps,
-and the app's log, `%APPDATA%\VultureTracker\vulturetracker.log` on Windows (`~/Library/Application
-Support/VultureTracker` on macOS, `~/.config/VultureTracker` elsewhere); attach the song if you can share it. A
-security problem goes through private reporting instead ([SECURITY.md](SECURITY.md)).
+Use the [bug form](https://github.com/shadoh420/VultureTracker/issues/new/choose) with the version, the steps and the
+app's log, `%APPDATA%\VultureTracker\vulturetracker.log` on Windows (`~/Library/Application Support/VultureTracker` on
+macOS, `~/.config/VultureTracker` elsewhere), and the song if you can share it. Security problems go through
+[SECURITY.md](SECURITY.md) instead.
 
 ## Docs
 
-- [GUIDE.md](GUIDE.md): the app tab by tab, the command line, the demos, samples, tests
-- [SONG_FORMAT.md](SONG_FORMAT.md): the complete song format
-- [SAMPLING.md](SAMPLING.md): making samples with Surge XT, Dexed, OB-Xd, Faust and CC0 recordings
-- [CHANGELOG.md](CHANGELOG.md): what changed in each release
-- [PROVENANCE.md](PROVENANCE.md): what the demos derive from reference material
-- [AGENTS.md](AGENTS.md): orientation for people and AI agents working on the repository
+[GUIDE.md](GUIDE.md) (the app and the command line) · [SONG_FORMAT.md](SONG_FORMAT.md) (the song format) ·
+[SAMPLING.md](SAMPLING.md) (making samples) · [CHANGELOG.md](CHANGELOG.md) · [PROVENANCE.md](PROVENANCE.md) (what the
+demos take from references) · [AGENTS.md](AGENTS.md) (for people and AI agents working on the code)
 
 ## Credits and licenses
 
-VultureTracker is MIT licensed ([LICENSE](LICENSE)) and stands on other people's work:
+VultureTracker's code is MIT licensed ([LICENSE](LICENSE)). It builds on:
 
-- [libopenmpt](https://lib.openmpt.org) by the OpenMPT project (BSD-3-Clause) verifies and renders every module. Its
-  Windows build in `vendor/` and inside the exe also carries mpg123 (LGPL-2.1, shipped as a separate DLL you can
-  replace), libogg and libvorbis from Xiph.Org (BSD-3-Clause) and zlib. License texts are in `vendor/Licenses/`.
-- The live engine is libopenmpt's official WebAssembly build (BSD-3-Clause and BSL-1.0, with minimp3, miniz and
-  stb_vorbis compiled in), in `vulturetracker/web/` with its license texts.
-- The exe bundles Python (PSF), pywebview (BSD-3-Clause) with Microsoft's WebView2 SDK loader, pythonnet (MIT),
-  NumPy (BSD-3-Clause), PyYAML (MIT), mido (MIT), sounddevice with PortAudio (MIT), PyGuitarPro (LGPL-3.0) and [pedalboard](https://github.com/spotify/pedalboard) (GPL-3.0,
-  the synth host), packed by PyInstaller; because of pedalboard the exe as a whole is distributed under the GPL-3.0,
-  while this repository's code stays MIT ([THIRD_PARTY.md](THIRD_PARTY.md)). [FFmpeg](https://ffmpeg.org) (GPL-3.0) ships beside it as a separate program for the
-  encoded exports.
-- The demo samples credit their sources in `samples/demo3/ATTRIBUTION.md` and `samples/demo4/ATTRIBUTION.md`: CC0
-  recordings by Karoryfer Samples and Versilian Studios, renders from Surge XT, Dexed and OB-Xd (GPL-3 programs run
-  separately; the audio they render is not GPL), and MusicRadar's royalty-free packs, which are not redistributed.
-- demo4 has UT99's Foregone Destruction (Epic Games; composed by Michiel van den Bos) as its stylistic reference for
-  grid and layer plan. No audio, melody or sample data from it is included; [PROVENANCE.md](PROVENANCE.md) says exactly
-  what was taken and what was changed.
-- The Impulse Tracker writer follows [ITTECH.TXT](https://github.com/schismtracker/schismtracker/wiki/ITTECH.TXT)
-  and was checked against OpenMPT's loader.
+- [libopenmpt](https://lib.openmpt.org) (BSD-3-Clause), which verifies and renders every module, natively and as its
+  WebAssembly build in the page. The Windows build carries mpg123 (LGPL-2.1, a separate replaceable DLL), libogg and
+  libvorbis (BSD-3-Clause) and zlib; license texts are in `vendor/Licenses/` and `vulturetracker/web/`.
+- The exe bundles Python, pywebview, pythonnet, NumPy, PyYAML, mido, sounddevice with PortAudio, PyGuitarPro (LGPL-3.0)
+  and [pedalboard](https://github.com/spotify/pedalboard) (GPL-3.0). Because of pedalboard the exe as a whole is GPL-3.0,
+  while this repository stays MIT. [FFmpeg](https://ffmpeg.org) (GPL-3.0) ships beside it as a separate program.
+- The demo samples credit their sources in `samples/*/ATTRIBUTION.md` (CC0 recordings by Karoryfer Samples and
+  Versilian Studios; renders from Surge XT, Dexed and OB-Xd). demo4 takes UT99's Foregone Destruction (Epic Games,
+  composed by Michiel van den Bos) as a stylistic reference only; [PROVENANCE.md](PROVENANCE.md) says what was taken.
+- The IT writer follows [ITTECH.TXT](https://github.com/schismtracker/schismtracker/wiki/ITTECH.TXT) and OpenMPT's
+  loader.
 
-Versions and where each license text lives: [THIRD_PARTY.md](THIRD_PARTY.md).
+Every component, version and license text: [THIRD_PARTY.md](THIRD_PARTY.md).
