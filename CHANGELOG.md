@@ -2,7 +2,7 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.6.0 (2026-10-14)
 
 - Recipes: `fx:` parameters that take a name reach pedalboard's enums (`resample: {quality: ZeroOrderHold}`, the
   aliasing lo-fi; `ladder_filter: {mode: HPF24}`); SAMPLING.md lists all 24 effects `fx:` accepts.
