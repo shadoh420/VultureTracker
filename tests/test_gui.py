@@ -697,6 +697,33 @@ class TestGui(unittest.TestCase):
         st.undo()
         self.assertEqual((self.dir / "song.yaml").read_bytes().decode("utf-8"), SONG)
 
+    def test_undo_steps_have_names_and_times(self):
+        from vulturetracker.history import validate_step
+        st = self.state()
+        body = {"patterns": [{"pattern": 0, "cells": [{}, {}]}, {"pattern": 1, "cells": [{}]}]}
+        self.assertEqual(gui._step_label("edit", body), "edit pattern 0, 1: 3 cells")
+        self.assertEqual(gui._step_label("songedit", {"ops": [{"op": "pattern_new"}, {"op": "orders"}, {"op": "orders"}]}),
+                         "song: pattern new, orders")
+        self.assertEqual(gui._step_label("applymix", {}), "WRITE MIX")
+        self.assertIsInstance(gui._step_label("edit", {"patterns": "junk", "cells": 5}), str)  # a bad body never raises
+        before = time.time()
+        try:
+            gui.LABEL.name = gui._step_label("edit", {"pattern": 0, "cells": [{}]})
+            st.edit_patterns([(0, [{"row": 1, "ch": 0, "cell": "E-5 01 ... ..."}])])
+            gui.LABEL.name = "undo"
+            st.undo()  # the redo step keeps the name and time of the edit it redoes
+        finally:
+            gui.LABEL.name = None
+        step = st.future[-1]
+        self.assertEqual(step["name"], "edit pattern 0: 1 cell")
+        self.assertGreaterEqual(step["time"], round(before, 1))
+        self.assertEqual(st.snapshot()["history_steps"]["redo"], [{"name": step["name"], "time": step["time"]}])
+        self.assertEqual(gui.State(self.dir / "song.yaml").future[-1]["name"], step["name"])  # saved beside the song
+        with self.assertRaises(ValueError):
+            validate_step(dict(step, name=7))
+        with self.assertRaises(ValueError):
+            validate_step(dict(step, time="noon"))
+
 
     def test_undo_keeps_the_newest_steps(self):
         st = self.state()

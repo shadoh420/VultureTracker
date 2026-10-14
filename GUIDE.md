@@ -62,7 +62,13 @@ python -m vulturetracker sections song.yaml save Intro 0 4              # SONG's
 python -m vulturetracker checkpoint song.yaml save "Before the mix"     # PROJECT's checkpoints: save, diff, restore, delete
 python -m vulturetracker phrase song.yaml capture --order 2 --rows 0-15 --channels 3 # PHRASES: then set, diff, render, accept
 python -m vulturetracker undo song.yaml                                # the app's undo (redo; trim-history --keep N)
+python -m vulturetracker synth samples.yaml --only 'bass*'             # render a sample recipe (SAMPLING.md)
+python -m vulturetracker surge-params cutoff                           # Surge XT parameter names for a recipe's params:
 ```
+
+The other commands: `measure` (loudness, true peak and correlation of a song), `audition` (patches or files matching a
+glob into one WAV), `mcp` (the agent tools over MCP, below) and `gui` (the app). `python -m vulturetracker <command>
+--help` lists each one's options.
 
 `pip install -e .` also installs a `vulturetracker` command.
 
@@ -170,7 +176,8 @@ note. On the Faust tab they play the Faust code instead (see there). In edit mod
 enters its note at the cursor with the INS instrument, and with VEL→VOL its velocity as the volume column (v01-v64),
 then the cursor moves STEP rows. While the live engine plays the pattern on show, a key records instead: its note goes
 into the cursor's channel at the row playing when it went down, and the cursor follows (the piano keys on the
-computer keyboard record the same way). With CHORD checked, a note arriving within 60 ms of the one before joins its chord (timed from each
+computer keyboard record the same way); with QUANT above 0 it goes to the nearest multiple of QUANT rows instead
+(Following OpenMPT, below). With CHORD checked, a note arriving within 60 ms of the one before joins its chord (timed from each
 note, so a rolled chord stays one), and the chord is captured together, lowest first, across consecutive channels starting at the
 cursor, the computer's piano keys too; with Shift held (OpenMPT's chord modifier) every key struck joins the chord,
 written when Shift is let go, CHORD checked or not. The chord is one undo step and advances STEP only once. If it
@@ -187,7 +194,12 @@ OpenMPT's source. The piano keys go by their place on the keyboard, not the lett
 IT-style keys do (the bottom-left letter key is C on QWERTY, QWERTZ and AZERTY alike), and so do note cut (`1`),
 note-off (`` ` ``) and fade (Shift+`` ` `` or `\`). CHORD joins a note struck within
 60 ms of the one before (OpenMPT's Auto Chord Wait Time, 60 ms by default, timed from each note), and Shift is the chord
-modifier. COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
+modifier. QUANT in the live bar is OpenMPT's record quantize (`recordQuantizeRows`, View_pat.cpp `QuantizeRow`): a note
+or chord recorded while the song plays goes to the nearest multiple of QUANT rows, a tie to the later one; past the
+pattern's end it goes to row 0 of the next order's pattern (of the same pattern while F6 loops it, as with OpenMPT's
+pattern loop; the last row when no order follows); and where the cell
+already holds a note it goes one row on (OpenMPT's grace note), voice by voice. Each undo step is named for the operation it undoes, as OpenMPT's `PrepareUndo` descriptions name
+its Edit menu's Undo entries (the names are the app's own words). COPY and PASTE use OpenMPT's clipboard rows; an MPTM parameter-control event (PC), which an IT module cannot
 hold, pastes as `Zxx` with its value scaled to 00-7F and the rest of the cell empty, as OpenMPT converts it. The MIDI
 import keeps at most 16 ticks a row, as OpenMPT's does, and the last of several tempos on one tick. A FLAC, AIFF, OGG
 or MP3 sample keeps what OpenMPT's loaders keep from it (its loops; a FLAC's root note), above. The mix plugins
@@ -208,7 +220,9 @@ out garbled there), keeps the file's time signatures (OpenMPT imports every file
 section where OpenMPT names a pattern, and bends no drums (their keys are kit pieces here); its bends, pedal and the
 module import's name character sets are OpenMPT's (above); a sample's root note (a
 WAV's or a FLAC's `smpl` unity note) becomes the slot's `base_note` when the sample is put in a slot, where OpenMPT
-keeps it only as a label and plays every file at its own rate on C-5. The piano roll (ROLL) is VultureTracker's own:
+keeps it only as a label and plays every file at its own rate on C-5. QUANT rounds by the row playing, not its tick
+(the live engine reports rows), so a note struck late in a row rounds as if struck at its start and QUANT 1 changes
+nothing. The piano roll (ROLL) is VultureTracker's own:
 OpenMPT has none. Any other difference from OpenMPT is a bug.
 
 **Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
@@ -500,13 +514,19 @@ up, rows across, bar and beat lines from the song's rows per beat and bar), the 
 with EDIT on, a click places a note with the INS instrument (dragging right gives it a length, ending in a note-off on
 a free row), dragging a note up or down transposes it, a right-click deletes it (its effect stays), Shift+click writes
 a note-off, and a click in the lane sets the note's volume. SCALE LOCK puts a click on the nearest note of the song's
-key and shades the pitches outside it.
+key and shades the pitches outside it. GHOST FROM draws another pattern's notes, all its channels, under this one in a
+third shade (amber), so a verse's bass shows under the chorus lead: the previous or the next order's pattern, or any
+pattern by name. They are never editable; where the two patterns differ in length the drawing stops at the shorter
+(the title says so), and a named pattern that is renamed or deleted falls back to the previous order's.
 
 **Agents: the AGENT panel and MCP.** An agent works on the song open in the app through one set of tools
-(`vulturetracker/agent.py`): read the song and a pattern, read the owner's selection (the rows and channels selected in
-the Pattern tab, with what sounds there), write cells, set the order list, add a pattern, set the tempo, speed, title
-or key, set the rack's plugins, measure (below), cue a place in the app and play it, offer WAVs as tryout candidates,
-read the listening notes, check the key, undo and redo. It can also:
+(`vulturetracker/agent.py`): read the song and a pattern (`song_overview`, `read_pattern`) and what the compiler
+says of it (`check`), read the owner's selection
+(`get_selection`: the rows and channels selected in the Pattern tab, with what sounds there), write cells
+(`write_cells`), set the order list (`set_orders`), add a pattern (`new_pattern`), set the tempo, speed, title or key
+(`set_module`), set the rack's plugins (`set_plugins`, with `describe_effects` listing their parameters), measure
+(`measure`, below), cue a place in the app and play it (`cue`), offer WAVs as tryout candidates (`offer_samples`), read
+the listening notes (`read_notes`), check the key (`key_check`), `undo` and `redo`. It can also:
 
 - **Add an empty channel** with `create_channel` (optional name, up to 64 channels). The returned channel number is
   ready for `write_cells`; existing notes and routing stay in place.
@@ -621,8 +641,10 @@ read the listening notes, check the key, undo and redo. It can also:
   requires a new cue. Requests need the same window acknowledgement as other transport tools.
 - **Inspect detailed history** with `inspect_history`: paginated undo/redo snapshots, nearest first, stable content
   IDs, saved versions, bounded current-to-snapshot YAML/settings diffs and asset/approval restore checks. Supply the
-  listed entry ID for details so a shifted stack cannot silently select another snapshot. History has no reliable
-  operation names or timestamps. Inspection never restores or trims it.
+  listed entry ID for details so a shifted stack cannot silently select another snapshot. Each step carries the
+  name of the operation it undoes (redoes, on the redo stack) and when it was done, as OpenMPT's undo names its steps
+  ("edit pattern 3: 4 cells", "song: orders", "WRITE MIX", "agent: write_cells"); steps written before names existed
+  show none. Inspection never restores or trims it.
 - **Use PROJECT checkpoints** with `checkpoint`: list, save, diff, restore and delete. Names are never overwritten.
   Restore is undoable and refuses changes to current approved material or owner-controlled levels/pan; the owner can
   restore such a checkpoint in PROJECT. Existing sample fingerprint checks still apply.

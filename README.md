@@ -67,6 +67,13 @@ python -m vulturetracker import some.xm -o some.yaml       # a module, a Guitar 
 python -m vulturetracker --help                            # every command
 ```
 
+## Reporting a problem
+
+Open an issue with the bug form (https://github.com/shadoh420/VultureTracker/issues/new/choose): the version, the steps,
+and the app's log, `%APPDATA%\VultureTracker\vulturetracker.log` on Windows (`~/Library/Application
+Support/VultureTracker` on macOS, `~/.config/VultureTracker` elsewhere); attach the song if you can share it. A
+security problem goes through private reporting instead ([SECURITY.md](SECURITY.md)).
+
 ## Docs
 
 - [GUIDE.md](GUIDE.md): the app tab by tab, the command line, the demos, samples, tests

@@ -2,6 +2,26 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- Recipes: `fx:` parameters that take a name reach pedalboard's enums (`resample: {quality: ZeroOrderHold}`, the
+  aliasing lo-fi; `ladder_filter: {mode: HPF24}`); SAMPLING.md lists all 24 effects `fx:` accepts.
+- Undo history: every step carries the name of the operation it undoes and its time ("edit pattern 3: 4 cells",
+  "song: orders", "WRITE MIX", "agent: write_cells", "command: checkpoint restore"), as OpenMPT names its undo steps;
+  PROJECT lists the nearest twelve of each stack and `inspect_history` returns them. Schema stays 2; older steps show
+  none.
+- Tests: `tests/test_docs.py` checks that SONG_FORMAT's effect and volume tables match what the compiler accepts, that
+  every command is in README or GUIDE, that every agent tool is named in GUIDE's agent section, and that CI and
+  AGENTS.md run every test module. GUIDE now names the nine tools and two commands it had left out.
+- CI: a newer push cancels the run still going for the same branch, and pip downloads are cached.
+- Pattern tab: QUANT in the live bar is OpenMPT's record quantize: a note or chord recorded while the song plays goes to
+  the nearest multiple of QUANT rows (past the pattern's end into the next order's pattern, a note already there pushes
+  it a row on, as OpenMPT does). Kept between launches; 0 is off.
+- Piano roll: GHOST FROM draws the previous or next order's pattern, or any pattern by name, under the one shown in a
+  third shade, clipped at the shorter pattern and never editable.
+- GitHub: a bug report form (version, steps, the app's log, the song if shareable) and a "Reporting a problem"
+  section in README.
+
 ## 1.5.2 (2026-10-10)
 
 - Agent chat loads tool definitions on demand through a small tool directory, reducing the upfront catalog from

@@ -74,6 +74,8 @@ def _song_tool(args):
     from .fileio import unlock_file
     st, lock = _open_song(args.song, args.cmd in HISTORY or args.action in WRITES[args.cmd], args.wait)
     seen = len(st.notices)
+    from .history import LABEL
+    LABEL.name = f"command: {args.cmd} {getattr(args, 'action', '') or ''}".strip()
     try:
         return _song_command(args, st)
     finally:

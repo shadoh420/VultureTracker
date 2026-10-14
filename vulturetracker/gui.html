@@ -79,7 +79,7 @@ body.agent-on #agent{display:flex}body.agent-on .main,body.agent-on .bottom{marg
 #ag-set label{display:block;margin:8px 0 2px;font-size:9.5px;letter-spacing:.1em;font-weight:700;color:var(--dim)}#ag-set input,#ag-set select{width:100%;padding:4px 6px;font:11px var(--mono)}
 #ag-find[hidden],#ag-model-pick[hidden]{display:none}
 .rnote{position:absolute;height:10px;border-radius:2px;background:var(--acc);box-shadow:inset 0 0 0 1px #0a0c0d;font:8px/10px var(--mono);color:#0c1a0f;padding-left:2px;overflow:hidden;white-space:nowrap;cursor:ns-resize}
-.rnote.ghost{background:#5f7d94;opacity:.28;pointer-events:none;color:transparent}.rlab{position:absolute;left:0;width:38px;font:8.5px/12px var(--mono);color:var(--dim);text-align:right;padding-right:3px}
+.rnote.ghost{background:#5f7d94;opacity:.28;pointer-events:none;color:transparent}.rnote.from{background:#a3803a;opacity:.32;pointer-events:none;color:transparent}.rlab{position:absolute;left:0;width:38px;font:8.5px/12px var(--mono);color:var(--dim);text-align:right;padding-right:3px}
 .rkchain{display:flex;align-items:flex-start;gap:0;padding:16px 14px;overflow-x:auto;min-height:100%}
 .rkdev{flex:none;width:250px;background:linear-gradient(#1d2327,#15191c);border-radius:4px;box-shadow:inset 0 1px 0 #2e363b,0 2px 6px #000a;border-top:3px solid var(--rkc,#5f7d94)}
 .rkdev.byp{opacity:.5}.rkdev .hd{display:flex;align-items:center;gap:4px;padding:7px 8px 6px;box-shadow:inset 0 -1px 0 #0a0c0d}
@@ -263,7 +263,7 @@ option.hascand{color:var(--acc);font-weight:700}
       <div id="livebar" style="display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap">
         <span class="k" style="margin-right:2px" title="the live engine: libopenmpt compiled to WebAssembly, playing in the page's audio thread the whole song as it is now (the unwritten mix in)">LIVE</span>
         <span class="btn sm" id="lv-cur" onclick="lvPlayCursor()" title="play from the cursor (Space, F7; Space again stops)">▶ FROM CURSOR</span><span class="btn sm" onclick="lvPlay(0,0)" title="play the song from its start">▶ SONG</span><span class="btn sm" id="lv-pat" onclick="lvLoopPattern()" title="loop the pattern at the cursor (F6)">↻ PATTERN</span><span class="btn sm" onclick="lvStop()" title="stop (F8)">■</span>
-        <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
+        <span class="btn sm" id="lv-edit" onclick="setEdit(!EDIT)" title="edit mode (Esc): the keys write into the pattern at the cursor, each change written into the song file in place">● EDIT</span><span class="k">STEP</span><input id="lv-step" type="number" min="0" max="16" value="1" style="width:34px;font:10px var(--mono);padding:1px 3px" title="rows the cursor moves after a note is entered"><span class="k" title="record quantize (OpenMPT's): a note entered while the song plays goes to the nearest multiple of this many rows; 0 off">QUANT</span><input id="lv-quant" type="number" min="0" max="64" value="0" style="width:34px;font:10px var(--mono);padding:1px 3px" onchange="try{localStorage.quant=this.value}catch(e){}" title="record quantize (OpenMPT's): a note entered while the song plays goes to the nearest multiple of this many rows; 0 off"><span class="btn sm" id="lv-undo" onclick="patUndo(false)" title="undo the last pattern edit (Ctrl+Z)">↶</span><span class="btn sm" id="lv-redo" onclick="patUndo(true)" title="redo (Ctrl+Y)">↷</span>
         <span class="k" style="margin-left:8px">INS</span><select id="lv-ins" style="font:10px var(--mono);padding:1px 3px;max-width:190px" title="the instrument the piano keys play (preview) and enter (edit mode): Z to M and Q to U, two octaves from OCT"></select><span class="k">OCT</span><input id="lv-oct" type="number" min="0" max="8" value="5" style="width:36px;font:10px var(--mono);padding:1px 3px">
         <span class="btn sm" id="roll-btn" onclick="rollToggle()" title="ROLL: the cursor's channel as a piano roll over the pattern's rows (the other channels' notes as ghosts, a lane for the volume column); a view of the same cells, edited the same way. OpenMPT has no piano roll: this one is VultureTracker's own">ROLL</span><span class="btn sm" onclick="materializePattern()" title="Rewrite this pattern as explicit literal cells; undo restores its original notation">MAKE EDITABLE</span> <label style="font:9.5px var(--mono)" title="notes struck together go in as one chord, lowest first, across channels from the cursor: MIDI notes and the computer's piano keys each within 60 ms of the one before; Shift held (OpenMPT's chord modifier) gathers any keys into one chord, written when Shift is let go"><input id="midi-chord" type="checkbox" checked> CHORD</label> <span class="btn sm" id="midi-on" style="margin-left:8px" onclick="midiToggle()" title="MIDI input (Web MIDI): a keyboard's notes preview like the piano keys and, in edit mode, enter notes at the cursor. The first time, the window asks whether the page may use MIDI devices">MIDI</span><label style="font:9.5px var(--mono);color:var(--dim)" title="the key's velocity sets the note's volume column (v01-v64) and the preview's loudness"><input type="checkbox" id="midi-vel" onchange="midiVel(this.checked)"> VEL→VOL</label><span class="btn sm" id="lv-metro" style="margin-left:8px" onclick="setMetro(!METRO)" title="metronome: a click on every beat while the live engine plays, higher on each bar (the song's row highlight: rows per beat and per bar)">METRO</span><canvas id="lv-scope" width="150" height="26" style="width:150px;height:26px;background:#0b0e0f;margin-left:6px" title="oscilloscope: the live engine's output"></canvas><span class="mono" id="midi-status" style="font-size:9.5px;color:var(--dim);max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
         <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
@@ -289,8 +289,9 @@ option.hascand{color:var(--acc);font-weight:700}
     <div id="patscroll" style="flex:1;min-height:0;overflow:auto"><div id="pat"></div></div>
     <div id="rollwrap" style="flex:1;min-height:0;display:none;flex-direction:column">
       <div style="flex:none;display:flex;align-items:center;gap:6px;padding:4px 8px;font:9.5px var(--mono);color:var(--dim)"><span class="k" id="rolltitle" style="white-space:nowrap">ROLL</span>
-        <label title="the other channels' notes, dimmed"><input type="checkbox" id="roll-ghost" checked onchange="renderRoll()"> GHOSTS</label>
-        <label title="a click lands on the nearest note of the song's key (SONG tab: key)"><input type="checkbox" id="roll-lock" onchange="renderRoll()"> SCALE LOCK</label>
+        <label style="white-space:nowrap" title="the other channels' notes, dimmed"><input type="checkbox" id="roll-ghost" checked onchange="renderRoll()"> GHOSTS</label>
+        <label style="white-space:nowrap" title="another pattern's notes (all its channels) under this one in a third shade, never editable: the previous or next order's pattern, or one by name; clipped at the shorter pattern">GHOST FROM <select id="roll-from" onchange="renderRoll()" style="font:9.5px var(--mono)"><option value="">none</option><option value="prev">previous order</option><option value="next">next order</option></select></label>
+        <label style="white-space:nowrap" title="a click lands on the nearest note of the song's key (SONG tab: key)"><input type="checkbox" id="roll-lock" onchange="renderRoll()"> SCALE LOCK</label>
         <span style="flex:1"></span><span id="rollhint">EDIT (Esc) on: click to place a note (drag right: its length, ending in a note-off) · drag a note up or down · right-click deletes · Shift+click: note-off · the lane below sets the volume column</span></div>
       <div id="rollscroll" style="flex:1;min-height:0;overflow:auto;position:relative" onscroll="renderRoll()"><div id="roll" style="position:relative" onmousedown="rollDown(event)" oncontextmenu="event.preventDefault()"></div></div>
       <div id="rollvel" style="flex:none;height:46px;position:relative;overflow:hidden;background:#0b0e0f;box-shadow:inset 0 1px 0 #21272a;cursor:ns-resize" onmousedown="rollVel(event)" title="the volume column of each note: click to set it (EDIT on)"></div>
@@ -609,6 +610,7 @@ option.hascand{color:var(--acc);font-weight:700}
     <p>External changes require comparison and reload. Reload starts a new undo/redo boundary; checkpoints remain.</p>
     <button class="btn" onclick="act('undo')">UNDO</button> <button class="btn" onclick="act('redo')">REDO</button>
     <button class="btn" onclick="compareExternal()">COMPARE EXTERNAL FILE</button> <span id="history-count" class="meta"></span>
+    <div id="history-steps" class="meta mono"></div>
     <p><label>Keep recent undo steps <input id="history-keep" type="number" min="0" max="200" value="20" style="width:65px"></label> <button class="btn" onclick="act('trimhistory',{keep:$('history-keep').value})">TRIM HISTORY</button> <button class="btn" onclick="act('trimhistory',{keep:0})">CLEAR UNDO / REDO</button> Checkpoints stay.</p>
     <p><label>Checkpoint name <input id="checkpoint-name" maxlength="80" placeholder="Before final mix"></label>
     <button class="btn" onclick="checkpointSave()">SAVE CHECKPOINT</button></p><div id="checkpoint-list"></div>
@@ -926,18 +928,27 @@ function rollScale(){const m=/^([A-Ga-g])([#b]?)\s+(\w+)$/.exec((S.song.facts.ke
 // noteNum and noteTxt (the instrument panel's, below) read and write a note's text
 const cellParts=c=>{const p=(c||'... .. ... ...').split(' ');while(p.length<4)p.push('...');return p};
 function rollToggle(){ROLL.on=!ROLL.on;$('roll-btn').classList.toggle('on',ROLL.on);$('patscroll').style.display=ROLL.on?'none':'';$('rollwrap').style.display=ROLL.on?'flex':'none';if(ROLL.on)renderRoll()}
-function rollNotes(ch){const rows=PAT.rows||[],out=[];let cur=null;
+function rollNotes(ch,rows=PAT.rows||[]){const out=[];let cur=null;
   rows.forEach((r,i)=>{const t=cellParts(r[ch])[0];if(t==='...')return;if(cur){cur.end=i;out.push(cur);cur=null}const n=noteNum(t);if(n!=null){const p=cellParts(r[ch]);cur={row:i,n,ins:p[1],vol:p[2]}}});
   if(cur){cur.end=rows.length;out.push(cur)}return out}
+// GHOST FROM: the rows of the previous or next order's pattern, or a named one (gone or renamed: the previous order's),
+// fetched once per song version and drawn under this pattern's notes
+function rollFrom(){const sel=$('roll-from'),pats=(S.structure&&S.structure.patterns)||[],orders=S.song.facts.orders,names=pats.map(p=>p.name).join('|');let v=sel.value;
+  if(sel.dataset.names!==names){sel.dataset.names=names;sel.innerHTML='<option value="">none</option><option value="prev">previous order</option><option value="next">next order</option>'+pats.map(p=>`<option value="p:${esc(p.name)}">${esc(p.name)}</option>`).join('');sel.value=v;if(sel.value!==v)sel.value=v=v?'prev':''}
+  if(!v)return null;const p=pats.find(p=>'p:'+p.name===v),o=v==='next'?orders[PAT.order+1]:orders[PAT.order-1],idx=p?p.index:o?o.index:null;if(idx==null)return null;
+  const key=`${S.song.mtime}|${idx}`;if(!ROLL.from||ROLL.from.key!==key){const want={key,rows:null};ROLL.from=want;patRows(idx).then(rows=>{if(ROLL.from===want){want.rows=rows;renderRoll()}})}
+  return ROLL.from.rows?{rows:ROLL.from.rows,name:(pats.find(q=>q.index===idx)||{name:'?'}).name}:null}
 function renderRoll(){if(!ROLL.on||!PAT.rows)return;const f=S.song.facts,ch=CUR.ch,rows=PAT.rows.length,{RW,PH}=ROLL,HL=f.highlight||[4,16],mine=rollNotes(ch),sc=rollScale();
   const all=(f.channels||[]).map((_,c)=>c===ch?mine:$('roll-ghost').checked?rollNotes(c):[]),ns=all.flat().map(x=>x.n);
   let lo=Math.max(0,Math.min(...(mine.length?mine.map(x=>x.n):[12*(+$('lv-oct').value||5)]))-7),hi=Math.min(119,Math.max(...(mine.length?mine.map(x=>x.n):[12*(+$('lv-oct').value||5)+12]))+7);
   if(hi-lo<24){const add=24-(hi-lo);lo=Math.max(0,lo-Math.ceil(add/2));hi=Math.min(119,lo+24)}ROLL.lo=lo;ROLL.hi=hi;
-  $('rolltitle').textContent=`ROLL · ${pad(ch+1)} ${(f.channels[ch]||'').toUpperCase()} · ${mine.length} NOTES${sc?' · '+f.key.toUpperCase():''}`;
+  const from=rollFrom(),under=from?(f.channels||[]).flatMap((_,c)=>rollNotes(c,from.rows)).filter(x=>x.row<rows).map(x=>({...x,end:Math.min(x.end,rows)})):[];
+  $('rolltitle').textContent=`ROLL · ${pad(ch+1)} ${(f.channels[ch]||'').toUpperCase()} · ${mine.length} NOTES${sc?' · '+f.key.toUpperCase():''}${from?` · FROM ${from.name.toUpperCase()}${from.rows.length!==rows?` (${from.rows.length} ROWS, CLIPPED AT ${Math.min(rows,from.rows.length)})`:''}`:''}`;
   const W=40+rows*RW,H=(hi-lo+1)*PH,y=n=>(hi-n)*PH;let h='';
   for(let n=lo;n<=hi;n++){const out=sc&&!sc.has(n%12),blk=[1,3,6,8,10].includes(n%12);h+=`<div style="position:absolute;left:40px;right:0;top:${y(n)}px;height:${PH}px;background:${out?'#0c0f10':blk?'#111518':'#14191c'};box-shadow:inset 0 -1px 0 #0a0c0d"></div>`;
     if(n%12===0||(sc&&n%12===[...sc][0]))h+=`<div class="rlab" style="top:${y(n)}px">${noteTxt(n)}</div>`}
   for(let r=0;r<=rows;r+=HL[0])h+=`<div style="position:absolute;top:0;height:${H}px;left:${40+r*RW}px;width:1px;background:${r%HL[1]===0?'#3a4449':'#1d2427'}"></div>`;
+  under.forEach(x=>{if(x.n>=lo&&x.n<=hi)h+=`<div class="rnote from" style="left:${40+x.row*RW+1}px;top:${y(x.n)+1}px;width:${Math.max(3,(x.end-x.row)*RW-2)}px"></div>`});
   all.forEach((list,c)=>list.forEach(x=>{if(x.n<lo||x.n>hi)return;const g=c!==ch;
     h+=`<div class="rnote ${g?'ghost':''}" style="left:${40+x.row*RW+1}px;top:${y(x.n)+1}px;width:${Math.max(3,(x.end-x.row)*RW-2)}px" ${g?'':`data-row="${x.row}" title="${noteTxt(x.n)} · row ${pad(x.row)} · ins ${x.ins} · ${x.vol==='...'?'default volume':x.vol}"`}>${g?'':noteTxt(x.n)}</div>`}));
   if(LV.playing&&LV.oi===PAT.order&&LV.pos)h+=`<div style="position:absolute;top:0;height:${H}px;left:${40+LV.pos.row*RW}px;width:2px;background:var(--amber)"></div>`;
@@ -1067,8 +1078,9 @@ const VOLMAX={v:64,p:64,a:9,b:9,c:9,d:9,e:9,f:9,g:9,h:9};
 const cellOf=s=>{const [n,i,v,e]=s.split(' ');return {n,i,v,e}},cellText=p=>`${p.n} ${p.i} ${p.v} ${p.e}`;
 function setEdit(on){EDIT=on;if(on&&CUR.o!==PAT.order){CUR.o=PAT.order;CUR.row=0}renderPat();renderLiveBar()}
 function patEdit(changes){const idx=PAT.idx;if(idx==null||!PAT.rows||!changes.length)return;  // the pattern on show
-  changes.forEach(c=>{PAT.rows[c.row][c.ch]=c.cell});renderPat();EDQ.n++;
-  EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pattern:idx,cells:changes})})).json();
+  changes.forEach(c=>{PAT.rows[c.row][c.ch]=c.cell});renderPat();editPost({pattern:idx,cells:changes})}
+function editPost(body){EDQ.n++;  // POST edit in order after the edits before it ({pattern, cells} or {patterns})
+  EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json();
       EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null})
     .catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
 function patUndo(redo){EDQ.n++;EDQ.err=null;EDQ.chain=EDQ.chain.then(()=>act(redo?'redo':'undo')).catch(()=>{}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
@@ -1088,7 +1100,22 @@ function patShift(down){const rows=PAT.rows,ch=CUR.ch,col=rows.map(r=>r[ch]),out
 // while the live engine plays the pattern on show, the note is recorded at the row playing when the key went down (the
 // cursor follows it there, and STEP does not move it on: the song moves on by itself)
 function enterNote(note,vol){const live=LV.playing&&LV.pos&&LV.oi===PAT.order&&CUR.o===PAT.order;if(live)CUR.row=Math.max(0,Math.min(PAT.rows.length-1,LV.pos.row));
+  if(live&&quantN())return quantNotes(CUR.row,CUR.ch,[[note,vol]],insNum());
   const p=cellOf(PAT.rows[CUR.row][CUR.ch]);p.n=noteTxt(note);p.i=pad(insNum());if(vol!=null)p.v='v'+pad(vol);putCell(p,!live)}
+// OpenMPT's record quantize (View_pat.cpp QuantizeRow; kcQuantizeSettings): with QUANT n, a note entered while the song
+// plays goes to the nearest multiple of n rows (a tie goes later); past the pattern's end to row 0 of the next order's
+// pattern (the same pattern's row 0 while F6 loops it; none: the last row); a note already in that cell moves it one row
+// on (OpenMPT's grace note), per voice.
+// ponytail: the engine posts the playing row, not its tick, so a note struck late in a row rounds as if struck at its
+// start (QUANT 1 changes nothing); tick-level rounding needs the worklet to post the tick.
+try{if(localStorage.quant)$('lv-quant').value=localStorage.quant}catch(e){}
+const quantN=()=>Math.max(0,Math.floor(+$('lv-quant').value||0));
+async function quantNotes(row,ch,notes,ins){const q=quantN(),orders=S.song.facts.orders,order=PAT.order;let idx=PAT.idx,rows=PAT.rows;
+  row=Math.round(row/q)*q;
+  if(row>=rows.length){const next=lvPatLoop?{index:PAT.idx}:orders[order+1];if(next){idx=next.index;rows=await patRows(idx);row=0}else row=rows.length-1}
+  const cells=notes.map(([n,v],i)=>{const r=/^[A-G][-#]\d$/.test(cellOf(rows[row][ch+i]).n)&&row<rows.length-1?row+1:row,p=cellOf(rows[r][ch+i]);
+    p.n=noteTxt(n);p.i=pad(ins);if(v!=null)p.v='v'+pad(v);return {row:r,ch:ch+i,cell:cellText(p)}});
+  if(idx===PAT.idx)patEdit(cells);else editPost({pattern:idx,cells})}
 // ---- MIDI input: Web MIDI in the page (no Python side). On the FAUST tab it all goes to the Faust code's live node (faMidi).
 // Elsewhere note-on previews through the live engine like the piano keys (the
 // instrument on show in INSTRUMENTS, the slot's player in SAMPLES, else INS), at the key's loudness with VEL→VOL; in edit
@@ -1104,6 +1131,7 @@ function midiMsg(d){if(!MIDI.on)return;if(faOn())return faMidi(d);if(!S||!S.song
 function flushMidiChord(){clearTimeout(MIDI.timer);const b=MIDI.pending;MIDI.pending=null;if(!b)return;
   if(b.song!==S.song.path||b.idx!==PAT.idx||b.order!==PAT.order||!PAT.rows)return;
   const notes=[...b.notes].sort((a,b)=>a[0]-b[0]);if(b.ch+notes.length>S.song.facts.channels.length){selInfo('Chord needs '+notes.length+' channels from the cursor; nothing written');return}
+  if(b.live&&quantN())return quantNotes(b.row,b.ch,notes,b.ins);
   const changes=notes.map(([n,v],i)=>{const p=cellOf(PAT.rows[b.row][b.ch+i]);p.n=noteTxt(n);p.i=pad(b.ins);if(v!=null)p.v='v'+pad(v);return {row:b.row,ch:b.ch+i,cell:cellText(p)}});
   patEdit(changes);if(!b.live){CUR.row=b.row;patMove(Math.max(0,+$('lv-step').value||0))}}
 function captureMidiChord(n,vol){const live=!!(LV.playing&&LV.pos&&LV.oi===PAT.order),row=live?Math.min(PAT.rows.length-1,LV.pos.row):CUR.row;
@@ -1719,9 +1747,8 @@ async function replaceAll(){const sp=findSpec(),f=S.song.facts,song=$('f-scope')
   if(!sp.r.some(x=>x))return selInfo('type what to replace with');
   for(const idx of idxs){const rows=await patRows(idx),cells=[];rows.forEach((row,r)=>row.forEach((s,ch)=>{if(!cellMatch(s,sp))return;const p=cellOf(s);sp.r.forEach((v,k)=>{if(v)p[FK[k]]=v});const t=cellText(p);if(t!==s)cells.push({row:r,ch,cell:t})}));
     if(cells.length){groups.push({pattern:idx,cells});total+=cells.length;if(idx===PAT.idx)cells.forEach(c=>{PAT.rows[c.row][c.ch]=c.cell})}}
-  if(!groups.length)return selInfo('nothing to replace');renderPat();selInfo(`replaced ${total} cell${total>1?'s':''} in ${groups.length} pattern${groups.length>1?'s':''} (one undo step)`);EDQ.n++;
-  EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/edit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({patterns:groups})})).json();
-      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null}).catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
+  if(!groups.length)return selInfo('nothing to replace');renderPat();selInfo(`replaced ${total} cell${total>1?'s':''} in ${groups.length} pattern${groups.length>1?'s':''} (one undo step)`);
+  editPost({patterns:groups})}
 // Pattern tab keys (a capture listener, before the app's own): Esc edit mode, Space / F7 play from the cursor or stop, F6
 // loop the pattern, F8 stop, arrows / Tab / Page Up/Down / Home / End move the cursor, Ctrl+Z / Ctrl+Y undo and redo; the
 // piano keys preview (or, in edit mode, enter notes)
@@ -2149,6 +2176,8 @@ function renderProject(){
   put('missing-samples',Object.entries(S.missing||{}).map(([n,p])=>`<p>Slot ${esc(n)}: ${esc(p)} <input class="relink-missing" data-slot="${esc(n)}" placeholder="Replacement WAV" style="width:50%"></p>`).join('')||'<p>No missing samples.</p>');
   const selected=$('section-select').value;put('section-select',Object.entries(S.sections||{}).map(([n,v])=>`<option value="${esc(n)}">${esc(n)} · ${v[0]}–${v[1]-1}</option>`).join(''));if(S.sections?.[selected])$('section-select').value=selected;
   $('history-count').textContent=`${S.undo} undo · ${S.redo} redo · ${(S.history_bytes/1048576).toFixed(2)} / ${(S.history_limit/1048576).toFixed(0)} MiB`;
+  const hs=S.history_steps||{},stepLine=(k,s)=>`<div>${k} ${s.name?esc(s.name):'(unnamed: an older app wrote it)'}${s.time?' · '+new Date(s.time*1000).toLocaleString():''}</div>`;
+  put('history-steps',(hs.undo||[]).map(s=>stepLine('UNDO',s)).join('')+(hs.redo||[]).map(s=>stepLine('REDO',s)).join(''));
   put('checkpoint-list',(S.checkpoints||[]).map(n=>`<p><span class="mono">${esc(n)}</span> <button class="btn" onclick="checkpointRestore(${attr(n)})">COMPARE / RESTORE</button> <button class="btn" onclick="act('checkpoint',{name:${attr(n)},action:'delete'})">DELETE CHECKPOINT</button></p>`).join(''));
 }
 const PROJECT_PREFS=['hexrows','speed','voice','lvlatency','midivel','metro','specscale','faustcode','uiscale'];

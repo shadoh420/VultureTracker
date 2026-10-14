@@ -112,6 +112,25 @@ class TestFilesAndFx(unittest.TestCase):
             fx_chain(["shimmer"])
         with self.assertRaises(RecipeError):
             fx_chain([{"reverb": {"size": 1}}])
+        with self.assertRaises(RecipeError):
+            fx_chain([{"resample": {"quality": "Nearest"}}])
+        with self.assertRaises(RecipeError):
+            fx_chain(["iir_filter"])  # pedalboard's base class raises RuntimeError when built
+
+    def test_fx_enum_strings(self):
+        """A YAML string reaches a pybind11 enum parameter: ZeroOrderHold aliases (5 kHz at an 8 kHz rate folds to
+        3 kHz), the default windowed sinc removes what is above the new Nyquist frequency."""
+        from vulturetracker.synth import fx_chain
+        self.assertIn("HPF24", repr(fx_chain([{"ladder_filter": {"mode": "HPF24"}}])))
+        fx_chain([{"gsm_full_rate_compressor": {"quality": "Linear"}}])
+        rate = 44100
+        x = (0.5 * np.sin(2 * np.pi * 5000 * np.arange(rate) / rate)).astype(np.float32)[None]
+        f = np.fft.rfftfreq(rate, 1 / rate)
+        zoh = np.abs(np.fft.rfft(fx_chain([{"resample": {"target_sample_rate": 8000,
+                                                         "quality": "ZeroOrderHold"}}])(x, rate)[0]))
+        self.assertAlmostEqual(f[zoh.argmax()], 3000, delta=5)
+        sinc = fx_chain([{"resample": {"target_sample_rate": 8000}}])(x, rate)[0]
+        self.assertLess(sinc.std(), 0.05)  # 0.35 before: only the edges ring
 
     def test_file_samples_mix_and_render(self):
         from vulturetracker.synth import render_recipe

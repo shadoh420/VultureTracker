@@ -223,28 +223,41 @@ distinct corpus blocks were used.
     fx:
       - delay: {delay_seconds: 0.36, feedback: 0.35, mix: 0.3}     # a dotted 8th at 125 BPM
       - reverb: {room_size: 0.6, wet_level: 0.25, dry_level: 0.85}
-      - resample: {target_sample_rate: 16000}                      # lo-fi: 16 kHz bandwidth and aliasing
+      - resample: {target_sample_rate: 16000}                      # lo-fi: a 16 kHz rate, 8 kHz bandwidth
       - bitcrush: {bit_depth: 8}                                   # lo-fi: 8-bit quantisation noise
 ```
 
 Each item is one effect: a name, or `{name: {parameter: value}}`. The effects are
 [pedalboard](https://spotify.github.io/pedalboard/reference/pedalboard.html)'s built-in plugins, and the
 parameters are their constructor arguments. Names are case-insensitive, with or without underscores
-(`highpass_filter` = `HighpassFilter`). Useful ones:
+(`highpass_filter` = `HighpassFilter`). A parameter that takes one of a set of names (`quality`, `mode`) is written as
+the name. All 24 effects `fx:` accepts (pedalboard's 25th, `IIRFilter`, is the shelves' base class and cannot be
+built):
 
-| effect | typical parameters |
+| effect | parameters (defaults) |
 |---|---|
-| `reverb` | `room_size` 0–1, `damping`, `wet_level`, `dry_level`, `width` |
-| `delay` | `delay_seconds`, `feedback`, `mix` |
-| `chorus` | `rate_hz`, `depth`, `centre_delay_ms`, `feedback`, `mix` |
-| `phaser` | `rate_hz`, `depth`, `mix` |
-| `distortion` | `drive_db` |
-| `compressor` | `threshold_db`, `ratio`, `attack_ms`, `release_ms` |
-| `highpass_filter`, `lowpass_filter` | `cutoff_frequency_hz` |
-| `ladder_filter` | `cutoff_hz`, `resonance`, `drive` (a 12 dB low-pass) |
-| `resample` | `target_sample_rate`: downsample and back with a windowed sinc, for early-sampler bandwidth (band-limited: it removes what is above the new Nyquist frequency rather than aliasing it) |
-| `bitcrush` | `bit_depth`: 8 gives the hiss and grit of 8-bit samples |
-| `gain`, `limiter`, `pitch_shift` | `gain_db`; `threshold_db`; `semitones` |
+| `reverb` | `room_size` 0.5, `damping` 0.5, `wet_level` 0.33, `dry_level` 0.4, `width` 1, `freeze_mode` 0 |
+| `delay` | `delay_seconds` 0.5, `feedback` 0, `mix` 0.5 |
+| `chorus` | `rate_hz` 1, `depth` 0.25, `centre_delay_ms` 7, `feedback` 0, `mix` 0.5 |
+| `phaser` | `rate_hz` 1, `depth` 0.5, `centre_frequency_hz` 1300, `feedback` 0, `mix` 0.5 |
+| `convolution` | `impulse_response_filename`, `mix` 1: any impulse response WAV makes a reverb or a cabinet; the path is read as given (from the folder the command runs in), so give it absolute |
+| `distortion` | `drive_db` 25: tanh saturation |
+| `clipping` | `threshold_db` -6: hard clip |
+| `bitcrush` | `bit_depth` 8: the hiss and grit of 8-bit samples |
+| `compressor` | `threshold_db` 0, `ratio` 1, `attack_ms` 1, `release_ms` 100 |
+| `limiter` | `threshold_db` -10, `release_ms` 100 |
+| `brickwall_limiter` | `ceiling_db` -1, `release_ms` 100, `lookahead_ms` 5, `true_peak` false |
+| `noise_gate` | `threshold_db` -100, `ratio` 10, `attack_ms` 1, `release_ms` 100 |
+| `gain` | `gain_db` 1 |
+| `invert` | none: polarity flip |
+| `highpass_filter`, `lowpass_filter` | `cutoff_frequency_hz` 50 (12 dB per octave) |
+| `low_shelf_filter`, `high_shelf_filter` | `cutoff_frequency_hz` 440, `gain_db` 0, `q` 0.707 |
+| `peak_filter` | `cutoff_frequency_hz` 440, `gain_db` 0, `q` 0.707: one band of a parametric EQ (list several) |
+| `ladder_filter` | `mode` LPF12 (or HPF12, BPF12, LPF24, HPF24, BPF24), `cutoff_hz` 200, `resonance` 0, `drive` 1 |
+| `pitch_shift` | `semitones` 0 |
+| `resample` | `target_sample_rate` 8000, `quality` WindowedSinc32: downsample and back, for early-sampler bandwidth. The windowed sinc qualities (`WindowedSinc`, `WindowedSinc8` to `WindowedSinc256`) are band-limited: they remove what is above the new Nyquist frequency. `quality: ZeroOrderHold` is the aliasing lo-fi (a sample-and-hold, what a bitcrusher's rate knob does): content above the new Nyquist folds back down as inharmonic tones; `Linear`, `CatmullRom` and `Lagrange` alias less |
+| `mp3_compressor` | `vbr_quality` 2 (0 best to 10 worst): MP3 codec artefacts |
+| `gsm_full_rate_compressor` | `quality` WindowedSinc8: the GSM phone codec at 8 kHz |
 
 The order of processing is: source → `start`/`length` → peak-normalise to -1 dBFS → pad with `fx_tail`
 seconds of silence → `fx` → `mono` → `reverse` → trim silence → `loop` → `fade_out` → `normalize`/`gain`.

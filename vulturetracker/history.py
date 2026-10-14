@@ -5,6 +5,7 @@ import itertools
 import json
 from pathlib import Path
 import re
+import threading
 import zlib
 
 from .fileio import atomic_write
@@ -54,6 +55,11 @@ def expanded(value):
     return raw
 
 
+# What the current request or agent tool is doing: the name the next undo step gets (OpenMPT's PrepareUndo
+# description). Thread-local because each request and each agent run has its own thread.
+LABEL = threading.local()
+
+
 def pack_step(step):
     if 'text' not in step:
         return step
@@ -95,6 +101,11 @@ def validate_step(step):
     if not isinstance(step, dict) or not isinstance(step.get('text'), str):
         raise ValueError('invalid history step')
     validate_meta(step.get('meta'))
+    # name and time: optional within schema 2 (older steps have neither; older apps ignore them)
+    if 'name' in step and not (isinstance(step['name'], str) and len(step['name']) <= 80):
+        raise ValueError('invalid history step name')
+    if 'time' in step and (type(step['time']) not in (int, float) or step['time'] < 0):
+        raise ValueError('invalid history step time')
     assets = step.get('assets')
     if not isinstance(assets, dict) or any(not isinstance(k, str) or (v is not None and
                                            (not isinstance(v, str) or not re.fullmatch('[0-9a-f]{64}', v)))

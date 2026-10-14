@@ -1,0 +1,47 @@
+name: Bug report
+description: Something in VultureTracker went wrong or does not do what the docs say.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A security problem goes through private reporting instead (SECURITY.md), not a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: >-
+        `python -m vulturetracker --version`, or the log's "VultureTracker X.Y.Z started" line for the run that
+        went wrong (it also names libopenmpt's version and the system); say whether it was the exe or from source.
+      placeholder: VultureTracker 1.5.2, Windows 10, the exe
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What you did, what you expected, and what happened instead.
+      placeholder: |
+        1. Opened song.yaml
+        2. Pattern tab, pressed ...
+        Expected: ...
+        Happened: ...
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        The app's log: `%APPDATA%\VultureTracker\vulturetracker.log` on Windows (`~/Library/Application
+        Support/VultureTracker` on macOS, `~/.config/VultureTracker` elsewhere); `vulturetracker.log.1` holds the run
+        before. Paste the part around the problem, or attach the file. It holds file paths: edit out what you do not
+        want public.
+      render: text
+  - type: textarea
+    id: song
+    attributes:
+      label: The song (if you can share it)
+      description: >-
+        Attach the song's .yaml, or a ZIP from PROJECT → Save Copy / Collect Samples with its samples, if you can share
+        them. A smaller song that shows the same problem is just as good.

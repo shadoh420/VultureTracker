@@ -177,7 +177,8 @@ def resume_playback(st, a):
 
 
 @tool('inspect_history', 'Read undo or redo snapshots, nearest step first (index 0). Paginated summaries include '
-      'entry IDs and saved versions; history has no reliable operation labels or timestamps. For detail, supply '
+      'entry IDs, saved versions, and the operation name and Unix time of each step (absent on steps older apps '
+      'wrote; an undo step is named for the operation it undoes). For detail, supply '
       'index and matching entry_id: returns a bounded CURRENT-to-snapshot YAML diff, changed saved settings and '
       'asset/approval restore checks. Does not restore or trim history. Metadata omitted by an old snapshot stays '
       'unchanged on restore. Use undo/redo/checkpoint tools separately.',
@@ -195,6 +196,7 @@ def inspect_history(st, a):
         for i in range(offset, min(len(steps), offset+limit)):
             s = unpack_step(steps[i])
             entries.append({'index': i, 'entry_id': _id(steps[i]), 'version': s.get('version'),
+                            'name': s.get('name'), 'time': s.get('time'),
                             'text_bytes': len(s['text'].encode()), 'asset_count': len(s.get('assets', {})),
                             'saved_settings': sorted((s.get('meta') or {}).keys())})
         out = {'stack': kind, 'total': len(steps), 'entries': entries,

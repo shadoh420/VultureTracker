@@ -41,7 +41,7 @@ from . import __version__, agent, api, plugins
 from .fileio import atomic_write as _atomic, lock_file, protect_outputs, save_beside, unlock_file, user_dir, wav_bytes
 from .notation import format_cell, format_note
 from .itwriter import write_it
-from .history import SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
+from .history import LABEL, SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
 from .project import collect, file_updates, replace_values, resolve_meta, relative_meta
 from .arrangement import section_renamed, sections_text, occurrence_map, reorder
 from .openmpt import LoadedModule, OpenMPTError, library_version
@@ -2399,9 +2399,13 @@ class State:
             assets[str(path)] = self._asset_hashes[key]
         return assets
 
-    def _step(self, meta=None):
+    def _step(self, meta=None, name=None, when=None):
+        """The current song as an undo step, named for what moves away from it (the request's or agent tool's
+        LABEL unless given) with the time it did."""
         return pack_step({'text': self.text, 'meta': copy.deepcopy(meta), 'assets': self._assets(self.text, meta),
-                          'crlf': self.crlf, 'bom': self.bom, 'version': self.version()})
+                          'crlf': self.crlf, 'bom': self.bom, 'version': self.version(),
+                          'name': str(name if name is not None else getattr(LABEL, 'name', None) or 'edit')[:80],
+                          'time': when if when is not None else round(time.time(), 1)})
 
     def _check_assets(self, step):
         step = unpack_step(step)
@@ -2449,7 +2453,7 @@ class State:
                     raise ValueError('A checkpoint with that name exists; choose another name')
                 if len(checkpoints) >= 32:
                     raise ValueError('At most 32 checkpoints; delete one before saving another')
-                checkpoints[name] = self._step(self._meta_view())
+                checkpoints[name] = self._step(self._meta_view(), name)
             else:
                 raise ValueError('unknown checkpoint action')
             try:
@@ -3521,7 +3525,7 @@ class State:
             step = unpack_step(src[-1])
             meta = step.get("meta")
             self._check_assets(step)
-            back = self._step({k: self.meta.get(k) for k in meta} if meta else None)
+            back = self._step({k: self.meta.get(k) for k in meta} if meta else None, step.get('name', ''), step.get('time'))
             target = copy.deepcopy(self.meta)
             if meta:
                 target.update(copy.deepcopy(meta))
@@ -3970,6 +3974,8 @@ class State:
                           "samples": [int(k) for k, v in (self.song.get("samples") or {}).items()
                                       if isinstance(v, dict) and v.get("approved")]},
                 "checkpoints": list(self.checkpoints),
+                "history_steps": {k: [{"name": s.get("name"), "time": s.get("time")} for s in reversed(v[-12:])]
+                                  for k, v in (("undo", self.history), ("redo", self.future))},
                 "history_bytes": self.history_store.path.stat().st_size if self.history_store.path.exists() else 0,
                 "history_limit": HISTORY_BYTES,
                 "phrase": {k: v for k, v in (self.meta.get("phrase") or {}).items() if k not in ("snapshot", "assets", "source_assets", "original")},
@@ -3994,6 +4000,26 @@ class State:
 
 
 # ---------------------------------------------------------------- HTTP
+
+STEP_NAMES = {"apply": "write candidate (U)", "applymix": "WRITE MIX", "relink": "relink samples",
+              "materialize": "materialize pattern", "phrase": "accept phrase", "checkpoint": "restore checkpoint"}
+
+
+def _step_label(act, body):
+    """The undo step name for a request: what it does, in the page's words."""
+    if act == "edit":
+        groups = [g for g in (body.get("patterns") if isinstance(body.get("patterns"), list) else [body])
+                  if isinstance(g, dict)]
+        cells = sum(len(g["cells"]) for g in groups if isinstance(g.get("cells"), list))
+        names = ", ".join(str(g.get("pattern")) for g in groups[:4]) + (", …" if len(groups) > 4 else "")
+        return f"edit pattern {names}: {cells} cell{'s' * (cells != 1)}"
+    if act == "songedit" and isinstance(body.get("ops"), list):
+        return "song: " + ", ".join(dict.fromkeys(str(o.get("op")).replace("_", " ") for o in body["ops"]
+                                                  if isinstance(o, dict)))
+    if act == "section":
+        return f"section {body.get('action', 'save')} {body.get('name', '')}".strip()
+    return STEP_NAMES.get(act, act)
+
 
 class Handler(BaseHTTPRequestHandler):
     state: State = None
@@ -4453,6 +4479,7 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(n) or b"{}")
             if not isinstance(body, dict):
                 raise ValueError("the request body must be a JSON object")
+            LABEL.name = _step_label(act, body)
             if act == "open":
                 self.open_song(body["path"])
             elif act == "new":

@@ -24,6 +24,7 @@ import urllib.request
 
 from . import __version__, plugins, agent_context
 from .fileio import atomic_write, user_dir
+from .history import LABEL
 
 TOOLS = {}  # name -> (description, JSON schema of the arguments, function(state, args))
 
@@ -53,6 +54,7 @@ def run(st, name, args):
                 raise ValueError("no song is open in the app")
             if st is not None and st.closed:
                 raise ValueError('project was closed; inspect the currently open project before editing')
+            LABEL.name = f"agent: {name}"
             out = TOOLS[name][2](st, args or {})
             if name == 'open_project':
                 st = Handler.state

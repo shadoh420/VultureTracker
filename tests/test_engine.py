@@ -380,6 +380,44 @@ class TestMidi(unittest.TestCase):
                                ["on", "m64", 4, 64, 1],
                                ["faust", 0x90, 60, 100], ["faust", 0xE0, 0, 64], ["faust", 0x80, 60, 0]])
 
+    def test_record_quantize(self):
+        """OpenMPT's QuantizeRow with QUANT 4 on a 16-row pattern played live: the nearest multiple of 4 (a tie goes
+        later), a cell holding a note pushes the new one a row on, past the end to the next order's pattern row 0 (with
+        its own grace check), and to the last row when no order follows. QUANT 0 enters at the row playing."""
+        page = (ROOT / "vulturetracker" / "gui.html").read_text(encoding="utf-8")
+        a, b = page.index("function enterNote("), page.index("if(MIDI.on)midiStart();else renderMidi();")
+        js_text = r"""
+const NOTES=['C-','C#','D-','D#','E-','F-','F#','G-','G#','A-','A#','B-'],noteTxt=n=>NOTES[n%12]+Math.floor(n/12),pad=n=>String(n).padStart(2,'0');
+const cellOf=s=>{const [n,i,v,e]=s.split(' ');return {n,i,v,e}},cellText=p=>`${p.n} ${p.i} ${p.v} ${p.e}`;
+const out=[],Q={value:'4'},$=id=>id==='lv-quant'?Q:{classList:{contains:()=>false}},document={querySelector:()=>null};
+const blank=n=>Array.from({length:n},()=>['... .. ... ...']);
+const other=blank(8);other[0][0]='C-4 01 ... ...';
+let S={song:{facts:{orders:[{index:0},{index:5}]}}},EDIT=true,PAT={idx:0,rows:blank(16),order:0},CUR={o:0,row:0,ch:0};
+PAT.rows[8][0]='E-5 01 ... ...';
+let lvPatLoop=false;const LV={playing:true,pos:{row:0},oi:0},insNum=()=>3,putCell=(p,adv)=>out.push(['cell',CUR.row,cellText(p)]);
+const patEdit=c=>out.push(['edit',PAT.idx,c]),editPost=b=>out.push(['post',b.pattern,b.cells]),patRows=async i=>i===PAT.idx?PAT.rows:other;
+PAGE
+(async()=>{
+  for(const r of [5,6,9,15]){LV.pos.row=r;await enterNote(62,null)}  // 4; 8 (a tie) holds a note: 9; 8; past the end
+  lvPatLoop=true;LV.pos.row=14;await enterNote(65,null);lvPatLoop=false;    // F6 loops the pattern: its own row 0
+  S.song.facts.orders=[{index:0}];LV.pos.row=15;await enterNote(63,null);  // no next order: the last row
+  Q.value='0';LV.pos.row=5;await enterNote(64,null);                       // off: the row playing
+  console.log(JSON.stringify(out));
+})();
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            js = Path(tmp) / "quant.js"
+            js.write_text(js_text.replace("PAGE", page[a:b]), encoding="utf-8")
+            out = json.loads(subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30, check=True).stdout)
+        d = "D-5 03 ... ..."
+        self.assertEqual(out, [["edit", 0, [{"row": 4, "ch": 0, "cell": d}]],
+                               ["edit", 0, [{"row": 9, "ch": 0, "cell": d}]],
+                               ["edit", 0, [{"row": 9, "ch": 0, "cell": d}]],
+                               ["post", 5, [{"row": 1, "ch": 0, "cell": d}]],
+                               ["edit", 0, [{"row": 0, "ch": 0, "cell": "F-5 03 ... ..."}]],
+                               ["edit", 0, [{"row": 15, "ch": 0, "cell": "D#5 03 ... ..."}]],
+                               ["cell", 5, "E-5 03 ... ..."]])
+
 
 if __name__ == "__main__":
     unittest.main()

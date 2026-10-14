@@ -361,6 +361,32 @@ class TestFeaturesPage(unittest.TestCase):
             page.wait_for_function("S.song.facts.tempo!==125", timeout=5000)
             self.assertIn(page.evaluate("S.song.facts.tempo"), (119, 120, 121))
 
+    def test_roll_ghost_from(self):
+        """GHOST FROM draws another pattern's notes (every channel) in a third shade, clipped at the shown pattern's
+        rows, never editable; a pattern that is gone falls back to the previous order."""
+        text = SONG_BLOCK.replace("  p2:\n    rows: 4\n", "  p2:\n    rows: 8\n").replace(
+            "orders: [p1, p2]", "".join(f"      {r:02d}: {'D-5 02' if r == 6 else '... ..'} ... ... | ... .. ... ...\n"
+                                          for r in range(4, 8)) + "orders: [p1, p2]")
+        with self.page(text) as (page, d):
+            page.evaluate("tab('pattern'); CUR.ch=0; showPattern(0); renderPat(); rollToggle()")
+            page.wait_for_function("PAT.rows && document.querySelectorAll('#roll .rnote').length>0")
+            count = "document.querySelectorAll('#roll .rnote.from').length"
+            self.assertEqual(page.evaluate(count), 0)
+            page.select_option('#roll-from', 'next')   # p2: C-5 at row 0; D-5 at row 6 is past p1's 4 rows
+            page.wait_for_function(f"{count}===1")
+            self.assertIn('FROM P2 (8 ROWS, CLIPPED AT 4)', page.evaluate("$('rolltitle').textContent"))
+            self.assertEqual(page.evaluate("getComputedStyle(document.querySelector('#roll .rnote.from')).pointerEvents"), 'none')
+            page.select_option('#roll-from', 'prev')   # order 0 has no previous order
+            page.wait_for_function(f"{count}===0")
+            page.select_option('#roll-from', 'p:p1')   # itself by name: both channels' notes
+            page.wait_for_function(f"{count}===2")
+            page.evaluate("showPattern(1); renderPat()")
+            page.wait_for_function("PAT.idx===1 && PAT.rows && PAT.rows.length===8")
+            # p1 gone from the list (renamed or deleted): the previous order's pattern, here p1 itself (cached rows)
+            self.assertEqual(page.evaluate("""(()=>{S.structure.patterns=S.structure.patterns.filter(p=>p.name!=='p1');
+              renderRoll();return [$('roll-from').value, document.querySelectorAll('#roll .rnote.from').length]})()"""),
+                             ['prev', 2])
+
     def test_paint_undo(self):
         with self.page() as (page, d):
             page.evaluate("tab('paint')")

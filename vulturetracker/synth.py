@@ -395,7 +395,12 @@ def fx_chain(fx, where="fx"):
     effects = {n.lower(): getattr(pedalboard, n) for n in dir(pedalboard)
                if isinstance(getattr(pedalboard, n), type) and issubclass(getattr(pedalboard, n), pedalboard.Plugin)
                and not n.startswith("_") and n not in ("Plugin", "Pedalboard", "Chain", "Mix", "PluginContainer",
-                                                       "ExternalPlugin", "VST3Plugin", "AudioUnitPlugin")}
+                                                       "ExternalPlugin", "VST3Plugin", "AudioUnitPlugin",
+                                                       "IIRFilter")}  # IIRFilter: the shelves' base, not constructible
+    # pybind11 enums by parameter name (Resample's and GSMFullRateCompressor's quality, LadderFilter's mode), so a
+    # YAML string reaches them: quality: ZeroOrderHold, mode: HPF24.
+    enums = {a.lower(): getattr(c, a) for c in effects.values() for a in dir(c)
+             if isinstance(getattr(c, a), type) and hasattr(getattr(c, a), "__members__")}
     chain = []
     for item in fx or []:
         if not isinstance(item, str) and not (isinstance(item, dict) and len(item) == 1):
@@ -404,9 +409,18 @@ def fx_chain(fx, where="fx"):
         cls = effects.get(str(name).lower().replace("_", ""))  # Reverb, reverb, HighpassFilter, highpass_filter
         if cls is None:
             raise RecipeError(f"{where}: unknown effect '{name}' (available: {', '.join(sorted(effects))})")
+        if not isinstance(params, dict):
+            raise RecipeError(f"{where}: {name}: parameters are a mapping, e.g. {{{name}: {{...}}}}; got {params}")
+        params = dict(params)
+        for k, v in params.items():
+            if isinstance(v, str) and str(k).lower() in enums:
+                members = enums[str(k).lower()].__members__
+                if v not in members:
+                    raise RecipeError(f"{where}: {name}: {k} is one of {', '.join(members)}; got '{v}'")
+                params[k] = members[v]
         try:
             chain.append(cls(**params))
-        except TypeError as e:
+        except (TypeError, ValueError, RuntimeError) as e:
             raise RecipeError(f"{where}: {name}: {e}")
     return pedalboard.Pedalboard(chain)
 
