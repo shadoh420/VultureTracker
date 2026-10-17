@@ -124,5 +124,7 @@ notes (`N`, written to `<song>.notes.json` and `.md` beside the song), the patte
 
 1. `suite/HANDOFF.md` for the state of the music, then the task at hand.
 2. `GUIDE.md`, `SONG_FORMAT.md`, `SAMPLING.md` only when the task needs them.
-3. Before changing the app: run the portable tests (the command in the layout table); after changing `gui.py`/`server.py`/`gui.html`: tests plus a check in the
-   real window; before any commit: the owner's word.
+3. Before changing the app, inspect the latest relevant test result and current changes; do not rerun a full portable
+   baseline by default. Test the affected behavior. Changes to gui.py/server.py/gui.html need the relevant real-window
+   check; packaging/native dependencies need a packaged smoke check. Use CI for the full suite and the existing release
+   qualification once per release, reusing applicable unchanged results. Commit only on the owner's instruction.
