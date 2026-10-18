@@ -1622,7 +1622,8 @@ function tapTempo(){const now=performance.now();TAP.t=TAP.t.filter(x=>now-x<2500
 function panic(){try{audio.pause()}catch(e){}try{lvStop()}catch(e){}try{pkStop()}catch(e){}}
 function songEdit(ops,onReport){EDQ.n++;renderSongTab();renderIns();renderSmp();
   EDQ.chain=EDQ.chain.then(async()=>{const j=await (await fetch('/api/songedit',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ops})})).json();
-      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null;if(j.report)(onReport||selInfo)(j.report);else if(['echoing…','writing…'].includes($('sel-msg').textContent))selInfo('')})
+      EDQ.err=j.error?j.error.replace(/^\w+: /,'').replace(/^.*?: error: /,''):null;const busy=['echoing…','writing…'].includes($('sel-msg').textContent);
+      if(j.report)(onReport||selInfo)(j.report);else if(busy){selInfo(EDQ.err||'');EDQ.err=null}})  // a selection tool's refusal shows in its own bar, whole
     .catch(e=>{EDQ.err=String(e)}).finally(()=>{if(--EDQ.n===0){PAT.key=null;refresh()}})}
 const isMark=o=>o==='+++'||o==='---';
 function uniqueName(base){const have=new Set(S.structure.patterns.map(p=>p.name));if(!have.has(base))return base;const m=/^(.*?)(\d*)$/.exec(base);for(let n=+(m[2]||1)+1;;n++){const s=m[1]+String(n).padStart(m[2].length||0,'0');if(!have.has(s))return s}}
