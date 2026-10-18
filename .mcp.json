@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "vulturetracker": {
+      "command": "python",
+      "args": ["-m", "vulturetracker", "mcp"]
+    }
+  }
+}
