@@ -202,6 +202,51 @@ def spectral_edge(channels, floor_db=-60.0, size=2048):
     return (np.nonzero(p >= p.max() * 10 ** (floor_db / 10))[0][-1] + 1) / size
 
 
+def ring_partials(channels, rate, floor_db=-20.0, prominence_db=15.0, persist=0.6, skip=0.02, seconds=2.0):
+    """A sample's steady partials (a drum's ring tones): the peaks of its average spectrum from `skip` seconds after its
+    loudest frame on (for at most `seconds`), each standing `prominence_db` over the median of the bins around it in
+    at least `persist` of those Blackman-windowed frames (46 ms, a quarter overlapping), within `floor_db` of the
+    loudest bin. Broadband noise has no such peak. `rate` is the stored rate in frames per second. Returns
+    [(cycles per stored frame, dB under the loudest bin)], loudest first; [] when under three frames sound past the
+    attack."""
+    x = np.asarray(channels, float)
+    if x.ndim != 2 or not x.shape[1]:
+        return []
+    x = x.sum(axis=0)
+    size = 1 << max(8, round(math.log2(rate * 0.046)))
+    hop, pad, wide = size // 4, 4, 16
+    start = int(np.argmax(np.abs(x))) + int(skip * rate)
+    seg = x[start:start + int(seconds * rate)]
+    if len(seg) < size:
+        return []
+    w = np.blackman(size)
+    frames = np.stack([seg[s:s + size] * w for s in range(0, len(seg) - size + 1, hop)])
+    p4 = np.abs(np.fft.rfft(frames, size * pad, axis=-1)) ** 2  # zero-padded: every pad-th bin is the plain DFT's
+    e = p4.sum(axis=1)
+    p4 = p4[e >= e.max() * 1e-3]                                 # frames within 30 dB of the loudest
+    if len(p4) < 3:
+        return []
+    db = 10 * np.log10(p4[:, ::pad] + 1e-12)
+    med = np.median(np.lib.stride_tricks.sliding_window_view(np.pad(db, ((0, 0), (wide, wide)), mode="edge"),
+                                                             2 * wide + 1, axis=1), axis=-1)
+    peak = (db - med >= prominence_db) & (db >= np.roll(db, 1, axis=1)) & (db >= np.roll(db, -1, axis=1))
+    peak = peak | np.roll(peak, 1, axis=1) | np.roll(peak, -1, axis=1)   # a peak may wander one bin
+    steady = peak.mean(axis=0) >= persist
+    a4 = p4.mean(axis=0)
+    a = a4[::pad]
+    top = a.max()
+    out = []
+    for k in np.nonzero(steady)[0]:
+        if not 0 < k < len(a) - 1 or a[k] < max(a[k - 1], a[k + 1]) or a[k] < top * 10 ** (floor_db / 10):
+            continue
+        j = k * pad - pad + int(np.argmax(a4[k * pad - pad:k * pad + pad + 1]))
+        j = min(max(j, 1), len(a4) - 2)
+        y0, y1, y2 = (10 * np.log10(a4[i] + 1e-12) for i in (j - 1, j, j + 1))
+        d = 0.5 * (y0 - y2) / (y0 - 2 * y1 + y2) if y0 - 2 * y1 + y2 < 0 else 0.0  # parabolic peak
+        out.append(((j + d) / (size * pad), 10 * math.log10(a[k] / top)))
+    return sorted(out, key=lambda t: -t[1])
+
+
 def resample_pcm(channels, rate_in, rate_out, bits=16, loops=()):
     """Integer PCM channels (lists) resampled and clipped back to `bits`; `loops` as for `resample`."""
     lim = 2 ** (bits - 1)

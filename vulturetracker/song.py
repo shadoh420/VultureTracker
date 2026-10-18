@@ -1240,6 +1240,7 @@ def compile_tree(tree, ctx, base_dir) -> Module:
             ctx.error(_line(pats, pat.name), f"pattern '{pat.name}': {size} bytes of cell data; IT holds at most "
                                              f"{PATTERN_BYTES} per pattern (fewer rows, channels or filled cells)")
     _check_images(ctx, mod, lowest, highest)
+    _check_rings(ctx, mod, lowest, highest)
     return mod
 
 
@@ -1288,6 +1289,60 @@ def _check_images(ctx, mod, lowest, highest):
                            f"above its root, which lifts its content to {top / 1000:.1f} kHz, over the ceiling of "
                            f"{mod.ceiling / 1000:g} kHz (module ceiling); play it lower, add a higher multisample, or "
                            f"store it narrower (bandlimit or resample in its recipe's fx, or a lower sample_rate)")
+
+
+RING_CENTS = 30        # cents: how far a drum's ring tone may sit from the nearest tone of the song's key
+KEY_CONFIDENCE = 0.7   # the Krumhansl-Kessler r under which key_report's estimate is no key to check against
+_RINGS = {}            # Sample.source -> resample.ring_partials
+
+
+def _check_rings(ctx, mod, lowest, highest):
+    """Warn when a sample the patterns play at one note only (a drum) rings at a steady partial more than RING_CENTS
+    from every tone of the song's key: `module: key`, else key_report's estimate when its r reaches KEY_CONFIDENCE.
+    Partials from 50 Hz to 5 kHz as they sound at that note (resample.ring_partials); the loudest such one is named."""
+    one = {n: v for n, v in lowest.items() if n in highest and highest[n][0] == v[0]}
+    if not one:
+        return
+    try:
+        from .resample import ring_partials
+        from .compose import NAMES, key_report, scale_of
+    except ImportError:     # no numpy, nothing to measure with
+        return
+    if mod.key:
+        scale, said = scale_of(mod.key), f"{mod.key} (module key)"
+    else:
+        rep = key_report(mod)
+        if not rep["estimate"] or rep["estimate_r"] < KEY_CONFIDENCE:
+            return
+        scale, said = scale_of(rep["estimate"]), f"{rep['estimate']} (estimated from the notes, r {rep['estimate_r']})"
+    # ponytail: the note as written; slides, arpeggios, pitch envelopes and an instrument's tuning are not followed
+    for num, (note, line, at) in sorted(one.items()):
+        smp = mod.samples[num - 1] if num <= len(mod.samples) else None
+        if not smp or not smp.data:
+            continue
+        parts = _RINGS.get(smp.source, _UNSEEN) if smp.source else _UNSEEN
+        if parts is _UNSEEN:
+            parts = ring_partials(smp.data, smp.rate or smp.c5_speed)
+            if smp.source:
+                _remember(_RINGS, smp.source, parts)
+        rate = smp.c5_speed * 2 ** ((note - 60) / 12)
+        off = []
+        for nu, db in parts:
+            hz = nu * rate
+            if not 50 <= hz <= 5000:
+                continue
+            m = 12 * math.log2(hz / 440) + 69
+            far = min(min((m - p) % 12, (p - m) % 12) for p in scale) * 100
+            if far > RING_CENTS:
+                off.append((hz, m, db, far))
+        if off:
+            hz, m, db, far = off[0]
+            n = round(m)
+            more = f" ({len(off) - 1} more such partial{'s' * (len(off) > 2)})" if len(off) > 1 else ""
+            ctx.warn(line, f"{at}: sample {num:02d} '{smp.name}', played only at {notation.format_note(note)}, rings "
+                           f"at {hz:.1f} Hz ({NAMES[n % 12]}{n // 12 - 1} {round((m - n) * 100):+d} cents), {abs(db):.0f} dB "
+                           f"under its loudest band, {far:.0f} cents from the nearest tone of {said}{more}; it may beat "
+                           f"against the pitched parts: play it at another note, retune it (c5_speed), or pick another")
 
 
 MAX_YAML_DEPTH = 100  # real songs nest six levels

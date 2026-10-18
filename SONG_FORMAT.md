@@ -86,7 +86,7 @@ a letter.
 | `plugins` | mapping | none | mix plugins: OpenMPT's built-in DMO effects (section 3.1) |
 | `macros` | mapping | none | SFx macros `SF0`..`SFF` of the embedded MIDI configuration, e.g. `SF1: F0F080z` (section 3.1) |
 | `ceiling` | 1000–96000 | 18000 | Hz: how high `check` lets a sample's content reach when a note plays it above its root (the top of its spectrum, where it comes within 60 dB of its loudest band, times the transposition ratio); set it to the drums' own top to keep every sound under them. For `check` only, not stored in the .it. Added after 1.5.2: a song that sets it says so with `requires:` |
-| `key` | text | none | the song's key, e.g. `A minor`, `F# major`, `D dorian` (major, minor and the seven modes): for people and agents, not stored in the .it |
+| `key` | text | none | the song's key, e.g. `A minor`, `F# major`, `D dorian` (major, minor and the seven modes): for people and agents, and the key `check` holds drums' ring tones to (§9); not stored in the .it |
 
 Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
@@ -478,7 +478,15 @@ for just one order. Phrase tryouts are project sidecar data; accepting a phrase 
 At most 64 channels, 99 samples, 99 instruments, 200 rows per pattern, 254 patterns (indexes 254/255 are skip/end markers), 255 orders and 25 envelope nodes.
 `check` reports all errors at once as `file:line: error: ...`, plus warnings (unused patterns,
 notes that map to no sample, samples played so far below their stored rate that interpolation images reach
-the audible band). Common mistakes it catches:
+the audible band, drums whose ring tones clash with the key). The ring-tone warning measures each sample the
+patterns play at one note only (a drum, a one-shot): its steady partials (spectral peaks that stand 15 dB over the
+bins around them through most of the sound past its attack, within 20 dB of its loudest band, so broadband noise has
+none), from 50 Hz to 5 kHz as they sound at that note. When one sits more than 30 cents from every tone of the song's
+key it names the loudest such partial in Hz, its nearest note and cents off, and its level under the sample's loudest
+band. The key is `module: key`, else the key estimated from the notes (the SONG tab's estimate) when its correlation
+r reaches 0.7; the warning says which. A song with neither gets no such warning. The key's tones are equal-tempered
+at A = 440 Hz: slides, arpeggios, pitch envelopes, an instrument's tuning and pitched samples tuned off that grid
+(`c5_speed`) are not followed. Common mistakes it catches:
 - lower-case notes, flats, or `C5` instead of `C-5`
 - effect letters that are digits (MOD/XM style `A08` is fine; `008` is not)
 - lower-case effect letters

@@ -577,6 +577,52 @@ class TestValidation(Base):
         with self.assertRaises(SongError):
             warned("C-5 01", ", ceiling: 10")
 
+    def test_drum_ring_off_the_key_warns(self):
+        """A sample played at one note only (a drum) that rings at a steady partial more than 30 cents from every tone
+        of the song's key warns, naming the partial; an in-key ring, noise, a sample played at two notes, or a song
+        with no key and no pitched line do not."""
+        import random
+        rng = random.Random(3)
+
+        def drum(path, hz):
+            n = RATE * 6 // 10
+            write_wav(self.dir / path, RATE, [[round(20000 * math.exp(-6 * i / RATE) * math.sin(2 * math.pi * hz * i / RATE)
+                                                     + 6000 * math.exp(-30 * i / RATE) * rng.uniform(-1, 1))
+                                               for i in range(n)]])
+
+        drum("in.wav", 220.0)                         # A3
+        drum("off.wav", 220 * 2 ** (0.45 / 12))       # about a quarter-tone above A3
+        drum("sharp.wav", 220 * 2 ** (1 / 12))        # A#3: in A minor only when played a semitone down
+        write_wav(self.dir / "noise.wav", RATE, [[round(20000 * math.exp(-6 * i / RATE) * rng.uniform(-1, 1))
+                                                  for i in range(RATE // 2)]])
+
+        def rings(file, cells, module=", key: A minor", melody=()):
+            data = "\n".join(f"{c}{' 01' * (c != '...')} | {m}"
+                             for c, m in zip(cells + ["..."] * 8, list(melody) or ["..."] * 8))
+            text = f"""
+                module: {{channels: 2{module}}}
+                samples: {{1: {{file: {file}}}, 2: {{file: low.wav}}}}
+                patterns: {{p: {{rows: 8, data: "{data.replace(chr(10), chr(92) + 'n')}"}}}}
+                orders: [p]
+            """
+            return [w for w in load_song_text(textwrap.dedent(text), self.dir)[1] if " rings at " in w]
+
+        self.assertEqual(rings("in.wav", ["C-5"]), [])
+        warned = rings("off.wav", ["C-5"])
+        self.assertEqual(len(warned), 1)
+        for part in ("sample 01 'off', played only at C-5", "225.8 Hz (A3 +45 cents)", "0 dB under its loudest band",
+                     "45 cents from the nearest tone of A minor (module key)"):
+            self.assertIn(part, warned[0])
+        self.assertEqual(rings("noise.wav", ["C-5"]), [])
+        self.assertEqual(rings("off.wav", ["C-5", "D-5"]), [])            # played at two notes: pitched, not a drum
+        self.assertEqual(rings("sharp.wav", ["B-4"]), [])                 # sounds at 220 Hz
+        self.assertTrue(rings("sharp.wav", ["C-5"]))
+        self.assertEqual(rings("off.wav", ["C-5"], module=""), [])        # no key and no pitched line to estimate one
+        melody = [f"{n} 02" for n in ("A-4", "C-5", "E-5", "A-4", "B-4", "E-5", "G-5", "A-5")]
+        estimated = rings("off.wav", ["C-5"], module="", melody=melody)
+        self.assertEqual(len(estimated), 1)
+        self.assertIn("(estimated from the notes, r ", estimated[0])
+
     def test_image_level_grows_with_the_drop(self):
         from vulturetracker.resample import image_level
         import random
@@ -749,7 +795,9 @@ class TestDemo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             res = api.build(ROOT / "demo" / "arena.yaml", Path(tmp) / "arena.it")
         self.assertEqual(res["mismatches"], [])
-        self.assertEqual(res["warnings"], [])
+        # the drum ring check's one finding: the kick rings at 52 Hz, G#1, 88 cents from the estimated E minor
+        self.assertEqual([w.split("warning: ")[1].split(" rings at ")[0] for w in res["warnings"]],
+                         ["pattern 'a', row 0, channel 1: sample 01 'Kick', played only at C-5,"])
         info = res["libopenmpt"]
         self.assertGreaterEqual(info["instruments"], 3)
         self.assertTrue(30 <= info["duration_seconds"] <= 60, info["duration_seconds"])
@@ -759,10 +807,13 @@ class TestDemo(unittest.TestCase):
             res = api.build(ROOT / "demo2" / "iron_relay.yaml", Path(tmp) / "iron_relay.it")
         self.assertEqual(res["mismatches"], [])
         # the upward ceiling check's two findings in the demo (a sound change is the owner's call): the lead, 8.4 kHz
-        # wide, at A-6, and the arp phrase, 19.6 kHz wide, two semitones up; nothing else
+        # wide, at A-6, and the arp phrase, 19.6 kHz wide, two semitones up; and the drum ring check's two: the kick at
+        # 123 Hz (B2) and the snare at 214 Hz (A3 -45 cents) against the estimated D minor; nothing else
         self.assertEqual([w.split("warning: ")[1].rsplit(" '", 1)[0] for w in res["warnings"]],
                          ["pattern 'b2', row 96, channel 15: A-6 plays sample 13",
-                          "pattern 'intro', row 64, channel 8: E-4 plays sample 14"])
+                          "pattern 'intro', row 64, channel 8: E-4 plays sample 14",
+                          "pattern 'a', row 0, channel 1: sample 01",
+                          "pattern 'a', row 8, channel 2: sample 02"])
         self.assertEqual(res["libopenmpt"]["channels"], 16)
 
 

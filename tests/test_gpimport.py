@@ -140,7 +140,8 @@ class TestGpImport(unittest.TestCase):
             kit = song["instruments"][2]["keymap"]
             self.assertEqual(song["samples"][next(k for k in kit if k["notes"] == "F#3")["sample"]]["name"], "kit_hat")  # 42
             res = api.check(str(d / "t.yaml"))
-            self.assertEqual((res["errors"], res["warnings"]), ([], []))     # no anti-aliasing warnings either
+            self.assertEqual((res["errors"], [w for w in res["warnings"] if " rings at " not in w]), ([], []))  # no
+            # anti-aliasing warnings either (the kit's kick rings at 53 Hz, G#1 +45 cents: its ring warning is expected)
             solo = api.load(d / "t.yaml")  # the guitar alone, for its pitches
             for c in solo["module"]["channels"]:
                 c["muted"] = c["name"].startswith("Drums")
