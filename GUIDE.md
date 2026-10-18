@@ -363,11 +363,28 @@ channels panned apart (say 3 rows at 60 % to the left, 6 rows at 35 % to the rig
 with no rows doubles a lead instead. Each ECHO is one step for Ctrl+Z, the channel it adds included. COMPOSE writes plain
 cells too, each command one step for Ctrl+Z with a count in the bar. GROOVE delays notes (note-offs too) by a tick count
 per row, repeating from the pattern's first row, as `SDx`: `0 2` swings every other row by two ticks, `0 0 2 2` the
-eighths of four-row beats; a 0 removes a delay, and a note that carries another effect keeps it undelayed. EUCLID makes
+eighths of four-row beats; a 0 removes a delay, and a note that carries another effect keeps it undelayed. ACCENT does
+the same for volume: a volume per row, repeating from the pattern's first row, written as `vNN` on every note of the
+selected channels (every channel with no selection), in THIS PATTERN or the WHOLE SONG: `64 40 52 40` accents the beats
+of four-row beats, and a percent takes the note's own volume (its `vNN`, else the one it plays at: its sample's
+default where the cell names an instrument, or a `vNN` above it in the channel), so `100% 60%` keeps the on-beat rows'
+volumes and lowers the others; a note with another volume-column command (a pan, a slide), or a percent on a bare note
+whose volume the pattern does not say, is left alone and counted in the bar, and a note already at its level keeps
+its cell. EUCLID makes
 the selected rows of one channel (or, with no selection, the cursor's channel from the cursor down) a Euclidean rhythm
 of the cell at their top: HITS spread as evenly as they go over STEPS (3 / 8 is `x..x..x.`), turned left by ROT, a step
 every EVERY rows, each hit kept with the given percent (seeded: the same settings write the same cells); the other rows
-are cleared. CHORD stacks each note of the selected channel (or the cursor's cell) into the chosen chord over that
+are cleared. Three more fields make it change by rule. `+` layers more cycles over HITS / STEPS (`2/5 3/7`): a step
+sounds where any cycle hits, at the top cell's volume where all of them hit and down to half of it where only one does
+(when that volume is known: its `vNN`, else its sample's default). PHRASE restarts the cycles every so many rows,
+counted from the pattern's first row, so cycles of 3, 5 and 7 steps realign at each phrase end. RULES, one per phrase
+and repeating, change each phrase: `-` as is, `rev` reversed, `inv` hits and rests swapped, `rotN` turned N steps,
+`+N` turned N steps more at each phrase (PHRASE 8 with RULES `+1` turns 3 / 8 from `x..x..x.` to `..x..x.x` in the
+second phrase, `.x..x.x.` in the third). With WHOLE SONG, EUCLID writes the channel in every pattern the orders play,
+with the cell at the top of the selection, and the phrases count on through the song from where each pattern first
+plays (by pattern lengths: a jump or break that cuts a pattern short is not counted). A pattern repeated in the orders
+holds one set of cells, so it plays the same rhythm each time: rhythms differ between patterns, not between repeats.
+CHORD stacks each note of the selected channel (or the cursor's cell) into the chosen chord over that
 channel and the ones to its right, with the note's instrument and volume, INV lowest tones moved up an octave; note-offs
 are copied across so the chord ends whole, and a chord that needs more channels than the song has is refused (add them
 in the SONG tab). STRUM above 0 delays the chord's voices one after another by that many ticks (`SDx`), the lowest first

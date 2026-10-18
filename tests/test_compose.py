@@ -42,6 +42,27 @@ class TestCompose(unittest.TestCase):
         with self.assertRaises(ValueError):
             compose.groove(rows, [0], 0, 3, [0, 16], speed=32)  # SDx holds 0-15 (16 would write SD0)
 
+    def test_accent_sets_volumes_by_row(self):
+        rows = grid(f"C-5 01 ... ... | {E}", "D-5 01 v20 ... | E-5 02 p32 ...", f"=== .. ... ... | {E}",
+                    "F-5 01 v64 ... | G-5 02 ... ...")
+        out, skipped = compose.accent(rows, [0, 1], 0, 3, [64, "v40"])
+        self.assertEqual(cells(out), {(0, 0): "C-5 01 v64 ...", (1, 0): "D-5 01 v40 ...", (3, 0): "F-5 01 v40 ...",
+                                      (3, 1): "G-5 02 v40 ..."})
+        self.assertEqual(skipped, 1)                      # E-5's pan p32 kept; the note-off on row 2 untouched
+        dv = lambda c: 48 if c.instrument == 2 else None  # noqa: E731  (sample 2's default volume)
+        out, _ = compose.accent(rows, [0, 1], 2, 3, ["100%", "50%"], dv)  # rows 2..3: the list from the pattern's row 0
+        self.assertEqual(cells(out), {(3, 0): "F-5 01 v32 ...", (3, 1): "G-5 02 v24 ..."})
+        self.assertEqual(compose.accent(rows, [0], 0, 0, ["200%"]), ([], 1))  # C-5's volume unknown: left alone
+        out, _ = compose.accent(rows, [0], 0, 0, ["200%"], lambda c: 40)  # a percent tops out at 64
+        self.assertEqual(cells(out), {(0, 0): "C-5 01 v64 ..."})
+        bare = grid("C-5 01 v20 ...", "D-5 .. ... G10", "... .. v30 ...", "E-5 .. ... ...")
+        out, _ = compose.accent(bare, [0], 1, 3, ["50%"])  # bare notes play at the volume carried down the channel
+        self.assertEqual(cells(out), {(1, 0): "D-5 .. v10 G10", (3, 0): "E-5 .. v15 ..."})
+        self.assertEqual(compose.accent(bare, [0], 1, 3, ["100%"]), ([], 0))  # already at their volume: unchanged
+        for bad in ([], [65], ["x"], ["-5%"], ["nan"]):
+            with self.assertRaises(ValueError, msg=bad):
+                compose.accent(rows, [0], 0, 3, bad)
+
     def test_euclid_fills_the_selection_from_its_top_cell(self):
         rows = grid(*(["C-5 03 v48 ..."] + [E] * 6 + ["G-5 01 ... ..."]))
         out = compose.euclid(rows, 0, 0, 7, 3, 8)
@@ -53,6 +74,25 @@ class TestCompose(unittest.TestCase):
         self.assertTrue(0 < sum(c["cell"] != E for c in a) < 7)
         with self.assertRaises(ValueError):
             compose.euclid(grid(E, E), 0, 0, 1, 1, 2)     # no note to play
+
+    def test_euclid_changes_by_rule_each_phrase(self):
+        def run(n, *args, **kw):  # channel 0 after euclid: x the top cell (v48), 2 at v36, 1 at v24, . empty
+            rows = grid(*(["C-5 03 v48 ..."] + [E] * (n - 1)))
+            for c in compose.euclid(rows, 0, 0, n - 1, *args, **kw):
+                rows[c["row"]][0] = parse_cell(c["cell"])
+            return "".join("." if c.note is None else {48: "x", 36: "2", 24: "1"}[c.volcmd] for c in (r[0] for r in rows))
+        self.assertEqual(run(32, 3, 8, phrase=8, rules=["+1"]), "x..x..x...x..x.x.x..x.x.x..x.x..")
+        self.assertEqual(run(64, 5, 16, phrase=16, rules=["-", "rev", "inv", "rot4"]),
+                         "x...x..x..x..x....x..x..x..x...x.xxx.xx.xx.xx.xxx..x..x..x..x...")
+        # 1/3 2/5 3/7 restarting every 16 rows, louder where more cycles hit
+        layered = run(32, 1, 3, more=[(2, 5), (3, 7)], phrase=16)
+        self.assertEqual(layered[:16], "x..x.211112.2112")
+        self.assertEqual(layered[16:], layered[:16])      # realigned at the phrase end
+        self.assertEqual(run(16, 3, 8, phrase=8, rules=["+1"], start=8)[:8], "..x..x.x")  # a pattern 8 rows into the song
+        self.assertEqual(run(8, 3, 8), "x..x..x.")        # without a phrase, as before
+        for bad in (dict(rules=["rev"]), dict(phrase=8, rules=["up"]), dict(more=[(1, 65)]), dict(phrase=-1)):
+            with self.assertRaises(ValueError, msg=bad):
+                run(8, 3, 8, **bad)
 
     def test_chord_stacks_over_the_channels_to_the_right(self):
         rows = grid(f"C-5 02 v40 ... | {E} | {E} | {E}", f"{E} | {E} | {E} | {E}", f"A-4 .. ... ... | {E} | {E} | {E}",

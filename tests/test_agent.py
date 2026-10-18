@@ -605,6 +605,11 @@ class AgentTests(unittest.TestCase):
         self.assertEqual([r[0].note for r in st.mod.patterns[0].rows], [60, None, 60, None])
         call(action='groove', ticks=[1, 0])
         self.assertEqual(st.mod.patterns[0].rows[0][0].param, 0xD1)
+        call(action='euclid', hits=1, steps=2, phrase=2, rules=['-', 'rot1'])  # rows 0 and 3 of the four
+        self.assertEqual([r[0].note for r in st.mod.patterns[0].rows], [60, None, None, 60])
+        call(action='euclid', hits=2, steps=4)
+        call(action='accent', levels=[48, '50%'])
+        self.assertEqual([st.mod.patterns[0].rows[r][0].volcmd for r in [0, 2]], [48, 48])
         call(action='layers', instruments=[1, 2])
         self.assertEqual([st.mod.patterns[0].rows[r][0].instrument for r in [0, 2]], [1, 2])
         before, n = st.text, len(st.history)

@@ -4,6 +4,7 @@ them into the song text in place as one undo step (State.song_edit), so what the
 shows and edits like any other cell:
 
 - groove: a repeating per-row note delay (SDx), e.g. 0 2 swings every other row by two ticks;
+- accent: a repeating per-row note volume (vNN), as volumes or percents of each note's own, e.g. 64 40 52 40;
 - euclid: k hits spread as evenly as they go over n steps (Euclidean rhythm), rotated, each kept with a probability from
   a seed, so the same settings always write the same cells;
 - chord: each note of a channel stacked into a chord over the channels to its right, note-offs copied so it ends whole;
@@ -13,6 +14,7 @@ shows and edits like any other cell:
   shrink (OpenMPT's), and the note lengths: fill, set_length, cut_here, glue.
 """
 import random
+import re
 
 from .model import NOTE_OFF, Cell
 from .notation import VOLCMDS, format_cell
@@ -59,6 +61,49 @@ def groove(rows, chans, r0, r1, ticks, speed):
     return out, skipped
 
 
+def accent(rows, chans, r0, r1, levels, default_volume=None):
+    """Every note (0-119) on rows r0..r1 of `chans` given the volume levels[row % len(levels)]: the accents repeat from
+    the pattern's first row, like groove's ticks. A level is a volume 0-64 (`40` or `v40`), written as vNN, or a percent
+    (`60%`) of the note's own volume: its vNN, else what IT plays it at, carried down the channel from the pattern's top
+    (`default_volume(cell)` where a cell names an instrument, a vNN above it); a note already playing at its level keeps
+    its cell. A note with another volume-column command
+    (a pan, a slide), or a percent on a note whose volume the pattern does not say, is left alone and counted. Returns
+    (cells, skipped)."""
+    parsed = []
+    for lv in levels:
+        m = re.fullmatch(r"v?(\d+(?:\.\d+)?)(%?)", str(lv).strip().lower())
+        pct, n = bool(m and m[2]), float(m[1]) if m else -1
+        if n < 0 or not pct and n > 64:
+            raise ValueError(f"an accent is a volume 0-64 (40 or v40) or a percent of the note's volume (60%), not '{lv}'")
+        parsed.append((pct, n))
+    if not parsed:
+        raise ValueError("give the volume of each row, e.g. 64 40 52 40 or 100% 60%")
+    out, skipped = [], 0
+    for ch in chans:
+        vol = None  # the channel's volume as IT carries it from the pattern's top: unknown until a vNN or an instrument
+        for r in range(0, r1 + 1):
+            c = rows[r][ch]
+            if c.note is None or c.note >= 120:
+                vol = c.volcmd if c.volcmd is not None and c.volcmd <= 64 else vol
+                continue
+            if c.instrument and default_volume:
+                vol = default_volume(c) if default_volume(c) is not None else vol
+            own, vol = (c.volcmd, c.volcmd) if c.volcmd is not None and c.volcmd <= 64 else (vol, vol)
+            if r < r0:
+                continue
+            if c.volcmd is not None and c.volcmd > 64:
+                skipped += 1
+                continue
+            pct, n = parsed[r % len(parsed)]
+            if pct and own is None:  # a bare note whose volume the pattern does not say
+                skipped += 1
+                continue
+            v = min(64, int(own * n / 100 + 0.5)) if pct else int(n + 0.5)
+            if v != c.volcmd and v != own:  # a bare note already playing at v keeps inheriting it
+                _write(out, r, ch, Cell(c.note, c.instrument, v, c.effect, c.param))
+    return out, skipped
+
+
 def euclid_steps(hits, steps, rotate=0):
     """`hits` onsets spread as evenly as they go over `steps` (the Euclidean rhythm, as Bresenham's line draws it: 3 over 8
     is x..x..x.), turned `rotate` steps to the left."""
@@ -67,21 +112,65 @@ def euclid_steps(hits, steps, rotate=0):
     return [((i + rotate) % steps * hits) % steps < hits for i in range(steps)]
 
 
-def euclid(rows, ch, r0, r1, hits, steps, rotate=0, every=1, prob=100, seed=1):
-    """Channel `ch`, rows r0..r1, made a Euclidean rhythm of the cell on row r0: a step every `every` rows, `hits` of each
-    `steps` steps sounding (the rhythm repeats down the selection), each hit kept with `prob` percent from `seed` (the
-    same settings write the same cells). Every other row of the selection is cleared."""
-    template = rows[r0][ch]
+RULE = re.compile(r"-|rev|inv|rot(\d+)|\+(\d+)")  # one phrase's transform: as is, reversed, inverted, turned, turned k*N
+
+
+def euclid(rows, ch, r0, r1, hits, steps, rotate=0, every=1, prob=100, seed=1, more=(), phrase=0, rules=(), start=0,
+           template=None, default_volume=None):
+    """Channel `ch`, rows r0..r1, made a Euclidean rhythm of the cell on row r0 (or `template`): a step every `every` rows,
+    `hits` of each `steps` steps sounding (the rhythm repeats down the selection), each hit kept with `prob` percent from
+    `seed` (the same settings write the same cells). Every other row of the selection is cleared.
+
+    `more` layers further (hits, steps) cycles over it: a step sounds where any cycle hits, at the top cell's volume
+    where all of them do, down to half of it where one does (when that volume is known: its vNN, else
+    `default_volume(template)`). With `phrase` rows the cycles restart at every phrase, counted from row 0 of a pattern
+    that starts `start` rows into the song (so they realign at phrase ends), and phrase k takes rules[k % len(rules)]:
+    `-` as is, `rev` reversed, `inv` hits and rests swapped, `rotN` turned N steps left, `+N` turned k*N steps left."""
+    template = template or rows[r0][ch]
     if template.note is None or template.note >= 120:
         raise ValueError("the rhythm plays the cell at the top of the selection: put a note there first")
     if not 1 <= every <= 64:
         raise ValueError("a step is 1-64 rows")
-    pattern, rng, out = euclid_steps(hits, steps, rotate), random.Random(seed), []
+    cycles = [(int(h), int(s)) for h, s in [(hits, steps), *more]]
+    if not all(1 <= s <= 64 for _, s in cycles) or len(cycles) > 8:
+        raise ValueError("a Euclidean rhythm has 1-64 steps, and up to 8 cycles layered")
+    if not 0 <= phrase <= 4096:
+        raise ValueError("a phrase is 0 (none) to 4096 rows")
+    parsed = [RULE.fullmatch(str(t).strip().lower()) for t in rules]
+    if not all(parsed):
+        raise ValueError("a phrase rule is -, rev, inv, rotN (turned N steps) or +N (turned N more each phrase)")
+    if parsed and not phrase:
+        raise ValueError("rules change the rhythm at each phrase: give the phrase's rows")
+    n, base = len(cycles), template.volcmd if template.volcmd is not None else (
+        default_volume(template) if default_volume else None)
+    if base is not None and base > 64:
+        base = None  # a pan or a slide in the volume column: written as it is, no accents
+    turned = {}  # (hits, steps, rotation): the cycle's steps
+
+    def hit(h, s, rot, j):
+        key = (h, s, rot % s)
+        if key not in turned:
+            turned[key] = euclid_steps(h, s, rot)
+        return turned[key][j % s]
+
+    rng, out = random.Random(seed), []
     for r in range(r0, r1 + 1):
-        on = (r - r0) % every == 0 and pattern[(r - r0) // every % steps]
+        k, off = divmod(start + r, phrase) if phrase else (0, start + r - r0)
+        i, rule, rot = off // every, parsed[k % len(parsed)] if parsed else None, rotate
+        word = rule[0] if rule else "-"
+        if word == "rev":
+            i = -(-phrase // every) - 1 - i
+        rot += int(rule[1]) if rule and rule[1] else k * int(rule[2]) if rule and rule[2] else 0
+        count = sum(hit(h, s, rot, i) for h, s in cycles)
+        if word == "inv":
+            count = n if count == 0 else 0
+        on = off % every == 0 and count > 0
         if on and prob < 100:
             on = rng.random() * 100 < prob
         want = template if on else Cell()
+        if on and n > 1 and base is not None:
+            want = Cell(template.note, template.instrument, int(base * (n + count - 2) / (2 * n - 2) + 0.5),
+                        template.effect, template.param)
         c = rows[r][ch]
         if (c.note, c.instrument, c.volcmd, c.effect, c.param) != (want.note, want.instrument, want.volcmd, want.effect, want.param):
             _write(out, r, ch, want)

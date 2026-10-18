@@ -947,13 +947,17 @@ def write_patterns(st, a):
         return _write_groups(st, groups)
 
 
-COMPOSE_ACTIONS = ("interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length", "cut_here", "glue")
+COMPOSE_ACTIONS = ("accent", "interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length", "cut_here", "glue")
 
 
 @tool("transform_patterns", "Transform named pattern selections atomically (one undo step), each pattern once even "
       "if repeated in orders. Inclusive row bounds; channels are 1-based. transpose clamps real notes to C-0..B-9, "
       "preserving off/cut/fade. replace matches exact field text with * and ? wildcards (case sensitive). clear uses "
-      "fields (default all). groove preserves other effects and reports skipped notes. chord/euclid require one source "
+      "fields (default all). euclid's cycles layer more [hits, steps] cycles (louder where more of them hit); phrase "
+      "(rows) restarts them at each phrase from the pattern's row 0, and rules (one per phrase, repeating: '-', 'rev', "
+      "'inv', 'rotN', '+N' = turned N more each phrase) transform it. groove preserves other effects and reports skipped notes; accent sets every note's volume to "
+      "levels[row % len] (from the pattern's first row), each 0-64 or a percent string like '60%' of the note's own "
+      "volume (as carried down the channel), leaving notes with another volume command, or an unknown volume, alone. chord/euclid require one source "
       "channel; chord writes adjacent channels and needs overwrite=true for occupied destinations, strum delays its "
       "voices by that many ticks each (down: from the top). layers takes slot numbers in the current instrument/sample "
       "mode. The Pattern tab's SELECTION-bar tools, the page's own code: interpolate (OpenMPT's, per selected channel "
@@ -977,7 +981,10 @@ COMPOSE_ACTIONS = ("interpolate", "automate", "grow", "shrink", "arp", "fill", "
        "target": {"type": "string", "enum": ["Z", "X", "M", "V", "T", "v"]}, "from": {"type": "integer"},
        "to": {"type": "integer"}, "octaves": {"type": "integer"},
        "direction": {"type": "string", "enum": ["up", "down", "updown", "downup", "random"]},
-       "gate": {"type": ["integer", "string"]}, "skip": {"type": "integer"}, "length": {"type": "integer"}},
+       "gate": {"type": ["integer", "string"]},
+       "levels": {"type": "array", "items": {"type": ["integer", "string"]}},
+       "cycles": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}}},
+       "phrase": {"type": "integer"}, "rules": {"type": "array", "items": {"type": "string"}}, "skip": {"type": "integer"}, "length": {"type": "integer"}},
       ["action", "selections"])
 def transform_patterns(st, a):
     import re
@@ -1010,10 +1017,14 @@ def transform_patterns(st, a):
                     raise ValueError(f"{action} requires one source channel")
                 if action == "euclid":
                     steps = _integer(a.get("steps"), 1, 64, "steps")
-                    cells = compose.euclid(rows, chans[0], r0, r1, _integer(a.get("hits"), 0, steps, "hits"), steps,
-                        _integer(a.get("rotate", 0), -64, 64, "rotate"), _integer(a.get("every", 1), 1, 64, "every"),
-                        _integer(a.get("probability", 100), 0, 100, "probability"),
-                        _integer(a.get("seed", 1), 0, 2147483647, "seed"))
+                    cells, _, _ = st.compose_cells(i, {"op": "euclid", "pattern": i, "r0": r0, "r1": r1, "ch": chans[0],
+                        "hits": _integer(a.get("hits"), 0, steps, "hits"), "steps": steps,
+                        "rotate": _integer(a.get("rotate", 0), -64, 64, "rotate"),
+                        "every": _integer(a.get("every", 1), 1, 64, "every"),
+                        "prob": _integer(a.get("probability", 100), 0, 100, "probability"),
+                        "seed": _integer(a.get("seed", 1), 0, 2147483647, "seed"),
+                        "cycles": [[_integer(h, 0, 64, "hits"), _integer(s, 1, 64, "steps")] for h, s in a.get("cycles", [])],
+                        "phrase": _integer(a.get("phrase", 0), 0, 4096, "phrase"), "rules": list(a.get("rules", []))})
                 elif a.get("strum"):  # the page's STRUM: compose.chord, then the voices delayed (State.compose_cells)
                     cells, n, more = st.compose_cells(i, {"op": "chord", "pattern": i, "r0": r0, "r1": r1, "ch": chans[0],
                         "shape": a.get("shape", "maj"), "inversion": _integer(a.get("inversion", 0), 0, 5, "inversion"),
@@ -1031,7 +1042,7 @@ def transform_patterns(st, a):
                       "cols": [[c, [_FIELDS.index(f) for f in fields]] for c in chans]}
                 if action == "arp" and len(chans) != 1:
                     raise ValueError("arp requires one source channel")
-                for k in ("target", "from", "to", "shape", "every", "octaves", "direction", "gate", "skip", "seed", "length"):
+                for k in ("target", "from", "to", "shape", "every", "octaves", "direction", "gate", "skip", "seed", "length", "levels"):
                     if k in a:
                         op[k] = a[k]
                 if action == "automate" and not all(type(op.get(k)) is int for k in ("from", "to")):

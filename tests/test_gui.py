@@ -1441,6 +1441,10 @@ class TestGui(unittest.TestCase):
         r = st.song_edit([{"op": "groove", "pattern": None, "ticks": [0, 2]}])  # the whole song, every channel
         self.assertEqual(r, {"report": "groove: 1 cell in the song"})
         self.assertEqual(col(0, 0)[3], "C-5 01 ... SD2")
+        r = st.song_edit([{"op": "accent", "pattern": None, "levels": [64, "50%"]}])
+        self.assertTrue(r["report"].startswith("accent: "), r)
+        self.assertEqual(col(0, 0)[2:], ["C-5 01 ... ...", "C-5 01 v32 SD2"])  # sample 1 plays at its default, 64
+        st.undo()
         st.song_edit([{"op": "layers", "pattern": 0, "chans": [0], "r0": 0, "r1": 3, "instruments": [2, 1]}])
         self.assertEqual([c[:6] for c in col(0, 0)], ["C-5 02", "... ..", "C-5 01", "C-5 02"])
         r = st.song_edit([{"op": "automate", "pattern": 0, "r0": 0, "r1": 3, "chans": [0], "target": "Z", "from": 0,
@@ -1469,8 +1473,15 @@ class TestGui(unittest.TestCase):
             st.song_edit([{"op": "chord", "pattern": 0, "ch": 0, "shape": "maj"}])
         st.song_edit([{"op": "chord", "pattern": 0, "ch": 0, "r0": 0, "r1": 0, "shape": "5"}])  # a power chord fits
         self.assertEqual(st.pattern_rows(0)["rows"][0][:2], ["C-5 02 ... Z00", "G-5 02 ... ..."])
-        for bad in ({"op": "groove", "pattern": 0, "ticks": [6]}, {"op": "euclid", "pattern": None, "ch": 0, "hits": 1,
-                    "steps": 2}, {"op": "layers", "pattern": 1, "chans": [5], "instruments": [1]}):
+        # EUCLID in the whole song: the cell at the top of the selection, its phrases counted on through the orders
+        r = st.song_edit([{"op": "euclid", "pattern": None, "src": 0, "row": 2, "ch": 1, "hits": 1, "steps": 4,
+                           "phrase": 4, "rules": ["-", "rot1"]}])
+        self.assertEqual(r, {"report": "euclid: 3 cells in the song"})
+        self.assertEqual([col(p, 1) for p in (0, 1)], [["C-5 02 ... ..."] + ["... .. ... ..."] * 3,
+                                                       ["... .. ... ..."] * 3 + ["C-5 02 ... ..."]])
+        st.undo()
+        for bad in ({"op": "groove", "pattern": 0, "ticks": [6]}, {"op": "euclid", "pattern": 0, "ch": 0, "hits": 1,
+                    "steps": 2, "phrase": 0, "rules": ["rev"]}, {"op": "layers", "pattern": 1, "chans": [5], "instruments": [1]}):
             with self.assertRaises(ValueError, msg=bad):
                 st.song_edit([bad])
         while st.snapshot()["undo"]:
