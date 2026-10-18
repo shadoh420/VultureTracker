@@ -351,7 +351,7 @@ const insNum=()=>3,putCell=(p,adv)=>out.push(['cell',cellText(p),adv,CUR.row]),l
 const faOn=()=>tabs.has('t-faust'),faMidi=d=>out.push(['faust',...d]);
 PAGE
 MIDI.on=true;midiMsg([0x90,60,127]);midiMsg([0x80,60,0]);          // preview only
-EDIT=true;midiMsg([0x90,61,64]);midiMsg([0x90,61,0]);  // edit mode: entered with the velocity, note-on at 0 = note-off
+EDIT=true;midiMsg([0x90,61,64]);midiMsg([0x90,61,0]);  // edit mode: entered with the velocity (OpenMPT curve: 64 is v17), note-on at 0 = note-off
 MIDI.vel=false;midiMsg([0x90,72,10]);                 // velocity off: the volume column is left alone, full loudness
 MIDI.on=false;midiMsg([0x90,50,100]);                 // MIDI switched off: nothing
 MIDI.on=true;LV.playing=true;LV.oi=0;LV.pos={order:0,row:2};midiMsg([0x90,62,127]);  // recorded at the row playing, no step
@@ -373,7 +373,7 @@ class TestMidi(unittest.TestCase):
             js.write_text(MIDI_JS.replace("PAGE", page[a:b]), encoding="utf-8")
             out = json.loads(subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30, check=True).stdout)
         self.assertEqual(out, [["on", "m60", None, 60, 1], ["off", "m60"],
-                               ["cell", "C#5 03 v32 A06", True, 0], ["on", "m61", None, 61, 64 / 127], ["off", "m61"],
+                               ["cell", "C#5 03 v17 A06", True, 0], ["on", "m61", None, 61, 64 / 127], ["off", "m61"],
                                ["cell", "C-6 03 v20 A06", True, 0], ["on", "m72", None, 72, 1],
                                ["cell", "D-5 03 ... ...", False, 2], ["on", "m62", None, 62, 1],
                                ["cell", "D#5 03 ... ...", True, 2], ["on", "m63", None, 63, 1],
