@@ -2263,7 +2263,7 @@ class State:
             remap.append(lambda k, order=order: order.index(k))
         elif kind == "echo":
             self._echo(lines, orders, op, remap)
-        elif kind in ("groove", "euclid", "chord", "layers", "interpolate", "automate", "grow", "shrink", "arp", "fill",
+        elif kind in ("groove", "accent", "euclid", "chord", "layers", "interpolate", "automate", "grow", "shrink", "arp", "fill",
                       "set_length", "cut_here", "glue"):
             self._compose(lines, op)
         elif kind == "render_sample":
@@ -2843,11 +2843,20 @@ class State:
         if kind == "groove":
             cells, s = compose.groove(rows, chans, r0, r1, op.get("ticks") or [], mod.speed)
             skipped += s
+        elif kind == "accent":
+            cells, s = compose.accent(rows, chans, r0, r1, op.get("levels") or [], default_volume)
+            skipped += s
         elif kind == "euclid":
             if not 1 <= int(op["steps"]) <= 64:
                 raise ValueError("a Euclidean rhythm has 1-64 steps")
+            template = None
+            if whole:  # the WHOLE SONG plays the cell at the top of the selection in the pattern it was made in
+                src = mod.patterns[self.pattern_at(op.get("src", 0))].rows
+                template = src[min(len(src) - 1, max(0, int(op.get("row") or 0)))][ch]
             cells = compose.euclid(rows, ch, r0, r1, int(op["hits"]), int(op["steps"]), int(op.get("rotate") or 0),
-                                   int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)))
+                                   int(op.get("every") or 1), float(op.get("prob", 100)), int(op.get("seed", 1)),
+                                   [(int(h), int(s)) for h, s in op.get("cycles") or []], int(op.get("phrase") or 0),
+                                   op.get("rules") or [], int(op.get("start") or 0), template, default_volume)
         elif kind == "chord":
             shape = op.get("shape") or "maj"
             cells = compose.chord(rows, ch, r0, r1, shape, int(op.get("inversion") or 0), nch)
@@ -2912,8 +2921,10 @@ class State:
 
     def _compose(self, lines, op):
         """The selection bar's composition ops (compose.py), written into the song text: `groove` (ticks: the per-row
-        delays) and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
-        rows r0..r1, or in every pattern (pattern null); `euclid` (ch, hits, steps, rotate, every, prob, seed) and `chord`
+        delays), `accent` (levels: the per-row volumes, 0-64 or "NN%") and `layers` (instruments, mode cycle / volume) over `chans` (None: every channel) in pattern `pattern`
+        rows r0..r1, or in every pattern (pattern null); `euclid` (ch, hits, steps, rotate, every, prob, seed; cycles: more
+        [hits, steps] layered, phrase rows, rules per phrase), in one pattern or, with pattern null, in every pattern the
+        orders play, the phrases counted on from where each first plays (the cell at row `row` of pattern `src`); `chord`
         (ch, shape, inversion; strum ticks, down) and `arp` (ch, shape, octaves, direction, every, gate, skip, seed) in one
         pattern; `fill`, `set_length` (length), `cut_here` (r0: the row) and `glue` over `chans` in one pattern, which
         an approved pattern refuses; `interpolate` (cols: [[channel, [fields 0-3]], ...]; with `sweep`, the span
@@ -2922,13 +2933,21 @@ class State:
         self._need_compiled()
         mod, kind = self.mod, op["op"]
         whole = op.get("pattern") is None
-        if whole and kind in ("euclid", "chord", "interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length",
+        if whole and kind in ("chord", "interpolate", "automate", "grow", "shrink", "arp", "fill", "set_length",
                               "cut_here", "glue"):
             raise ValueError(f"{kind} works on a selection in one pattern")
         written = skipped = 0
         extra = []
-        for idx in range(len(mod.patterns)) if whole else [self.pattern_at(op["pattern"])]:
-            cells, s, more = self.compose_cells(idx, op)
+        starts = {}  # euclid in the whole song: each played pattern and the row of the song where it first plays
+        if whole and kind == "euclid":
+            # ponytail: rows counted by pattern lengths, so a Bxx/Cxx that cuts a pattern short shifts later phrases
+            t = 0
+            for o in mod.orders:
+                if o < len(mod.patterns):
+                    starts.setdefault(o, t)
+                    t += len(mod.patterns[o].rows)
+        for idx in starts or (range(len(mod.patterns)) if whole else [self.pattern_at(op["pattern"])]):
+            cells, s, more = self.compose_cells(idx, dict(op, start=starts[idx]) if starts else op)
             skipped += s
             extra += more
             if cells:
@@ -3133,7 +3152,7 @@ class State:
         """Apply `ops` (dicts with `op`: orders, pattern_new, pattern_clone, pattern_rename, pattern_delete, pattern_rows,
         pattern_split, channel_rename, channel_color, channel_add, channel_remove, channel_move, module, instrument_set / new / delete, sample_new,
         sample_set (the whole entry), sample_file (the slot pointed at another WAV), sample_delete, sample_process (an edit of the slot's audio written as a new WAV beside the song,
-        the slot pointed at it), echo, groove, euclid, chord, layers, arp, interpolate, automate, grow, shrink, fill,
+        the slot pointed at it), echo, groove, accent, euclid, chord, layers, arp, interpolate, automate, grow, shrink, fill,
         set_length, cut_here, glue, render_sample (rows rendered into a new slot), sample_slice, sf2_preset) to the song text as one undo step. The tryout's
         channel mutes and unwritten faders follow a channel that moves or goes; its section and loop are dropped when they
         fall outside a changed order list."""
