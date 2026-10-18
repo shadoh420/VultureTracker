@@ -519,6 +519,29 @@ def span_numbers(series, t0, t1):
     return {"lufs_s": max(short) if short else None, "correlation": corr}
 
 
+def integrated_lufs(x, rate, ms=None):
+    """Integrated loudness in LUFS (BS.1770-4: K-weighted, 400 ms blocks every 100 ms, gated at -70 LUFS and 10 LU
+    under the ungated mean) of `x` (channels x frames, full scale 1.0); `ms`: its K-weighted squares when already
+    computed. None when shorter than one block or silent."""
+    if ms is None:
+        from .resample import fir_filter
+        h = k_weighting(rate)
+        ms = [fir_filter(c, h) ** 2 for c in np.atleast_2d(np.asarray(x, float))]
+    block, hop = int(0.4 * rate), int(0.1 * rate)
+    n = max(0, (len(ms[0]) - block) // hop + 1) if len(ms) else 0
+    if not n:
+        return None
+    cs = [np.concatenate([[0.0], np.cumsum(m)]) for m in ms]
+    starts = np.arange(n) * hop
+    z = sum((c[starts + block] - c[starts]) / block for c in cs)  # BS.1770's channel weights are 1 for L and R
+    z = z[-0.691 + 10 * np.log10(np.maximum(z, 1e-20)) > -70]
+    if not len(z):
+        return None
+    rel = -0.691 + 10 * np.log10(z.mean()) - 10
+    z = z[-0.691 + 10 * np.log10(z) > rel]
+    return round(float(-0.691 + 10 * np.log10(z.mean())), 2) if len(z) else None
+
+
 def measure_mix(x, rate):
     """A mix's numbers (`x`: channels x frames, full scale 1.0): integrated loudness in LUFS (BS.1770-4: K-weighted,
     400 ms blocks every 100 ms, gated at -70 LUFS and 10 LU under the ungated mean), true peak in dBTP (4x
@@ -529,21 +552,7 @@ def measure_mix(x, rate):
     x = np.atleast_2d(np.asarray(x, float))
     h = k_weighting(rate)
     ms = [fir_filter(c, h) ** 2 for c in x]
-    block, hop = int(0.4 * rate), int(0.1 * rate)
-    n = max(0, (x.shape[1] - block) // hop + 1)
-    if n:
-        cs = [np.concatenate([[0.0], np.cumsum(m)]) for m in ms]
-        starts = np.arange(n) * hop
-        z = sum((c[starts + block] - c[starts]) / block for c in cs)  # BS.1770's channel weights are 1 for L and R
-        lk = -0.691 + 10 * np.log10(np.maximum(z, 1e-20))
-        z = z[lk > -70]
-        lufs = None
-        if len(z):
-            rel = -0.691 + 10 * np.log10(z.mean()) - 10
-            z = z[-0.691 + 10 * np.log10(z) > rel]
-            lufs = round(float(-0.691 + 10 * np.log10(z.mean())), 2) if len(z) else None
-    else:
-        lufs = None
+    lufs = integrated_lufs(x, rate, ms)
     up = np.zeros((x.shape[0], x.shape[1] * 4))
     up[:, ::4] = x
     lp = lowpass_fir(0.125 * 0.98, 255) * 4
