@@ -51,6 +51,7 @@ def measure(path) -> dict:
         "root": format_note(w.root) if w.root is not None else None,
         "loop": bool(w.loops), "wave": wave_points(_envelope(mono, 100)),
         "pitch": None, "cents": None, "centroid": None, "decay": None, "attack": None, "flatness": None, "bands": None,
+        "lufs": None,
     }
     try:
         import numpy as np
@@ -61,6 +62,7 @@ def measure(path) -> dict:
     if not x.any():
         return m
     peak = np.abs(x).max()
+    m["lufs"] = sample_lufs(w)
     # 10 ms RMS envelope: attack = time to reach the peak, decay = time until it stays under -40 dB of the peak
     hop = max(1, w.rate // 100)
     env = np.sqrt(np.convolve(x * x, np.ones(hop) / hop, mode="same"))
@@ -93,6 +95,24 @@ def measure(path) -> dict:
     return m
 
 
+def sample_lufs(w):
+    """A WAV's loudness as the tryout's MATCH LEVEL compares it (dsp.integrated_lufs): a mono WAV counted on both
+    sides, as the module plays it; a loop's body repeated to 3 s, as a held note sustains it; a one-shot shorter than one
+    400 ms block padded with silence (the gate then drops a silent tail and a long quiet one alike)."""
+    import numpy as np
+    from . import dsp
+    x = np.asarray(w.channels, float) / (1 << (w.out_bits - 1))
+    if len(x) == 1:
+        x = np.vstack([x, x])
+    if w.loops and w.loops[0][1] > w.loops[0][0]:
+        a, b, _ = w.loops[0]
+        reps = -(-max(0, 3 * w.rate - b) // (b - a))
+        x = np.hstack([x[:, :b], np.tile(x[:, a:b], (1, reps))])
+    if x.shape[1] < int(0.4 * w.rate):
+        x = np.hstack([x, np.zeros((len(x), int(0.4 * w.rate) - x.shape[1]))])
+    return dsp.integrated_lufs(x, w.rate)
+
+
 def distance(a, b):
     """Rough perceptual distance between two measurements (0 = same); None when either lacks numbers."""
     if not a or not b or a.get("centroid") is None or b.get("centroid") is None:
@@ -123,14 +143,41 @@ def patch_it(data, silenced=(), mix=None):
     if mix.get("mix_volume") is not None:
         d[0x31] = int(mix["mix_volume"])
     if mix.get("sample_volume"):
-        nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
-        offs = [struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * i)[0] for i in range(nsmp)]
-        data = [struct.unpack_from("<I", d, off + 0x48)[0] for off in offs]  # a tuning's copies share their slot's data
+        offs, copies = _sample_headers(d)
         for slot, g in mix["sample_volume"].items():
-            if 1 <= int(slot) <= nsmp:
-                for i in [int(slot) - 1] + ([j for j in range(nsmp) if data[j] == data[int(slot) - 1]] if data[int(slot) - 1] else []):
+            if 1 <= int(slot) <= len(offs):
+                for i in copies(int(slot)):
                     d[offs[i] + 0x11] = int(g)
     return bytes(d)
+
+
+def _sample_headers(d):
+    """The module's sample header offsets and copies(slot): the sample indices that play slot `slot` (a tuning's copies
+    share their slot's data)."""
+    nord, nins, nsmp = struct.unpack_from("<HHH", d, 0x20)
+    offs = [struct.unpack_from("<I", d, 0xC0 + nord + 4 * nins + 4 * i)[0] for i in range(nsmp)]
+    data = [struct.unpack_from("<I", d, off + 0x48)[0] for off in offs]
+    return offs, lambda slot: [slot - 1] + ([j for j in range(nsmp) if j != slot - 1 and data[j] == data[slot - 1]] if data[slot - 1] else [])
+
+
+def match_level(data, slot, db):
+    """The tryout's MATCH LEVEL (playback only): the module with slot `slot` `db` louder against the rest of the mix.
+    A sample's global volume only goes down from 64, so a cut lowers the slot's and a boost lowers every other sample's
+    by as much, and the render is then multiplied by the factor returned. Returns (module bytes, output factor)."""
+    r = 10 ** (db / 20)
+    out = max(1.0, r)
+    d = bytearray(data)
+    offs, copies = _sample_headers(d)
+    mine = set(copies(slot)) if 1 <= slot <= len(offs) else set()
+    for i, off in enumerate(offs):  # ponytail: integer volumes 0-64, so a sample already near 0 quantizes coarsely
+        d[off + 0x11] = min(64, round(d[off + 0x11] * (r if i in mine else 1) / out))
+    return bytes(d), out
+
+
+def scale_pcm(pcm, factor):
+    """Interleaved int16 PCM times `factor`, clipped as libopenmpt's own output clips."""
+    import numpy as np
+    return np.clip(np.round(np.frombuffer(pcm, "<i2") * factor), -32768, 32767).astype("<i2").tobytes()
 
 
 def channel_levels(data, nch, cancel=None):

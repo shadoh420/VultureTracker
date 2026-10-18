@@ -249,6 +249,52 @@ class TestGui(unittest.TestCase):
         self.assertEqual((st.facts["volume"], st.facts["pan"], st.facts["mix_volume"]), ([32, 64], [32, 0], 100))
         self.assertEqual(st.song["samples"][2]["global_volume"], 40)
 
+    def test_match_level_is_playback_only(self):
+        """MATCH LEVEL plays a candidate as loud as the slot's current sample, in the mix and alone, and writes nothing:
+        the song text, the mix, what U writes and the song's own render stay as they are."""
+        import numpy as np
+        from vulturetracker.wavload import read_wav
+        lufs = lambda p: measure.sample_lufs(read_wav(p))  # noqa: E731
+        write_wav(self.dir / "quiet.wav", RATE, [[v // 4 for v in sine(440)]])  # slot 1's sound, 12 dB down
+        write_wav(self.dir / "hit.wav", RATE, [sine(440, seconds=0.1)])
+        write_wav(self.dir / "hit_tail.wav", RATE, [sine(440, seconds=0.1) + [0] * RATE])
+        self.assertAlmostEqual(lufs(self.dir / "a.wav") - lufs(self.dir / "quiet.wav"), 12.04, delta=0.1)
+        self.assertIsNotNone(lufs(self.dir / "hit.wav"))  # shorter than one 400 ms block: padded, still measured
+        self.assertLess(abs(lufs(self.dir / "hit.wav") - lufs(self.dir / "hit_tail.wav")), 0.5)  # a silent tail is gated
+        st = self.state()
+        cand = str(self.dir / "quiet.wav")
+        st.add_candidates(cand)
+        own, k_off = st.key(), st.key(cand)
+        before = (st.patched_text(cand), st.diff(cand), st.mix_text(), st.mix(), st.text)
+
+        def rendered(k):
+            for _ in range(400):
+                if st.renders.get(k, {}).get("status") in ("ready", "failed"):
+                    break
+                time.sleep(0.05)
+            self.assertEqual(st.renders[k]["status"], "ready", st.renders.get(k))
+            return np.frombuffer(Path(st.renders[k]["file"]).read_bytes()[44:], "<i2").astype(float)
+
+        db = lambda x: 10 * math.log10((x ** 2).mean())  # noqa: E731
+        song, off = rendered(own), rendered(k_off)
+        self.assertLess(db(off), db(song) - 1)  # unmatched, the quiet candidate plays quieter than the song
+        self.assertEqual(st.raw_file(0), cand)
+        st.set_match(True)
+        self.assertEqual(st.match_db(cand), 12.0)
+        self.assertEqual(st.key(), own)  # the song's own render is not re-rendered
+        k_on = st.key(cand)
+        self.assertNotEqual(k_on, k_off)
+        on = rendered(k_on)
+        self.assertLess(abs(db(on) - db(song)), 0.3)  # matched: as loud as the slot's current sample in the same mix
+        self.assertEqual(rendered(own).tobytes(), song.tobytes())
+        alone = st.raw_file(0)  # SAMPLE ALONE: a copy at the matched gain, MATCH_PAD under it
+        self.assertNotEqual(alone, cand)
+        self.assertAlmostEqual(lufs(alone), lufs(self.dir / "a.wav") - gui.MATCH_PAD, delta=0.2)
+        self.assertEqual((st.patched_text(cand), st.diff(cand), st.mix_text(), st.mix(), st.text), before)
+        st.apply(cand)  # U writes the candidate as it is
+        self.assertEqual((self.dir / "song.yaml").read_bytes().decode("utf-8"), before[0][0])
+        self.assertIn("file: quiet.wav", before[0][0])
+
     def test_facts_timing_follows_effects(self):
         row = 6 * 2.5 / 125
 

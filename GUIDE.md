@@ -88,6 +88,12 @@ one-second tone written beside the song as `<name>_tone.wav` (numbered when that
 a section of the song, add candidate WAVs by path or glob, and each candidate is rendered inside the song with
 only that slot swapped. Keys `1`–`0` switch candidates without losing the playback position, `S`/`M` toggle
 SAMPLE ALONE (the candidate's WAV by itself) vs. IN MIX, SOLO IN SONG mutes every channel that never plays the slot,
+MATCH LEVEL (off by default) plays each candidate as loud as the slot's current sample so the louder one does not win
+by level (in its card, MATCH is the gain it gets, grey while off: the two WAVs' BS.1770 loudness, measured on the WAV
+itself with a mono WAV counted on both sides, a loop's body repeated to 3 s and a hit shorter than 400 ms padded with
+silence; in the mix a boost is played by lowering every other sample and raising the render, which clips, as the peak
+shows, where the song is already near full scale; alone, every matched copy plays 12 dB down so a boost does not clip;
+it is playback only: the song, the faders, WRITE MIX and what `U` writes stay as they are),
 stars/reject/notes are kept per candidate beside the song (`<song>.tryout.json`), and `U` shows the YAML change before
 writing it; once written, that slot's candidate list is cleared (the choice is made; a file's rating is remembered if it
 is added again). With no candidate picked, SONG plays the song itself. Slots that have candidates are marked in the slot list

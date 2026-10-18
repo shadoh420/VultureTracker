@@ -39,7 +39,8 @@ from .model import Cell
 from .notation import format_cell, format_note, parse_cell
 from .itwriter import write_it
 from .measure import (DELTA_DB, DELTA_STOPS, RATE, SPEC_DB, SPEC_STOPS, _colour_png, _peak, channel_levels, distance,
-                      measure, mix_numbers, patch_it, png_rgb, reference_align, reference_compare, reference_wav)
+                      match_level, measure, mix_numbers, patch_it, png_rgb, reference_align, reference_compare, reference_wav,
+                      scale_pcm)
 from .sample_edit import (SAMPLE_ACTIONS, VOICE_GROUPS, VOICE_RANGE, entry_loops, paint_args, process_wav, voice_entry,
                           voice_of, wav_array, wave_peaks)
 from .history import LABEL, SIDE_SCHEMA, History, digest, json_bytes, newer, pack_step, unpack_step, HISTORY_BYTES
@@ -349,6 +350,9 @@ def sounding_table(mod, facts):
         table.append(rows)
         abs_row += len(pat.rows)
     return table
+
+
+MATCH_PAD = 12  # dB under the matched level that SAMPLE ALONE plays at with MATCH LEVEL on (State.raw_file)
 
 
 def _stamp(f):
@@ -806,8 +810,44 @@ class State:
         return hashlib.sha1(f"{api.RENDER_VERSION}|{self.text_sha()}|{self.slot}|{self.orders}|{stamps}|{inst}".encode()).hexdigest()[:16]
 
     def key(self, cand=None):
-        """Render cache key: the compile key plus what is patched into the module's header, mutes and the unwritten mix."""
-        return hashlib.sha1(f"{self.ckey(cand)}|{self.silenced()}|{json.dumps(self.mix(), sort_keys=True)}".encode()).hexdigest()[:16]
+        """Render cache key: the compile key plus what is patched into the module's header, mutes, the unwritten mix and,
+        for a candidate, MATCH LEVEL (its gain follows from the WAVs' stamps in the compile key)."""
+        match = "|match" if cand and self.meta.get("match_level") else ""
+        return hashlib.sha1(f"{self.ckey(cand)}|{self.silenced()}|{json.dumps(self.mix(), sort_keys=True)}{match}".encode()).hexdigest()[:16]
+
+    # ---- MATCH LEVEL: each candidate played as loud as the slot's current sample. Playback only: the gain never reaches
+    # the song, the mix or what U writes
+
+    def match_db(self, cand):
+        """The gain in dB that brings `cand` to the loudness of the slot's current sample (measure.sample_lufs: both WAVs
+        play from the same slot, so pitch, envelopes and volume commands cancel); None when either cannot be measured."""
+        cur = self.current_file()
+        a = self.measured(cur).get("lufs") if cur and Path(cur).exists() else None
+        b = self.measured(cand).get("lufs") if Path(cand).exists() else None
+        return round(a - b, 1) if a is not None and b is not None else None
+
+    def set_match(self, on):
+        with self.lock:
+            self.meta["match_level"] = bool(on)
+            self.save_meta()
+            self.queue_all()
+
+    def raw_file(self, i):
+        """What SAMPLE ALONE plays for candidate `i`: its WAV, or with MATCH LEVEL on a copy at the matched gain less
+        MATCH_PAD dB (nothing else plays then, so the pad changes no comparison and keeps a boost from clipping)."""
+        c = self.cand(i)
+        db = self.match_db(c) if self.meta.get("match_level") else None
+        if db is None:
+            return c
+        out = self.cache_dir / "match" / f"{hashlib.sha1(f'{_stamp(c)}|{db}'.encode()).hexdigest()[:16]}.wav"
+        if not out.exists():  # ponytail: never pruned (_prune globs the cache's own WAVs); one small copy per candidate and gain
+            import numpy as np
+            w = read_wav(c)
+            x = np.asarray(w.channels if len(w.channels) > 1 else w.channels * 2, float) * (256 if w.out_bits == 8 else 1)
+            x = np.clip(np.round(x * 10 ** ((db - MATCH_PAD) / 20)), -32768, 32767).astype("<i2")
+            out.parent.mkdir(exist_ok=True)
+            _atomic(out, wav_bytes(x[:2].T.tobytes(), w.rate))
+        return str(out)
 
     def meter_key(self):
         return hashlib.sha1(f"{self.ckey()}|{json.dumps(self.mix(), sort_keys=True)}".encode()).hexdigest()[:16]
@@ -959,10 +999,16 @@ class State:
                     self.renders.pop(k, None)
                     continue
                 self.renders[k]["status"] = "rendering"
-                silenced, mix = self.silenced(), self.mix()
+                silenced, mix, slot = self.silenced(), self.mix(), self.slot
+                db = self.match_db(cand) if cand and self.meta.get("match_level") else None
             try:
-                with LoadedModule(patch_it(self.compiled_it(cand), silenced, mix)) as lm:
+                data, gain = patch_it(self.compiled_it(cand), silenced, mix), 1.0
+                if db:
+                    data, gain = match_level(data, slot, db)
+                with LoadedModule(data) as lm:
                     pcm = lm.render(RATE)
+                if gain != 1.0:
+                    pcm = scale_pcm(pcm, gain)
                 out = self.cache_dir / f"{k}.wav"
                 _write_pcm(out, pcm)
                 with self.lock:
@@ -3563,7 +3609,7 @@ class State:
                 rating = self.meta["ratings"].get(c, {})
                 cands.append({"id": i, "path": c, "name": Path(c).stem, "src": os.path.relpath(c, self.base_dir).replace(os.sep, "/"),
                               "key": k, "status": r["status"], "error": r.get("error"), "peak": r.get("peak"), "meas": m,
-                              "dist": distance(m, ref), "stars": rating.get("stars", 0), "rejected": rating.get("rejected", False),
+                              "dist": distance(m, ref), "match_db": self.match_db(c), "stars": rating.get("stars", 0), "rejected": rating.get("rejected", False),
                               "note": rating.get("note", ""), "current": c == cur,
                               "found": (self.meta.get("found") or {}).get(c)})
             ents = self.song.get("samples") or {}
@@ -3587,6 +3633,7 @@ class State:
                          "slot_meas": slot_meas},
                 "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref, "selected_candidate": self.want,
                 "orders": list(self.orders) if self.orders else None, "loop": self.meta.get("loop"),
+                "match": bool(self.meta.get("match_level")),
                 "muted": sorted(set(self.meta.get("muted") or [])), "solo": self.meta.get("solo"),
                 "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak"),
                         "numbers": mix_numbers(own["file"]) if own["status"] == "ready" else None},

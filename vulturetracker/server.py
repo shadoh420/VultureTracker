@@ -620,9 +620,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"cols": cols, "median": live[len(live) // 2] if live else None, "gain_db": gain, "covered": covered})
         if path.startswith("/raw/"):
             try:
-                c = st.cand(path[5:])
+                c = st.raw_file(path[5:])  # with MATCH LEVEL on: a copy at the matched gain
             except (ValueError, IndexError):
                 return self._send(404, {"error": "no such candidate"})
+            except OSError as e:
+                return self._send(500, {"error": f"{type(e).__name__}: {e}"})
             return self._send_file(c, "audio/wav")
         if path.startswith("/api/diff/") or path == "/api/mixdiff":
             try:
@@ -801,6 +803,8 @@ class Handler(BaseHTTPRequestHandler):
                 st.save_meta()
             elif act == "want":
                 st.set_want(st.cand(body["id"]) if body.get("id") is not None else None)
+            elif act == "match":  # MATCH LEVEL: playback only
+                st.set_match(body.get("on"))
             elif act == "note":
                 return self._send(200, st.add_note(body))
             elif act == "noteedit":
