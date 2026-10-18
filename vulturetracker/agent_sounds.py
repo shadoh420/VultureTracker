@@ -214,9 +214,9 @@ def _spec(st, a):
     rate = _integer(a.get('sample_rate', rate), 8000, 192000, 'sample_rate')
     jobs = list(synth.expand({'samples': {'sound': spec}}))
     if 'note' in a:
-        jobs = [j for j in jobs if str(j[1].get('note')) == a['note']]
+        jobs = [j for j in jobs if (j[1].get('_take_name') or str(j[1].get('note'))) == a['note']]
     if len(jobs) != 1:
-        raise ValueError('render one note at a time; select note for a notes list')
+        raise ValueError('render one note at a time; select note for a notes list (a take, t1, t2, ..., for takes)')
     spec = jobs[0][1]
     spec.pop('_name_by_root', None)
     synth._job_root('sound', spec)

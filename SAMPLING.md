@@ -130,6 +130,7 @@ samples:
 | `sfxr` | | instead of `patch`: a sound effect from sfxr's synthesis, a preset drawn from a seed (see below) |
 | `additive` | | instead of `patch`: a PADsynth pad, harmonics as bands of noise in one exact loop (see below) |
 | `drum` | | instead of `patch`: DrumSynth's sections (tone, noise, overtones, noise bands, distortion, filter), or a `.ds` file (see below) |
+| `takes` | none | `drum` only: several takes of the drum (`name_t1.wav`, ...) for round-robin, a count or `{count, tuning, stretch, level}` (see Drums) |
 | `mip` | none | any source: copies band-limited per octave (or `step`) and the song's `samples:`/`keymap:` to paste (see below) |
 | `start`, `length` | 0, all | `file` and `resynth` (its target): seconds to skip, and seconds to keep (effects tails still ring past `length`) |
 | `note` | | `patch`: the key to play, in tracker names (`C-5` = MIDI 60 = middle C). `file`: the pitch recorded in the file (default `C-5`) |
@@ -374,6 +375,14 @@ then resampled to the recipe's rate.
 `note` (default C-5) names the pitch the sample is played at, as for a recorded drum; drums are not pitch-checked. The
 noise sections fill the band to half the rate: play such a drum at its root or below (`check` measures it like any
 sample).
+
+`takes` renders the drum several times, so repeated hits need not be the same sample. `takes: 4` writes `name_t1.wav`
+to `name_t4.wav`; `takes: {count: 4, tuning: 0.25, stretch: 6, level: 1}` sets how far they spread. `name_t1` is the
+sound as written; each later take adds one to the noise's `seed` and moves its `tuning` up to ± that many semitones
+(0.1 by default, 12 at most), its `stretch` up to ± that many percent (3; 50) and its `level` up to ± that many dB
+(0.5; 24), at random but the same on every render, and a take keeps its values when `count` grows. A `.ds` file
+takes it too. Point a slot at each take and LAYERS CYCLE (GUIDE.md) cycles them note by note; in the tryout the RECIPE
+box shows the entry for the slot's own take and RENDER CANDIDATE renders that take.
 
 ## Printed effects (`fx:`)
 

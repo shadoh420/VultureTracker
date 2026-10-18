@@ -34,7 +34,32 @@ RECIPE_KEYS = ["out_dir", "sample_rate", "defaults", "samples"]
 SOURCE_KEYS = ("patch", "file", "resynth", "faust", "wave", "sfxr", "drum", "additive")  # a sample has exactly one
 SAMPLE_KEYS = ["patch", "file", "resynth", "faust", "wave", "sfxr", "drum", "additive", "mip", "start", "length", "fx", "fx_tail", "note", "notes", "chord", "phrase", "velocity",
                "hold", "tail", "params", "gain", "normalize", "mono", "trim", "loop", "fade_out", "reverse", "root_offset",
-               "instrument", "layer", "layers"]  # the last three: a Hydrogen kit's (file: kit.h2drumkit)
+               "instrument", "layer", "layers", "takes"]  # instrument, layer(s): a Hydrogen kit's (file: kit.h2drumkit)
+TAKES_KEYS = {"tuning": (0.1, 12), "stretch": (3.0, 50), "level": (0.5, 24)}  # `takes:` spreads: (default, most)
+
+
+def _takes(t, where):
+    """`takes:` (a count, or {count, tuning, stretch, level}) -> each take's offsets for sources.drum: the first is the
+    sound itself, each other one a seed further with its tuning (semitones), stretch (%) and level (dB) moved at random
+    within ± the spreads, the same on every render."""
+    import math
+    import random
+    t = {"count": t} if isinstance(t, int) and not isinstance(t, bool) else t
+    count = t.get("count") if isinstance(t, dict) else None
+    if (not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 32
+            or set(t) - {"count", *TAKES_KEYS}):
+        raise RecipeError(f"{where}: takes is a count (1-32) or {{count, tuning, stretch, level}}; got {t!r}")
+    spread = {}
+    for k, (d, most) in TAKES_KEYS.items():
+        v = t.get(k, d)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= most:
+            raise RecipeError(f"{where}: takes: {k} is a spread from 0 to {most}; got {v!r}")
+        spread[k] = float(v)
+    out = []
+    for i in range(count):
+        rng = random.Random(i)
+        out.append({"seed": i, **{k: rng.uniform(-a, a) if i else 0.0 for k, a in spread.items()}})
+    return out
 
 
 # `resynth:` (mosaic.resynth): a target rebuilt from blocks of a corpus; its keys and their defaults
@@ -595,10 +620,18 @@ def expand(recipe):
         if "layers" in merged and (not isinstance(merged["layers"], list) or not merged["layers"]
                                    or not all(isinstance(v, int) and v >= 1 for v in merged["layers"])):
             raise RecipeError(f"{where}: layers is a list of layer numbers from 1, e.g. [1, 2, 3]")
+        if "takes" in merged and "drum" not in spec:
+            raise RecipeError(f"{where}: takes makes several takes of a drum: sample (seed, tuning, stretch, level)")
         if any(k in spec for k in ("file", "resynth", "sfxr", "drum")):
             if "notes" in spec or "chord" in spec or "phrase" in spec:
                 raise RecipeError(f"{where}: 'file', 'resynth', 'sfxr' and 'drum' samples take 'note' (the pitch they are "
                                   "played at), not notes/chord/phrase")
+            if "takes" in merged:  # name_t1, name_t2, ... to cycle through (LAYERS CYCLE)
+                for i, vary in enumerate(_takes(merged["takes"], where), 1):
+                    one = {k: v for k, v in merged.items() if k != "takes"}
+                    one["_take"], one["_take_name"] = vary, f"t{i}"
+                    yield name, one
+                continue
             if "layers" in merged:  # one sample per layer of the kit's instrument: name_l1, name_l2, ... to try out
                 for n in merged["layers"]:
                     one = {k: v for k, v in merged.items() if k != "layers"}
@@ -684,19 +717,21 @@ def _job_root(name, spec):
         raise RecipeError(f"{where}: root_offset moves the root outside C-0..B-9")
     if spec.get("_name_by_layer"):  # layers: lists become name_l1.wav, name_l2.wav, ...
         name = f"{name}_l{spec['layer']}"
+    if spec.get("_take_name"):  # takes: become name_t1.wav, name_t2.wav, ...
+        name = f"{name}_{spec['_take_name']}"
     if spec.get("_name_by_root"):  # notes: lists become name_c3.wav, name_fs4.wav, ... named by sounding pitch
         name = f"{name}_{notation.format_note(root).replace('#', 's').replace('-', '').lower()}"
     return name, root
 
 
 def recipe_outputs(path):
-    """What the recipe at `path` writes, without rendering: [(WAV path, sample name, the key for a `notes:` entry or
-    None)]. RecipeError when the recipe is not valid."""
+    """What the recipe at `path` writes, without rendering: [(WAV path, sample name, the key for a `notes:` entry, the
+    take (t1, t2, ...) of a `takes:` entry, or None)]. RecipeError when the recipe is not valid."""
     recipe, _, out_dir = _load_recipe(path)
     out = []
     for name, spec in expand(recipe):
         file, _ = _job_root(name, spec)
-        out.append((out_dir / f"{file}.wav", name, spec.get("note") if spec.get("_name_by_root") else None))
+        out.append((out_dir / f"{file}.wav", name, spec.get("note") if spec.get("_name_by_root") else spec.get("_take_name")))
     return out
 
 
@@ -712,14 +747,15 @@ def recipe_entry(path, name):
 def render_one(path, name, spec=None, note=None, out=None, log=print):
     """Render one sample of the recipe at `path`: entry `name`, or `spec` in its place (an edited entry, merged over the
     recipe's defaults like any other); for a `notes:` entry, only the key `note`. Written to `out` (default: where the
-    recipe writes it). Returns (file, root, loop)."""
+    recipe writes it); for a `takes:` entry, only the take `note` (t1, t2, ...). Returns (file, root, loop)."""
     recipe, rate, out_dir = _load_recipe(path)
     entry = spec if spec is not None else (recipe.get("samples") or {}).get(name)
     jobs = list(expand({"defaults": recipe.get("defaults"), "samples": {name: entry}}))
     if note is not None:
-        jobs = [j for j in jobs if str(j[1].get("note")) == str(note)]
+        jobs = [j for j in jobs if (j[1].get("_take_name") or str(j[1].get("note"))) == str(note)]
     if len(jobs) != 1:
-        raise RecipeError(f"sample '{name}': {'no key ' + str(note) if note is not None else 'a notes: list'}; give one key")
+        raise RecipeError(f"sample '{name}': {'no key or take ' + str(note) if note is not None else 'a notes: or takes: list'}; "
+                          "give one key or take")
     fx_chain(jobs[0][1].get("fx"), f"sample '{name}'")
     # VST reset can reload the plugin, which JUCE permits only on its main thread.
     # Both the Recipe box and agent jobs call here from background workers.
@@ -812,7 +848,7 @@ def _render_job(path, rate, surge, name, spec, out_dir, log, file=None):
     elif "sfxr" in spec:
         audio, source = _source_check(lambda: sources.sfxr(spec["sfxr"], rate), where)
     elif "drum" in spec:
-        audio, source = _source_check(lambda: sources.drum(spec["drum"], path.parent, rate), where)
+        audio, source = _source_check(lambda: sources.drum(spec["drum"], path.parent, rate, spec.get("_take")), where)
     else:
         events, seconds, _ = _events(spec, where)
         source = spec["patch"]

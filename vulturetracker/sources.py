@@ -504,11 +504,16 @@ def _waveform(ph, form):
     return np.where(np.sin(np.fmod(ph, _TWO_PI)) > 0, 1.0, -1.0)
 
 
-def drum(spec, base, rate):
+def drum(spec, base, rate, vary=None):
     """The `drum:` source: (1 x frames float array at `rate`, label). DrumSynth's sections summed at 44100 Hz (its
-    rate: a .ds file's times are frames of it) as its renderer does, in 1200-frame blocks, then resampled to `rate`."""
+    rate: a .ds file's times are frames of it) as its renderer does, in 1200-frame blocks, then resampled to `rate`.
+    `vary` (a take of synth's `takes:`) adds to the sound's own general seed, tuning, stretch and level."""
     from .resample import resample
     s = drum_sections(spec, base)
+    if vary:
+        g = s.setdefault("general", {})
+        for key, d in (("seed", 1), ("tuning", 0.0), ("stretch", 100.0), ("level", 0.0)):
+            g[key] = _ds_value(s, "general", key, d, int if key == "seed" else float) + vary.get(key, 0)
     v = lambda sec, key, d, what=float: _ds_value(s, sec, key, d, what)  # noqa: E731
     on = lambda sec: v(sec, "on", 0, int) == 1  # noqa: E731
     stretch = min(10.0, max(0.2, 0.01 * v("general", "stretch", 100.0)))

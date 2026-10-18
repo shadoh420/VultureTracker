@@ -283,6 +283,26 @@ class TestDrum(unittest.TestCase):
             with self.assertRaises(synth.RecipeError, msg=bad):
                 recipe(f"  x: {bad}\n")
 
+    def test_recipe_drum_takes(self):
+        snare = "{tone: {f1: 220, f2: 170, envelope: '0,100 3000,0'}, noise: {level: 140, envelope: '0,100 6000,0'}}"
+        d, _ = recipe(f"  s: {{drum: {snare}, mono: true}}\n"
+                      f"  s4: {{drum: {snare}, mono: true, takes: {{count: 4, tuning: 0.5, stretch: 10, level: 2}}}}\n"
+                      f"  s5: {{drum: {snare}, mono: true, takes: {{count: 5, tuning: 0.5, stretch: 10, level: 2}}}}\n")
+        wav = lambda n: np.array(read_wav(d / "out" / f"{n}.wav").channels[0])  # noqa: E731
+        takes = [wav(f"s4_t{i}") for i in range(1, 5)]
+        self.assertTrue(np.array_equal(takes[0], wav("s")))                      # take 1 is the sound as written
+        self.assertEqual(len({t.tobytes() for t in takes}), 4)                   # the others differ
+        self.assertEqual(len({len(t) for t in takes}), 4)                        # stretch: their lengths too
+        for i, t in enumerate(takes, 1):
+            self.assertTrue(np.array_equal(t, wav(f"s5_t{i}")))                  # a take keeps its values as count grows
+        self.assertEqual([w[2] for w in synth.recipe_outputs(d / "r.yaml") if w[1] == "s4"], ["t1", "t2", "t3", "t4"])
+        f, _, _ = synth.render_one(d / "r.yaml", "s4", note="t3", out=d / "one.wav", log=lambda s: None)
+        self.assertTrue(np.array_equal(np.array(read_wav(f).channels[0]), takes[2]))  # the RECIPE box's one take
+        for bad in ("{drum: {tone: {}}, takes: 0}", "{drum: {tone: {}}, takes: {count: 2, tuning: 13}}",
+                    "{drum: {tone: {}}, takes: {count: 2, swing: 1}}", "{wave: sine, takes: 2}"):
+            with self.assertRaises(synth.RecipeError, msg=bad):
+                recipe(f"  x: {bad}\n")
+
 
 if __name__ == "__main__":
     unittest.main()
