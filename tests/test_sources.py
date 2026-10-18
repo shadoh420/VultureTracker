@@ -262,6 +262,10 @@ class TestDrum(unittest.TestCase):
         dark = sources.drum({**noise, "general": {"filter": 1, "resonance": 0, "filterenv": "0,20 10000,20"}}, ".", R)[0][0]
         hi = lambda y: (np.abs(np.fft.rfft(y))[len(y) // 4:] ** 2).sum()  # noqa: E731  above a quarter of the rate
         self.assertLess(hi(dark), hi(plain) / 100)  # the filter on everything, low envelope: a low-pass
+        self.assertTrue((sources.drum({**noise, "general": {"seed": 1}}, ".", R)[0][0] == plain).all())  # 1 is the default
+        take2 = sources.drum({**noise, "general": {"seed": 2}}, ".", R)[0][0]
+        self.assertFalse((take2 == plain).all())                       # another seed, another take
+        self.assertAlmostEqual(np.std(take2), np.std(plain), delta=0.05 * np.std(plain))  # at the same level
         crushed = sources.drum({"tone": {"f1": 200, "f2": 200, **hold}, "distortion": {"bits": 4, "rate": 4}}, ".", R)[0][0]
         self.assertTrue((crushed[:4000].reshape(-1, 8) == crushed[:4000].reshape(-1, 8)[:, :1]).all())  # held 8 frames
         self.assertLessEqual(len(np.unique(np.round(crushed * 32768))), 2 * 32768 // 256 + 1)          # 2 ** 8 per step

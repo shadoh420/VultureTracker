@@ -536,7 +536,7 @@ def drum(spec, base, rate):
             e[t >= last[k]] = 0
         return e
 
-    rng = np.random.default_rng(1)  # DrumSynth fixes its random sequence too
+    rng = np.random.default_rng(v("general", "seed", 1, int))  # DrumSynth fixes its random sequence; seed: another take
     out = np.zeros(n)
     levels = {}
     if on("noise"):

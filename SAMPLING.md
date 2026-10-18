@@ -369,7 +369,7 @@ then resampled to the recipe's rate.
 | `overtones` | two oscillators `f1` (200) and `f2` (120) Hz, `wave1`/`wave2` (0 sine, 1 rectified sine, 2 triangle, 3 saw, 4 square), `track1`/`track2` (1: follow the tone's sweep as a ratio of its F1), `method` (2; 0 mixed, 1 the second modulates the first's frequency, 2 ring modulation, 3 the 808 cymbal: six pulse trains between the two periods through a band-pass that `envelope2` sweeps), `param` (50: the balance; the drive for 1 and 2, the resonance for 3), `filter` (1: the master filter on the overtones only), `level` (128), `envelope1`, `envelope2` |
 | `noiseband`, `noiseband2` | a band of noise around `f` (1000 Hz), `df` (50) wide, `level` (128), `envelope` |
 | `distortion` | `clipping` (0 dB of gain into the clip), `bits` (0; each step takes two bits off), `rate` (0; 1-6 hold every 2, 3, 4, 8, 10 or 20 frames) |
-| `general` | `tuning` (0 semitones), `stretch` (100: % of every envelope's length, 20-1000), `level` (0 dB), `filter` (1: the master filter on everything), `resonance` (0-100), `highpass` (1: a high-pass instead), `filterenv` (the cutoff, 0-100; it holds its last level) |
+| `general` | `tuning` (0 semitones), `stretch` (100: % of every envelope's length, 20-1000), `level` (0 dB), `filter` (1: the master filter on everything), `resonance` (0-100), `highpass` (1: a high-pass instead), `filterenv` (the cutoff, 0-100; it holds its last level), `seed` (1: the noise's random sequence, not DrumSynth's: another seed is another take of the same drum) |
 
 `note` (default C-5) names the pitch the sample is played at, as for a recorded drum; drums are not pitch-checked. The
 noise sections fill the band to half the rate: play such a drum at its root or below (`check` measures it like any
