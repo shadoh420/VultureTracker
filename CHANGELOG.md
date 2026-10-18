@@ -2,8 +2,23 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.8.0 (2026-10-18)
 
+- Pattern tab: ACCENT sets a repeating list of volumes (vNN, or a percent of the note's own) on the selected channels'
+  notes, in the pattern or the whole song. EUCLID layers more cycles (`+ 2/5 3/7`: a row plays where any cycle hits,
+  quieter where fewer do), restarts them every PHRASE rows, changes each phrase by RULES (`-`, `rev`, `inv`, `rotN`,
+  `+N`), and walks the WHOLE SONG with the phrase count running on. Both are agent tools too. A selection tool's refusal
+  (nothing to change) shows whole in the selection bar.
+- Tryout: MATCH LEVEL (off by default) plays every candidate at the current sample's integrated loudness, in the mix and
+  alone, the gain shown on each candidate. Playback only: the song, the faders and what U writes are unchanged.
+- Recipes: a `drum:` sample takes `general: {seed: N}` for another take of the same hit, and `takes: 4` (or `takes:
+  {count, tuning, stretch, level}`) renders `name_t1.wav` … `name_tN.wav`, each later take moved at random within the
+  spreads, the same on every render, for LAYERS CYCLE round-robin.
+- `check` warns when a sample played at one note only (a drum, a one-shot) has a steady partial between 50 Hz and 5 kHz
+  more than 30 cents from every tone of the song's key, with its Hz, nearest note, cents and level (SONG_FORMAT.md §9).
+- Claude Code in this repository: `.mcp.json` registers the app's MCP server, hooks guard against `git add -A` and run
+  `tests.test_docs` after an edit to a file it checks, and the `/release` and `run-app` skills and the `openmpt-parity`
+  reviewer come with the checkout.
 - Keys follow OpenMPT's defaults (`DefaultKeyBindings.h`; the owner's call, 2026-10-18). Transport, in every tab: F5
   play/pause, F6 the song from its start (Ctrl+F6 from the cursor), F7 the pattern looped from its first row (Ctrl+F7
   from the cursor), F8 pause, Esc stop. Pattern tab: Ctrl+Space edit mode (was Esc), Enter / Space cursor copy and paste
