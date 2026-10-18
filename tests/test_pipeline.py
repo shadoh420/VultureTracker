@@ -7,7 +7,7 @@ import unittest
 from array import array
 from pathlib import Path
 
-from vulturetracker import api
+from vulturetracker import api, openmpt
 from vulturetracker.itwriter import write_it
 from vulturetracker.openmpt import LoadedModule
 from vulturetracker.song import SongError, load_song_text
@@ -83,6 +83,27 @@ class TestStructure(Base):
             self.assertAlmostEqual(info["duration_seconds"], 4 * 6 * 2.5 / 125, places=3)
             cell = m.cell(0, 0, 0)
             self.assertEqual((cell["note"], cell["instrument"], cell["volume"]), (61, 1, 64))
+
+    def test_pattern_and_channel_names_stored(self):
+        # OpenMPT's PNAM and CNAM chunks, up to the last named one; a channel name keeps 19 characters, as in OpenMPT
+        data = self.build("""
+            module:
+              channels: [{name: Kick}, {}, {name: Twenty characters ok}]
+            samples:
+              1: {file: low.wav}
+            patterns:
+              intro: |
+                C-5 01 ... ... | ... | ...
+              verse: |
+                ... | ... | ...
+            orders: [intro, verse]
+        """)
+        name = lambda f, m, i: openmpt._str(getattr(openmpt._lib, f)(m._mod, i))
+        with LoadedModule(data) as m:
+            self.assertEqual([name("openmpt_module_get_pattern_name", m, i) for i in range(2)], ["intro", "verse"])
+            self.assertEqual([name("openmpt_module_get_channel_name", m, i) for i in range(3)],
+                             ["Kick", "", "Twenty characters o"])
+            self.assertEqual(m.info()["warnings"], [])
 
     def test_multi_pattern_instrument_song(self):
         song = """

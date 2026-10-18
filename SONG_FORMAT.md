@@ -92,7 +92,7 @@ Channel entry: `{name: Bass, pan: 32, volume: 64, muted: false}`
 
 | key | range | default | meaning |
 |---|---|---|---|
-| `name` | ≤20 ASCII chars | `""` | label for humans (not stored in the .it) |
+| `name` | ≤20 ASCII chars | `""` | label for humans; stored in the .it as OpenMPT stores channel names (its `CNAM` chunk, which keeps 19 characters), with the pattern names (`PNAM`, 32 characters) |
 | `pan` | 0–64 or `surround` | 32 | initial pan: 0 = hard left, 32 = centre, 64 = hard right |
 | `volume` | 0–64 | 64 | initial channel volume (the `M` effect changes it) |
 | `muted` | bool | false | channel starts muted |

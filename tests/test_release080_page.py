@@ -152,16 +152,55 @@ class TestRelease080Page(unittest.TestCase):
                     page.keyboard.press('Enter')
                     page.wait_for_function("S.mix?.pan?.['0']==='surround'")
                     page.wait_for_function("$('mp0').textContent==='S'")
-                    # Ctrl+Alt+V floods on a layout where AltGr+V types '@' (Czech, Slovak, Hungarian): the key is '@'
+                    # Ctrl+Alt+V (OpenMPT's Push Forward Paste) on a layout where AltGr+V types '@' (Czech, Slovak,
+                    # Hungarian): the key is '@'. Channel B's C-5 at row 2 copied and pushed in at row 0: rows 0 and 3
                     page.click('[data-t="pattern"]')
                     page.evaluate("setEdit(false);SEL=null;setCursor(0,2,1,0);selCopy(false);setCursor(0,0,1,0)")
                     page.evaluate("""document.dispatchEvent(new KeyboardEvent('keydown',{key:'@',code:'KeyV',ctrlKey:true,altKey:true,
                         bubbles:true,cancelable:true}))""")
+                    notes = lambda pat, ch: [st.mod.patterns[pat].rows[r][ch].note for r in range(4)]  # noqa: E731
                     for _ in range(100):
-                        if all(st.mod.patterns[0].rows[r][1].note == 60 for r in range(4)):
+                        if notes(0, 1) == [60, None, None, 60]:
                             break
                         time.sleep(0.05)
-                    self.assertEqual([st.mod.patterns[0].rows[r][1].note for r in range(4)], [60] * 4)
+                    self.assertEqual(notes(0, 1), [60, None, None, 60])
+                    # Shift+V outside the note column: OpenMPT's Paste Flood, down to the pattern's end
+                    page.evaluate("setCursor(0,0,1,2)")
+                    page.evaluate("""document.dispatchEvent(new KeyboardEvent('keydown',{key:'V',code:'KeyV',shiftKey:true,
+                        bubbles:true,cancelable:true}))""")
+                    for _ in range(100):
+                        if notes(0, 1) == [60] * 4:
+                            break
+                        time.sleep(0.05)
+                    self.assertEqual(notes(0, 1), [60] * 4)
+                    # Ctrl+5 selects the pattern, Ctrl+I puts the INS instrument (01) on every note in it
+                    page.evaluate("$('lv-ins').value='0'")
+                    for key in ('5', 'i'):
+                        page.evaluate(f"""document.dispatchEvent(new KeyboardEvent('keydown',{{key:'{key}',ctrlKey:true,bubbles:true,
+                            cancelable:true}}))""")
+                    for _ in range(100):
+                        if all(st.mod.patterns[0].rows[r][1].instrument == 1 for r in range(4)):
+                            break
+                        time.sleep(0.05)
+                    self.assertEqual([st.mod.patterns[0].rows[r][1].instrument for r in range(4)], [1] * 4)
+                    # Enter keeps the volume field under the cursor, Space (edit mode) writes it at the cursor, a row on
+                    page.evaluate("SEL=null;setEdit(true);setCursor(0,2,1,2)")
+                    page.keyboard.press('Enter')
+                    page.evaluate("setCursor(0,1,0,2)")
+                    page.keyboard.press(' ')
+                    page.wait_for_function("!EDQ.n && PAT.rows[1][0].includes('v00') && CUR.row===2")
+                    self.assertEqual(page.evaluate("$('sr-cur').textContent"), 'Row 2, Channel 1, Volume: ')
+                    # OVERFLOW: a paste past the pattern's end goes on in the next order's pattern (p2), one undo step
+                    page.evaluate("""setEdit(false);$('sel-over').checked=true;CLIP={rows:[[{n:'D-5',i:'02'}],[{n:'E-5',i:'02'}]]};
+                        setCursor(0,3,1,0);selPaste(false)""")
+                    for _ in range(100):
+                        if st.mod.patterns[1].rows[0][1].note == 64:
+                            break
+                        time.sleep(0.05)
+                    self.assertEqual((st.mod.patterns[0].rows[3][1].note, st.mod.patterns[1].rows[0][1].note), (62, 64))
+                    page.evaluate("$('sel-over').checked=false")
+                    # MIDI velocity to the volume column on OpenMPT's curve
+                    self.assertEqual(page.evaluate("[32,64,96,127].map(velVol)"), [4, 17, 37, 64])
                     # TRIM HISTORY with the keep field emptied keeps every undo step (it read as 0 and cleared them)
                     steps, said = len(st.history), []
                     page.once('dialog', lambda d: (said.append(d.message), d.dismiss()))

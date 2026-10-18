@@ -162,7 +162,8 @@ class TestFeatures080Page(unittest.TestCase):
                     page.wait_for_function("!MIDI.pending && !EDQ.n")
                     self.assertEqual(page.evaluate("PAT.rows.slice(2,4).map(r=>r.map(c=>c.slice(0,3)).join(' '))"),
                                      ['C-5 E-5 G-5 C-6', '... ... ... ...'])
-                    self.assertIn('C-5 01 v50 ... | E-5 01 v50 ... | G-5 01 v50 ... | C-6 01 v50 ...', song.read_text())
+                    # velocity 100 on OpenMPT's curve (squared): v40
+                    self.assertIn('C-5 01 v40 ... | E-5 01 v40 ... | G-5 01 v40 ... | C-6 01 v40 ...', song.read_text())
                     self.assertEqual(errors, [])
                     browser.close()
             finally:

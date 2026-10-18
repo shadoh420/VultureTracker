@@ -92,7 +92,7 @@ class PluginTests(unittest.TestCase):
         it = compile_song(self.d, extra)
         mod, warnings = read_it(it)
         self.assertEqual(mod.channels[0].plugin, 1)
-        self.assertEqual(mod.channels[0].name, "Ch 1")
+        self.assertEqual(mod.channels[0].name, "Hit")  # the song's channel name, kept by the CNAM chunk
         self.assertEqual(mod.macros, {2: "F0F081z"})
         self.assertEqual(sorted(mod.plugins), [1, 2])
         song = module_to_song(mod, self.d / "back.yaml", self.d / "back")

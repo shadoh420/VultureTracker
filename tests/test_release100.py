@@ -139,9 +139,9 @@ class TestSongFormatPromise(unittest.TestCase):
     # The demos whose samples are all in git, as each compiles today (sha256 of the .it bytes). 1.x keeps compiling them
     # to these bytes; a deliberate change of the compiler's output updates a hash here and says so in CHANGELOG.md. The
     # same on Windows and Linux (nadir resamples through numpy's FFT: checked under python:3.14 with numpy 2.5.3).
-    CORPUS = {'demo/arena.yaml': 'f620568224a1b7a73b5cb269c023e13264c2d3fa7f3cc189d46760adeb4ae9f4',
-              'demo2/iron_relay.yaml': '1a3b5571689ab31a371f50ed8c3af830af46e9494df8ce9e090f10674269112c',
-              'suite/nadir/nadir.yaml': 'a20899a09eee88462a29ef2514d007cb6b88cd0c1a4f0f80d0de495cbe73732d'}
+    CORPUS = {'demo/arena.yaml': '3e99e47f0ca741af1093c98e9a6883f44c1e9a1da1089e799a420b94918e6ba1',
+              'demo2/iron_relay.yaml': 'a6b84c61918e7af0e92234b2af3c3004b5918746eb2fce41bb8f6ccd23626622',
+              'suite/nadir/nadir.yaml': '22a1d28aedc75abe91c377fba84932ac8de7aa4336382658c7f10caf83f9d67f'}
 
     def test_the_corpus_compiles_to_the_same_bytes(self):
         for song, want in self.CORPUS.items():

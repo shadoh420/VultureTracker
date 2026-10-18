@@ -2,6 +2,23 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- Keys follow OpenMPT's defaults (`DefaultKeyBindings.h`; the owner's call, 2026-10-18). Transport, in every tab: F5
+  play/pause, F6 the song from its start (Ctrl+F6 from the cursor), F7 the pattern looped from its first row (Ctrl+F7
+  from the cursor), F8 pause, Esc stop. Pattern tab: Ctrl+Space edit mode (was Esc), Enter / Space cursor copy and paste
+  (Space played from the cursor), Ctrl+5 select the pattern (was Ctrl+A), Ctrl+Q / Ctrl+A transpose (were Ctrl+Up /
+  Down), Ctrl+Up / Down the previous / next INS instrument, Ctrl+I set the INS instrument on the selection (Ctrl+I
+  interpolated), Ctrl+J / Ctrl+K interpolate the volume / effect column, Shift+V paste flood outside the note column,
+  Ctrl+Alt+V push-forward paste (it flooded).
+- SELECTION bar: PUSH (OpenMPT's Push Forward Paste) and OVERFLOW (OpenMPT's Overflow Paste: a paste past the pattern's
+  end goes on in the next order's pattern).
+- MIDI note entry with VEL→VOL uses OpenMPT's velocity curve (squared): velocity 64 enters v17, not v32.
+- The .it carries the channel and pattern names (OpenMPT's `CNAM` and `PNAM` chunks), so OpenMPT and libopenmpt show
+  them; the demos' compiled bytes change by those chunks only (the corpus hashes in `tests/test_release100.py`).
+- The Pattern tab tells a screen reader the cursor's cell in OpenMPT's accessibility format ("Row 4, Channel 2,
+  Volume: …"); the tab bar has tab roles, the icon-only buttons in the live bar names.
+
 ## 1.7.0 (2026-10-14)
 
 The October 2026 external audit's findings, fixed (code-signing the exe stays open):

@@ -43,6 +43,8 @@ for fname, res, args in [
     ("openmpt_module_get_pattern_num_rows", C.c_int32, [_P, C.c_int32]),
     ("openmpt_module_get_instrument_name", _P, [_P, C.c_int32]),
     ("openmpt_module_get_sample_name", _P, [_P, C.c_int32]),
+    ("openmpt_module_get_pattern_name", _P, [_P, C.c_int32]),
+    ("openmpt_module_get_channel_name", _P, [_P, C.c_int32]),
     ("openmpt_module_format_pattern_row_channel", _P, [_P, C.c_int32, C.c_int32, C.c_int32, C.c_size_t, C.c_int]),
     ("openmpt_module_get_pattern_row_channel_command", C.c_uint8, [_P, C.c_int32, C.c_int32, C.c_int32, C.c_int]),
     ("openmpt_module_set_repeat_count", C.c_int, [_P, C.c_int32]),

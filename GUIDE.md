@@ -149,9 +149,10 @@ audition mute/solo behavior and tail before starting. The tab also has the arran
 pattern view and editor, the whole window wide, following the selected order and the playhead. It has a cursor (click a
 cell; the arrows, Tab, Page Up/Down, Home and End move it through rows, channels and the note, instrument, volume,
 effect letter and effect parameter columns) and the LIVE transport: libopenmpt compiled to WebAssembly plays, in the page's
-own audio thread, the whole song as it is now with the unwritten mix. ▶ FROM CURSOR (Space, F7; Space again stops,
-and the cursor stays where it stopped; a double-click on a row plays from there), ▶ SONG from the start, ↻ PATTERN
-(F6) loops the pattern at the cursor, ■ (F8) stops. The view follows what plays, the channel headers show each
+own audio thread, the whole song as it is now with the unwritten mix. ▶ FROM CURSOR (Ctrl+F6; a second click on the button stops,
+and the cursor stays where it stopped; a double-click on a row plays from there), ▶ SONG from the start (F6), ↻ PATTERN
+loops the pattern at the cursor from its row (Ctrl+F7; F7 from the pattern's first row), ■ (Esc) stops; F5 plays and
+pauses, F8 pauses (OpenMPT's keys: Following OpenMPT, below). The view follows what plays, the channel headers show each
 channel's level, SOUNDING lists what sounds, NOTE… drops a note at the live position (N in the other tabs). Mutes and
 solo from the stems rail,
 the playback loop (LOOP FROM / TO) and SPEED act on it at once, without a render; a fader, the instrument panel or a
@@ -159,11 +160,13 @@ change to the song file recompiles the song and swaps it in where it plays. The 
 octaves from OCT) preview the PREVIEW instrument: on the song while it plays, alone while stopped; in the Pattern tab
 they take the place of the app's letter keys (M, S, N, U, X), and the NOTE… button still drops notes.
 
-**Editing patterns.** Esc (or ● EDIT) turns on edit mode. In the note column the piano keys enter a note with the INS
+**Editing patterns.** Ctrl+Space (or ● EDIT) turns on edit mode. In the note column the piano keys enter a note with the INS
 instrument (and preview it) and move the cursor down by STEP rows; `1` enters a note cut (`^^^`), `` ` `` a note-off
 (`===`), Shift+`` ` `` or `\` a fade (`~~~`), OpenMPT's IT-style keys (by their place on the keyboard). Digits type the instrument (two digits), the volume column takes a command letter (v p a b c d e f g h) and
 two digits, the effect columns an effect letter and two hex digits; values are clamped to their range. Delete or . clears
-the column under the cursor; Insert pushes the channel down from the cursor, Backspace pulls it up. Each change shows
+the column under the cursor; Insert pushes the channel down from the cursor, Backspace pulls it up. Enter keeps the
+field under the cursor (in the note or instrument column the note and its instrument, which becomes INS) and Space
+writes it back into the same column at the cursor and moves STEP rows on (OpenMPT's Cursor Copy and Cursor Paste). Each change shows
 at once and is written into the song file in place: only that row's cell changes (the other cells, the row label, the
 comments and every other line stay as they are; rows the pattern leaves implied are written out when a later row is
 edited). Before anything is written the whole song is compiled: a change the song format refuses (an instrument that
@@ -188,7 +191,8 @@ its name next to MIDI and VEL→VOL. Its keys play like the piano
 keys, MIDI note 60 being C-5: a preview through the live engine (the INS instrument; in the Instruments tab the
 instrument on show, in the Samples tab the slot), at the key's loudness with VEL→VOL; releasing the key releases the
 note. On the Faust tab they play the Faust code instead (see there). In edit mode on the Pattern tab each key also
-enters its note at the cursor with the INS instrument, and with VEL→VOL its velocity as the volume column (v01-v64),
+enters its note at the cursor with the INS instrument, and with VEL→VOL its velocity as the volume column on OpenMPT's curve (the velocity
+squared: 32 gives v04, 64 v17, 96 v37, 127 v64),
 then the cursor moves STEP rows. While the live engine plays the pattern on show, a key records instead: its note goes
 into the cursor's channel at the row playing when it went down, and the cursor follows (the piano keys on the
 computer keyboard record the same way); with QUANT above 0 it goes to the nearest multiple of QUANT rows instead
@@ -216,13 +220,14 @@ note-off (`` ` ``) and fade (Shift+`` ` `` or `\`). CHORD joins a note struck wi
 60 ms of the one before (OpenMPT's Auto Chord Wait Time, 60 ms by default, timed from each note), and Shift is the chord
 modifier. QUANT in the live bar is OpenMPT's record quantize (`recordQuantizeRows`, View_pat.cpp `QuantizeRow`): a note
 or chord recorded while the song plays goes to the nearest multiple of QUANT rows, a tie to the later one; past the
-pattern's end it goes to row 0 of the next order's pattern (of the same pattern while F6 loops it, as with OpenMPT's
+pattern's end it goes to row 0 of the next order's pattern (of the same pattern while F7 loops it, as with OpenMPT's
 pattern loop; the last row when no order follows); and where the cell
 already holds a note it goes one row on (OpenMPT's grace note), voice by voice. INTERPOLATE is OpenMPT's `Interpolate`
 (View_pat.cpp) for the note, instrument, volume and effect columns: its `IsInterpolationPossible` test, its rounding (C's
 truncating division with a half-step bias), a two-nibble effect moved nibble by nibble, `D`, `K` and `L` sliding into one
-another, and its sweep with no selection. Three deliberate differences: one button interpolates every column the
-selection covers (OpenMPT has a command per column, Ctrl+J and Ctrl+K for volume and effect); where the note column's
+another, and its sweep with no selection. Ctrl+J and Ctrl+K are OpenMPT's: the volume or the effect column alone, in the channels
+whose selection covers that column (with no selection, only with the cursor on it). Three deliberate differences: the INTERPOLATE button interpolates every column the selection covers (OpenMPT
+has a command per column, of which only volume and effect have default keys); where the note column's
 start is empty, OpenMPT reads the end's note into an instrument slot, and the app takes the end's instrument; and an
 empty volume end next to a note counts from that note's default volume, where OpenMPT reads the start's. GROW and
 SHRINK are OpenMPT's `OnGrowSelection` and `OnShrinkSelection` (Alt+E, Alt+D, its default keys), quirks included: a
@@ -296,10 +301,35 @@ key). Three differences: OpenMPT plays tunings only in its own MPTM format, so t
 per degree instead; a pitch such as `-5.0` is read as cents, as Scala's format says, where OpenMPT's reader takes it for
 the ratio -5 and refuses the file; and a `.kbm` keyboard map is read (Scala's format), which OpenMPT does not. So is the MAP tab; its Up and Down step through the filter's matches as the arrow keys step through
 OpenMPT's tree view, but play each sound as they land on it, where OpenMPT plays a tree item on Space (`kcTreeViewPlay`;
-Space here plays the song). Any other difference from OpenMPT is a bug.
+Space here plays the song). The keys are OpenMPT's defaults (`DefaultKeyBindings.h`; its IT set changes only keys of
+note entry): F5 play/pause, F6 the song from its start, Ctrl+F6 from the cursor, F7 the pattern looped from its first
+row, Ctrl+F7 from the cursor, F8 pause, Esc stop (`Moddoc.cpp`: F5 after a stop plays from the song's start, after a
+pause resumes with the pattern loop off), Ctrl+Space edit mode, Enter and Space cursor copy and paste, Ctrl+5 select
+the pattern, Ctrl+Q / Ctrl+A transpose (with Shift an octave), Ctrl+Up / Ctrl+Down the previous / next instrument
+(wrapping round), Ctrl+I the INS instrument on every selected cell with a note or an instrument
+(`SetSelectionInstrument`), Ctrl+J / Ctrl+K interpolate, Shift+V paste flood, Ctrl+Alt+V push-forward paste. Shift+V
+in the note column stays a chord note, as OpenMPT's note context takes the key before the paste does. PUSH is
+OpenMPT's Push Forward Paste (`PatternClipboard.cpp` `pmPushForward`): before each pasted cell its channel moves a row
+down from there, the last row dropping off. OVERFLOW is OpenMPT's Overflow Paste, off by default as there: a PASTE or
+MIX that runs past the pattern's end goes on at row 0 of the next order's pattern (one undo step), never with flood or
+push, and stops after the last order (OpenMPT adds patterns only for a multi-pattern paste). Channel and pattern names
+are written into the .it as OpenMPT's `SaveIT` writes them: the `PNAM` and `CNAM` chunks after the MIDI configuration,
+up to the last named one, a channel name keeping 19 characters. The Pattern tab tells a screen reader the cursor's cell
+in OpenMPT's default accessibility format (`get_accName`): "Row 4, Channel 2, Instrument: 3: Bass", a special note
+as Note Off, Note Cut or Note Fade, an empty column as nothing; a volume or an effect is described in the hint line's
+words, not `EffectInfo`'s, and an instrument without OpenMPT's "(n: sample)". A paste goes to the selection's top-left
+corner, else the cursor, as OpenMPT's `ExecutePaste` puts it; TRANSPOSE skips a channel whose note column the
+selection (or the cursor) leaves out, as `TransposeSelection` does. Deliberate differences in the keys: PASTE, MIX,
+FLOOD, PUSH and the interpolations work outside edit mode too (OpenMPT asks for it), as the buttons always have here;
+the INS box has no "No Instrument" entry for Ctrl+Up / Ctrl+Down to stop on, and Enter on a cell without an instrument
+leaves INS as it is; Space and note entry stop at the pattern's last row where OpenMPT's continuous scrolling carries
+the cursor into the next order's pattern; on the Samples tab Esc first clears the waveform selection; F5, F8 and the
+Ctrl variants drive the live engine, not the Tryout's rendered player (Esc stops both); VEL→VOL starts off (OpenMPT
+records velocity by default). Any other difference from OpenMPT is a bug.
 
-**Conveniences.** F5 plays the song from its start, F6 loops the pattern at the cursor, F7 plays from the cursor and F8
-stops, in every tab (F5 no longer reloads the page). METRO in the live bar clicks on every beat while the live engine
+**Conveniences.** F5 plays and pauses, F6 plays the song from its start (Ctrl+F6 from the cursor), F7 loops the pattern
+from its first row (Ctrl+F7 from the cursor), F8 pauses and Esc stops, in every tab (OpenMPT's keys; F5 no longer
+reloads the page). METRO in the live bar clicks on every beat while the live engine
 plays, higher on the first row of each bar, by the song's row highlight (rows per beat and per bar, which also draw the
 pattern's row lines). Set rows per beat and rows per bar in SONG (1-255 each); the displayed BPM uses that
 beat spacing, and these values round-trip through IT imports and exports. They change the grid and metronome,
@@ -321,14 +351,18 @@ not used); from Ogg, Opus and MP3 nothing (OpenMPT reads no loop tags there).
 
 **Selections and commands.** Drag over cells, or hold Shift with the arrows (and Page Up/Down, Home, End), to select a
 block the way trackers do: the first channel from the column the selection starts in, the last up to the column it
-ends in, the channels between whole. Ctrl+A selects the pattern (the channels on show), Ctrl+L the cursor's channel; a
+ends in, the channels between whole. Ctrl+5 selects the pattern (the channels on show), Ctrl+L the cursor's channel; a
 plain move or click drops the selection. The SELECTION bar (and its keys) works on the selection, or on the cursor's
 cell when there is none: COPY (Ctrl+C; also puts the rows on the system clipboard in OpenMPT's format, so OpenMPT
 pastes them), CUT (Ctrl+X), PASTE at the cursor (Ctrl+V: the copied fields overwrite; rows copied in OpenMPT from an IT,
-MPTM or S3M module paste too, the first pattern of several, values this notation lacks left empty and counted), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Ctrl+Alt+V: the clipboard again and again down to the
-end of the pattern, e.g. one bar of hats over eight), CLEAR
-(Delete), TRANSPOSE by a semitone or an octave (Ctrl+Up/Down, with Shift an octave; INS ONLY limits it to notes whose
-cell names the INS instrument; notes stay within C-0..B-9), INTERPOLATE (Ctrl+I: OpenMPT's, in each selected column,
+MPTM or S3M module paste too, the first pattern of several, values this notation lacks left empty and counted), MIX (Ctrl+Shift+V: only into empty fields), FLOOD (Shift+V outside the note column: the clipboard again
+and again down to the end of the pattern, e.g. one bar of hats over eight), PUSH (Ctrl+Alt+V: the copied rows inserted
+at the cursor, each pasted channel's rows below moved down and the last ones dropped), OVERFLOW (kept for the next
+launch: PASTE and MIX go on past the pattern's end into the next order's pattern), CLEAR
+(Delete), TRANSPOSE by a semitone or an octave (Ctrl+Q / Ctrl+A, with Shift an octave; INS ONLY limits it to notes whose
+cell names the INS instrument; notes stay within C-0..B-9), Ctrl+I sets the INS instrument on every selected note or
+instrument (Ctrl+Up / Ctrl+Down step INS), INTERPOLATE (OpenMPT's, Ctrl+J the volume column alone, Ctrl+K the effect
+column alone; the button in each selected column,
 note, instrument, volume and effect alike, from the first selected row to the last, where both ends carry the same
 command or one end is empty and the other's value fills the span; a row holding another command is left alone; with no
 selection, the cursor's column between the nearest value at or above the cursor and the next one below), GROW and
@@ -782,7 +816,7 @@ the listening notes (`read_notes`), check the key (`key_check`), `undo` and `red
   they stop updating when the window is closed or suspended.
 - **Solo, mute and loop** with `set_audition`. Channels are 1-based; loop endpoints are `[order,row]`, 0-based and
   inclusive. `solo:null`, `muted:[]` and `loop:null` clear those settings; omitted fields stay unchanged. A loop selects
-  its orders for rendering and overrides F6's pattern loop. These settings persist in the tryout sidecar, without moving
+  its orders for rendering and overrides the live pattern loop (F7). These settings persist in the tryout sidecar, without moving
   faders or changing notes. Use `cue` with `play:true` to start; `stop_playback` stops the live and rendered players.
   Stop/audition requests report **queued**, with a request ID: `get_state.ui.applied_request` confirms window delivery.
   Playback state is reported separately; requests expire after ten seconds if no open window handles them.

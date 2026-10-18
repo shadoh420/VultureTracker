@@ -228,14 +228,14 @@ class TestPage(unittest.TestCase):
                     page.wait_for_function("PAT.rows && PAT.rows.length === 4")
                     settle = lambda: page.wait_for_function("EDQ.n === 0 && PAT.key !== null")  # noqa: E731
                     page.evaluate("document.activeElement && document.activeElement.blur()")
-                    page.keyboard.press("Escape")  # edit mode
+                    page.keyboard.press("Control+Space")  # edit mode
                     page.evaluate("$('lv-oct').value = 5; setCursor(0, 1, 0, 0)")
                     page.keyboard.press("x")       # D-5 on the piano keys, with INS 01
                     page.wait_for_function("!MIDI.pending")  # with CHORD (the default) a key goes in 60 ms later, as MIDI does
                     settle()
                     self.assertIn("      01: D-5 01 ... ... | ... .. ... ...\n", text())
                     page.keyboard.press("Control+l")           # the whole channel
-                    page.keyboard.press("Control+ArrowUp")     # a semitone up
+                    page.keyboard.press("Control+q")           # a semitone up
                     settle()
                     self.assertIn("      00: C#5 01 ... ... | ... .. ... ...\n      01: D#5 01", text())
                     page.evaluate("SEL = null; setCursor(0, 0, 0, 0)")
