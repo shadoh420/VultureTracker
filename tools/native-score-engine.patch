@@ -1,0 +1,2801 @@
+--- a/soundlib/Sndfile.h
++++ b/soundlib/Sndfile.h
+@@ -505,6 +505,42 @@
+ 	uint32 m_nFreqFactor = 65536; // Pitch shift factor (65536 = no pitch shifting). Only used in libopenmpt (openmpt::ext::interactive::set_pitch_factor)
+ 	uint32 m_nTempoFactor = 65536; // Tempo factor (65536 = no tempo adjustment). Only used in libopenmpt (openmpt::ext::interactive::set_tempo_factor)
+ #endif
++	bool m_vtExactClassicClock = false; // Scratch opt-in; legacy Classic timing remains the default.
++	static uint64 AllocateEventIdentity(); // Unique within this loaded engine, including across modules.
++	bool SetEventPitch(uint64 identity, double semitones);
++	bool SetEventGain(uint64 identity, double gain);
++	samplecount_t GetEventBufferCount() const { return m_PlayState.m_nBufferCount; }
++	bool m_vtTickPrepared = false; // Raw row/effects applied; tick envelopes/mixer still pending.
++	bool m_vtTailActive = false; // Explicit host-owned tail; no pattern/order traversal.
++	struct VtGroupPlan
++	{
++		uint8 count = 0;
++		bool hold = false;
++		std::array<ModCommand::NOTE, 3> notes{};
++		std::array<uint64, 3> identities{};
++	};
++	std::array<VtGroupPlan, MAX_BASECHANNELS> m_vtGroups{};
++	bool m_vtGroupTransaction = false;
++	mutable int m_vtGroupError = 0;
++	bool HasHeldScoreVoice(CHANNELINDEX parent = CHANNELINDEX_INVALID) const;
++	struct VtScoreHead
++	{
++		uint64 key = 0;
++		CHANNELINDEX parent = 0, anchor = 0;
++		INSTRUMENTINDEX source = 0;
++	};
++	std::array<VtScoreHead, 64> m_vtScoreHeads{};
++	uint64 m_vtLastHeadKey = 0;
++	bool IsScoreHeadAnchor(CHANNELINDEX channel) const
++	{
++		for(const auto &head : m_vtScoreHeads)
++			if(head.key && head.anchor == channel) return true;
++		return false;
++	}
++	int CheckEventGroupMaps(CHANNELINDEX parent, uint32 instr);
++	void ConsumeEventGroupNNA(CHANNELINDEX parent);
++	void ApplyEventGroupEffects(CHANNELINDEX parent, bool volume, ModCommand::VOL vol, ModCommand::COMMAND cmd, uint32 param);
++	CHANNELINDEX TriggerEventGroup(CHANNELINDEX parent, uint32 instr, ModCommand::COMMAND cmd, uint32 param, ModCommand::VOLCMD volcmd, ModCommand::VOL vol);
+ 
+ 	// Row swing factors for modern tempo mode
+ 	TempoSwing m_tempoSwing;
+@@ -1015,13 +1051,39 @@
+ 	void SetEQGains(const uint32 *pGains, const uint32 *pFreqs, bool bReset = false) { m_EQ.SetEQGains(pGains, pFreqs, bReset, m_MixerSettings.gdwMixingFreq); } // 0=-12dB, 32=+12dB
+ #endif // NO_EQ
+ public:
+-	bool ReadNote();
+-	bool ProcessRow();
++	bool ReadNote(CHANNELINDEX refreshOnly = CHANNELINDEX_INVALID);
++	bool PrepareEventBoundary();
++	bool PrepareEventBatch(bool &rowLoaded, bool &effectsPending);
++	struct VtCheckpoint
++	{
++		PlayState play;
++		RowVisitor visited;
++		mpt::fast_prng random;
++		std::array<mixsample_t, 4> offsets;
++		CHANNELINDEX mixChannels, mixStat;
++		TimingInfo timing;
++		bool tickPrepared, tailActive;
++		std::array<VtScoreHead, 64> scoreHeads;
++		uint64 lastHeadKey;
++#ifndef NO_REVERB
++		CReverb reverb;
++		mixsample_t reverbLeft, reverbRight;
++#endif
++		explicit VtCheckpoint(const CSoundFile &sf);
++	};
++	std::unique_ptr<VtCheckpoint> CaptureEventCheckpoint() const;
++	bool RefreshEventCheckpoint(VtCheckpoint &checkpoint) const;
++	bool RestoreEventCheckpoint(const VtCheckpoint &checkpoint);
++	bool BeginEventTail();
++	uint32 PeekEventRandom() const { auto copy = AccessPRNG(); return copy(); }
++	bool ProcessRow(bool *rowLoaded = nullptr);
+ 	bool ProcessEffects();
++	bool IgnoreNoteMap(CHANNELINDEX nChn, uint32 instr);
++	CHANNELINDEX ProcessNoteTransition(CHANNELINDEX nChn, uint32 &instr, bool &bPorta, bool continueNote, ModCommand::COMMAND cmd, uint32 param, ModCommand::VOLCMD volcmd, ModCommand::VOL vol, bool groupLayer = false);
+ 	std::pair<bool, bool> NextRow(PlayState &playState, const bool breakRow) const;
+ 	void SetupNextRow(PlayState &playState, const bool patternLoop) const;
+ 	CHANNELINDEX GetNNAChannel(CHANNELINDEX nChn) const;
+-	CHANNELINDEX CheckNNA(CHANNELINDEX nChn, uint32 instr, int note, bool forceCut);
++	CHANNELINDEX CheckNNA(CHANNELINDEX nChn, uint32 instr, int note, bool forceCut, bool duplicateOnly = false, bool skipDuplicates = false);
+ 	void StopOldNNA(ModChannel &chn, CHANNELINDEX channel);
+ 	void NoteChange(ModChannel &chn, int note, bool bPorta = false, bool bResetEnv = true, bool bManual = false, CHANNELINDEX channelHint = CHANNELINDEX_INVALID) const;
+ 	void InstrumentChange(PlayState &playState, CHANNELINDEX channel, uint32 instr, bool bPorta = false, bool bUpdVol = true, bool bResetEnv = true) const;
+--- a/soundlib/Sndfile.cpp
++++ b/soundlib/Sndfile.cpp
+@@ -912,6 +912,10 @@
+ 
+ void CSoundFile::ResetPlayPos()
+ {
++	m_vtTickPrepared = false;
++	m_vtTailActive = false;
++	m_vtScoreHeads = {};
++	m_vtLastHeadKey = 0;
+ 	const auto muteFlag = GetChannelMuteFlag();
+ 	for(CHANNELINDEX i = 0; i < m_PlayState.Chn.size(); i++)
+ 		m_PlayState.Chn[i].Reset(ModChannel::resetSetPosFull, *this, i, muteFlag);
+@@ -945,6 +949,10 @@
+ 
+ void CSoundFile::SetCurrentOrder(ORDERINDEX nOrder)
+ {
++	m_vtTickPrepared = false;
++	m_vtTailActive = false;
++	m_vtScoreHeads = {};
++	m_vtLastHeadKey = 0;
+ 	while(nOrder < Order().size() && !Order().IsValidPat(nOrder))
+ 		nOrder++;
+ 	if(nOrder >= Order().size())
+@@ -952,6 +960,8 @@
+ 
+ 	for(auto &chn : m_PlayState.Chn)
+ 	{
++		chn.vtContextKey = 0;
++		chn.vtContextPrimary = false;
+ 		chn.nPeriod = 0;
+ 		chn.nNote = NOTE_NONE;
+ 		chn.nPortamentoDest = 0;
+@@ -1874,6 +1884,19 @@
+ // goes wrong.
+ uint32 CSoundFile::GetTickDuration(PlayState &playState) const
+ {
++	if(m_vtExactClassicClock && m_nTempoMode == TempoMode::Classic)
++	{
++		double duration = static_cast<double>(m_MixerSettings.gdwMixingFreq) * (2.5 / playState.m_nMusicTempo.ToDouble());
++#ifndef MODPLUG_TRACKER
++		duration *= static_cast<double>(m_nTempoFactor) / 65536.0;
++#endif
++		// Carry signed rounding error, so cumulative boundaries round to the nearest frame.
++		// The existing restart paths reset m_dBufferDiff; factor changes retain the residual.
++		const double accumulated = duration + playState.m_dBufferDiff;
++		const uint32 frames = std::max(uint32(1), static_cast<uint32>(accumulated + 0.5));
++		playState.m_dBufferDiff = accumulated - frames;
++		return frames;
++	}
+ 	uint32 retval = 0;
+ 	switch(m_nTempoMode)
+ 	{
+--- a/soundlib/Sndmix.cpp
++++ b/soundlib/Sndmix.cpp
+@@ -22,8 +22,59 @@
+ #include "plugins/PlugInterface.h"
+ #endif // NO_PLUGINS
+ #include "OPL.h"
++#include <atomic>
+ 
+ OPENMPT_NAMESPACE_BEGIN
++
++uint64 CSoundFile::AllocateEventIdentity()
++{
++	static std::atomic<uint64> serial{0};
++	return ++serial;
++}
++
++static SamplePosition EventPitchIncrement(SamplePosition base, double semitones)
++{
++	if(semitones == 0) return base;
++	return SamplePosition(std::max<int64>(1, mpt::saturate_round<int64>(base.GetRaw() * std::pow(2.0, semitones / 12.0))));
++}
++
++bool CSoundFile::SetEventGain(uint64 identity, double gain)
++{
++	if(!identity || !std::isfinite(gain) || gain < 0 || gain > 1 || GetType() != MOD_TYPE_IT) return false;
++	for(auto &chn : m_PlayState.Chn)
++	{
++		if(chn.vtNoteIdentity != identity || !chn.nLength || !chn.nFadeOutVol) continue;
++		if(chn.dwFlags[CHN_ADLIB] || chn.HasMIDIOutput()) return false;
++		chn.vtGain = gain;
++		return true;
++	}
++	return false;
++}
++
++bool CSoundFile::SetEventPitch(uint64 identity, double semitones)
++{
++	if(!identity || !std::isfinite(semitones) || semitones < -12 || semitones > 12 || GetType() != MOD_TYPE_IT) return false;
++	for(auto &chn : m_PlayState.Chn)
++	{
++		if(chn.vtNoteIdentity != identity || !chn.nLength || !chn.nFadeOutVol) continue;
++		if(chn.dwFlags[CHN_ADLIB] || chn.HasMIDIOutput()) return false;
++		if(chn.vtPitchOffset == semitones) return true;
++		chn.vtPitchOffset = semitones;
++		// A tick not yet mixed will calculate its normal tracker increment once.
++		// Mid-tick, touch only pitch/resampling: do not re-run envelopes or ramps.
++		if(m_PlayState.m_nBufferCount && !chn.vtPitchBaseIncrement.IsZero())
++		{
++			const bool reverse = chn.increment.IsNegative();
++			chn.increment = EventPitchIncrement(chn.vtPitchBaseIncrement, semitones);
++			chn.resamplingMode = chn.vtPitchBaseResampling;
++			if(chn.increment.IsUnity() && !(chn.dwFlags[CHN_VIBRATO] || chn.nAutoVibDepth || chn.resamplingMode == SRCMODE_AMIGA))
++				chn.resamplingMode = SRCMODE_NEAREST;
++			if(reverse) chn.increment.Negate();
++		}
++		return true;
++	}
++	return false;
++}
+ 
+ // Log tables for pre-amp
+ // Pre-amp (or more precisely: Pre-attenuation) depends on the number of channels,
+@@ -442,9 +493,16 @@
+ /////////////////////////////////////////////////////////////////////////////
+ // Handles navigation/effects
+ 
+-bool CSoundFile::ProcessRow()
+-{
+-	while(++m_PlayState.m_nTickCount >= m_PlayState.TicksOnRow())
++bool CSoundFile::ProcessRow(bool *rowLoaded)
++{
++	if(rowLoaded) *rowLoaded = false;
++	if(m_vtTailActive)
++	{
++		// Blank continuation ticks without visiting, restarting, or inventing rows.
++		if(++m_PlayState.m_nTickCount >= m_PlayState.TicksOnRow())
++			m_PlayState.m_nTickCount = 0;
++	}
++	while(!m_vtTailActive && ++m_PlayState.m_nTickCount >= m_PlayState.TicksOnRow())
+ 	{
+ 		const auto [ignoreRow, patternTransition] = NextRow(m_PlayState, m_PlayState.m_flags[SONG_BREAKTOROW]);
+ 
+@@ -733,6 +791,7 @@
+ 			m_PlayState.m_nTickCount = m_PlayState.m_nMusicSpeed;
+ 			continue;
+ 		}
++		if(rowLoaded) *rowLoaded = true;
+ 		break;
+ 	}
+ 	// Should we process tick0 effects?
+@@ -771,7 +830,8 @@
+ 	}
+ 
+ 	// Update Effects
+-	return ProcessEffects();
++	// A batch supplies row notes before the normal channel-ordered effects pass.
++	return rowLoaded ? true : ProcessEffects();
+ }
+ 
+ 
+@@ -2111,8 +2171,131 @@
+ ////////////////////////////////////////////////////////////////////////////////////////////
+ // Handles envelopes & mixer setup
+ 
+-bool CSoundFile::ReadNote()
+-{
++bool CSoundFile::BeginEventTail()
++{
++	if(!(GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT)) || m_PlayState.m_flags[SONG_ENDREACHED | SONG_FADINGSONG | SONG_PAUSED]) return false;
++	if(m_vtTailActive) return true;
++	m_vtTailActive = true;
++	m_vtScoreHeads = {}; // A section tail cancels every future generated attack.
++	m_PlayState.m_nPatternDelay = m_PlayState.m_nFrameDelay = 0;
++	for(auto &chn : m_PlayState.PatternChannels(*this))
++	{
++		chn.rowCommand.Clear();
++		chn.nCommand = CMD_NONE;
++		chn.dwFlags.reset(CHN_VIBRATO | CHN_TREMOLO);
++		if(!m_playBehaviour[kITVibratoTremoloPanbrello]) chn.nPanbrelloOffset = 0;
++		chn.m_plugParamValueStep = 0;
++	}
++	// Do not refresh the mixer, consume a frame, or discard a partial tick.
++	return true;
++}
++
++bool CSoundFile::PrepareEventBoundary()
++{
++	if(m_PlayState.m_flags[SONG_ENDREACHED | SONG_FADINGSONG | SONG_PAUSED]) return false;
++	if(m_PlayState.m_nBufferCount || m_vtTickPrepared) return true;
++	// Apply raw row commands first, but leave envelopes/modulation and mixer setup
++	// for ReadNote after all same-frame events. No PCM frame is consumed here.
++	if(!ProcessRow()) return false;
++	m_vtTickPrepared = true;
++	return true;
++}
++
++bool CSoundFile::PrepareEventBatch(bool &rowLoaded, bool &effectsPending)
++{
++	rowLoaded = effectsPending = false;
++	if(m_PlayState.m_flags[SONG_ENDREACHED | SONG_FADINGSONG | SONG_PAUSED]) return false;
++	if(m_PlayState.m_nBufferCount || m_vtTickPrepared) return true;
++	if(!ProcessRow(&rowLoaded)) return false;
++	m_vtTickPrepared = effectsPending = true;
++	return true;
++}
++
++CSoundFile::VtCheckpoint::VtCheckpoint(const CSoundFile &sf)
++	: play(sf.m_PlayState), visited(sf.m_visitedRows), random(sf.m_PRNG)
++	, offsets{sf.m_dryLOfsVol, sf.m_dryROfsVol, sf.m_surroundLOfsVol, sf.m_surroundROfsVol}
++	, mixChannels(sf.m_nMixChannels), mixStat(sf.IsFirstTick() ? 0 : sf.m_nMixStat), timing(sf.m_TimingInfo)
++	, tickPrepared(sf.m_vtTickPrepared), tailActive(sf.m_vtTailActive)
++	, scoreHeads(sf.m_vtScoreHeads), lastHeadKey(sf.m_vtLastHeadKey)
++#ifndef NO_REVERB
++	, reverb(sf.m_Reverb), reverbLeft(sf.m_RvbLOfsVol), reverbRight(sf.m_RvbROfsVol)
++#endif
++{}
++
++std::unique_ptr<CSoundFile::VtCheckpoint> CSoundFile::CaptureEventCheckpoint() const
++{
++	// This is a reusable checkpoint for immutable, linear PCM IT score backing.
++	// Plugin/OPL/script state and mutable sample formats need their own save APIs.
++	if(GetType() != MOD_TYPE_IT || !m_vtExactClassicClock || m_nRepeatCount != 0
++		|| m_MixerSettings.DSPMask || m_MixerSettings.NumInputChannels || m_opl
++		|| !m_globalScript.empty() || m_PlayState.m_midiMacroEvaluationResults) return {};
++#ifndef NO_PLUGINS
++	if(m_loadedPlugins) return {};
++#endif
++	for(INSTRUMENTINDEX i = 1; i <= GetNumInstruments(); ++i)
++		if(Instruments[i] && (Instruments[i]->synth.HasScripts() || Instruments[i]->nMidiChannel || Instruments[i]->nMixPlug)) return {};
++	for(SAMPLEINDEX i = 1; i <= GetNumSamples(); ++i)
++		if(Samples[i].uFlags[CHN_ADLIB]) return {};
++	for(const auto &pattern : Patterns)
++		for(const auto &c : pattern)
++			if(ModCommand::IsPcNote(c.note)
++				|| (c.volcmd != VOLCMD_NONE && c.volcmd != VOLCMD_VOLUME)
++				|| (c.command != CMD_NONE && c.command != CMD_PANNING8 && c.command != CMD_CHANNELVOLUME
++					&& c.command != CMD_VOLUMESLIDE && c.command != CMD_GLOBALVOLUME && c.command != CMD_TEMPO)
++				|| (c.command == CMD_TEMPO && c.param < 0x20)
++				|| (c.command == CMD_NONE && c.param)
++				|| (c.command == CMD_CHANNELVOLUME && c.param > 64)
++				|| (c.command == CMD_GLOBALVOLUME && c.param > 128)) return {};
++	return std::make_unique<VtCheckpoint>(*this);
++}
++
++bool CSoundFile::RefreshEventCheckpoint(VtCheckpoint &checkpoint) const
++{
++	// The caller has validated this immutable configuration at its mutation epoch.
++	// Reuse the existing storage; the admitted domain has no scripts or MIDI macros.
++	if(!checkpoint.visited.RestoreLinearRowsFrom(m_visitedRows)) return false;
++	checkpoint.play = m_PlayState;
++	checkpoint.random = m_PRNG;
++	checkpoint.offsets = {m_dryLOfsVol, m_dryROfsVol, m_surroundLOfsVol, m_surroundROfsVol};
++	checkpoint.mixChannels = m_nMixChannels; checkpoint.mixStat = IsFirstTick() ? 0 : m_nMixStat;
++	checkpoint.timing = m_TimingInfo;
++	checkpoint.tickPrepared = m_vtTickPrepared; checkpoint.tailActive = m_vtTailActive;
++	checkpoint.scoreHeads = m_vtScoreHeads; checkpoint.lastHeadKey = m_vtLastHeadKey;
++#ifndef NO_REVERB
++	checkpoint.reverb = m_Reverb;
++	checkpoint.reverbLeft = m_RvbLOfsVol; checkpoint.reverbRight = m_RvbROfsVol;
++#endif
++	return true;
++}
++
++bool CSoundFile::RestoreEventCheckpoint(const VtCheckpoint &checkpoint)
++{
++	if(!m_visitedRows.RestoreLinearRowsFrom(checkpoint.visited)) return false;
++	m_PlayState = checkpoint.play;
++	m_PRNG = checkpoint.random;
++	m_dryLOfsVol = checkpoint.offsets[0]; m_dryROfsVol = checkpoint.offsets[1];
++	m_surroundLOfsVol = checkpoint.offsets[2]; m_surroundROfsVol = checkpoint.offsets[3];
++	m_nMixChannels = checkpoint.mixChannels; m_nMixStat = checkpoint.mixStat;
++	m_TimingInfo = checkpoint.timing;
++	m_vtTickPrepared = checkpoint.tickPrepared; m_vtTailActive = checkpoint.tailActive;
++	m_vtScoreHeads = checkpoint.scoreHeads; m_vtLastHeadKey = checkpoint.lastHeadKey;
++#ifndef NO_REVERB
++	m_Reverb = checkpoint.reverb;
++	m_RvbLOfsVol = checkpoint.reverbLeft; m_RvbROfsVol = checkpoint.reverbRight;
++#endif
++	// Mix buffers are scratch: Read fills them anew; Reverb::Process clears its
++	// pending-send flag before any public read returns. Resampler tables are immutable.
++	return true;
++}
++
++bool CSoundFile::ReadNote(CHANNELINDEX refreshOnly)
++{
++	// Candidate: refresh one event voice between reads without advancing the song clock.
++	const bool eventRefresh = refreshOnly != CHANNELINDEX_INVALID;
++	if(!eventRefresh)
++	{
++	if(!m_vtTickPrepared)
++	{
+ #ifdef MODPLUG_TRACKER
+ 	// Checking end of row ?
+ 	if(m_PlayState.m_flags[SONG_PAUSED])
+@@ -2126,12 +2309,15 @@
+ 		if(!ProcessRow())
+ 			return false;
+ 	}
++	}
++	m_vtTickPrepared = false;
+ 	////////////////////////////////////////////////////////////////////////////////////
+ 	if (m_PlayState.m_nMusicTempo.GetRaw() == 0) return false;
+ 
+ 	m_PlayState.m_globalScriptState.NextTick(m_PlayState, *this);
+ 	m_PlayState.m_nSamplesPerTick = GetTickDuration(m_PlayState);
+ 	m_PlayState.m_nBufferCount = m_PlayState.m_nSamplesPerTick;
++	}
+ 
+ 	// Master Volume + Pre-Amplification / Attenuation setup
+ 	uint32 nMasterVol;
+@@ -2172,9 +2358,16 @@
+ 
+ 	////////////////////////////////////////////////////////////////////////////////////
+ 	// Update channels data
+-	m_nMixChannels = 0;
++	if(!eventRefresh)
++		m_nMixChannels = 0;
++	else
++	{
++		auto begin = std::begin(m_PlayState.ChnMix);
++		m_nMixChannels = static_cast<CHANNELINDEX>(std::remove(begin, begin + m_nMixChannels, refreshOnly) - begin);
++	}
+ 	for(CHANNELINDEX nChn = 0; nChn < m_PlayState.Chn.size(); nChn++)
+ 	{
++		if(eventRefresh && nChn != refreshOnly) continue;
+ 		ModChannel &chn = m_PlayState.Chn[nChn];
+ 		// Increment age of NNA channels
+ 		if(chn.nMasterChn && nChn < GetNumChannels() && chn.nnaChannelAge < Util::MaxValueOfType(chn.nnaChannelAge))
+@@ -2206,7 +2399,7 @@
+ 		// Calc Frequency
+ 		int32 period = 0;
+ 
+-		chn.synthState.NextTick(m_PlayState, nChn, *this);
++		if(!eventRefresh) chn.synthState.NextTick(m_PlayState, nChn, *this);
+ 
+ 		// Also process envelopes etc. when there's a plugin on this channel, for possible fake automation using volume and pan data.
+ 		// We only care about master channels, though, since automation only "happens" on them.
+@@ -2217,10 +2410,20 @@
+ 			int vol = chn.nVolume;
+ 			int insVol = chn.nInsVol;		// This is the "SV * IV" value in ITTECH.TXT
+ 
+-			ProcessVolumeSwing(chn, m_playBehaviour[kITSwingBehaviour] ? insVol : vol);
+-			ProcessPanningSwing(chn);
+-			ProcessTremolo(chn, vol);
+-			ProcessTremor(nChn, vol);
++			if(eventRefresh)
++			{
++				// Evaluate the existing swing without consuming/resetting its channel state.
++				auto evaluation = chn;
++				ProcessVolumeSwing(evaluation, m_playBehaviour[kITSwingBehaviour] ? insVol : vol);
++				ProcessPanningSwing(evaluation);
++				chn.nRealPan = evaluation.nRealPan;
++			} else
++			{
++				ProcessVolumeSwing(chn, m_playBehaviour[kITSwingBehaviour] ? insVol : vol);
++				ProcessPanningSwing(chn);
++				ProcessTremolo(chn, vol);
++				ProcessTremor(nChn, vol);
++			}
+ 
+ 			// Clip volume and multiply (extend to 14 bits)
+ 			Limit(vol, 0, 256);
+@@ -2229,7 +2432,7 @@
+ 			// Process Envelopes
+ 			if (pIns)
+ 			{
+-				if(m_playBehaviour[kITEnvelopePositionHandling])
++				if(!eventRefresh && m_playBehaviour[kITEnvelopePositionHandling])
+ 				{
+ 					// In IT compatible mode, envelope position indices are shifted by one for proper envelope pausing,
+ 					// so we have to update the position before we actually process the envelopes.
+@@ -2238,9 +2441,24 @@
+ 					// Test cases: s77.it
+ 					IncrementEnvelopePositions(chn);
+ 				}
+-				ProcessVolumeEnvelope(chn, vol);
+-				ProcessInstrumentFade(chn, vol);
+-				ProcessPanningEnvelope(chn);
++				if(eventRefresh)
++				{
++					auto evaluation = chn;
++					if(m_playBehaviour[kITEnvelopePositionHandling])
++					{
++						evaluation.VolEnv.nEnvPosition = std::max(uint32(1), evaluation.VolEnv.nEnvPosition);
++						evaluation.PanEnv.nEnvPosition = std::max(uint32(1), evaluation.PanEnv.nEnvPosition);
++					}
++					ProcessVolumeEnvelope(evaluation, vol);
++					if(chn.dwFlags[CHN_NOTEFADE]) vol = (vol * chn.nFadeOutVol) / 65536;
++					ProcessPanningEnvelope(evaluation);
++					chn.nRealPan = evaluation.nRealPan;
++				} else
++				{
++					ProcessVolumeEnvelope(chn, vol);
++					ProcessInstrumentFade(chn, vol);
++					ProcessPanningEnvelope(chn);
++				}
+ 
+ 				if(!m_playBehaviour[kITPitchPanSeparation] && chn.nNote != NOTE_NONE && chn.pModInstrument && chn.pModInstrument->nPPS != 0)
+ 					ProcessPitchPanSeparation(chn.nRealPan, chn.nNote, *chn.pModInstrument);
+@@ -2308,7 +2526,7 @@
+ 				period = chn.glissandoPeriod;
+ 			}
+ 
+-			ProcessArpeggio(nChn, period, arpeggioSteps);
++			if(!eventRefresh) ProcessArpeggio(nChn, period, arpeggioSteps);
+ 
+ 			// Preserve Amiga freq limits.
+ 			// In ST3, the frequency is always clamped to periods 113 to 856, while in ProTracker,
+@@ -2330,7 +2548,7 @@
+ 				Limit(chn.nPeriod, limitLow, limitHigh);
+ 			}
+ 
+-			ProcessPanbrello(chn);
++			if(!eventRefresh) ProcessPanbrello(chn);
+ 		}
+ 
+ 		// IT Compatibility: Ensure that there is no pan swing, panbrello, panning envelopes, etc. applied on surround channels.
+@@ -2345,7 +2563,7 @@
+ 			m_opl->Volume(nChn, static_cast<uint8>(cutoff), true);
+ 
+ 		// Now that all relevant envelopes etc. have been processed, we can parse the MIDI macro data.
+-		ProcessMacroOnChannel(nChn);
++		if(!eventRefresh) ProcessMacroOnChannel(nChn);
+ 
+ 		// After MIDI macros have been processed, we can also process the pitch / filter envelope and other pitch-related things.
+ 		if(samplePlaying)
+@@ -2356,7 +2574,7 @@
+ 				m_opl->Volume(nChn, static_cast<uint8>(envCutoff / 4), true);
+ 		}
+ 
+-		if(chn.rowCommand.volcmd == VOLCMD_VIBRATODEPTH &&
++		if(!eventRefresh && chn.rowCommand.volcmd == VOLCMD_VIBRATODEPTH &&
+ 			(chn.rowCommand.command == CMD_VIBRATO || chn.rowCommand.command == CMD_VIBRATOVOL || chn.rowCommand.command == CMD_FINEVIBRATO))
+ 		{
+ 			if(GetType() == MOD_TYPE_XM)
+@@ -2376,15 +2594,18 @@
+ 			}
+ 		}
+ 		// Plugins may also receive vibrato
+-		ProcessVibrato(nChn, period, vibratoFactor);
++		if(!eventRefresh) ProcessVibrato(nChn, period, vibratoFactor);
+ 
+ 		if(samplePlaying)
+ 		{
+-			chn.synthState.ApplyChannelState(chn, period, *this);
+-			m_PlayState.m_globalScriptState.ApplyChannelState(m_PlayState, nChn, period, *this);
++			if(!eventRefresh)
++			{
++				chn.synthState.ApplyChannelState(chn, period, *this);
++				m_PlayState.m_globalScriptState.ApplyChannelState(m_PlayState, nChn, period, *this);
++			}
+ 
+ 			int nPeriodFrac = 0;
+-			ProcessSampleAutoVibrato(chn, period, vibratoFactor, nPeriodFrac);
++			if(!eventRefresh) ProcessSampleAutoVibrato(chn, period, vibratoFactor, nPeriodFrac);
+ 
+ 			// Final Period
+ 			// ST3 only clamps the final output period, but never the channel's internal period.
+@@ -2416,7 +2637,8 @@
+ 			{
+ 				ninc.Set(0, 1);
+ 			}
+-			chn.increment = ninc;
++			chn.vtPitchBaseIncrement = ninc;
++			chn.increment = EventPitchIncrement(ninc, chn.vtPitchOffset);
+ 
+ 			if((chn.dwFlags & (CHN_ADLIB | CHN_MUTE | CHN_SYNCMUTE)) == CHN_ADLIB && m_opl)
+ 			{
+@@ -2462,7 +2684,7 @@
+ 		}
+ 
+ 		// Increment envelope positions
+-		if(pIns != nullptr && !m_playBehaviour[kITEnvelopePositionHandling])
++		if(!eventRefresh && pIns != nullptr && !m_playBehaviour[kITEnvelopePositionHandling])
+ 		{
+ 			// In IT and FT2 compatible mode, envelope positions are updated above.
+ 			// Test cases: s77.it, EnvLoops.xm
+@@ -2578,6 +2800,7 @@
+ 				chn.resamplingMode = m_Resampler.m_Settings.SrcMode;
+ 			}
+ 
++			chn.vtPitchBaseResampling = chn.resamplingMode;
+ 			if(chn.increment.IsUnity() && !(chn.dwFlags[CHN_VIBRATO] || chn.nAutoVibDepth || chn.resamplingMode == SRCMODE_AMIGA))
+ 			{
+ 				// Exact sample rate match, do not interpolate at all
+@@ -2609,7 +2832,8 @@
+ 			// Stop NNA channel processing if the channel is effectively muted.
+ 			// Required for Carry Envelope quirk to stop processing envelopes of affected channels.
+ 			// Test case: CarryCompatGxxPortaWithIns.it
+-			if(nChn >= GetNumChannels() && !(chn.nVolume && chn.nGlobalVol && chn.nInsVol))
++			if(nChn >= GetNumChannels() && (!chn.IsHeldScoreVoice() || (chn.vtContextKey && !chn.vtContextPrimary))
++				&& !(chn.nVolume && chn.nGlobalVol && chn.nInsVol))
+ 				chn.nLength = 0;
+ 		} else
+ 		{
+--- a/soundlib/Snd_fx.cpp
++++ b/soundlib/Snd_fx.cpp
+@@ -1070,7 +1070,14 @@
+ 		}
+ 
+ 		const uint32 tickDuration = GetTickDuration(playState);
+-		const uint32 rowDuration = tickDuration * numTicks;
++		uint32 rowDuration = tickDuration * numTicks;
++		if(m_vtExactClassicClock && m_nTempoMode == TempoMode::Classic && numTicks > 1)
++		{
++			// Match the render clock: each tick advances its fractional residual.
++			rowDuration = tickDuration;
++			for(uint32 tick = 1; tick < numTicks; ++tick)
++				rowDuration += GetTickDuration(playState);
++		}
+ 		memory.elapsedTime += static_cast<double>(rowDuration) / static_cast<double>(m_MixerSettings.gdwMixingFreq);
+ 		playState.m_lTotalSampleCount += rowDuration;
+ 		const ROWINDEX rowsPerBeat = playState.m_nCurrentRowsPerBeat ? playState.m_nCurrentRowsPerBeat : DEFAULT_ROWS_PER_BEAT;
+@@ -2263,6 +2270,7 @@
+ 	// Check for empty channel
+ 	for(CHANNELINDEX i = GetNumChannels(); i < m_PlayState.Chn.size(); i++)
+ 	{
++		if(IsScoreHeadAnchor(i)) continue;
+ 		const ModChannel &c = m_PlayState.Chn[i];
+ 		// Sample playing?
+ 		if(c.nLength)
+@@ -2275,6 +2283,11 @@
+ 			return i;
+ 	}
+ 
++	if(m_vtGroupTransaction)
++	{
++		m_vtGroupError = -4; // A transaction never steals a sounding voice.
++		return CHANNELINDEX_INVALID;
++	}
+ 	int32 vol = 0x800100;
+ 	if(nChn < m_PlayState.Chn.size())
+ 	{
+@@ -2290,6 +2303,7 @@
+ 	for(CHANNELINDEX i = GetNumChannels(); i < m_PlayState.Chn.size(); i++)
+ 	{
+ 		const ModChannel &c = m_PlayState.Chn[i];
++		if(c.IsHeldScoreVoice() || IsScoreHeadAnchor(i)) continue;
+ 		// Stopped OPL channel
+ 		if(c.dwFlags[CHN_ADLIB] && (!m_opl || !m_opl->IsActive(i)))
+ 			return i;
+@@ -2316,7 +2330,7 @@
+ }
+ 
+ 
+-CHANNELINDEX CSoundFile::CheckNNA(CHANNELINDEX nChn, uint32 instr, int note, bool forceCut)
++CHANNELINDEX CSoundFile::CheckNNA(CHANNELINDEX nChn, uint32 instr, int note, bool forceCut, bool duplicateOnly, bool skipDuplicates)
+ {
+ 	ModChannel &srcChn = m_PlayState.Chn[nChn];
+ 	const ModInstrument *pIns = nullptr;
+@@ -2342,6 +2356,8 @@
+ 	// Always NNA cut
+ 	if(!(GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT | MOD_TYPE_MT2)) || !m_nInstruments || forceCut)
+ 	{
++		if(duplicateOnly) return CHANNELINDEX_INVALID;
++		ConsumeEventGroupNNA(nChn);
+ 		if(srcChn.dwFlags[CHN_MUTE])
+ 			return CHANNELINDEX_INVALID;
+ 
+@@ -2368,6 +2384,7 @@
+ 		StopOldNNA(chn, nnaChn);
+ 		// Copy Channel
+ 		chn = srcChn;
++		chn.vtContextPrimary = false;
+ 		chn.dwFlags.reset(CHN_VIBRATO | CHN_TREMOLO | CHN_MUTE | CHN_PORTAMENTO);
+ 		chn.nPanbrelloOffset = 0;
+ 		chn.nMasterChn = nChn + 1;
+@@ -2412,15 +2429,19 @@
+ 		}
+ 	}
+ 	if(srcChn.dwFlags[CHN_MUTE])
++	{
++		if(!duplicateOnly) ConsumeEventGroupNNA(nChn);
+ 		return CHANNELINDEX_INVALID;
+-
+-	for(CHANNELINDEX i = nChn; i < m_PlayState.Chn.size(); i++)
++	}
++
++	for(CHANNELINDEX i = nChn; !skipDuplicates && i < m_PlayState.Chn.size(); i++)
+ 	{
+ 		// Only apply to background channels, or the same pattern channel
+ 		if(i < GetNumChannels() && i != nChn)
+ 			continue;
+ 
+ 		ModChannel &chn = m_PlayState.Chn[i];
++		if(chn.IsHeldScoreVoice() && (!srcChn.vtContextKey || chn.vtContextKey != srcChn.vtContextKey)) continue;
+ 		bool applyDNAtoPlug = false;
+ 		if((chn.nMasterChn == nChn + 1 || i == nChn) && chn.pModInstrument != nullptr)
+ 		{
+@@ -2510,10 +2531,23 @@
+ 					chn.nFadeOutVol = 0;
+ 					chn.dwFlags.set(CHN_NOTEFADE | CHN_FASTVOLRAMP);
+ 				}
+-			}
+-		}
+-	}
+-
++				// A former group member may already be ordinary background audio.
++				// Current siblings are refreshed once by ConsumeEventGroupNNA below.
++				if(i >= GetNumChannels() && !chn.vtGroupPendingNNA && !chn.nFadeOutVol
++					&& !m_vtTickPrepared && m_PlayState.m_nBufferCount)
++				{
++					chn.nRealVolume = chn.nCalcVolume = 0;
++					chn.newLeftVol = chn.newRightVol = 0;
++					chn.nRampLength = 0;
++					chn.dwFlags.set(CHN_VOLUMERAMP);
++					ProcessRamping(chn);
++				}
++			}
++		}
++	}
++
++	if(duplicateOnly) return CHANNELINDEX_INVALID;
++	ConsumeEventGroupNNA(nChn);
+ 	m_PlayState.m_lastMovedChannel = CHANNELINDEX_INVALID;
+ 
+ 	// New Note Action
+@@ -2555,6 +2589,7 @@
+ 	StopOldNNA(chn, nnaChn);
+ 	// Copy Channel
+ 	chn = srcChn;
++	chn.vtContextPrimary = false;
+ 	chn.dwFlags.reset(CHN_VIBRATO | CHN_TREMOLO | CHN_PORTAMENTO);
+ 	chn.nPanbrelloOffset = 0;
+ 
+@@ -2640,6 +2675,568 @@
+ }
+ 
+ 
++bool CSoundFile::IgnoreNoteMap(CHANNELINDEX nChn, uint32 instr)
++{
++	auto &chn = m_PlayState.Chn[nChn];
++	if(m_playBehaviour[kITEmptyNoteMapSlotIgnoreCell] && instr > 0 && instr <= GetNumInstruments()
++	   && Instruments[instr] != nullptr && !Instruments[instr]->HasValidMIDIChannel())
++	{
++		auto note = (chn.rowCommand.note != NOTE_NONE) ? chn.rowCommand.note : chn.nNewNote;
++		if(ModCommand::IsNote(note) && Instruments[instr]->Keyboard[note - NOTE_MIN] == 0)
++		{
++			chn.nNewNote = chn.nLastNote = note;
++			chn.nNewIns = static_cast<ModCommand::INSTR>(instr);
++			chn.rowCommand.Clear();
++			return true;
++		}
++	}
++	return false;
++}
++
++
++int CSoundFile::CheckEventGroupMaps(CHANNELINDEX parent, uint32 instr)
++{
++	auto &group = m_vtGroups[parent];
++	if(group.count < 2) return 1;
++	auto &chn = m_PlayState.Chn[parent];
++	const auto saved = chn;
++	int ignored = 0;
++	for(uint8 i = 0; i < group.count; ++i)
++	{
++		chn = saved;
++		chn.rowCommand.note = group.notes[i];
++		if(IgnoreNoteMap(parent, instr)) ++ignored;
++		else if(!instr && chn.pModInstrument
++			&& m_playBehaviour[kITEmptyNoteMapSlot]
++			&& chn.pModInstrument->Keyboard[group.notes[i] - NOTE_MIN] == 0)
++		{
++			// The ordinary inherited-empty path does not report an ignored cell.
++			// Refuse rather than duplicate its still-playing old sample as a layer.
++			chn = saved;
++			return m_vtGroupError = -3;
++		}
++	}
++	chn = saved;
++	if(ignored && ignored != group.count) return m_vtGroupError = -2;
++	return ignored ? 0 : 1;
++}
++
++bool CSoundFile::HasHeldScoreVoice(CHANNELINDEX parent) const
++{
++	for(CHANNELINDEX i = 0; i < m_PlayState.Chn.size(); ++i)
++	{
++		const auto &chn = m_PlayState.Chn[i];
++		if(chn.IsHeldScoreVoice() && (parent == CHANNELINDEX_INVALID || i == parent || chn.nMasterChn == parent + 1))
++			return true;
++	}
++	return false;
++}
++
++void CSoundFile::ConsumeEventGroupNNA(CHANNELINDEX parent)
++{
++	if(parent >= GetNumChannels() || !m_PlayState.Chn[parent].vtGroupPendingNNA) return;
++	const auto context = m_PlayState.Chn[parent].vtContextKey;
++	m_PlayState.Chn[parent].vtGroupPendingNNA = false;
++	for(CHANNELINDEX i = GetNumChannels(); i < m_PlayState.Chn.size(); ++i)
++	{
++		auto &chn = m_PlayState.Chn[i];
++		if(!chn.vtGroupPendingNNA || chn.nMasterChn != parent + 1) continue;
++		if(chn.vtContextKey != context) continue;
++		chn.vtGroupPendingNNA = false;
++		if(chn.IsHeldScoreVoice() && !context) continue;
++		if(context) chn.vtContextPrimary = false;
++		if(!chn.nLength) continue;
++		if(chn.nFadeOutVol) switch(chn.nNNA)
++		{
++		case NewNoteAction::NoteOff: KeyOff(chn); break;
++		case NewNoteAction::NoteCut: chn.nFadeOutVol = 0; chn.dwFlags.set(CHN_NOTEFADE); break;
++		case NewNoteAction::NoteFade: chn.dwFlags.set(CHN_NOTEFADE); break;
++		case NewNoteAction::Continue: break;
++		}
++		if(!chn.nVolume) { chn.nFadeOutVol = 0; chn.dwFlags.set(CHN_NOTEFADE | CHN_FASTVOLRAMP); }
++		if(!m_vtTickPrepared && m_PlayState.m_nBufferCount && !chn.nFadeOutVol)
++		{
++			chn.nRealVolume = chn.nCalcVolume = 0;
++			chn.newLeftVol = chn.newRightVol = 0;
++			chn.nRampLength = 0;
++			chn.dwFlags.set(CHN_VOLUMERAMP);
++			ProcessRamping(chn);
++		}
++	}
++}
++
++void CSoundFile::ApplyEventGroupEffects(CHANNELINDEX parent, bool volume, ModCommand::VOL vol, ModCommand::COMMAND cmd, uint32 param)
++{
++	if(!m_PlayState.Chn[parent].vtGroupPendingNNA) return;
++	for(CHANNELINDEX i = GetNumChannels(); i < m_PlayState.Chn.size(); ++i)
++	{
++		auto &chn = m_PlayState.Chn[i];
++		if(!chn.vtGroupPendingNNA || chn.nMasterChn != parent + 1 || !chn.nLength || !chn.nFadeOutVol) continue;
++		if(chn.vtContextKey != m_PlayState.Chn[parent].vtContextKey) continue;
++		chn.isFirstTick = m_PlayState.Chn[parent].isFirstTick;
++		if(volume) { chn.nVolume = std::min<uint32>(vol, 64) << 2; chn.dwFlags.set(CHN_FASTVOLRAMP); }
++		switch(cmd)
++		{
++		case CMD_VOLUMESLIDE: VolumeSlide(chn, static_cast<ModCommand::PARAM>(param)); break;
++		case CMD_PANNING8:
++			if(m_PlayState.m_flags[SONG_FIRSTTICK]) Panning(chn, param, Pan8bit);
++			break;
++		case CMD_CHANNELVOLUME:
++			if(m_PlayState.m_flags[SONG_FIRSTTICK] && param <= 64) {
++				chn.nGlobalVol = static_cast<uint8>(param); chn.dwFlags.set(CHN_FASTVOLRAMP);
++			}
++			break;
++		default: break; // V is already global; admitted backing contains no other effect.
++		}
++	}
++}
++
++CHANNELINDEX CSoundFile::TriggerEventGroup(CHANNELINDEX parent, uint32 instr, ModCommand::COMMAND cmd, uint32 param, ModCommand::VOLCMD volcmd, ModCommand::VOL vol)
++{
++	auto &group = m_vtGroups[parent];
++	const auto seed = m_PlayState.Chn[parent];
++	const auto needed = group.count - 1 + (seed.IsSamplePlaying() ? 1 : 0);
++	int free = 0;
++	for(CHANNELINDEX i = GetNumChannels(); i < m_PlayState.Chn.size(); ++i)
++		if(!IsScoreHeadAnchor(i) && !m_PlayState.Chn[i].nLength && !m_PlayState.Chn[i].HasMIDIOutput()) ++free;
++	if(free < needed) { m_vtGroupError = -4; return CHANNELINDEX_INVALID; }
++	// Complete duplicate checks before creating any sibling, in source order.
++	for(uint8 i = 0; i < group.count; ++i)
++		CheckNNA(parent, instr, group.notes[i], false, true);
++	const auto displaced = CheckNNA(parent, instr, group.notes[group.count - 1], false, false, true);
++	for(uint8 i = 0; i < group.count; ++i)
++	{
++		const bool primary = i + 1 == group.count;
++		const CHANNELINDEX slot = primary ? parent : GetNNAChannel(CHANNELINDEX_INVALID);
++		if(slot == CHANNELINDEX_INVALID) { m_vtGroupError = -4; return displaced; }
++		auto &chn = m_PlayState.Chn[slot];
++		chn = seed;
++		chn.nLength = 0;
++		chn.position.Set(0);
++		chn.nROfs = chn.nLOfs = 0;
++		chn.nMasterChn = primary ? 0 : parent + 1;
++		chn.vtGroupPendingNNA = true;
++		chn.rowCommand.note = group.notes[i];
++		if(!primary)
++		{
++			chn.leftVol = chn.rightVol = chn.newLeftVol = chn.newRightVol = 0;
++			chn.rampLeftVol = chn.rampRightVol = chn.leftRamp = chn.rightRamp = 0;
++			chn.nRampLength = 0;
++			chn.nCommand = CMD_NONE;
++		}
++		auto layerInstr = instr;
++		bool porta = false;
++		ProcessNoteTransition(slot, layerInstr, porta, false, cmd, param, volcmd, vol, true);
++		group.identities[i] = chn.vtNoteIdentity;
++		if(!primary && !m_vtTickPrepared)
++		{
++			if(m_playBehaviour[kITEnvelopePositionHandling])
++			{
++				if(chn.VolEnv.flags[ENV_ENABLED]) chn.VolEnv.nEnvPosition = std::max(uint32(1), chn.VolEnv.nEnvPosition);
++				if(chn.PanEnv.flags[ENV_ENABLED]) chn.PanEnv.nEnvPosition = std::max(uint32(1), chn.PanEnv.nEnvPosition);
++				if(chn.PitchEnv.flags[ENV_ENABLED]) chn.PitchEnv.nEnvPosition = std::max(uint32(1), chn.PitchEnv.nEnvPosition);
++			}
++			ReadNote(slot);
++		}
++	}
++	return displaced;
++}
++
++CHANNELINDEX CSoundFile::ProcessNoteTransition(CHANNELINDEX nChn, uint32 &instr, bool &bPorta, bool continueNote, ModCommand::COMMAND cmd, uint32 param, ModCommand::VOLCMD volcmd, ModCommand::VOL vol, bool groupLayer)
++{
++	auto &chn = m_PlayState.Chn[nChn];
++	if(!groupLayer && nChn < GetNumChannels() && m_vtGroups[nChn].count > 1 && ModCommand::IsNote(chn.rowCommand.note))
++		return TriggerEventGroup(nChn, instr, cmd, param, volcmd, vol);
++	CHANNELINDEX displaced = CHANNELINDEX_INVALID;
++	ModCommand::NOTE note = chn.rowCommand.note;
++	if(ModCommand::IsNote(note) && chn.IsHeldScoreVoice() && !chn.vtContextKey)
++	{
++		if(!m_vtGroupTransaction || bPorta || continueNote || groupLayer)
++		{
++			m_vtGroupError = -6;
++			return CHANNELINDEX_INVALID;
++		}
++		// Save the old live voice before changing instrument/note memories.
++		// This is neither an instrument NNA nor a fresh synthetic note/tick.
++		displaced = GetNNAChannel(CHANNELINDEX_INVALID);
++		if(displaced == CHANNELINDEX_INVALID) return displaced;
++		auto &saved = m_PlayState.Chn[displaced];
++		saved = chn;
++		saved.nMasterChn = nChn + 1;
++		saved.vtGroupPendingNNA = false;
++		saved.rowCommand.Clear();
++		chn.vtHoldOwned = false;
++		chn.vtNoteIdentity = 0;
++		chn.nLength = 0;
++		chn.position.Set(0);
++		chn.nROfs = chn.nLOfs = 0;
++		chn.rightVol = chn.leftVol = 0;
++	}
++	if(instr)
++	{
++		chn.nNewIns = static_cast<ModCommand::INSTR>(instr);
++		chn.swapSampleIndex = GetSampleIndex(ModCommand::IsNote(note) ? note : chn.nLastNote, instr);
++	}
++
++	if(ModCommand::IsNote(note) && m_playBehaviour[kFT2Transpose])
++	{
++		// Notes that exceed FT2's limit are completely ignored.
++		// Test case: NoteLimit.xm
++		int transpose = chn.nTranspose;
++		if(instr && !bPorta)
++		{
++			// Refresh transpose
++			// Test case: NoteLimit2.xm
++			const SAMPLEINDEX sample = GetSampleIndex(note, instr);
++			if(sample > 0)
++				transpose = GetSample(sample).RelativeTone;
++		}
++
++		const int computedNote = note + transpose;
++		if((computedNote < NOTE_MIN + 11 || computedNote > NOTE_MIN + 130))
++		{
++			note = NOTE_NONE;
++		}
++	} else if((GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT | MOD_TYPE_J2B)) && GetNumInstruments() != 0 && ModCommand::IsNoteOrEmpty(static_cast<ModCommand::NOTE>(note)))
++	{
++		// IT compatibility: Invalid instrument numbers do nothing, but they are remembered for upcoming notes and do not trigger a note in that case.
++		// Test case: InstrumentNumberChange.it
++		INSTRUMENTINDEX instrToCheck = static_cast<INSTRUMENTINDEX>((instr != 0) ? instr : chn.nOldIns);
++		if(instrToCheck != 0 && (instrToCheck > GetNumInstruments() || Instruments[instrToCheck] == nullptr))
++		{
++			note = NOTE_NONE;
++			instr = 0;
++		}
++	}
++
++	// XM: FT2 ignores a note next to a K00 effect, and a fade-out seems to be done when no volume envelope is present (not exactly the Kxx behaviour)
++	if(cmd == CMD_KEYOFF && param == 0 && m_playBehaviour[kFT2KeyOff])
++	{
++		note = NOTE_NONE;
++		instr = 0;
++	}
++
++	bool retrigEnv = note == NOTE_NONE && instr != 0;
++
++	// Apparently, any note number in a pattern causes instruments to recall their original volume settings - no matter if there's a Note Off next to it or whatever.
++	// Test cases: keyoff+instr.xm, delay.xm
++	bool reloadSampleSettings = (m_playBehaviour[kFT2ReloadSampleSettings] && instr != 0);
++	bool keepInstr = (GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT)) || m_playBehaviour[kST3SampleSwap];
++	if(m_playBehaviour[kMODSampleSwap])
++	{
++		// ProTracker Compatibility: If a sample was stopped before, lone instrument numbers can retrigger it
++		// Test cases: PTSwapEmpty.mod, PTInstrVolume.mod, PTStoppedSwap.mod
++		if(!chn.IsSamplePlaying() && instr <= GetNumSamples() && Samples[instr].uFlags[CHN_LOOP])
++			keepInstr = true;
++	}
++
++	// Now it's time for some FT2 crap...
++	if (GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2))
++	{
++		// XM: Key-Off + Sample == Note Cut (BUT: Only if no instr number or volume effect is present!)
++		// Test case: NoteOffVolume.xm
++		if(note == NOTE_KEYOFF
++			&& ((!instr && volcmd != VOLCMD_VOLUME && cmd != CMD_VOLUME) || !m_playBehaviour[kFT2KeyOff])
++			&& (chn.pModInstrument == nullptr || !chn.pModInstrument->VolEnv.dwFlags[ENV_ENABLED]))
++		{
++			chn.dwFlags.set(CHN_FASTVOLRAMP);
++			chn.nVolume = 0;
++			note = NOTE_NONE;
++			instr = 0;
++			retrigEnv = false;
++			// FT2 Compatibility: Start fading the note for notes with no delay. Only relevant when a volume command is encountered after the note-off.
++			// Test case: NoteOffFadeNoEnv.xm
++			if(m_PlayState.m_flags[SONG_FIRSTTICK] && m_playBehaviour[kFT2NoteOffFlags])
++				chn.dwFlags.set(CHN_NOTEFADE);
++		} else if(m_playBehaviour[kFT2RetrigWithNoteDelay] && !m_PlayState.m_flags[SONG_FIRSTTICK])
++		{
++			// FT2 Compatibility: Some special hacks for rogue note delays... (EDx with x > 0)
++			// Apparently anything that is next to a note delay behaves totally unpredictable in FT2. Swedish tracker logic. :)
++
++			retrigEnv = true;
++
++			// Portamento + Note Delay = No Portamento
++			// Test case: porta-delay.xm
++			bPorta = false;
++
++			if(note == NOTE_NONE)
++			{
++				// If there's a note delay but no real note, retrig the last note.
++				// Test case: delay2.xm, delay3.xm
++				note = static_cast<ModCommand::NOTE>(chn.nNote - chn.nTranspose);
++			} else if(note >= NOTE_MIN_SPECIAL)
++			{
++				// Gah! Even Note Off + Note Delay will cause envelopes to *retrigger*! How stupid is that?
++				// ... Well, and that is actually all it does if there's an envelope. No fade out, no nothing. *sigh*
++				// Test case: OffDelay.xm
++				note = NOTE_NONE;
++				keepInstr = false;
++				reloadSampleSettings = true;
++			} else if(instr || !m_playBehaviour[kFT2NoteDelayWithoutInstr])
++			{
++				// Normal note (only if there is an instrument, test case: DelayVolume.xm)
++				keepInstr = true;
++				reloadSampleSettings = true;
++			}
++		}
++	}
++
++	if((retrigEnv && !m_playBehaviour[kFT2ReloadSampleSettings]) || reloadSampleSettings)
++	{
++		const ModSample *oldSample = nullptr;
++		// Reset default volume when retriggering envelopes
++
++		if(GetNumInstruments())
++		{
++			oldSample = chn.pModSample;
++		} else if (instr <= GetNumSamples())
++		{
++			// Case: Only samples are used; no instruments.
++			oldSample = &Samples[instr];
++		}
++
++		if(oldSample != nullptr)
++		{
++			if(!oldSample->uFlags[SMP_NODEFAULTVOLUME] && (GetType() != MOD_TYPE_S3M || oldSample->HasSampleData()))
++			{
++				chn.nVolume = oldSample->nVolume;
++				chn.dwFlags.set(CHN_FASTVOLRAMP);
++			}
++			if(reloadSampleSettings)
++			{
++				// Also reload panning
++				chn.SetInstrumentPan(oldSample->nPan, *this);
++			}
++		}
++	}
++
++	// FT2 compatibility: Instrument number disables tremor effect
++	// Test case: TremorInstr.xm, TremoRecover.xm
++	if(m_playBehaviour[kFT2Tremor] && instr != 0)
++	{
++		chn.nTremorCount = 0x20;
++	}
++
++	// IT compatibility: Envelope retriggering with instrument number based on Old Effects and Compatible Gxx flags:
++	// OldFX CompatGxx Env Behaviour
++	// ----- --------- -------------
++	//  off     off    never reset
++	//  on      off    reset on instrument without portamento
++	//  off     on     reset on instrument with portamento
++	//  on      on     always reset
++	// Test case: ins-xx.it, ins-ox.it, ins-oc.it, ins-xc.it, ResetEnvNoteOffOldFx.it, ResetEnvNoteOffOldFx2.it, noteoff3.it
++	if(GetNumInstruments() && m_playBehaviour[kITInstrWithNoteOffOldEffects]
++		&& instr && !ModCommand::IsNote(note))
++	{
++		if((bPorta && m_SongFlags[SONG_ITCOMPATGXX])
++			|| (!bPorta && m_SongFlags[SONG_ITOLDEFFECTS]))
++		{
++			chn.ResetEnvelopes();
++			chn.dwFlags.set(CHN_FASTVOLRAMP);
++			chn.nFadeOutVol = 65536;
++		}
++	}
++
++	if(retrigEnv) //Case: instrument with no note data.
++	{
++		//IT compatibility: Instrument with no note.
++		if(m_playBehaviour[kITInstrWithoutNote] || GetType() == MOD_TYPE_PLM)
++		{
++			// IT compatibility: Completely retrigger note after sample end to also reset portamento.
++			// Test case: PortaResetAfterRetrigger.it
++			bool triggerAfterSmpEnd = m_playBehaviour[kITMultiSampleInstrumentNumber] && !chn.IsSamplePlaying();
++			if(GetNumInstruments())
++			{
++				// Instrument mode
++				if(instr <= GetNumInstruments() && (chn.pModInstrument != Instruments[instr] || triggerAfterSmpEnd))
++					note = chn.nNote;
++			} else
++			{
++				// Sample mode
++				if(instr < MAX_SAMPLES && (chn.pModSample != &Samples[instr] || triggerAfterSmpEnd))
++					note = chn.nNote;
++			}
++		}
++
++		if(GetNumInstruments() && (GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2 | MOD_TYPE_MED)))
++		{
++			chn.ResetEnvelopes();
++			chn.dwFlags.set(CHN_FASTVOLRAMP);
++			chn.dwFlags.reset(CHN_NOTEFADE);
++			chn.nAutoVibDepth = 0;
++			chn.nAutoVibPos = 0;
++			chn.nFadeOutVol = 65536;
++			// FT2 Compatibility: Reset key-off status with instrument number
++			// Test case: NoteOffInstrChange.xm
++			if(m_playBehaviour[kFT2NoteOffFlags])
++				chn.dwFlags.reset(CHN_KEYOFF);
++		}
++		if (!keepInstr) instr = 0;
++	}
++
++	// Note Cut/Off/Fade => ignore instrument
++	if (note >= NOTE_MIN_SPECIAL)
++	{
++		// IT compatibility: Default volume of sample is recalled if instrument number is next to a note-off.
++		// Test case: NoteOffInstr.it, noteoff2.it
++		if(m_playBehaviour[kITInstrWithNoteOff] && instr)
++		{
++			const SAMPLEINDEX smp = GetSampleIndex(chn.nLastNote, instr);
++			if(smp > 0 && !Samples[smp].uFlags[SMP_NODEFAULTVOLUME])
++				chn.nVolume = Samples[smp].nVolume;
++		}
++		// IT compatibility: Note-off with instrument number + Old Effects retriggers envelopes.
++		// Test case: ResetEnvNoteOffOldFx.it
++		if(!m_playBehaviour[kITInstrWithNoteOffOldEffects] || !m_SongFlags[SONG_ITOLDEFFECTS])
++			instr = 0;
++	}
++
++	const auto previousNewNote = chn.nNewNote;
++	if(ModCommand::IsNote(note))
++	{
++		chn.nNewNote = chn.nLastNote = note;
++
++		// New Note Action ?
++		if(!bPorta && !groupLayer)
++		{
++			// The protected foreground was already moved intact. Only perform
++			// ordinary duplicate checks; a second NNA would demand a spare slot.
++			const auto nna = CheckNNA(nChn, instr, note, false, displaced != CHANNELINDEX_INVALID);
++			if(displaced == CHANNELINDEX_INVALID) displaced = nna;
++		}
++
++		chn.RestorePanAndFilter();
++	}
++
++	// Instrument Change ?
++	if(instr)
++	{
++		auto [oldChnOfsL, oldChnOfsR] = GetChannelOffsets(chn, nChn);
++
++		const ModSample *oldSample = chn.pModSample;
++		//const ModInstrument *oldInstrument = chn.pModInstrument;
++
++		InstrumentChange(m_PlayState, nChn, instr, bPorta, true);
++
++		if(!chn.dwFlags[CHN_MUTE | CHN_SYNCMUTE] && chn.pModSample != nullptr && chn.pModSample->uFlags[CHN_ADLIB] && m_opl)
++		{
++			m_opl->Patch(nChn, chn.pModSample->adlib);
++		}
++
++		// IT compatibility: Keep new instrument number for next instrument-less note even if sample playback is stopped
++		// Test case: StoppedInstrSwap.it
++		if(GetType() == MOD_TYPE_MOD)
++		{
++			// Test case: PortaSwapPT.mod
++			if(!bPorta || !m_playBehaviour[kMODSampleSwap]) chn.nNewIns = 0;
++		} else
++		{
++			if(!m_playBehaviour[kITInstrWithNoteOff] || ModCommand::IsNote(note)) chn.nNewIns = 0;
++		}
++
++		// When swapping samples without explicit note change (e.g. during portamento), avoid clicks at end of sample (as there won't be an NNA channel to fade the sample out)
++		if(oldSample != nullptr && oldSample != chn.pModSample)
++		{
++			*oldChnOfsL += chn.nLOfs;
++			*oldChnOfsR += chn.nROfs;
++			chn.nLOfs = 0;
++			chn.nROfs = 0;
++		}
++
++		if(m_playBehaviour[kITPortamentoSwapResetsPos])
++		{
++			// Test cases: PortaInsNum.it, PortaSample.it
++			if(ModCommand::IsNote(note) && oldSample != chn.pModSample)
++			{
++				//const bool newInstrument = oldInstrument != chn.pModInstrument && chn.pModInstrument->Keyboard[chn.nNewNote - NOTE_MIN] != 0;
++				chn.position.Set(0);
++			}
++		} else if((GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT)) && oldSample != chn.pModSample && ModCommand::IsNote(note))
++		{
++			// Special IT case: portamento+note causes sample change -> ignore portamento
++			bPorta = false;
++		} else if(m_playBehaviour[kST3SampleSwap] && oldSample != chn.pModSample && (bPorta || !ModCommand::IsNote(note)) && chn.position.GetUInt() > chn.nLength)
++		{
++			// ST3 with SoundBlaster does sample swapping and continues playing the new sample where the old sample was stopped.
++			// If the new sample is shorter than that, it is stopped, even if it could be looped.
++			// This also applies to portamento between different samples.
++			// Test case: SampleSwap.s3m
++			chn.nLength = 0;
++		} else if(m_playBehaviour[kMODSampleSwap] && !chn.IsSamplePlaying())
++		{
++			// If channel was paused and is resurrected by a lone instrument number, reset the sample position.
++			// Test case: PTSwapEmpty.mod
++			chn.position.Set(0);
++		}
++	}
++	// New Note ?
++	if (note != NOTE_NONE)
++	{
++		const bool instrChange = (!instr) && (chn.nNewIns) && ModCommand::IsNote(note);
++		if(instrChange)
++		{
++			// If we change to a new instrument, we need to do so based on whatever previous note would have played
++			// - so that we trigger the correct sample in a multisampled instrument (based on the previous note, not the new note).
++			// Test case: InitialNoteMemoryInstrMode.it
++			if(m_playBehaviour[kITEmptyNoteMapSlotIgnoreCell] && ModCommand::IsNote(previousNewNote))
++				chn.nNewNote = previousNewNote;
++
++			InstrumentChange(m_PlayState, nChn, chn.nNewIns, bPorta, chn.pModSample == nullptr && chn.pModInstrument == nullptr, !(GetType() & (MOD_TYPE_XM|MOD_TYPE_MT2)));
++			chn.nNewNote = note;
++			chn.swapSampleIndex = chn.nNewIns = 0;
++		}
++		if(!chn.dwFlags[CHN_MUTE | CHN_SYNCMUTE] && chn.pModSample != nullptr && chn.pModSample->uFlags[CHN_ADLIB] && m_opl && (instrChange || !m_opl->IsActive(nChn)))
++		{
++			m_opl->Patch(nChn, chn.pModSample->adlib);
++		}
++
++		NoteChange(chn, note, bPorta, !(GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2)), false, nChn);
++		if(ModCommand::IsNote(note))
++		{
++			chn.vtNoteIdentity = AllocateEventIdentity();
++			chn.vtHoldOwned = chn.vtContextKey || (nChn < GetNumChannels() && m_vtGroups[nChn].hold);
++			chn.vtPitchOffset = 0;
++			chn.vtGain = 1;
++			chn.vtPitchBaseIncrement = SamplePosition(0);
++		}
++		if(continueNote)
++			chn.nPeriod = chn.nPortamentoDest;
++		if(ModCommand::IsNote(note))
++			HandleDigiSamplePlayDirection(m_PlayState, nChn);
++		if ((bPorta) && (GetType() & (MOD_TYPE_XM|MOD_TYPE_MT2)) && (instr))
++		{
++			chn.dwFlags.set(CHN_FASTVOLRAMP);
++			chn.ResetEnvelopes();
++			chn.nAutoVibDepth = 0;
++			chn.nAutoVibPos = 0;
++		}
++		if(chn.dwFlags[CHN_ADLIB] && m_opl
++			&& ((note == NOTE_NOTECUT || note == NOTE_KEYOFF) || (note == NOTE_FADE && !m_playBehaviour[kOPLFlexibleNoteOff])))
++		{
++			if(m_playBehaviour[kOPLNoteStopWith0Hz])
++				m_opl->Frequency(nChn, 0, true, false);
++			m_opl->NoteOff(nChn);
++		}
++	}
++	// Tick-0 only volume commands
++	if (volcmd == VOLCMD_VOLUME)
++	{
++		if (vol > 64) vol = 64;
++		chn.nVolume = vol << 2;
++		chn.dwFlags.set(CHN_FASTVOLRAMP);
++	} else
++	if (volcmd == VOLCMD_PANNING)
++	{
++		Panning(chn, vol, Pan6bit);
++	}
++
++#ifndef NO_PLUGINS
++	if (m_nInstruments) ProcessMidiOut(nChn);
++#endif // NO_PLUGINS
++	return displaced;
++}
++
++
+ bool CSoundFile::ProcessEffects()
+ {
+ 	m_PlayState.m_breakRow = ROWINDEX_INVALID;    // Is changed if a break to row command is encountered
+@@ -2726,18 +3323,8 @@
+ 		// In instrument mode, when an note + instrument is triggered that does not map to any sample, the entire cell (including potentially present global effects!)
+ 		// is ignored. Even better, if on a following row another instrument number (this time without a note) is encountered, we end up in the same situation!
+ 		// Test cases: NoMap.it, NoMapEffects.it
+-		if(m_playBehaviour[kITEmptyNoteMapSlotIgnoreCell] && instr > 0 && instr <= GetNumInstruments()
+-		   && Instruments[instr] != nullptr && !Instruments[instr]->HasValidMIDIChannel())
+-		{
+-			auto note = (chn.rowCommand.note != NOTE_NONE) ? chn.rowCommand.note : chn.nNewNote;
+-			if(ModCommand::IsNote(note) && Instruments[instr]->Keyboard[note - NOTE_MIN] == 0)
+-			{
+-				chn.nNewNote = chn.nLastNote = note;
+-				chn.nNewIns = static_cast<ModCommand::INSTR>(instr);
+-				chn.rowCommand.Clear();
+-				continue;
+-			}
+-		}
++		if(CheckEventGroupMaps(nChn, instr) < 0) return false;
++		if(IgnoreNoteMap(nChn, instr)) continue;
+ 
+ 		const bool continueNote = !bPorta && m_playBehaviour[kContinueSampleWithoutInstr] && !chn.rowCommand.instr && chn.dwFlags[CHN_LOOP] && chn.pCurrentSample;
+ 		if(continueNote)
+@@ -2878,357 +3465,7 @@
+ 		// Handles note/instrument/volume changes
+ 		if(triggerNote)
+ 		{
+-			ModCommand::NOTE note = chn.rowCommand.note;
+-			if(instr)
+-			{
+-				chn.nNewIns = static_cast<ModCommand::INSTR>(instr);
+-				chn.swapSampleIndex = GetSampleIndex(ModCommand::IsNote(note) ? note : chn.nLastNote, instr);
+-			}
+-
+-			if(ModCommand::IsNote(note) && m_playBehaviour[kFT2Transpose])
+-			{
+-				// Notes that exceed FT2's limit are completely ignored.
+-				// Test case: NoteLimit.xm
+-				int transpose = chn.nTranspose;
+-				if(instr && !bPorta)
+-				{
+-					// Refresh transpose
+-					// Test case: NoteLimit2.xm
+-					const SAMPLEINDEX sample = GetSampleIndex(note, instr);
+-					if(sample > 0)
+-						transpose = GetSample(sample).RelativeTone;
+-				}
+-
+-				const int computedNote = note + transpose;
+-				if((computedNote < NOTE_MIN + 11 || computedNote > NOTE_MIN + 130))
+-				{
+-					note = NOTE_NONE;
+-				}
+-			} else if((GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT | MOD_TYPE_J2B)) && GetNumInstruments() != 0 && ModCommand::IsNoteOrEmpty(static_cast<ModCommand::NOTE>(note)))
+-			{
+-				// IT compatibility: Invalid instrument numbers do nothing, but they are remembered for upcoming notes and do not trigger a note in that case.
+-				// Test case: InstrumentNumberChange.it
+-				INSTRUMENTINDEX instrToCheck = static_cast<INSTRUMENTINDEX>((instr != 0) ? instr : chn.nOldIns);
+-				if(instrToCheck != 0 && (instrToCheck > GetNumInstruments() || Instruments[instrToCheck] == nullptr))
+-				{
+-					note = NOTE_NONE;
+-					instr = 0;
+-				}
+-			}
+-
+-			// XM: FT2 ignores a note next to a K00 effect, and a fade-out seems to be done when no volume envelope is present (not exactly the Kxx behaviour)
+-			if(cmd == CMD_KEYOFF && param == 0 && m_playBehaviour[kFT2KeyOff])
+-			{
+-				note = NOTE_NONE;
+-				instr = 0;
+-			}
+-
+-			bool retrigEnv = note == NOTE_NONE && instr != 0;
+-
+-			// Apparently, any note number in a pattern causes instruments to recall their original volume settings - no matter if there's a Note Off next to it or whatever.
+-			// Test cases: keyoff+instr.xm, delay.xm
+-			bool reloadSampleSettings = (m_playBehaviour[kFT2ReloadSampleSettings] && instr != 0);
+-			bool keepInstr = (GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT)) || m_playBehaviour[kST3SampleSwap];
+-			if(m_playBehaviour[kMODSampleSwap])
+-			{
+-				// ProTracker Compatibility: If a sample was stopped before, lone instrument numbers can retrigger it
+-				// Test cases: PTSwapEmpty.mod, PTInstrVolume.mod, PTStoppedSwap.mod
+-				if(!chn.IsSamplePlaying() && instr <= GetNumSamples() && Samples[instr].uFlags[CHN_LOOP])
+-					keepInstr = true;
+-			}
+-
+-			// Now it's time for some FT2 crap...
+-			if (GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2))
+-			{
+-				// XM: Key-Off + Sample == Note Cut (BUT: Only if no instr number or volume effect is present!)
+-				// Test case: NoteOffVolume.xm
+-				if(note == NOTE_KEYOFF
+-					&& ((!instr && volcmd != VOLCMD_VOLUME && cmd != CMD_VOLUME) || !m_playBehaviour[kFT2KeyOff])
+-					&& (chn.pModInstrument == nullptr || !chn.pModInstrument->VolEnv.dwFlags[ENV_ENABLED]))
+-				{
+-					chn.dwFlags.set(CHN_FASTVOLRAMP);
+-					chn.nVolume = 0;
+-					note = NOTE_NONE;
+-					instr = 0;
+-					retrigEnv = false;
+-					// FT2 Compatibility: Start fading the note for notes with no delay. Only relevant when a volume command is encountered after the note-off.
+-					// Test case: NoteOffFadeNoEnv.xm
+-					if(m_PlayState.m_flags[SONG_FIRSTTICK] && m_playBehaviour[kFT2NoteOffFlags])
+-						chn.dwFlags.set(CHN_NOTEFADE);
+-				} else if(m_playBehaviour[kFT2RetrigWithNoteDelay] && !m_PlayState.m_flags[SONG_FIRSTTICK])
+-				{
+-					// FT2 Compatibility: Some special hacks for rogue note delays... (EDx with x > 0)
+-					// Apparently anything that is next to a note delay behaves totally unpredictable in FT2. Swedish tracker logic. :)
+-
+-					retrigEnv = true;
+-
+-					// Portamento + Note Delay = No Portamento
+-					// Test case: porta-delay.xm
+-					bPorta = false;
+-
+-					if(note == NOTE_NONE)
+-					{
+-						// If there's a note delay but no real note, retrig the last note.
+-						// Test case: delay2.xm, delay3.xm
+-						note = static_cast<ModCommand::NOTE>(chn.nNote - chn.nTranspose);
+-					} else if(note >= NOTE_MIN_SPECIAL)
+-					{
+-						// Gah! Even Note Off + Note Delay will cause envelopes to *retrigger*! How stupid is that?
+-						// ... Well, and that is actually all it does if there's an envelope. No fade out, no nothing. *sigh*
+-						// Test case: OffDelay.xm
+-						note = NOTE_NONE;
+-						keepInstr = false;
+-						reloadSampleSettings = true;
+-					} else if(instr || !m_playBehaviour[kFT2NoteDelayWithoutInstr])
+-					{
+-						// Normal note (only if there is an instrument, test case: DelayVolume.xm)
+-						keepInstr = true;
+-						reloadSampleSettings = true;
+-					}
+-				}
+-			}
+-
+-			if((retrigEnv && !m_playBehaviour[kFT2ReloadSampleSettings]) || reloadSampleSettings)
+-			{
+-				const ModSample *oldSample = nullptr;
+-				// Reset default volume when retriggering envelopes
+-
+-				if(GetNumInstruments())
+-				{
+-					oldSample = chn.pModSample;
+-				} else if (instr <= GetNumSamples())
+-				{
+-					// Case: Only samples are used; no instruments.
+-					oldSample = &Samples[instr];
+-				}
+-
+-				if(oldSample != nullptr)
+-				{
+-					if(!oldSample->uFlags[SMP_NODEFAULTVOLUME] && (GetType() != MOD_TYPE_S3M || oldSample->HasSampleData()))
+-					{
+-						chn.nVolume = oldSample->nVolume;
+-						chn.dwFlags.set(CHN_FASTVOLRAMP);
+-					}
+-					if(reloadSampleSettings)
+-					{
+-						// Also reload panning
+-						chn.SetInstrumentPan(oldSample->nPan, *this);
+-					}
+-				}
+-			}
+-
+-			// FT2 compatibility: Instrument number disables tremor effect
+-			// Test case: TremorInstr.xm, TremoRecover.xm
+-			if(m_playBehaviour[kFT2Tremor] && instr != 0)
+-			{
+-				chn.nTremorCount = 0x20;
+-			}
+-
+-			// IT compatibility: Envelope retriggering with instrument number based on Old Effects and Compatible Gxx flags:
+-			// OldFX CompatGxx Env Behaviour
+-			// ----- --------- -------------
+-			//  off     off    never reset
+-			//  on      off    reset on instrument without portamento
+-			//  off     on     reset on instrument with portamento
+-			//  on      on     always reset
+-			// Test case: ins-xx.it, ins-ox.it, ins-oc.it, ins-xc.it, ResetEnvNoteOffOldFx.it, ResetEnvNoteOffOldFx2.it, noteoff3.it
+-			if(GetNumInstruments() && m_playBehaviour[kITInstrWithNoteOffOldEffects]
+-				&& instr && !ModCommand::IsNote(note))
+-			{
+-				if((bPorta && m_SongFlags[SONG_ITCOMPATGXX])
+-					|| (!bPorta && m_SongFlags[SONG_ITOLDEFFECTS]))
+-				{
+-					chn.ResetEnvelopes();
+-					chn.dwFlags.set(CHN_FASTVOLRAMP);
+-					chn.nFadeOutVol = 65536;
+-				}
+-			}
+-
+-			if(retrigEnv) //Case: instrument with no note data.
+-			{
+-				//IT compatibility: Instrument with no note.
+-				if(m_playBehaviour[kITInstrWithoutNote] || GetType() == MOD_TYPE_PLM)
+-				{
+-					// IT compatibility: Completely retrigger note after sample end to also reset portamento.
+-					// Test case: PortaResetAfterRetrigger.it
+-					bool triggerAfterSmpEnd = m_playBehaviour[kITMultiSampleInstrumentNumber] && !chn.IsSamplePlaying();
+-					if(GetNumInstruments())
+-					{
+-						// Instrument mode
+-						if(instr <= GetNumInstruments() && (chn.pModInstrument != Instruments[instr] || triggerAfterSmpEnd))
+-							note = chn.nNote;
+-					} else
+-					{
+-						// Sample mode
+-						if(instr < MAX_SAMPLES && (chn.pModSample != &Samples[instr] || triggerAfterSmpEnd))
+-							note = chn.nNote;
+-					}
+-				}
+-
+-				if(GetNumInstruments() && (GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2 | MOD_TYPE_MED)))
+-				{
+-					chn.ResetEnvelopes();
+-					chn.dwFlags.set(CHN_FASTVOLRAMP);
+-					chn.dwFlags.reset(CHN_NOTEFADE);
+-					chn.nAutoVibDepth = 0;
+-					chn.nAutoVibPos = 0;
+-					chn.nFadeOutVol = 65536;
+-					// FT2 Compatibility: Reset key-off status with instrument number
+-					// Test case: NoteOffInstrChange.xm
+-					if(m_playBehaviour[kFT2NoteOffFlags])
+-						chn.dwFlags.reset(CHN_KEYOFF);
+-				}
+-				if (!keepInstr) instr = 0;
+-			}
+-
+-			// Note Cut/Off/Fade => ignore instrument
+-			if (note >= NOTE_MIN_SPECIAL)
+-			{
+-				// IT compatibility: Default volume of sample is recalled if instrument number is next to a note-off.
+-				// Test case: NoteOffInstr.it, noteoff2.it
+-				if(m_playBehaviour[kITInstrWithNoteOff] && instr)
+-				{
+-					const SAMPLEINDEX smp = GetSampleIndex(chn.nLastNote, instr);
+-					if(smp > 0 && !Samples[smp].uFlags[SMP_NODEFAULTVOLUME])
+-						chn.nVolume = Samples[smp].nVolume;
+-				}
+-				// IT compatibility: Note-off with instrument number + Old Effects retriggers envelopes.
+-				// Test case: ResetEnvNoteOffOldFx.it
+-				if(!m_playBehaviour[kITInstrWithNoteOffOldEffects] || !m_SongFlags[SONG_ITOLDEFFECTS])
+-					instr = 0;
+-			}
+-
+-			const auto previousNewNote = chn.nNewNote;
+-			if(ModCommand::IsNote(note))
+-			{
+-				chn.nNewNote = chn.nLastNote = note;
+-
+-				// New Note Action ?
+-				if(!bPorta)
+-				{
+-					CheckNNA(nChn, instr, note, false);
+-				}
+-
+-				chn.RestorePanAndFilter();
+-			}
+-
+-			// Instrument Change ?
+-			if(instr)
+-			{
+-				auto [oldChnOfsL, oldChnOfsR] = GetChannelOffsets(chn, nChn);
+-
+-				const ModSample *oldSample = chn.pModSample;
+-				//const ModInstrument *oldInstrument = chn.pModInstrument;
+-
+-				InstrumentChange(m_PlayState, nChn, instr, bPorta, true);
+-
+-				if(!chn.dwFlags[CHN_MUTE | CHN_SYNCMUTE] && chn.pModSample != nullptr && chn.pModSample->uFlags[CHN_ADLIB] && m_opl)
+-				{
+-					m_opl->Patch(nChn, chn.pModSample->adlib);
+-				}
+-
+-				// IT compatibility: Keep new instrument number for next instrument-less note even if sample playback is stopped
+-				// Test case: StoppedInstrSwap.it
+-				if(GetType() == MOD_TYPE_MOD)
+-				{
+-					// Test case: PortaSwapPT.mod
+-					if(!bPorta || !m_playBehaviour[kMODSampleSwap]) chn.nNewIns = 0;
+-				} else
+-				{
+-					if(!m_playBehaviour[kITInstrWithNoteOff] || ModCommand::IsNote(note)) chn.nNewIns = 0;
+-				}
+-
+-				// When swapping samples without explicit note change (e.g. during portamento), avoid clicks at end of sample (as there won't be an NNA channel to fade the sample out)
+-				if(oldSample != nullptr && oldSample != chn.pModSample)
+-				{
+-					*oldChnOfsL += chn.nLOfs;
+-					*oldChnOfsR += chn.nROfs;
+-					chn.nLOfs = 0;
+-					chn.nROfs = 0;
+-				}
+-
+-				if(m_playBehaviour[kITPortamentoSwapResetsPos])
+-				{
+-					// Test cases: PortaInsNum.it, PortaSample.it
+-					if(ModCommand::IsNote(note) && oldSample != chn.pModSample)
+-					{
+-						//const bool newInstrument = oldInstrument != chn.pModInstrument && chn.pModInstrument->Keyboard[chn.nNewNote - NOTE_MIN] != 0;
+-						chn.position.Set(0);
+-					}
+-				} else if((GetType() & (MOD_TYPE_IT | MOD_TYPE_MPT)) && oldSample != chn.pModSample && ModCommand::IsNote(note))
+-				{
+-					// Special IT case: portamento+note causes sample change -> ignore portamento
+-					bPorta = false;
+-				} else if(m_playBehaviour[kST3SampleSwap] && oldSample != chn.pModSample && (bPorta || !ModCommand::IsNote(note)) && chn.position.GetUInt() > chn.nLength)
+-				{
+-					// ST3 with SoundBlaster does sample swapping and continues playing the new sample where the old sample was stopped.
+-					// If the new sample is shorter than that, it is stopped, even if it could be looped.
+-					// This also applies to portamento between different samples.
+-					// Test case: SampleSwap.s3m
+-					chn.nLength = 0;
+-				} else if(m_playBehaviour[kMODSampleSwap] && !chn.IsSamplePlaying())
+-				{
+-					// If channel was paused and is resurrected by a lone instrument number, reset the sample position.
+-					// Test case: PTSwapEmpty.mod
+-					chn.position.Set(0);
+-				}
+-			}
+-			// New Note ?
+-			if (note != NOTE_NONE)
+-			{
+-				const bool instrChange = (!instr) && (chn.nNewIns) && ModCommand::IsNote(note);
+-				if(instrChange)
+-				{
+-					// If we change to a new instrument, we need to do so based on whatever previous note would have played
+-					// - so that we trigger the correct sample in a multisampled instrument (based on the previous note, not the new note).
+-					// Test case: InitialNoteMemoryInstrMode.it
+-					if(m_playBehaviour[kITEmptyNoteMapSlotIgnoreCell] && ModCommand::IsNote(previousNewNote))
+-						chn.nNewNote = previousNewNote;
+-
+-					InstrumentChange(m_PlayState, nChn, chn.nNewIns, bPorta, chn.pModSample == nullptr && chn.pModInstrument == nullptr, !(GetType() & (MOD_TYPE_XM|MOD_TYPE_MT2)));
+-					chn.nNewNote = note;
+-					chn.swapSampleIndex = chn.nNewIns = 0;
+-				}
+-				if(!chn.dwFlags[CHN_MUTE | CHN_SYNCMUTE] && chn.pModSample != nullptr && chn.pModSample->uFlags[CHN_ADLIB] && m_opl && (instrChange || !m_opl->IsActive(nChn)))
+-				{
+-					m_opl->Patch(nChn, chn.pModSample->adlib);
+-				}
+-
+-				NoteChange(chn, note, bPorta, !(GetType() & (MOD_TYPE_XM | MOD_TYPE_MT2)), false, nChn);
+-				if(continueNote)
+-					chn.nPeriod = chn.nPortamentoDest;
+-				if(ModCommand::IsNote(note))
+-					HandleDigiSamplePlayDirection(m_PlayState, nChn);
+-				if ((bPorta) && (GetType() & (MOD_TYPE_XM|MOD_TYPE_MT2)) && (instr))
+-				{
+-					chn.dwFlags.set(CHN_FASTVOLRAMP);
+-					chn.ResetEnvelopes();
+-					chn.nAutoVibDepth = 0;
+-					chn.nAutoVibPos = 0;
+-				}
+-				if(chn.dwFlags[CHN_ADLIB] && m_opl
+-					&& ((note == NOTE_NOTECUT || note == NOTE_KEYOFF) || (note == NOTE_FADE && !m_playBehaviour[kOPLFlexibleNoteOff])))
+-				{
+-					if(m_playBehaviour[kOPLNoteStopWith0Hz])
+-						m_opl->Frequency(nChn, 0, true, false);
+-					m_opl->NoteOff(nChn);
+-				}
+-			}
+-			// Tick-0 only volume commands
+-			if (volcmd == VOLCMD_VOLUME)
+-			{
+-				if (vol > 64) vol = 64;
+-				chn.nVolume = vol << 2;
+-				chn.dwFlags.set(CHN_FASTVOLRAMP);
+-			} else
+-			if (volcmd == VOLCMD_PANNING)
+-			{
+-				Panning(chn, vol, Pan6bit);
+-			}
+-
+-#ifndef NO_PLUGINS
+-			if (m_nInstruments) ProcessMidiOut(nChn);
+-#endif // NO_PLUGINS
++			ProcessNoteTransition(nChn, instr, bPorta, continueNote, cmd, param, volcmd, vol);
+ 		}
+ 
+ 		if(m_playBehaviour[kST3NoMutedChannels] && ChnSettings[nChn].dwFlags[CHN_MUTE])	// not even effects are processed on muted S3M channels
+@@ -3900,6 +4137,8 @@
+ 			chn.nOldIns = chn.rowCommand.instr;
+ 		}
+ 
++		ApplyEventGroupEffects(nChn, triggerNote && volcmd == VOLCMD_VOLUME
++			&& !(m_vtGroups[nChn].count > 1 && m_vtGroups[nChn].identities[0]), vol, cmd, param);
+ 		ProcessAutoSlides(m_PlayState, nChn);
+ 	} // for(...) end
+ 
+--- a/soundlib/ModChannel.h
++++ b/soundlib/ModChannel.h
+@@ -81,12 +81,22 @@
+ 	FlagSet<ChannelFlags> dwFlags;
+ 	mixsample_t nROfs, nLOfs;
+ 	uint32 nRampLength;
++	double vtGain = 1; // Independent event gain; neutral tracker ramp state is untouched.
+ 
+ 	const ModSample *pModSample;  // Currently assigned sample slot (may already be stopped)
+ 	Paula::State paulaState;
+ 	InstrumentSynth::States synthState;
+ 
+ 	// Information not used in the mixer
++	uint64 vtNoteIdentity = 0; // Scratch event identity; copied with displaced NNA voices.
++	bool vtGroupPendingNNA = false; // Auxiliary member of the current logical foreground.
++	bool vtHoldOwned = false; // Identity-owned score voice, including its release tail.
++	uint64 vtContextKey = 0; // Scratch phase B head owner; never a playable voice handle.
++	bool vtContextPrimary = false; // Survives scheduler close; NNA copies are secondary.
++	bool IsHeldScoreVoice() const { return vtHoldOwned && vtNoteIdentity && nLength; }
++	double vtPitchOffset = 0; // Absolute semitones, independent of tracker pitch/modulation.
++	SamplePosition vtPitchBaseIncrement;
++	ResamplingMode vtPitchBaseResampling = SRCMODE_DEFAULT;
+ 	const ModInstrument *pModInstrument;  // Currently assigned instrument slot
+ 	SmpLength prevNoteOffset;             // Offset for instrument-less notes for ProTracker/ScreamTracker
+ 	SmpLength oldOffset;                  // Offset command memory
+--- a/soundlib/ModChannel.cpp
++++ b/soundlib/ModChannel.cpp
+@@ -22,6 +22,15 @@
+ 	const ModSample *defaultSample = (sndFile.GetType() == MOD_TYPE_MOD && sndFile.GetSample(0).HasSampleData()) ? &sndFile.GetSample(0) : nullptr;
+ 	if(resetMask & resetSetPosBasic)
+ 	{
++		vtNoteIdentity = 0;
++		vtGroupPendingNNA = false;
++		vtHoldOwned = false;
++		vtContextKey = 0;
++		vtContextPrimary = false;
++		vtPitchOffset = 0;
++		vtGain = 1;
++		vtPitchBaseIncrement = SamplePosition(0);
++		vtPitchBaseResampling = SRCMODE_DEFAULT;
+ 		// IT compatibility: Initial "last note memory" of channel is C-0 (so a lonely instrument number without note will play that note).
+ 		// Test case: InitialNoteMemory.it
+ 		nNote = nNewNote = (sndFile.m_playBehaviour[kITInitialNoteMemory] ? NOTE_MIN : NOTE_NONE);
+--- a/libopenmpt/libopenmpt_ext_impl.hpp
++++ b/libopenmpt/libopenmpt_ext_impl.hpp
+@@ -43,8 +43,11 @@
+ 
+ private:
+ 
+-
+-
++	struct vt_checkpoint_state;
++	std::unique_ptr<vt_checkpoint_state> m_vtCheckpoint;
++	std::unique_ptr<vt_checkpoint_state> m_vtGroupCheckpoint;
++	std::uint64_t m_vtGroupCheckpointBuilds = 0; // Scratch proof: setup/eligibility passes.
++	std::vector<std::int8_t> m_vtHoldParentsEligible;
+ 	/* add stuff here */
+ 
+ 
+@@ -100,6 +103,27 @@
+ 	std::int32_t play_note( std::int32_t instrument, std::int32_t note, double volume, double panning ) override;
+ 
+ 	void stop_note( std::int32_t channel ) override;
++	std::int32_t vt_play_note(std::int32_t instrument, std::int32_t note, double volume, double pan, std::int32_t parent);
++	void vt_note_off(std::int32_t channel);
++	std::int64_t vt_state(std::int32_t channel, std::int32_t field);
++	bool vt_configure_clock(std::int32_t enabled);
++	std::int64_t vt_parent_note(std::int32_t parent, std::int32_t note, std::int32_t instrument, std::int32_t volume);
++	bool vt_parent_off(std::int64_t identity);
++	bool vt_prepare(std::int32_t samplerate);
++	bool vt_parent_batch(std::int32_t samplerate, std::int32_t offCount, const std::int64_t *offIds,
++		std::int32_t noteCount, const std::int32_t *notes, std::int64_t *identities);
++	std::int32_t vt_parent_groups(std::int32_t samplerate, std::int32_t offCount, const std::int64_t *offIds,
++		std::int32_t groupCount, const std::int32_t *groups, std::int32_t outputCapacity, std::int64_t *identities,
++		const std::int32_t *holdFlags = nullptr);
++	bool vt_begin_tail();
++	std::int32_t vt_score_contexts(std::int32_t rate, std::int32_t offCount, const std::int64_t *offIds,
++		std::int32_t closeCount, const std::int64_t *closeKeys, std::int32_t attackCount,
++		const std::int64_t *headKeys, const std::int32_t *attacks, std::int32_t capacity, std::int64_t *identities);
++	std::int64_t vt_checkpoint_capture();
++	std::int32_t vt_checkpoint_restore(std::int64_t token, std::int64_t *oldIds, std::int64_t *newIds);
++	bool vt_checkpoint_clear(std::int64_t token);
++	bool vt_pitch(std::int64_t identity, double semitones);
++	bool vt_gain(std::int64_t identity, double gain);
+ 
+ 	void note_off( std::int32_t channel ) override;
+ 
+--- a/libopenmpt/libopenmpt_ext_impl.cpp
++++ b/libopenmpt/libopenmpt_ext_impl.cpp
+@@ -17,10 +17,60 @@
+ #include "mpt/base/saturate_round.hpp"
+ 
+ #include "soundlib/Sndfile.h"
++#include "soundlib/AudioReadTarget.h"
++#include <atomic>
+ 
+ // assume OPENMPT_NAMESPACE is OpenMPT
+ 
+ namespace openmpt {
++	struct module_ext_impl::vt_checkpoint_state {
++		std::unique_ptr<OpenMPT::CSoundFile::VtCheckpoint> engine;
++		OpenMPT::DithersWrapperOpenMPT dither;
++		double seconds;
++		std::uint64_t epoch;
++		std::int64_t token;
++		explicit vt_checkpoint_state(module_ext_impl &m)
++			: engine(m.m_sndFile->CaptureEventCheckpoint()), dither(static_cast<const OpenMPT::DithersWrapperOpenMPT &>(*m.m_Dithers)),
++			  seconds(m.m_currentPositionSeconds), epoch(m.m_vtMutationEpoch), token(0) {}
++	};
++
++	std::int64_t module_ext_impl::vt_checkpoint_capture() {
++		if(!m_mixer_initialized) return 0;
++		auto state = std::make_unique<vt_checkpoint_state>(*this);
++		if(!state->engine) return 0;
++		static std::atomic<std::int64_t> serial{0};
++		state->token = ++serial;
++		m_vtCheckpoint = std::move(state);
++		return m_vtCheckpoint->token;
++	}
++
++	std::int32_t module_ext_impl::vt_checkpoint_restore(std::int64_t token, std::int64_t *oldIds, std::int64_t *newIds) {
++		if(!oldIds || !newIds || !m_vtCheckpoint || token != m_vtCheckpoint->token
++			|| m_vtMutationEpoch != m_vtCheckpoint->epoch) return -1;
++		if(!m_sndFile->RestoreEventCheckpoint(*m_vtCheckpoint->engine)) return -1;
++		*m_Dithers = m_vtCheckpoint->dither;
++		m_currentPositionSeconds = m_vtCheckpoint->seconds;
++		std::int32_t count = 0;
++		for(auto &chn : m_sndFile->m_PlayState.Chn) {
++			if(chn.vtNoteIdentity && chn.nLength && (chn.nFadeOutVol || chn.vtHoldOwned)) {
++				const auto old = chn.vtNoteIdentity;
++				std::int32_t i = 0;
++				while(i < count && oldIds[i] != static_cast<std::int64_t>(old)) ++i;
++				if(i == count) {
++					oldIds[count] = static_cast<std::int64_t>(old);
++					newIds[count++] = static_cast<std::int64_t>(m_sndFile->AllocateEventIdentity());
++				}
++				chn.vtNoteIdentity = static_cast<std::uint64_t>(newIds[i]);
++			} else chn.vtNoteIdentity = 0;
++		}
++		return count;
++	}
++
++	bool module_ext_impl::vt_checkpoint_clear(std::int64_t token) {
++		if(!m_vtCheckpoint || token != m_vtCheckpoint->token) return false;
++		m_vtCheckpoint.reset();
++		return true;
++	}
+ 
+ 	module_ext_impl::module_ext_impl( callback_stream_wrapper stream, std::unique_ptr<log_interface> log, const std::map< std::string, std::string > & ctls ) : module_impl( stream, std::move(log), ctls ) {
+ 		ctor();
+@@ -128,6 +178,7 @@
+ 	// interactive
+ 
+ 	void module_ext_impl::set_current_speed( std::int32_t speed ) {
++		++m_vtMutationEpoch;
+ 		if ( speed < 1 || speed > 65535 ) {
+ 			throw openmpt::exception("invalid tick count");
+ 		}
+@@ -135,6 +186,7 @@
+ 	}
+ 
+ 	void module_ext_impl::set_current_tempo( std::int32_t tempo ) {
++		++m_vtMutationEpoch;
+ 		if ( tempo < 32 || tempo > 512 ) {
+ 			throw openmpt::exception("invalid tempo");
+ 		}
+@@ -142,6 +194,7 @@
+ 	}
+ 
+ 	void module_ext_impl::set_tempo_factor( double factor ) {
++		++m_vtMutationEpoch;
+ 		if ( factor <= 0.0 || factor > 4.0 ) {
+ 			throw openmpt::exception("invalid tempo factor");
+ 		}
+@@ -154,6 +207,7 @@
+ 	}
+ 
+ 	void module_ext_impl::set_pitch_factor( double factor ) {
++		++m_vtMutationEpoch;
+ 		if ( factor <= 0.0 || factor > 4.0 ) {
+ 			throw openmpt::exception("invalid pitch factor");
+ 		}
+@@ -166,6 +220,7 @@
+ 	}
+ 
+ 	void module_ext_impl::set_global_volume( double volume ) {
++		++m_vtMutationEpoch;
+ 		if ( volume < 0.0 || volume > 1.0 ) {
+ 			throw openmpt::exception("invalid global volume");
+ 		}
+@@ -177,6 +232,7 @@
+ 	}
+ 	
+ 	void module_ext_impl::set_channel_volume( std::int32_t channel, double volume ) {
++		++m_vtMutationEpoch;
+ 		if ( channel < 0 || channel >= get_num_channels() ) {
+ 			throw openmpt::exception("invalid channel");
+ 		}
+@@ -184,6 +240,11 @@
+ 			throw openmpt::exception("invalid global volume");
+ 		}
+ 		m_sndFile->m_PlayState.Chn[channel].nGlobalVol = mpt::saturate_round<std::uint8_t>(volume * 64.0);
++		for(OpenMPT::CHANNELINDEX i = m_sndFile->GetNumChannels(); i < OpenMPT::MAX_CHANNELS; ++i) {
++			auto &chn = m_sndFile->m_PlayState.Chn[i];
++			if((chn.IsHeldScoreVoice() || m_sndFile->IsScoreHeadAnchor(i)) && chn.nMasterChn == channel + 1)
++				chn.nGlobalVol = m_sndFile->m_PlayState.Chn[channel].nGlobalVol;
++		}
+ 	}
+ 
+ 	double module_ext_impl::get_channel_volume( std::int32_t channel ) const {
+@@ -194,6 +255,7 @@
+ 	}
+ 
+ 	void module_ext_impl::set_channel_mute_status( std::int32_t channel, bool mute ) {
++		++m_vtMutationEpoch;
+ 		if ( channel < 0 || channel >= get_num_channels() ) {
+ 			throw openmpt::exception("invalid channel");
+ 		}
+@@ -218,6 +280,7 @@
+ 	}
+ 	
+ 	void module_ext_impl::set_instrument_mute_status( std::int32_t instrument, bool mute ) {
++		++m_vtMutationEpoch;
+ 		const bool instrument_mode = get_num_instruments() != 0;
+ 		const std::int32_t max_instrument = instrument_mode ? get_num_instruments() : get_num_samples();
+ 		if ( instrument < 0 || instrument >= max_instrument ) {
+@@ -249,6 +312,7 @@
+ 	}
+ 
+ 	std::int32_t module_ext_impl::play_note( std::int32_t instrument, std::int32_t note, double volume, double panning ) {
++		if(m_sndFile->m_vtTailActive) return -1;
+ 		const bool instrument_mode = get_num_instruments() != 0;
+ 		const std::int32_t max_instrument = instrument_mode ? get_num_instruments() : get_num_samples();
+ 		if ( instrument < 0 || instrument >= max_instrument ) {
+@@ -262,6 +326,8 @@
+ 		// Find a free channel
+ 		OpenMPT::CHANNELINDEX free_channel = m_sndFile->GetNNAChannel( OpenMPT::CHANNELINDEX_INVALID );
+ 		if ( free_channel == OpenMPT::CHANNELINDEX_INVALID ) {
++			if(m_sndFile->m_PlayState.Chn[OpenMPT::MAX_CHANNELS - 1].IsHeldScoreVoice()
++				|| m_sndFile->IsScoreHeadAnchor(OpenMPT::MAX_CHANNELS - 1)) return -1;
+ 			free_channel = OpenMPT::MAX_CHANNELS - 1;
+ 		}
+ 
+@@ -289,6 +355,529 @@
+ 		return free_channel;
+ 	}
+ 
++	std::int32_t module_ext_impl::vt_play_note(std::int32_t instrument, std::int32_t note, double volume, double pan, std::int32_t parent) {
++		if(m_sndFile->m_vtTailActive) return -1;
++		if(parent < 0 || parent >= get_num_channels()) throw openmpt::exception("invalid parent");
++		const auto available = m_sndFile->GetNNAChannel(OpenMPT::CHANNELINDEX_INVALID);
++		if(available < get_num_channels() || available >= OpenMPT::MAX_CHANNELS) return -1;
++		const auto &slot = m_sndFile->m_PlayState.Chn[available];
++		if(slot.nLength || slot.HasMIDIOutput()) return -1; // Refuse exhaustion instead of stealing a voice.
++		const auto channel = play_note(instrument, note, volume, pan);
++		if(channel < get_num_channels() || channel >= OpenMPT::MAX_CHANNELS) return -1;
++		auto &chn = m_sndFile->m_PlayState.Chn[channel];
++		const auto &owner = m_sndFile->m_PlayState.Chn[parent];
++		chn.nMasterChn = static_cast<OpenMPT::CHANNELINDEX>(parent + 1);
++		chn.nGlobalVol = owner.nGlobalVol;
++		chn.dwFlags.set(OpenMPT::CHN_MUTE, owner.dwFlags[OpenMPT::CHN_MUTE]);
++		chn.dwFlags.set(OpenMPT::CHN_SYNCMUTE, owner.dwFlags[OpenMPT::CHN_SYNCMUTE]);
++		m_sndFile->ReadNote(static_cast<OpenMPT::CHANNELINDEX>(channel));
++		return channel;
++	}
++
++	bool module_ext_impl::vt_configure_clock(std::int32_t enabled) {
++		++m_vtMutationEpoch;
++		if((enabled != 0 && enabled != 1) || !m_sndFile->IsFirstTick() || m_sndFile->m_vtTickPrepared) return false;
++		m_sndFile->m_vtExactClassicClock = enabled != 0;
++		m_sndFile->ResetPlayPos();
++		return true;
++	}
++
++	void module_ext_impl::vt_note_off(std::int32_t channel) {
++		if(channel < get_num_channels() || channel >= OpenMPT::MAX_CHANNELS) throw openmpt::exception("invalid event voice");
++		m_sndFile->KeyOff(m_sndFile->m_PlayState.Chn[channel]);
++	}
++
++	bool module_ext_impl::vt_prepare(std::int32_t samplerate) {
++		apply_mixer_settings(samplerate, 2);
++		return m_sndFile->PrepareEventBoundary();
++	}
++
++	bool module_ext_impl::vt_begin_tail() {
++		return m_sndFile->BeginEventTail();
++	}
++
++	bool module_ext_impl::vt_parent_batch(std::int32_t samplerate, std::int32_t offCount, const std::int64_t *offIds,
++		std::int32_t noteCount, const std::int32_t *notes, std::int64_t *identities) {
++		if(noteCount && !m_sndFile->m_vtGroupTransaction)
++			for(const auto &head : m_sndFile->m_vtScoreHeads) if(head.key) return false;
++		if(noteCount && !m_sndFile->m_vtGroupTransaction && m_sndFile->HasHeldScoreVoice()) return false;
++		// Validate the entire call before applying settings or advancing playback.
++		if(samplerate <= 0 || samplerate > 768000 || offCount < 0 || offCount > OpenMPT::MAX_CHANNELS
++			|| noteCount < 0 || noteCount > 64 || (offCount && !offIds) || (noteCount && (!notes || !identities))
++			|| !(m_sndFile->GetType() & (OpenMPT::MOD_TYPE_IT | OpenMPT::MOD_TYPE_MPT))
++			|| (noteCount && m_sndFile->m_vtTailActive)) return false;
++		std::array<bool, OpenMPT::MAX_BASECHANNELS> parents{};
++		for(std::int32_t i = 0; i < offCount; ++i) if(offIds[i] < 0) return false;
++		for(std::int32_t i = 0; i < noteCount; ++i) {
++			const auto *n = notes + i * 4;
++			if(n[0] < 0 || n[0] >= get_num_channels() || parents[n[0]] || n[1] < 0 || n[1] > 119
++				|| n[2] < 0 || n[2] > (get_num_instruments() ? get_num_instruments() : get_num_samples())
++				|| n[3] < -1 || n[3] > 64) return false;
++			parents[n[0]] = true;
++		}
++		apply_mixer_settings(samplerate, 2);
++		bool rowLoaded = false, effectsPending = false;
++		if(!m_sndFile->PrepareEventBatch(rowLoaded, effectsPending)) return false;
++		// A later tick's effects belong to the ongoing row, not to a new score attack.
++		if(effectsPending && !rowLoaded && !m_sndFile->ProcessEffects()) return false;
++		if(noteCount) {
++			// Only the qualified non-timing controls are accepted on a batch parent.
++			// Other backing cells still pass through the ordinary raw engine.
++			for(std::int32_t i = 0; i < noteCount; ++i) {
++				const auto &c = m_sndFile->m_PlayState.Chn[notes[i * 4]].rowCommand;
++				const auto cmd = c.command;
++				if((rowLoaded && (c.note != OpenMPT::NOTE_NONE || (c.instr && notes[i * 4 + 2] && c.instr != notes[i * 4 + 2])
++					|| (c.volcmd != OpenMPT::VOLCMD_NONE && c.volcmd != OpenMPT::VOLCMD_VOLUME)
++					|| (c.volcmd != OpenMPT::VOLCMD_NONE && notes[i * 4 + 3] >= 0 && c.vol != notes[i * 4 + 3])))
++					|| (cmd != OpenMPT::CMD_NONE && cmd != OpenMPT::CMD_PANNING8 && cmd != OpenMPT::CMD_CHANNELVOLUME
++						&& cmd != OpenMPT::CMD_VOLUMESLIDE && cmd != OpenMPT::CMD_GLOBALVOLUME && cmd != OpenMPT::CMD_TEMPO)
++					|| (cmd == OpenMPT::CMD_TEMPO && c.param < 0x20)
++					|| (cmd == OpenMPT::CMD_CHANNELVOLUME && c.param > 64)
++					|| (cmd == OpenMPT::CMD_GLOBALVOLUME && c.param > 128)) {
++					// Runtime backing conflict: finish the prepared tick's effects, report failure.
++					if(rowLoaded) m_sndFile->ProcessEffects();
++					return false;
++				}
++			}
++		}
++		for(std::int32_t i = 0; i < offCount; ++i) if(offIds[i] > 0) vt_parent_off(offIds[i]);
++		if(!rowLoaded) {
++			for(std::int32_t i = 0; i < noteCount; ++i) {
++				const auto *n = notes + i * 4;
++				identities[i] = vt_parent_note(n[0], n[1], n[2], n[3]);
++				if(identities[i] < 0) return false;
++			}
++			return true;
++		}
++		std::array<std::uint64_t, 64> previous{};
++		for(std::int32_t i = 0; i < noteCount; ++i) {
++			const auto *n = notes + i * 4;
++			auto &chn = m_sndFile->m_PlayState.Chn[n[0]];
++			previous[i] = chn.vtNoteIdentity;
++			chn.rowCommand.note = static_cast<OpenMPT::ModCommand::NOTE>(n[1] + OpenMPT::NOTE_MIN);
++			if(n[2]) chn.rowCommand.instr = static_cast<OpenMPT::ModCommand::INSTR>(n[2]);
++			if(n[3] >= 0) {
++				chn.rowCommand.volcmd = OpenMPT::VOLCMD_VOLUME;
++				chn.rowCommand.vol = static_cast<OpenMPT::ModCommand::VOL>(n[3]);
++			}
++		}
++		if(!m_sndFile->ProcessEffects()) return false;
++		for(std::int32_t i = 0; i < noteCount; ++i) {
++			const auto identity = m_sndFile->m_PlayState.Chn[notes[i * 4]].vtNoteIdentity;
++			identities[i] = identity != previous[i] ? static_cast<std::int64_t>(identity) : 0;
++		}
++		return true;
++	}
++
++	std::int32_t module_ext_impl::vt_parent_groups(std::int32_t samplerate, std::int32_t offCount, const std::int64_t *offIds,
++		std::int32_t groupCount, const std::int32_t *groups, std::int32_t outputCapacity, std::int64_t *identities,
++		const std::int32_t *holdFlags) {
++		if(groupCount)
++			for(const auto &head : m_sndFile->m_vtScoreHeads) if(head.key) return -6;
++		if(!m_mixer_initialized || samplerate != static_cast<std::int32_t>(m_sndFile->m_MixerSettings.gdwMixingFreq)
++			|| m_sndFile->m_MixerSettings.gnChannels != 2 || m_sndFile->m_vtGroupTransaction
++			|| groupCount < 0 || groupCount > 64 || outputCapacity < groupCount * 3
++			|| offCount < 0 || offCount > OpenMPT::MAX_CHANNELS || (offCount && !offIds)
++			|| (groupCount && (!groups || !identities))) return 0;
++		std::array<bool, OpenMPT::MAX_BASECHANNELS> parents{};
++		std::array<std::int32_t, 64 * 4> notes{};
++		std::array<std::int64_t, 64> primaryIds{};
++		std::array<std::int64_t, 64 * 3> result{};
++		for(std::int32_t i = 0; i < offCount; ++i) if(offIds[i] < 0) return 0;
++		for(std::int32_t i = 0; i < groupCount; ++i) {
++			const auto *g = groups + i * 7;
++			if(holdFlags && holdFlags[i] != 0 && holdFlags[i] != 1) return 0;
++			if(g[0] < 0 || g[0] >= get_num_channels() || parents[g[0]]
++				|| g[1] < 0 || g[1] > (get_num_instruments() ? get_num_instruments() : get_num_samples())
++				|| g[2] < -1 || g[2] > 64 || g[3] < 1 || g[3] > 3) return 0;
++			for(int j = 0; j < g[3]; ++j) if(g[4+j] < 0 || g[4+j] > 119) return 0;
++			if((holdFlags && holdFlags[i]) || m_sndFile->HasHeldScoreVoice(static_cast<OpenMPT::CHANNELINDEX>(g[0]))) {
++				if(g[3] != 1 || !g[1] || (get_num_instruments() && !m_sndFile->Instruments[g[1]])) return -6;
++			}
++			parents[g[0]] = true;
++			notes[i*4] = g[0]; notes[i*4+1] = g[3+g[3]]; notes[i*4+2] = g[1]; notes[i*4+3] = g[2];
++		}
++		// Validate/allocate once per configuration epoch, including cached refusal.
++		// Playback, group failures and user checkpoint operations do not change it.
++		if(!m_vtGroupCheckpoint || m_vtGroupCheckpoint->epoch != m_vtMutationEpoch) {
++			m_vtGroupCheckpoint = std::make_unique<vt_checkpoint_state>(*this);
++			m_vtHoldParentsEligible.assign(get_num_channels(), 0);
++			++m_vtGroupCheckpointBuilds;
++		} else if(m_vtGroupCheckpoint->engine
++			&& !m_sndFile->RefreshEventCheckpoint(*m_vtGroupCheckpoint->engine)) {
++			return 0;
++		}
++		// Internal rollback only: never replace the user's checkpoint or remap IDs.
++		auto *snapshot = m_vtGroupCheckpoint->engine.get();
++		if(!snapshot) return 0;
++		for(std::int32_t i = 0; holdFlags && i < groupCount; ++i) {
++			if(!holdFlags[i]) continue;
++			const auto parent = static_cast<OpenMPT::CHANNELINDEX>(groups[i*7]);
++			auto &eligible = m_vtHoldParentsEligible[parent];
++			if(!eligible) {
++				eligible = 1;
++				for(const auto &pattern : m_sndFile->Patterns) {
++					if(!pattern.IsValid()) continue;
++					for(OpenMPT::ROWINDEX row = 0; row < pattern.GetNumRows(); ++row) {
++						const auto &c = *pattern.GetpModCommand(row, parent);
++						if(c.note != OpenMPT::NOTE_NONE || c.instr || c.volcmd != OpenMPT::VOLCMD_NONE
++							|| (c.command != OpenMPT::CMD_NONE && c.command != OpenMPT::CMD_TEMPO && c.command != OpenMPT::CMD_GLOBALVOLUME)) {
++							eligible = -1;
++							break;
++						}
++					}
++					if(eligible < 0) break;
++				}
++			}
++			if(eligible < 0) return -6;
++		}
++		// An empty call primes this configuration without preparing a raw boundary.
++		if(!offCount && !groupCount) return 1;
++		auto finish = [&]() {
++			m_sndFile->m_vtGroups = {};
++			m_sndFile->m_vtGroupTransaction = false;
++		};
++		m_sndFile->m_vtGroupError = 0;
++		m_sndFile->m_vtGroupTransaction = true;
++		for(std::int32_t i = 0; i < groupCount; ++i) {
++			const auto *g = groups + i * 7;
++			auto &plan = m_sndFile->m_vtGroups[g[0]];
++			plan.count = static_cast<std::uint8_t>(g[3]);
++			plan.hold = holdFlags && holdFlags[i] != 0;
++			for(int j = 0; j < g[3]; ++j) plan.notes[j] = static_cast<OpenMPT::ModCommand::NOTE>(g[4+j] + OpenMPT::NOTE_MIN);
++		}
++		try {
++			if(!vt_parent_batch(samplerate, offCount, offIds, groupCount, notes.data(), primaryIds.data())
++				|| m_sndFile->m_vtGroupError) {
++				const int error = m_sndFile->m_vtGroupError ? m_sndFile->m_vtGroupError : -5;
++				m_sndFile->RestoreEventCheckpoint(*snapshot);
++				finish();
++				return error;
++			}
++			for(std::int32_t i = 0; i < groupCount; ++i) {
++				const auto *g = groups + i * 7;
++				if(g[3] == 1) result[i*3] = primaryIds[i];
++				else for(int j = 0; j < g[3]; ++j)
++					result[i*3+j] = static_cast<std::int64_t>(m_sndFile->m_vtGroups[g[0]].identities[j]);
++			}
++			finish();
++			if(groupCount) std::copy_n(result.data(), groupCount*3, identities);
++			return 1;
++		} catch(...) {
++			m_sndFile->RestoreEventCheckpoint(*snapshot);
++			finish();
++			throw;
++		}
++	}
++
++	std::int32_t module_ext_impl::vt_score_contexts(std::int32_t rate, std::int32_t offCount, const std::int64_t *offIds,
++		std::int32_t closeCount, const std::int64_t *closeKeys, std::int32_t attackCount,
++		const std::int64_t *headKeys, const std::int32_t *attacks, std::int32_t capacity, std::int64_t *identities) {
++		if(attackCount && m_sndFile->m_vtTailActive) return -5;
++		if(attackCount < 0 || attackCount > 64 || capacity < attackCount * 3
++			|| closeCount < 0 || closeCount > 64 || offCount < 0 || offCount > 256
++			|| (offCount && !offIds) || (closeCount && !closeKeys)
++			|| (attackCount && (!headKeys || !attacks || !identities))) return 0;
++		for(int i = 0; i < offCount; ++i) if(offIds[i] < 0) return 0;
++		if(vt_parent_groups(rate, 0, nullptr, 0, nullptr, 0, nullptr) != 1) return 0;
++		auto findHead = [&](std::int64_t key) -> OpenMPT::CSoundFile::VtScoreHead * {
++			for(auto &head : m_sndFile->m_vtScoreHeads) if(key > 0 && head.key == static_cast<uint64_t>(key)) return &head;
++			return nullptr;
++		};
++		std::array<int, OpenMPT::MAX_BASECHANNELS> domains{};
++		std::array<std::int32_t, 64 * 4> legacy{};
++		std::array<std::int64_t, 64> legacyIds{};
++		std::array<std::int64_t, 64 * 3> result{};
++		int legacyCount = 0;
++		auto lastKey = m_sndFile->m_vtLastHeadKey;
++		for(int i = 0; i < attackCount; ++i) {
++			const auto *a = attacks + i * 8;
++			if(a[0] < 0 || a[0] >= get_num_channels() || a[1] < 0
++				|| a[1] > (get_num_instruments() ? get_num_instruments() : get_num_samples())
++				|| a[2] < -1 || a[2] > 64 || a[3] < 1 || a[3] > 3 || a[7] < 0 || a[7] > 2) return 0;
++			for(int j = 0; j < a[3]; ++j) if(a[4+j] < 0 || a[4+j] > 119) return 0;
++			if(!a[7]) {
++				if(headKeys[i] || domains[a[0]] || m_sndFile->HasHeldScoreVoice(static_cast<OpenMPT::CHANNELINDEX>(a[0]))) return -6;
++				for(const auto &head : m_sndFile->m_vtScoreHeads) if(head.key && head.parent == a[0]) return -6;
++				domains[a[0]] = 1;
++				legacy[legacyCount*4] = a[0]; legacy[legacyCount*4+1] = a[3+ a[3]];
++				legacy[legacyCount*4+2] = a[1]; legacy[legacyCount*4+3] = a[2]; ++legacyCount;
++				continue;
++			}
++			if(domains[a[0]] == 1 || !a[1]) return -6;
++			domains[a[0]] = 2;
++			for(int j = 0; j < i; ++j) if(headKeys[j] == headKeys[i]) return -7;
++			if(a[7] == 1) {
++				if(headKeys[i] <= 0 || static_cast<uint64_t>(headKeys[i]) <= lastKey) return -7;
++				lastKey = headKeys[i];
++				if(m_sndFile->m_PlayState.Chn[a[0]].vtNoteIdentity) return -6;
++			} else {
++				const auto *head = findHead(headKeys[i]);
++				if(!head || head->parent != a[0] || head->source != a[1]) return -7;
++			}
++			if(get_num_instruments()) {
++				const auto *ins = m_sndFile->Instruments[a[1]];
++				if(!ins || ins->VolEnv.dwFlags[OpenMPT::ENV_CARRY] || ins->PanEnv.dwFlags[OpenMPT::ENV_CARRY]
++					|| ins->PitchEnv.dwFlags[OpenMPT::ENV_CARRY] || ins->nVolSwing || ins->nPanSwing
++					|| ins->nCutSwing || ins->nResSwing) return -6;
++				if(a[7] == 1)
++					for(const auto mapped : ins->Keyboard)
++						if(mapped && mapped <= m_sndFile->GetNumSamples()
++							&& m_sndFile->GetSample(mapped).nVibType == OpenMPT::VIB_RANDOM) return -6;
++				for(int j = 0; j < a[3]; ++j) {
++					const auto sample = ins->Keyboard[a[4+j]];
++					if(!sample || sample > m_sndFile->GetNumSamples()) return -6;
++					if(m_sndFile->GetSample(sample).nVibType == OpenMPT::VIB_RANDOM) return -6;
++				}
++			} else if(m_sndFile->GetSample(static_cast<OpenMPT::SAMPLEINDEX>(a[1])).nVibType == OpenMPT::VIB_RANDOM) return -6;
++			auto &eligible = m_vtHoldParentsEligible[a[0]];
++			if(!eligible) {
++				eligible = 1;
++				for(const auto &pattern : m_sndFile->Patterns) {
++					if(!pattern.IsValid()) continue;
++					for(OpenMPT::ROWINDEX row = 0; row < pattern.GetNumRows(); ++row) {
++						const auto &c = *pattern.GetpModCommand(row, a[0]);
++						if(c.note || c.instr || c.volcmd != OpenMPT::VOLCMD_NONE
++							|| (c.command != OpenMPT::CMD_NONE && c.command != OpenMPT::CMD_TEMPO && c.command != OpenMPT::CMD_GLOBALVOLUME)) {
++							eligible = -1; break;
++						}
++					}
++					if(eligible < 0) break;
++				}
++			}
++			if(eligible < 0) return -6;
++		}
++		for(int i = 0; i < closeCount; ++i) {
++			if(closeKeys[i] <= 0) return -7;
++			for(int j = 0; j < i; ++j) if(closeKeys[j] == closeKeys[i]) return -7;
++			bool opened = false;
++			for(int j = 0; j < attackCount; ++j) if(headKeys[j] == closeKeys[i] && attacks[j*8+7] == 1) opened = true;
++			if(!opened && !findHead(closeKeys[i])) return -7;
++		}
++		if(!attackCount && !offCount && !closeCount) return 1;
++		auto fail = [&](int error) {
++			m_sndFile->RestoreEventCheckpoint(*m_vtGroupCheckpoint->engine);
++			m_sndFile->m_vtGroups = {};
++			m_sndFile->m_vtGroupTransaction = false;
++			return error;
++		};
++		m_sndFile->m_vtGroupError = 0;
++		m_sndFile->m_vtGroupTransaction = true;
++		auto planAttack = [&](const std::int32_t *a) {
++			auto &plan = m_sndFile->m_vtGroups[a[0]];
++			plan.count = static_cast<std::uint8_t>(a[3]);
++			for(int j = 0; j < a[3]; ++j) plan.notes[j] = static_cast<OpenMPT::ModCommand::NOTE>(a[4+j] + OpenMPT::NOTE_MIN);
++		};
++		try {
++			for(int i = 0; i < attackCount; ++i) if(!attacks[i*8+7]) planAttack(attacks+i*8);
++			if(!vt_parent_batch(rate, offCount, offIds, legacyCount, legacy.data(), legacyIds.data())
++				|| m_sndFile->m_vtGroupError) return fail(m_sndFile->m_vtGroupError ? m_sndFile->m_vtGroupError : -5);
++			legacyCount = 0;
++			for(int i = 0; i < attackCount; ++i) {
++				const auto *a = attacks + i*8;
++				if(a[7]) continue;
++				if(a[3] == 1) result[i*3] = legacyIds[legacyCount];
++				else for(int j = 0; j < a[3]; ++j) result[i*3+j] = m_sndFile->m_vtGroups[a[0]].identities[j];
++				++legacyCount;
++			}
++			m_sndFile->m_vtGroups = {};
++			for(int i = 0; i < attackCount; ++i) {
++				const auto *a = attacks + i * 8;
++				if(!a[7]) continue;
++				auto *head = findHead(headKeys[i]);
++				if(a[7] == 1) {
++					for(auto &entry : m_sndFile->m_vtScoreHeads) if(!entry.key) { head = &entry; break; }
++					if(!head) return fail(-4);
++					const auto anchor = m_sndFile->GetNNAChannel(OpenMPT::CHANNELINDEX_INVALID);
++					if(anchor == OpenMPT::CHANNELINDEX_INVALID) return fail(-4);
++					*head = {static_cast<uint64_t>(headKeys[i]), static_cast<OpenMPT::CHANNELINDEX>(a[0]), anchor,
++						static_cast<OpenMPT::INSTRUMENTINDEX>(a[1])};
++					auto &chn = m_sndFile->m_PlayState.Chn[anchor];
++					chn = m_sndFile->m_PlayState.Chn[a[0]];
++					chn.vtContextKey = headKeys[i]; chn.vtContextPrimary = true; chn.nMasterChn = a[0] + 1;
++					m_sndFile->m_vtLastHeadKey = headKeys[i];
++				}
++				const auto parent = head->parent, anchor = head->anchor;
++				// Run the existing parent transition in-place, then restore routing.
++				// No PCM/tick runs between swaps; keep the mixer list in sync.
++				auto swapChannels = [&]() {
++					std::swap(m_sndFile->m_PlayState.Chn[parent], m_sndFile->m_PlayState.Chn[anchor]);
++					for(OpenMPT::CHANNELINDEX j = 0; j < m_sndFile->m_nMixChannels; ++j) {
++						auto &index = m_sndFile->m_PlayState.ChnMix[j];
++						if(index == parent) index = anchor; else if(index == anchor) index = parent;
++					}
++				};
++				swapChannels();
++				m_sndFile->m_PlayState.Chn[parent].nMasterChn = 0;
++				planAttack(a);
++				std::int64_t primaryId = 0;
++				try { primaryId = vt_parent_note(parent, a[3+a[3]], a[1], a[2]); }
++				catch(...) { swapChannels(); throw; }
++				swapChannels();
++				m_sndFile->m_PlayState.Chn[anchor].nMasterChn = parent + 1;
++				if(a[3] == 1) result[i*3] = primaryId;
++				else for(int j = 0; j < a[3]; ++j) result[i*3+j] = m_sndFile->m_vtGroups[parent].identities[j];
++				m_sndFile->m_vtGroups[parent] = {};
++				if(primaryId <= 0 || m_sndFile->m_vtGroupError)
++					return fail(m_sndFile->m_vtGroupError ? m_sndFile->m_vtGroupError : -6);
++			}
++			for(int i = 0; i < closeCount; ++i) *findHead(closeKeys[i]) = {};
++			m_sndFile->m_vtGroupTransaction = false;
++			if(attackCount) std::copy_n(result.data(), attackCount*3, identities);
++			return 1;
++		} catch(...) { fail(0); throw; }
++	}
++
++	bool module_ext_impl::vt_parent_off(std::int64_t identity) {
++		if(identity <= 0 || !m_sndFile->PrepareEventBoundary()) return false;
++		for(std::int32_t channel = 0; channel < OpenMPT::MAX_CHANNELS; ++channel) {
++			auto &chn = m_sndFile->m_PlayState.Chn[channel];
++			if(chn.vtNoteIdentity != static_cast<std::uint64_t>(identity) || !chn.nLength || !chn.nFadeOutVol) continue;
++			if(channel < get_num_channels()) return vt_parent_note(channel, -1, 0, -1) >= 0;
++			// PCM NNA release follows the same special-note transition; no extra modulation tick.
++			const auto saved = chn.rowCommand;
++			chn.rowCommand.Clear(); chn.rowCommand.note = OpenMPT::NOTE_KEYOFF;
++			std::uint32_t instrument = 0; bool porta = false;
++			try { m_sndFile->ProcessNoteTransition(static_cast<OpenMPT::CHANNELINDEX>(channel), instrument, porta, false, OpenMPT::CMD_NONE, 0, OpenMPT::VOLCMD_NONE, 0); }
++			catch(...) { chn.rowCommand = saved; throw; }
++			chn.rowCommand = saved;
++			return true;
++		}
++		return false;
++	}
++
++	std::int64_t module_ext_impl::vt_parent_note(std::int32_t parent, std::int32_t note, std::int32_t instrument, std::int32_t volume) {
++		if(note >= 0 && !m_sndFile->m_vtGroupTransaction)
++			for(const auto &head : m_sndFile->m_vtScoreHeads) if(head.key) return -1;
++		if(note >= 0 && !m_sndFile->m_vtGroupTransaction && m_sndFile->HasHeldScoreVoice()) return -1;
++		if(note >= 0 && m_sndFile->m_vtTailActive) return -1;
++		if(parent < 0 || parent >= get_num_channels() || note < -1 || note > 119 || volume < -1 || volume > 64) return -1;
++		if(instrument < 0 || instrument > (get_num_instruments() ? get_num_instruments() : get_num_samples())) return -1;
++		if(!(m_sndFile->GetType() & (OpenMPT::MOD_TYPE_IT | OpenMPT::MOD_TYPE_MPT))) return -1;
++		if(!m_sndFile->PrepareEventBoundary()) return -1;
++		auto &chn = m_sndFile->m_PlayState.Chn[parent];
++		const auto savedCommand = chn.rowCommand;
++		chn.rowCommand.Clear();
++		chn.rowCommand.note = static_cast<OpenMPT::ModCommand::NOTE>(note < 0 ? OpenMPT::NOTE_KEYOFF : note + OpenMPT::NOTE_MIN);
++		chn.rowCommand.instr = static_cast<OpenMPT::ModCommand::INSTR>(instrument);
++		if(volume >= 0) {
++			chn.rowCommand.volcmd = OpenMPT::VOLCMD_VOLUME;
++			chn.rowCommand.vol = static_cast<OpenMPT::ModCommand::VOL>(volume);
++		}
++		try {
++			if(note >= 0 && m_sndFile->CheckEventGroupMaps(static_cast<OpenMPT::CHANNELINDEX>(parent), instrument) < 0) {
++				chn.rowCommand = savedCommand;
++				return -1;
++			}
++			if(m_sndFile->IgnoreNoteMap(static_cast<OpenMPT::CHANNELINDEX>(parent), instrument)) {
++				chn.rowCommand = savedCommand;
++				return 0; // Normal ignored empty-map command; no voice identity to release.
++			}
++			std::uint32_t instr = instrument;
++			bool porta = false;
++			const auto displaced = m_sndFile->ProcessNoteTransition(static_cast<OpenMPT::CHANNELINDEX>(parent), instr, porta, false,
++				OpenMPT::CMD_NONE, 0, chn.rowCommand.volcmd, chn.rowCommand.vol);
++			if(instrument) chn.nOldIns = static_cast<OpenMPT::ModCommand::INSTR>(instrument);
++			// A prepared tick will calculate every voice once after all same-frame events.
++			// An extra refresh here consumes the note-start ramp/filter state prematurely.
++			if(note >= 0 && !m_sndFile->m_vtTickPrepared) {
++				if(m_sndFile->m_playBehaviour[OpenMPT::kITEnvelopePositionHandling]) {
++					// IT counters are one-based: initialize musical position zero, without a tick.
++					if(chn.VolEnv.flags[OpenMPT::ENV_ENABLED]) chn.VolEnv.nEnvPosition = std::max(std::uint32_t(1), chn.VolEnv.nEnvPosition);
++					if(chn.PanEnv.flags[OpenMPT::ENV_ENABLED]) chn.PanEnv.nEnvPosition = std::max(std::uint32_t(1), chn.PanEnv.nEnvPosition);
++					if(chn.PitchEnv.flags[OpenMPT::ENV_ENABLED]) chn.PitchEnv.nEnvPosition = std::max(std::uint32_t(1), chn.PitchEnv.nEnvPosition);
++				}
++				m_sndFile->ReadNote(static_cast<OpenMPT::CHANNELINDEX>(parent));
++				if(displaced != OpenMPT::CHANNELINDEX_INVALID) {
++					// NNA copied already-calculated mixer state. Preserve its current pitch,
++					// filter and panning rather than recalculating/advancing modulation.
++					auto &background = m_sndFile->m_PlayState.Chn[displaced];
++					if(!background.nFadeOutVol && (!background.IsHeldScoreVoice() || background.vtContextKey)) {
++						background.nRealVolume = background.nCalcVolume = 0;
++						background.newLeftVol = background.newRightVol = 0;
++						background.nRampLength = 0;
++						background.dwFlags.set(OpenMPT::CHN_VOLUMERAMP);
++						m_sndFile->ProcessRamping(background);
++					}
++					auto begin = std::begin(m_sndFile->m_PlayState.ChnMix);
++					if(background.nLength && background.pCurrentSample && m_sndFile->m_nMixChannels < OpenMPT::MAX_CHANNELS
++						&& std::find(begin, begin + m_sndFile->m_nMixChannels, displaced) == begin + m_sndFile->m_nMixChannels)
++						m_sndFile->m_PlayState.ChnMix[m_sndFile->m_nMixChannels++] = displaced;
++				}
++			}
++		} catch(...) {
++			chn.rowCommand = savedCommand;
++			throw;
++		}
++		chn.rowCommand = savedCommand;
++		return static_cast<std::int64_t>(chn.vtNoteIdentity);
++	}
++
++	bool module_ext_impl::vt_pitch(std::int64_t identity, double semitones) {
++		return identity > 0 && m_sndFile->SetEventPitch(static_cast<std::uint64_t>(identity), semitones);
++	}
++
++	bool module_ext_impl::vt_gain(std::int64_t identity, double gain) {
++		return identity > 0 && m_sndFile->SetEventGain(static_cast<std::uint64_t>(identity), gain);
++	}
++
++	std::int64_t module_ext_impl::vt_state(std::int32_t channel, std::int32_t field) {
++		const auto &s = m_sndFile->m_PlayState;
++		if(channel < 0 || channel >= OpenMPT::MAX_CHANNELS) throw openmpt::exception("invalid channel");
++		const auto &c = s.Chn[channel];
++		switch(field) {
++		case 0: return s.m_nTickCount;
++		case 1: return s.m_lTotalSampleCount;
++		case 2: return c.VolEnv.nEnvPosition;
++		case 3: return c.position.GetUInt();
++		case 4: return c.nMasterChn;
++		case 5: return c.nLoopEnd;
++		case 6: return c.nAutoVibPos;
++		case 7: return c.nAutoVibDepth;
++		case 8: return c.nFadeOutVol;
++		case 9: return c.PanEnv.nEnvPosition;
++		case 10: return c.PitchEnv.nEnvPosition;
++		case 11: return m_sndFile->PeekEventRandom();
++		case 12: return c.vtNoteIdentity;
++		case 13: return c.increment.GetRaw();
++		case 14: return c.vtPitchBaseIncrement.GetRaw();
++		case 15: return c.position.GetRaw();
++		case 16: return c.nRampLength;
++		case 17: return c.leftVol;
++		case 18: return c.rightVol;
++		case 19: return c.nVibratoPos;
++		case 20: return c.nTremoloPos;
++		case 21: return c.nPanbrelloPos;
++		case 22: return c.nPeriod;
++		case 23: return m_sndFile->GetEventBufferCount();
++		case 24: return mpt::saturate_round<std::int64_t>(c.vtGain * 1000000000);
++		case 25: return c.nVolume;
++		case 26: return c.rampLeftVol;
++		case 27: return c.rampRightVol;
++		case 28: return c.leftRamp;
++		case 29: return c.rightRamp;
++		case 30: return c.nFilter_Y[0][0];
++		case 31: return c.nFilter_Y[0][1];
++		case 32: return c.vtGroupPendingNNA;
++		case 33: return static_cast<int>(c.nNNA);
++		case 34: return c.nGlobalVol;
++		case 35: return c.nPan;
++		case 36: return c.nOldIns;
++		case 37: return c.nNewIns;
++		case 38: return c.nNewNote;
++		case 39: return c.nOldVolumeSlide;
++		case 40: return m_vtGroupCheckpointBuilds;
++		case 41: return s.m_nMusicTempo.GetInt();
++		case 42: return s.m_nMusicSpeed;
++		case 43: return c.dwFlags.GetRaw();
++		case 44: return c.vtHoldOwned;
++		case 45: return c.vtContextKey;
++		case 46: return m_sndFile->IsScoreHeadAnchor(static_cast<OpenMPT::CHANNELINDEX>(channel));
++		case 47: return c.nLength;
++		default: return -1;
++		}
++	}
++
+ 	void module_ext_impl::stop_note( std::int32_t channel ) {
+ 		if ( channel < 0 || channel >= OpenMPT::MAX_CHANNELS ) {
+ 			throw openmpt::exception("invalid channel");
+@@ -315,11 +904,19 @@
+ 	}
+ 
+ 	void module_ext_impl::set_channel_panning( int32_t channel, double panning ) {
++		++m_vtMutationEpoch;
+ 		if ( channel < 0 || channel >= OpenMPT::MAX_CHANNELS ) {
+ 			throw openmpt::exception( "invalid channel" );
+ 		}
+ 		auto & chn = m_sndFile->m_PlayState.Chn[channel];
+ 		chn.nPan = mpt::saturate_round<int32_t>( std::clamp( panning, -1.0, 1.0 ) * 128.0 + 128.0 );
++		if(channel < get_num_channels()) {
++			for(OpenMPT::CHANNELINDEX i = m_sndFile->GetNumChannels(); i < OpenMPT::MAX_CHANNELS; ++i) {
++				auto &background = m_sndFile->m_PlayState.Chn[i];
++				if((background.IsHeldScoreVoice() || m_sndFile->IsScoreHeadAnchor(i)) && background.nMasterChn == channel + 1)
++					background.nPan = chn.nPan;
++			}
++		}
+ 	}
+ 
+ 	double module_ext_impl::get_channel_panning( int32_t channel ) {
+--- a/libopenmpt/libopenmpt_c.cpp
++++ b/libopenmpt/libopenmpt_c.cpp
+@@ -1912,6 +1912,124 @@
+ 
+ 
+ 
++// Scratch-only ABI. Host splits read calls at frame offsets; no wall-clock scheduling.
++struct vt_frame_events {
++	int32_t (*play)(openmpt_module_ext *, int32_t, int32_t, double, double, int32_t);
++	int (*off)(openmpt_module_ext *, int32_t);
++	int64_t (*state)(openmpt_module_ext *, int32_t, int32_t);
++};
++struct vt_exact_clock {
++	int (*configure)(openmpt_module_ext *, int32_t);
++};
++struct vt_tail {
++	int (*begin)(openmpt_module_ext *);
++};
++static int vt_begin_tail(openmpt_module_ext *m) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_begin_tail() ? 1 : 0; }
++	catch(...) { return 0; }
++}
++struct vt_parent_events {
++	int64_t (*note)(openmpt_module_ext *, int32_t, int32_t, int32_t, int32_t);
++	int (*off)(openmpt_module_ext *, int64_t);
++	int (*prepare)(openmpt_module_ext *, int32_t);
++};
++struct vt_parent_batch {
++	int (*dispatch)(openmpt_module_ext *, int32_t, int32_t, const int64_t *, int32_t, const int32_t *, int64_t *);
++};
++struct vt_parent_groups {
++	int (*dispatch)(openmpt_module_ext *, int32_t, int32_t, const int64_t *, int32_t, const int32_t *, int32_t, int64_t *);
++};
++struct vt_held_score {
++	int (*dispatch)(openmpt_module_ext *, int32_t, int32_t, const int64_t *, int32_t, const int32_t *, const int32_t *, int32_t, int64_t *);
++};
++struct vt_score_contexts {
++	int (*dispatch)(openmpt_module_ext *, int32_t, int32_t, const int64_t *, int32_t, const int64_t *,
++		int32_t, const int64_t *, const int32_t *, int32_t, int64_t *);
++};
++static int vt_dispatch_score_contexts(openmpt_module_ext *m, int32_t rate, int32_t offCount, const int64_t *offIds,
++	int32_t closeCount, const int64_t *closeKeys, int32_t attackCount, const int64_t *headKeys,
++	const int32_t *attacks, int32_t capacity, int64_t *identities) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_score_contexts(rate, offCount, offIds,
++		closeCount, closeKeys, attackCount, headKeys, attacks, capacity, identities); }
++	catch(...) { return 0; }
++}
++static int vt_dispatch_held_score(openmpt_module_ext *m, int32_t rate, int32_t offCount, const int64_t *offIds,
++	int32_t groupCount, const int32_t *groups, const int32_t *holdFlags, int32_t capacity, int64_t *identities) {
++	if(groupCount && !holdFlags) return 0;
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_parent_groups(rate, offCount, offIds, groupCount, groups, capacity, identities, holdFlags); }
++	catch(...) { return 0; }
++}
++static int vt_dispatch_parent_groups(openmpt_module_ext *m, int32_t rate, int32_t offCount, const int64_t *offIds,
++	int32_t groupCount, const int32_t *groups, int32_t capacity, int64_t *identities) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_parent_groups(rate, offCount, offIds, groupCount, groups, capacity, identities); }
++	catch(...) { return 0; }
++}
++struct vt_checkpoint {
++	int64_t (*capture)(openmpt_module_ext *);
++	int32_t (*restore)(openmpt_module_ext *, int64_t, int64_t *, int64_t *);
++	int (*clear)(openmpt_module_ext *, int64_t);
++};
++struct vt_pitch {
++	int (*set)(openmpt_module_ext *, int64_t, double);
++};
++struct vt_gain {
++	int (*set)(openmpt_module_ext *, int64_t, double);
++};
++static int vt_set_gain(openmpt_module_ext *m, int64_t identity, double gain) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_gain(identity, gain) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int vt_set_pitch(openmpt_module_ext *m, int64_t identity, double semitones) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_pitch(identity, semitones) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int64_t vt_capture_checkpoint(openmpt_module_ext *m) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_checkpoint_capture(); }
++	catch(...) { return 0; }
++}
++static int32_t vt_restore_checkpoint(openmpt_module_ext *m, int64_t token, int64_t *oldIds, int64_t *newIds) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_checkpoint_restore(token, oldIds, newIds); }
++	catch(...) { return -1; }
++}
++static int vt_clear_checkpoint(openmpt_module_ext *m, int64_t token) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_checkpoint_clear(token) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int vt_dispatch_parent_batch(openmpt_module_ext *m, int32_t rate, int32_t offCount, const int64_t *offIds,
++	int32_t noteCount, const int32_t *notes, int64_t *identities) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_parent_batch(rate, offCount, offIds, noteCount, notes, identities) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int64_t vt_parent_note(openmpt_module_ext *m, int32_t parent, int32_t note, int32_t instrument, int32_t volume) {
++	if(note < 0) return -1; // Releases must use the identity-checked off callback.
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_parent_note(parent, note, instrument, volume); }
++	catch(...) { return -1; }
++}
++static int vt_parent_off(openmpt_module_ext *m, int64_t identity) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_parent_off(identity) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int vt_prepare(openmpt_module_ext *m, int32_t samplerate) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_prepare(samplerate) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int vt_configure_clock(openmpt_module_ext *m, int32_t enabled) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_configure_clock(enabled) ? 1 : 0; }
++	catch(...) { return 0; }
++}
++static int32_t vt_play(openmpt_module_ext *m, int32_t i, int32_t n, double v, double p, int32_t c) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_play_note(i,n,v,p,c); }
++	catch(...) { return -1; }
++}
++static int vt_off(openmpt_module_ext *m, int32_t c) {
++	try { openmpt::interface::check_soundfile(m); m->impl->vt_note_off(c); return 1; }
++	catch(...) { return 0; }
++}
++static int64_t vt_state(openmpt_module_ext *m, int32_t c, int32_t f) {
++	try { openmpt::interface::check_soundfile(m); return m->impl->vt_state(c,f); }
++	catch(...) { return -1; }
++}
++
+ int openmpt_module_ext_get_interface( openmpt_module_ext * mod_ext, const char * interface_id, void * interface, size_t interface_size ) {
+ 	try {
+ 		openmpt::interface::check_soundfile( mod_ext );
+@@ -1920,6 +2038,53 @@
+ 		std::memset( interface, 0, interface_size );
+ 		int result = 0;
+ 		std::string_view interface_id_sv = interface_id;
++		if(interface_id_sv == "vt_pitch" && interface_size == sizeof(vt_pitch)) {
++			static_cast<vt_pitch *>(interface)->set = &vt_set_pitch;
++			return 1;
++		}
++		if(interface_id_sv == "vt_gain" && interface_size == sizeof(vt_gain)) {
++			static_cast<vt_gain *>(interface)->set = &vt_set_gain;
++			return 1;
++		}
++		if(interface_id_sv == "vt_checkpoint" && interface_size == sizeof(vt_checkpoint)) {
++			auto *i = static_cast<vt_checkpoint *>(interface);
++			i->capture = &vt_capture_checkpoint; i->restore = &vt_restore_checkpoint; i->clear = &vt_clear_checkpoint;
++			return 1;
++		}
++		if(interface_id_sv == "vt_parent_batch" && interface_size == sizeof(vt_parent_batch)) {
++			static_cast<vt_parent_batch *>(interface)->dispatch = &vt_dispatch_parent_batch;
++			return 1;
++		}
++		if(interface_id_sv == "vt_parent_groups" && interface_size == sizeof(vt_parent_groups)) {
++			static_cast<vt_parent_groups *>(interface)->dispatch = &vt_dispatch_parent_groups;
++			return 1;
++		}
++		if(interface_id_sv == "vt_held_score" && interface_size == sizeof(vt_held_score)) {
++			static_cast<vt_held_score *>(interface)->dispatch = &vt_dispatch_held_score;
++			return 1;
++		}
++		if(interface_id_sv == "vt_score_contexts" && interface_size == sizeof(vt_score_contexts)) {
++			static_cast<vt_score_contexts *>(interface)->dispatch = &vt_dispatch_score_contexts;
++			return 1;
++		}
++		if(interface_id_sv == "vt_tail" && interface_size == sizeof(vt_tail)) {
++			static_cast<vt_tail *>(interface)->begin = &vt_begin_tail;
++			return 1;
++		}
++		if(interface_id_sv == "vt_parent_events" && interface_size == sizeof(vt_parent_events)) {
++			auto *i = static_cast<vt_parent_events *>(interface);
++			i->note = &vt_parent_note; i->off = &vt_parent_off; i->prepare = &vt_prepare;
++			return 1;
++		}
++		if(interface_id_sv == "vt_exact_clock" && interface_size == sizeof(vt_exact_clock)) {
++			static_cast<vt_exact_clock *>(interface)->configure = &vt_configure_clock;
++			return 1;
++		}
++		if(interface_id_sv == "vt_frame_events" && interface_size == sizeof(vt_frame_events)) {
++			auto *i = static_cast<vt_frame_events *>(interface);
++			i->play = &vt_play; i->off = &vt_off; i->state = &vt_state;
++			return 1;
++		}
+ 		if ( interface_id_sv == "" ) {
+ 			result = 0;
+ 
+--- a/soundlib/RowVisitor.h
++++ b/soundlib/RowVisitor.h
+@@ -16,6 +16,7 @@
+ #include "Snd_defs.h"
+ 
+ #include <map>
++#include <algorithm>
+ 
+ OPENMPT_NAMESPACE_BEGIN
+ 
+@@ -83,6 +84,18 @@
+ 	RowVisitor(const CSoundFile &sndFile, SEQUENCEINDEX sequence = SEQUENCEINDEX_INVALID);
+ 	
+ 	void MoveVisitedRowsFrom(RowVisitor &other) noexcept;
++	bool RestoreLinearRowsFrom(const RowVisitor &other) noexcept
++	{
++		if(&m_sndFile != &other.m_sndFile || m_sequence != other.m_sequence
++			|| !m_visitedLoopStates.empty() || !other.m_visitedLoopStates.empty()
++			|| m_visitedRows.size() != other.m_visitedRows.size()) return false;
++		for(size_t i = 0; i < m_visitedRows.size(); ++i)
++			if(m_visitedRows[i].size() != other.m_visitedRows[i].size()) return false;
++		for(size_t i = 0; i < m_visitedRows.size(); ++i)
++			std::copy(other.m_visitedRows[i].begin(), other.m_visitedRows[i].end(), m_visitedRows[i].begin());
++		m_rowsSpentInLoops = other.m_rowsSpentInLoops;
++		return true;
++	}
+ 
+ 	// Resize / Clear the row vector.
+ 	// If reset is true, the vector is not only resized to the required dimensions, but also completely cleared (i.e. all visited rows are unset).
+--- a/libopenmpt/libopenmpt_impl.hpp
++++ b/libopenmpt/libopenmpt_impl.hpp
+@@ -140,6 +140,7 @@
+ 	std::unique_ptr<OpenMPT::CSoundFile> m_sndFile;
+ 	bool m_loaded;
+ 	bool m_mixer_initialized;
++	std::uint64_t m_vtMutationEpoch = 0;
+ 	std::unique_ptr<OpenMPT::DithersWrapperOpenMPT> m_Dithers;
+ 	subsongs_type m_subsongs;
+ 	float m_Gain;
+--- a/libopenmpt/libopenmpt_impl.cpp
++++ b/libopenmpt/libopenmpt_impl.cpp
+@@ -422,6 +422,7 @@
+ void module_impl::apply_mixer_settings( std::int32_t samplerate, int channels ) {
+ 	bool samplerate_changed = static_cast<std::int32_t>( m_sndFile->m_MixerSettings.gdwMixingFreq ) != samplerate;
+ 	bool channels_changed = static_cast<int>( m_sndFile->m_MixerSettings.gnChannels ) != channels;
++	if(samplerate_changed || channels_changed || !m_mixer_initialized) ++m_vtMutationEpoch;
+ 	if ( samplerate_changed || channels_changed ) {
+ 		OpenMPT::MixerSettings mixersettings = m_sndFile->m_MixerSettings;
+ 		std::int32_t volrampin_us = mixersettings.GetVolumeRampUpMicroseconds();
+@@ -956,6 +957,7 @@
+ 	return result;
+ }
+ void module_impl::set_render_param( int param, std::int32_t value ) {
++	++m_vtMutationEpoch;
+ 	switch ( param ) {
+ 		case module::RENDER_MASTERGAIN_MILLIBEL: {
+ 			m_Gain = std::pow( 10.0f, static_cast<float>( value ) * 0.001f * 0.5f );
+@@ -1101,6 +1103,7 @@
+ }
+ 
+ void module_impl::select_subsong( std::int32_t subsong ) {
++	++m_vtMutationEpoch;
+ 	std::unique_ptr<subsongs_type> subsongs_temp = has_subsongs_inited() ? std::unique_ptr<subsongs_type>() : std::make_unique<subsongs_type>( get_subsongs() );
+ 	const subsongs_type & subsongs = has_subsongs_inited() ? m_subsongs : *subsongs_temp;
+ 	if ( subsong != all_subsongs && ( subsong < 0 || subsong >= static_cast<std::int32_t>( subsongs.size() ) ) ) {
+@@ -1137,6 +1140,7 @@
+ }
+ 
+ void module_impl::set_repeat_count( std::int32_t repeat_count ) {
++	++m_vtMutationEpoch;
+ 	m_sndFile->SetRepeatCount( repeat_count );
+ }
+ std::int32_t module_impl::get_repeat_count() const {
+@@ -1146,6 +1150,7 @@
+ 	return m_currentPositionSeconds;
+ }
+ double module_impl::set_position_seconds( double seconds ) {
++	++m_vtMutationEpoch;
+ 	std::unique_ptr<subsongs_type> subsongs_temp = has_subsongs_inited() ? std::unique_ptr<subsongs_type>() : std::make_unique<subsongs_type>( get_subsongs() );
+ 	const subsongs_type & subsongs = has_subsongs_inited() ? m_subsongs : *subsongs_temp;
+ 	const subsong_data * subsong = 0;
+@@ -1173,6 +1178,7 @@
+ 	return m_currentPositionSeconds;
+ }
+ double module_impl::set_position_order_row( std::int32_t order, std::int32_t row ) {
++	++m_vtMutationEpoch;
+ 	if ( order < 0 || order >= m_sndFile->Order().GetLengthTailTrimmed() ) {
+ 		return m_currentPositionSeconds;
+ 	}
+@@ -2014,6 +2020,7 @@
+ 	}
+ }
+ void module_impl::ctl_set_boolean( std::string_view ctl, bool value, bool throw_if_unknown ) {
++	++m_vtMutationEpoch;
+ 	if ( !ctl.empty() ) {
+ 		// cppcheck false-positive
+ 		// cppcheck-suppress containerOutOfBounds
+@@ -2064,6 +2071,7 @@
+ 	}
+ }
+ void module_impl::ctl_set_integer( std::string_view ctl, std::int64_t value, bool throw_if_unknown ) {
++	++m_vtMutationEpoch;
+ 	if ( !ctl.empty() ) {
+ 		// cppcheck false-positive
+ 		// cppcheck-suppress containerOutOfBounds
+@@ -2103,6 +2111,7 @@
+ 	}
+ }
+ void module_impl::ctl_set_floatingpoint( std::string_view ctl, double value, bool throw_if_unknown ) {
++	++m_vtMutationEpoch;
+ 	if ( !ctl.empty() ) {
+ 		// cppcheck false-positive
+ 		// cppcheck-suppress containerOutOfBounds
+@@ -2156,6 +2165,7 @@
+ 	}
+ }
+ void module_impl::ctl_set_text( std::string_view ctl, std::string_view value, bool throw_if_unknown ) {
++	++m_vtMutationEpoch;
+ 	if ( !ctl.empty() ) {
+ 		// cppcheck false-positive
+ 		// cppcheck-suppress containerOutOfBounds
+--- a/soundlib/MixerInterface.h
++++ b/soundlib/MixerInterface.h
+@@ -14,6 +14,7 @@
+ 
+ #include "Snd_defs.h"
+ #include "ModChannel.h"
++#include "mpt/base/saturate_round.hpp"
+ 
+ OPENMPT_NAMESPACE_BEGIN
+ 
+@@ -91,13 +92,30 @@
+ 	unsigned int samples = numSamples;
+ 	SamplePosition smpPos = c.position;            // Fixed-point sample position
+ 	const SamplePosition increment = c.increment;  // Fixed-point sample increment
++	const double gain = c.vtGain;
+ 
+ 	while(samples--)
+ 	{
+ 		typename Traits::outbuf_t outSample;
+ 		interpolate(outSample, inSample + smpPos.GetInt() * Traits::numChannelsIn, smpPos.GetFract());
+ 		filter(outSample, c);
+-		mix(outSample, c, outBuffer);
++		if(gain == 1)
++		{
++			mix(outSample, c, outBuffer);
++		} else
++		{
++			// Scale this voice's final contribution, not its tracker volume or ramp.
++			// Run the ordinary filter/mixer even at zero gain to preserve progression.
++			typename Traits::outbuf_t contribution{};
++			mix(outSample, c, contribution);
++			for(int i = 0; i < Traits::numChannelsOut; i++)
++			{
++				if constexpr(std::is_integral_v<typename Traits::output_t>)
++					outBuffer[i] += mpt::saturate_round<typename Traits::output_t>(contribution[i] * gain);
++				else
++					outBuffer[i] += static_cast<typename Traits::output_t>(contribution[i] * gain);
++			}
++		}
+ 		outBuffer += Traits::numChannelsOut;
+ 
+ 		smpPos += increment;

@@ -159,7 +159,11 @@ def tuned(mod):
     return samples, insts if mod.instruments is not None else None, data_of
 
 
-def write_it(mod: Module) -> bytes:
+def write_it(mod: Module, *, _native_backing=False) -> bytes:
+    if mod.native_score is not None and not _native_backing:
+        raise ValueError('Native score backing is not a standalone IT export; use strict compile_song for IT export')
+    if _native_backing:
+        mod = mod.playback_backing()
     if len(mod.patterns) > 254:
         raise ValueError('IT supports at most 254 addressable patterns')
     orders = list(mod.orders)
@@ -185,6 +189,10 @@ def write_it(mod: Module) -> bytes:
     # (a pattern name may fill its field; OpenMPT keeps a channel name in 20 bytes with its null, so 19 characters)
     for magic, items, size, keep in ((b"PNAM", mod.patterns, 32, 32), (b"CNAM", mod.channels, 20, 19)):
         n = max((i + 1 for i, x in enumerate(items) if x.name), default=0)
+        if magic == b"CNAM" and mod.native_score is not None:
+            # Score-only channels have no packed cells. OpenMPT uses CNAM's
+            # length to retain them, including unnamed channels, without dummy notes.
+            n = len(items)
         if n:
             extra += magic + struct.pack("<I", n * size) + b"".join(
                 x.name.encode("ascii", "replace")[:keep].ljust(size, b"\0") for x in items[:n])

@@ -1820,5 +1820,149 @@ class ContextTests(unittest.TestCase):
 
 
 
+class NativeScoreAgentTests(unittest.TestCase):
+    def test_unapproved_hammer_cannot_change_an_approved_following_channel(self):
+        import copy
+        song = self.song()
+        song['module']['channels'][0]['approved'] = True
+        track = song['score']['tracks']['guitar']
+        track.update(tuning=[64, 59], channels=[0, 1])
+        first = song['score']['patterns']['a']['beats'][0]
+        first.update(at=[0, 1], written={'value': 4})
+        first['notes'] = [dict(id='source', pitch=64, string=1, fret=0, channel=1, velocity=95)]
+        target = copy.deepcopy(first)
+        target.update(id='target', at=[1, 1])
+        target['notes'] = [dict(id='target_note', pitch=65, string=1, fret=1, channel=0, velocity=95)]
+        song['score']['patterns']['a']['beats'] = [first, target]
+        song['score']['patterns']['b']['beats'] = []
+        st = self.state(song)
+        before = st.song_path.read_bytes(), len(st.history)
+        result = agent.run(st, 'edit_score', {'revision': st.text_sha(), 'edit': dict(
+            op='note_set', pattern='a', beat=first['id'], note=dict(id='source', hammer=True))})
+        self.assertIn('approved', result.get('error', ''))
+        self.assertEqual((st.song_path.read_bytes(), len(st.history)), before)
+
+    def setUp(self):
+        from tests.test_tablature_sync import TestNativeStateBackend
+        TestNativeStateBackend.setUp(self)
+
+    def song(self):
+        from tests.test_tablature_sync import TestNativePlaybackPreparation
+        return TestNativePlaybackPreparation.native_song(self)
+
+    def state(self, song):
+        from tests.test_tablature_sync import TestPreparedPlaybackBundle
+        return TestPreparedPlaybackBundle.state(self, song)
+
+    def test_score_only_approved_channel_protects_notes_sound_and_restore(self):
+        import copy
+        from vulturetracker import api, gui
+        song = self.song()
+        song['module']['channels'][0]['approved'] = True
+        st = self.state(song)
+        self.assertIsNone(st.error)
+        self.assertEqual(agent._protected_voices(st)['samples'], {1})
+        before = st.song_path.read_bytes(), len(st.history)
+        edit = {'op': 'note_set', 'pattern': 'a', 'beat': 'chord', 'note': {'id': 'e', 'fret': 3}}
+        result = agent.run(st, 'edit_score', {'revision': st.text_sha(), 'edit': edit})
+        self.assertIn('approved', result['error'])
+        changed = copy.deepcopy(song)
+        changed['score']['patterns']['a']['beats'][0]['notes'][0].update(fret=3, pitch=67)
+        loaded = gui.load_for_state(api.to_yaml(changed), self.base)[0]
+        self.assertEqual(loaded.patterns, st.mod.patterns)
+        with self.assertRaisesRegex(ValueError, 'approved'):
+            agent._guard_restore(st, {'text': api.to_yaml(changed)}, loaded)
+        with self.assertRaisesRegex(ValueError, 'approved'):
+            agent._voice_guard(st, 'samples', 1)
+        self.assertEqual((st.song_path.read_bytes(), len(st.history)), before)
+
+    def test_unused_score_references_block_deletion_and_populated_channel_removal(self):
+        import copy
+        song = self.song()
+        song['samples'][3] = dict(song['samples'][1], name='Unused score')
+        song['patterns']['unused'] = {'rows': 48, 'data': ''}
+        unused = copy.deepcopy(song['score']['patterns']['a'])
+        unused['beats'][0]['notes'][0]['instrument'] = 3
+        song['score']['patterns']['unused'] = unused
+        st = self.state(song)
+        before = st.song_path.read_bytes(), len(st.history)
+        self.assertIn(3, st.unused()['samples'])
+        result = agent.run(st, 'delete_slot', {'kind': 'sample', 'number': 3})
+        self.assertIn('referenced', result['error'])
+        self.assertEqual(result['usage']['references'][0]['pattern'], 'unused')
+        result = agent.run(st, 'edit_channel', {'action': 'remove', 'channel': 1})
+        self.assertIn('remove_notes', result['error'])
+        self.assertEqual((st.song_path.read_bytes(), len(st.history)), before)
+
+    def test_native_cut_command_shared_history_revision_and_agent_guard(self):
+        import copy
+        st = self.state(self.song())
+        before = copy.deepcopy(st.song)
+        revision = st.text_sha()
+        command = {'action': 'cut', 'occurrence': 'first', 'track': 'guitar',
+                   'voice': 0, 'beats': ['chord'], 'notes': ['e']}
+        result = agent.run(st, 'score_command', {'revision': revision, 'command': command})
+        self.assertNotIn('error', result, result)
+        self.assertEqual(result['revision'], st.text_sha())
+        self.assertTrue(result['clipboard'])
+        beat = st.song['score']['patterns']['a']['beats'][0]
+        original = before['score']['patterns']['a']['beats'][0]
+        self.assertEqual((beat['at'], beat['written'], beat['notes']),
+                         (original['at'], original['written'], []))
+        self.assertEqual(len(st.history), 1)
+        self.assertEqual(st.song['patterns']['a']['by'], 'you and agent')
+        saved = st.song_path.read_bytes()
+        stale = agent.run(st, 'score_command', {'revision': revision, 'command': command})
+        self.assertIn('error', stale)
+        self.assertEqual((st.song_path.read_bytes(), len(st.history)), (saved, 1))
+        self.assertTrue(agent.run(st, 'undo', {}).get('ok'))
+        self.assertEqual(st.song['score'], before['score'])
+        st.song['module']['channels'][0]['approved'] = True
+        saved, history = st.song_path.read_bytes(), len(st.history)
+        refused = agent.run(st, 'score_command', {'revision': st.text_sha(), 'command': command})
+        self.assertIn('approved', refused['error'])
+        self.assertEqual((st.song_path.read_bytes(), len(st.history)), (saved, history))
+
+    def test_exact_agent_read_edit_and_transform_refusal(self):
+        st = self.state(self.song())
+        view = agent.run(st, 'read_score', {'pattern': 'a'})
+        self.assertTrue(view['positions'])
+        self.assertTrue(all(p['pattern'] == 'a' for p in view['positions']))
+        pattern = agent.run(st, 'read_pattern', {'pattern': 'a', 'occurrence': 'first'})
+        self.assertTrue(pattern['positions'])
+        self.assertEqual(pattern['positions'][0]['row'], [12, 13])
+        result = agent.run(st, 'edit_score', {'revision': st.text_sha(),
+                                            'edit': {'op': 'note_set', 'pattern': 'a', 'beat': 'chord',
+                                                     'note': {'id': 'e', 'fret': 3}}})
+        self.assertTrue(result.get('ok'), result)
+        self.assertEqual(st.song['patterns']['a']['by'], 'you and agent')
+        before = st.song_path.read_bytes(), len(st.history)
+        result = agent.run(st, 'transform_patterns', {'action': 'clear', 'selections': [{'pattern': 'a'}]})
+        self.assertIn('changed before this Pattern edit', result['error'])
+        self.assertEqual((st.song_path.read_bytes(), len(st.history)), before)
+        result = agent.run(st, 'undo', {})
+        self.assertTrue(result.get('ok'), result)
+        self.assertEqual(st.song['score']['patterns']['a']['beats'][0]['notes'][0]['pitch'], 64)
+        result = agent.run(st, 'write_cells', {'pattern': 'b', 'occurrence': 'second', 'revision': st.text_sha(),
+                                             'cells': [{'row': 42, 'channel': 1, 'cell': 'F-5 01 ... ...'}]})
+        self.assertTrue(result.get('ok'), result)
+        self.assertEqual(result['revision'], st.text_sha())
+        self.assertEqual(st.song['score']['patterns']['b']['beats'][0]['notes'][0]['pitch'], 65)
+        self.assertIsNone(st.mod.patterns[1].rows[42][0].note)
+
+    def test_approved_score_pattern_protects_unused_track_context(self):
+        import copy
+        from vulturetracker import api, gui
+        song = self.song()
+        song['patterns']['unused'] = {'rows': 48, 'data': '', 'approved': True}
+        song['score']['patterns']['unused'] = copy.deepcopy(song['score']['patterns']['a'])
+        st = self.state(song)
+        target = copy.deepcopy(song)
+        target['score']['tracks']['guitar']['name'] = 'Changed approved track'
+        with self.assertRaisesRegex(ValueError, 'approved pattern'):
+            agent._guard_restore(st, {'text': api.to_yaml(target)},
+                                 gui.load_for_state(api.to_yaml(target), self.base)[0])
+
+
 if __name__ == "__main__":
     unittest.main()

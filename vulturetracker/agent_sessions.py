@@ -130,6 +130,7 @@ def manage_take(st, a):
       'to avoid overwriting a newer note. Notes are sidecars outside song undo; song notes/audio are unchanged.',
       {'action': {'enum': ['add', 'update', 'delete']}, 'note_id': {'type': 'integer'}, 'revision': {'type': 'string'},
        'order': {'type': 'integer'}, 'row': {'type': 'integer'}, 'text': {'type': 'string'}, 'tag': {'type': 'string'},
+       'play_id': {'type': 'string'}, 'playback_revision': {'type': 'string'},
        'channels': {'type': 'array', 'items': {'type': 'integer'}}}, ['action'])
 def update_listening_note(st, a):
     with st.lock:
@@ -154,7 +155,8 @@ def update_listening_note(st, a):
                 raise ValueError('give the listening note text')
             order = _integer(a['order'], 0, len(st.facts['orders'])-1, 'order')
             row = _integer(a['row'], 0, st.facts['orders'][order]['rows']-1, 'row')
-            note = st.add_note(dict(b, order=order, row=row, source='agent annotation'))
+            note = st.add_note(dict(b, order=order, row=row, source='agent annotation',
+                                   play_id=a.get('play_id'), revision=a.get('playback_revision')))
         elif act in ('update', 'delete'):
             nid = _integer(a.get('note_id'), 1, 2147483647, 'note_id')
             note = next((n for n in st.notes if n['id'] == nid), None)

@@ -29,7 +29,9 @@ import threading
 import time
 import wave
 import webbrowser
+from bisect import bisect_right
 from pathlib import Path
+from fractions import Fraction
 
 import yaml
 
@@ -145,7 +147,7 @@ def demo_songs():
                   if p.is_file() and re.search(r"^orders:", p.read_text(encoding="utf-8", errors="replace"), re.M))
 
 
-def create_song(path, channels=8, sample=None):
+def create_song(path, channels=8, sample=None, template=None, bars=4):
     """A new song file at `path` (refused when it exists), laid out the way the app edits songs: a block module with one
     channel entry per line, one sample slot (`sample`, a WAV, or a one-second C-5 sine written beside the song as
     <stem>_tone.wav) played by instrument 1, one empty 64-row pattern, the order list on one line. Written with LF endings."""
@@ -154,6 +156,10 @@ def create_song(path, channels=8, sample=None):
         path = path.with_suffix(".yaml")
     if path.exists():
         raise ValueError(f"{path} exists already: open it, or pick another name")
+    native = None
+    if template is not None:
+        from .tablature import new_score_song
+        native = new_score_song(re.sub(r"[^ -~]", "", path.stem)[:25] or 'Untitled', 'placeholder.wav', template, bars)
     path.parent.mkdir(parents=True, exist_ok=True)
     if sample:
         wav = Path(sample).resolve()
@@ -177,6 +183,11 @@ def create_song(path, channels=8, sample=None):
         rel = wav.as_posix()
     title = re.sub(r"[^ -~]", "", path.stem)[:25] or "Untitled"
     name = re.sub(r"[^ -~]", "", wav.stem)[:25] or "sample"
+    if native is not None:
+        native['samples'][1].update(file=rel, name=name)
+        api.compile_song(native, path.parent)
+        _atomic(path, (api.written_by_line() + api.to_yaml(native)).encode('utf-8'), replace=False)
+        return path
     q = State._yname
     chans = "".join(f"    - {{name: Ch {i + 1}}}\n" for i in range(max(1, min(64, int(channels)))))
     _atomic(path, (f"# {title}: a song made in VultureTracker (the format: SONG_FORMAT.md)\n{api.written_by_line()}module:\n  title: {q(title)}\n"
@@ -208,12 +219,11 @@ def effect_help():
     return out
 
 
-def import_beside(src):
+def import_beside(src, *, native_tab=False, midi_options=None, gp_encoding=None):
     """A module (.it, .xm, .s3m, .mod), a Guitar Pro tab (.gp3, .gp4, .gp5: gpimport) or a MIDI file (.mid, .midi:
     midiimport; both with placeholder sounds) imported as
     <stem>.yaml beside it with its samples in <stem>_samples/ (numbered <stem>-2 and so on when either exists: nothing
     is replaced). Returns (song path, warnings)."""
-    from .itreader import import_it
     src = Path(src).resolve()
     if not src.is_file():
         raise ValueError(f"no such file: {src}")
@@ -222,16 +232,41 @@ def import_beside(src):
         out, sdir = src.with_name(stem + ".yaml"), src.with_name(stem + "_samples")
         if not out.exists() and not sdir.exists():
             break
+    return import_song(src, out, sdir, native_tab=native_tab, midi_options=midi_options,gp_encoding=gp_encoding)
+
+
+def import_song(src, out, sdir, *, native_tab=False, midi_options=None, gp_encoding=None):
+    """Import through the same readers to explicit fresh song/sample destinations."""
+    from .itreader import import_it
+    src, out, sdir = Path(src).resolve(), Path(out), Path(sdir)
+    if not src.is_file():
+        raise ValueError(f"no such file: {src}")
+    for destination in (out, sdir):
+        if destination.exists() or destination.is_symlink():
+            raise ValueError(f'import needs a fresh destination: {destination}')
+    if src.suffix.lower() == '.tg':
+        from .tgimport import import_tg
+        return out, import_tg(src, out, sdir)[1]
+    if src.suffix.lower() == '.ptb':
+        from .ptb import import_ptb
+        return out, import_ptb(src, out, sdir)[1]
+    if src.suffix.lower() == '.tef':
+        from .tef import import_tef
+        return out, import_tef(src, out, sdir)[1]
     if src.suffix.lower() in GP_SUFFIXES:
         from .gpimport import import_gp
-        return out, import_gp(src, out, sdir)[1]
+        return out, import_gp(src, out, sdir, native=native_tab,encoding=gp_encoding)[1]
     if src.suffix.lower() in MIDI_SUFFIXES:
-        from .midiimport import import_midi
-        return out, import_midi(src, out, sdir)[1]
+        from .midiimport import import_midi, import_midi_score, score_import_options
+        if native_tab:
+            return out, import_midi_score(src,out,sdir,**score_import_options(midi_options))[1]
+        if midi_options is not None:
+            raise ValueError('MIDI score options require native score import')
+        return out, import_midi(src,out,sdir)[1]
     return out, import_it(src, out, sdir)[1]
 
 
-GP_SUFFIXES = (".gp3", ".gp4", ".gp5")
+GP_SUFFIXES = (".gtp", ".gp3", ".gp4", ".gp5", ".gpx", ".gp")   # .gtp: GP1/GP2 (gplegacy); .gpx/.gp: GP6/GP7 (gpx)
 MIDI_SUFFIXES = (".mid", ".midi")
 
 
@@ -239,13 +274,167 @@ MIDI_SUFFIXES = (".mid", ".midi")
 
 def song_facts(text, base_dir, name):
     """Compile once for the overview: channels, order timing and which samples each order/channel plays."""
-    return facts_of(*load_song_text(text, base_dir, name))
+    return facts_of(*load_for_state(text, base_dir, name))
+
+
+def load_for_state(text, base_dir=".", name="<song>"):
+    """State validates exact scores at a reference rate; each player prepares its actual mixer rate separately."""
+    loaded = load_song_text(text, base_dir, name, native_score_rate=44100)
+    mod = loaded[0]
+    if mod.native_score is not None:
+        song = api.from_yaml(text)
+        kind = 'instruments' if mod.instruments is not None else 'samples'
+        missing = voice_references(song, mod) - {int(n) for n in song.get(kind, {})}
+        if missing:
+            raise SongError([f'{name}: score references missing {kind}: {sorted(missing)}'])
+    return loaded
+
+
+def score_notes(song):
+    """Authored notes, including unused patterns; never infer their presence from residual tracker cells."""
+    from .tablature import _resolved_notes
+    score = song.get('score') or {}
+    for name, pattern in score.get('patterns', {}).items():
+        for beat in pattern['beats']:
+            track = score['tracks'][beat['track']]
+            for note in _resolved_notes(score, beat):
+                yield name, beat, track, note
+
+
+def score_context(song, name):
+    """Score content protected by a pattern mark, including its tracks and occurrence notation."""
+    score = song.get('score') or {}
+    pattern = score.get('patterns', {}).get(name)
+    tracks = {b['track']: score['tracks'][b['track']] for b in (pattern or {}).get('beats', [])}
+    ids, orders = score.get('order_ids', []), list(map(str, song.get('orders', [])))
+    notation = []
+    for collection in ('measures', 'ties'):
+        for item in score.get(collection, []):
+            a, b = (ids.index(item[side]['occurrence']) for side in ('from', 'to'))
+            uses = range(a, b + 1) if collection == 'measures' else (a, b)
+            if any(orders[i] == name for i in uses):
+                notation.append((collection, item))
+    return pattern, tracks, notation
+
+
+def score_channel_content(song, channel):
+    """Semantic channel identity for approval/restore guards; includes unused authored patterns."""
+    content = []
+    for name, beat, track, note in score_notes(song):
+        if note['channel'] == channel:
+            content.append((name, {k: v for k, v in beat.items() if k != 'notes'},
+                            {k: v for k, v in track.items() if k != 'channels'},
+                            {k: v for k, v in note.items() if k != 'channel'}))
+    score = song.get('score') or {}
+    note_ids = {(name, n['id']) for name, _, _, n in score_notes(song) if n['channel'] == channel}
+    orders = dict(zip(score.get('order_ids', []), map(str, song.get('orders', []))))
+    ties = [tie for tie in score.get('ties', []) if any(
+        (orders.get(tie[side]['occurrence']), tie[side]['note']) in note_ids for side in ('from', 'to'))]
+    return content, ties
+
+
+def voice_references(song, mod, *, played=False, channels=None):
+    """Voice slots referenced by raw cells or score notes, plus resolved played instrument memory."""
+    names = {mod.patterns[o].name for o in mod.orders if o < 254} if played else None
+    allowed = lambda ch: channels is None or ch in channels
+    refs = {c.instrument for p in mod.patterns if names is None or p.name in names
+            for row in p.rows for ch, c in enumerate(row) if c.instrument and allowed(ch)}
+    refs.update(n.get('instrument', track['instrument']) for name, _, track, n in score_notes(song)
+                if (names is None or name in names) and allowed(n['channel']))
+    if mod.native_score:
+        refs.update(e['instrument'] for e in mod.native_score['plan']['events']
+                    if e['type'] == 'note_on' and allowed(e['ch']))
+    return refs - {0}
+
+
+def native_actions(mod):
+    """Raw and score parent-channel actions on one exact timeline, resolving their shared instrument memory."""
+    mod = mod.playback_backing()
+    plan, actions = mod.native_score['plan'], []
+    step = Fraction(*plan['row_step'])
+    for order, occurrence in enumerate(plan['occurrences']):
+        for row, cells in enumerate(mod.patterns[mod.orders[order]].rows):
+            at = Fraction(*occurrence['at']) + row * step
+            for ch, cell in enumerate(cells):
+                if cell.instrument or cell.note is not None:
+                    actions.append((at, 1, ch, {'order': order, 'cell': cell}))
+    starts = [Fraction(*o['at']) for o in plan['occurrences']]
+    for event in plan['events']:
+        if event['type'] not in ('note_on', 'note_off'):
+            continue  # Pitch controls do not retrigger parent-note activity or instrument memory.
+        at = Fraction(*event['at'])
+        order = max(0, min(len(starts) - 1, bisect_right(starts, at) - 1))
+        actions.append((at, 0 if event['type'] == 'note_off' else 2, event['ch'],
+                        {**event, 'order': order}))
+    memory, result = {}, []
+    for at, kind, ch, item in sorted(actions, key=lambda a: a[:3]):
+        if kind == 1:
+            cell = item['cell']
+            memory[ch] = cell.instrument or memory.get(ch, 0)
+            if cell.note is None:
+                continue
+            item = {'type': 'note_on' if cell.note < 120 else 'note_off', 'pitch': cell.note,
+                    'instrument': memory[ch], 'order': item['order'], 'id': None}
+        elif kind == 2:
+            memory[ch] = item['instrument']
+        result.append({**item, 'at': at, 'ch': ch})
+    return result
+
+
+def native_sounding_table(mod):
+    """Parent-note activity at exact row boundaries; release/NNA tails remain unmeasured, as in the legacy estimate."""
+    mod = mod.playback_backing()
+    from .tablature import TempoClock
+    plan = mod.native_score['plan']
+    clock = TempoClock(plan['tempo'], plan.get('tempos'))
+    actions = iter(native_actions(mod))
+    pending = next(actions, None)
+    current, table = {}, []
+    step = Fraction(*mod.native_score['plan']['row_step'])
+    for order, occurrence in enumerate(mod.native_score['plan']['occurrences']):
+        rows = []
+        for row in range(len(mod.patterns[mod.orders[order]].rows)):
+            at = Fraction(*occurrence['at']) + row * step
+            while pending is not None and pending['at'] <= at:
+                ch = pending['ch']
+                if pending['type'] == 'note_off':
+                    if pending.get('id') is None:
+                        for key, event in list(current.items()):
+                            if key[0] == ch and not (event.get('hold') or 'context' in event):
+                                current.pop(key)
+                    else:
+                        current.pop((ch, pending['id']), None)
+                else:
+                    for key, event in list(current.items()):
+                        if key[0] == ch and not (event.get('hold') or 'context' in event):
+                            current.pop(key)
+                    current[ch, pending.get('id')] = pending
+                pending = next(actions, None)
+            sounding = []
+            for (ch, _), event in current.items():
+                ins, pitch = event['instrument'], event['pitch']
+                played, smp = ((pitch, ins) if mod.instruments is None else
+                               mod.instruments[ins - 1].keymap[pitch] if 0 < ins <= len(mod.instruments) else (pitch, 0))
+                sample = mod.samples[smp - 1] if 0 < smp <= len(mod.samples) else None
+                age = at - event['at']
+                if sample is not None and not sample.loop and sample.c5_speed and (
+                        float(clock.seconds_at(at) - clock.seconds_at(event['at'])) >= sample.length / sample.c5_speed / 2 ** ((played - 60) / 12)):
+                    continue
+                sounding.append({'ch': ch, 'name': mod.channels[ch].name or f'Ch {ch + 1}',
+                                 'sample': smp or None, 'note': format_note(pitch), 'order': event['order'],
+                                 'loop': bool(sample and sample.loop), 'ago': float(age / step),
+                                 'basis': 'parent-note activity; release tails unmeasured'})
+            rows.append(sounding)
+        table.append(rows)
+    return table
 
 
 DMO = plugins.describe()  # the rack's effects and their parameters
 
 
 def _key_report(mod):
+    if mod.native_score is not None:
+        return None  # A residual-only harmonic report would omit the score.
     try:
         from .compose import key_report
         return key_report(mod)
@@ -261,16 +450,41 @@ def facts_of(mod, warnings, it=None):
     use = []  # per order: per channel: sorted sample numbers triggered
     # order timing comes from libopenmpt, so speed, tempo, break and jump effects count; an order that playback
     # never reaches lasts 0 s
-    with LoadedModule(it or write_it(mod)) as lm:
-        duration = lm.duration()
-        starts = {i: lm.order_start(i) for i, o in enumerate(mod.orders) if o < 254}
-        for i, t in starts.items():
-            if t <= 0.0 and i != min(starts):  # never entered: libopenmpt seeks into the hidden subsong starting there
-                starts[i] = duration
-            elif t >= duration:  # row 0 is skipped by a break into the pattern: it starts at its first row that plays
-                rows = len(mod.patterns[mod.orders[i]].rows)
-                starts[i] = next((v for v in (lm.order_start(i, r) for r in range(1, rows)) if v < duration), duration)
+    native = mod.native_score
+    playback_orders = []
+    repeated = bool(native and native['plan'].get('repeat_projection'))
+    if native:
+        from .tablature import TempoClock
+        plan = native['plan']
+        clock = TempoClock(plan['tempo'], plan.get('tempos'))
+        duration = float(Fraction(*plan['duration']['seconds']))
+        source_occurrences = native['view']['occurrences']
+        source_clock = TempoClock(mod.tempo, native['view'].get('tempos')) if repeated else clock
+        starts = {i: float(source_clock.seconds_at(Fraction(*o['at'])))
+                  for i, o in enumerate(source_occurrences)}
+        if repeated:
+            backing = mod.playback_backing()
+            step = Fraction(*plan['row_step'])
+            for i, occurrence in enumerate(plan['occurrences']):
+                origin, length = Fraction(*occurrence['at']), Fraction(*occurrence['duration'])
+                start = clock.seconds_at(origin)
+                rows = len(backing.patterns[backing.orders[i]].rows)
+                playback_orders.append({**occurrence, 'order': i, 'index': backing.orders[i], 'rows': rows,
+                    'start': float(start), 'seconds': float(clock.seconds_at(origin + length) - start),
+                    'row_times': [float(clock.seconds_at(origin + row * step) - start) for row in range(rows + 1)]})
+    else:
+        with LoadedModule(it or write_it(mod)) as lm:
+            duration = lm.duration()
+            starts = {i: lm.order_start(i) for i, o in enumerate(mod.orders) if o < 254}
+            for i, t in starts.items():
+                if t <= 0.0 and i != min(starts):
+                    starts[i] = duration
+                elif t >= duration:
+                    rows = len(mod.patterns[mod.orders[i]].rows)
+                    starts[i] = next((v for v in (lm.order_start(i, r) for r in range(1, rows)) if v < duration), duration)
     points = sorted({*starts.values(), duration})
+    native_onsets = native_actions(mod) if native else []
+    resolved_positions = {p['id']: p for p in native['plan']['positions']} if native else {}
     for i, o in enumerate(mod.orders):
         if o >= 254:
             continue
@@ -286,12 +500,53 @@ def facts_of(mod, warnings, it=None):
                     smp = mod.instruments[cell.instrument - 1].keymap[cell.note][1]
                     if smp:
                         per_ch[ch].add(smp)
+        if native:
+            for event in native_onsets:
+                event_order = plan['occurrences'][event['order']].get('source_order', event['order'])
+                if event['type'] != 'note_on' or event_order != i:
+                    continue
+                ins, pitch = event['instrument'], event['pitch']
+                smp = (ins if mod.instruments is None else mod.instruments[ins - 1].keymap[pitch][1]
+                       if 0 < ins <= len(mod.instruments) else 0)
+                if smp:
+                    per_ch[event['ch']].add(smp)
+            occurrence = source_occurrences[i]['id']
+            for position in native['view']['positions']:
+                if position['kind'] != 'note' or position['occurrence'] != occurrence:
+                    continue
+                resolved = resolved_positions.get(position['id'])
+                if resolved is None:
+                    continue  # Unplayed endings have no performed instrument state.
+                ins, pitch = resolved['instrument'], position['pitch']
+                smp = ins if mod.instruments is None else mod.instruments[ins - 1].keymap[pitch][1]
+                if smp:
+                    per_ch[position['ch']].add(smp)
         start = starts[i]
         secs = next((p for p in points if p > start), start) - start
         orders.append({"pattern": pat.name, "index": o, "order": i, "rows": len(pat.rows), "bars": len(pat.rows) / rows_per_bar, "start": start, "seconds": secs})
+        if native:
+            orders[-1]['occurrence'] = source_occurrences[i]['id']
+            if repeated:
+                orders[-1]['authored_timing'] = True
+                orders[-1]['start'] = orders[-1]['seconds'] = None
+                from .tablature import resolve_source_region
+                try:
+                    a, r0, b, r1 = resolve_source_region(plan, (i, 0, i, len(pat.rows) - 1))
+                    orders[-1]['playback_loop'] = {'from': [a, r0], 'to': [b, r1]}
+                except ValueError as exc:
+                    orders[-1]['playback_loop_error'] = str(exc)
+            elif plan.get('tempos'):
+                origin = Fraction(*source_occurrences[i]['at'])
+                step = Fraction(*plan['row_step'])
+                origin_seconds = clock.seconds_at(origin)
+                orders[-1]['row_times'] = [float(clock.seconds_at(origin + row * step) - origin_seconds)
+                                           for row in range(len(pat.rows) + 1)]
         use.append([sorted(s) for s in per_ch])
     return {
-        "title": mod.title, "tempo": mod.tempo, "speed": mod.speed, "bpm": round(mod.tempo * 24 / mod.speed / (mod.row_highlight[0] or 4), 2),
+        "title": mod.title, "tempo": mod.tempo, "speed": mod.speed,
+        "score": native is not None or mod.score_projection is not None,
+        "native_score": native is not None,
+        "bpm": mod.tempo if native is not None or mod.score_projection is not None else round(mod.tempo * 24 / mod.speed / (mod.row_highlight[0] or 4), 2),
         "highlight": [mod.row_highlight[0] or 4, rows_per_bar],
         "channels": [c.name or f"Ch {i + 1}" for i, c in enumerate(mod.channels)],
         "pan": [c.pan for c in mod.channels], "volume": [c.volume for c in mod.channels], "mix_volume": mod.mix_volume,
@@ -300,6 +555,7 @@ def facts_of(mod, warnings, it=None):
         "macros": {f"SF{n:X}": t for n, t in sorted(mod.macros.items())},
         "key": mod.key, "key_report": _key_report(mod),
         "patterns": len(mod.patterns), "duration": duration, "orders": orders, "use": use,
+        **({'playback_orders': playback_orders} if repeated else {}),
         "instruments": [i.name for i in mod.instruments] if mod.instruments else [],
         "samples": [{"num": i + 1, "name": s.name, "c5_speed": s.c5_speed, "length": s.length / s.c5_speed if s.c5_speed else 0,
                      "loop": s.loop is not None, "bits": s.bits} for i, s in enumerate(mod.samples)],
@@ -315,6 +571,8 @@ def sounding_table(mod, facts):
     it started at, whether the sample loops); a note-off/cut/fade drops it, and a one-shot sample drops out once its
     length has played at the note's rate, at that order's row rate. A note without an instrument keeps the channel's last instrument (a slide
     target, the tracker convention). Entry: ch, name, sample, note, order, loop, ago (rows since it started)."""
+    if mod.native_score is not None:
+        return native_sounding_table(mod)
     secs = [s.length / s.c5_speed if s.c5_speed else 0 for s in mod.samples]
     state, last_ins = [None] * len(mod.channels), [0] * len(mod.channels)
     table, abs_row = [], 0
@@ -484,6 +742,7 @@ class State:
         self.sound_table = None  # per order per row: the channels sounding there (sounding_table), rebuilt on reload
         self.renders = {}     # render key -> {"status", "error", "file", "peak"}
         self.compiled = {}    # compile key -> .it bytes of the tryout section (a candidate swapped in), patched per render
+        self.prepared = {}    # playback key -> inseparable backing/plan at the requested actual mixer rate
         self.meters = None    # soloed channel levels of the section with the unwritten mix applied
         self.meas = {}        # wav path -> measurement (memo, kept while the file's stamp holds: meas_stamp)
         self.meas_stamp = {}
@@ -550,9 +809,12 @@ class State:
             self.text = raw[3 if self.bom else 0:].decode("utf-8").replace("\r\n", "\n")
             self.mtime = self.song_path.stat().st_mtime
             try:
-                self.mod, warnings = loaded or load_song_text(self.text, self.base_dir, str(self.song_path))
-                self.it = write_it(self.mod)
-                self.facts = facts_of(self.mod, warnings, self.it)
+                if loaded is not None and loaded[0].score_projection is not None:
+                    loaded = None  # A strict export result cannot become State's residual/score model.
+                mod, warnings = loaded or load_for_state(self.text, self.base_dir, str(self.song_path))
+                it = None if mod.native_score is not None else write_it(mod)
+                facts = facts_of(mod, warnings, it)
+                self.mod, self.it, self.facts = mod, it, facts
                 self.sound_table = None
                 self.error = None
             except SongError as e:
@@ -668,6 +930,8 @@ class State:
                 return [o, max(0, min(f["orders"][o]["rows"] - 1, int(p[1])))]
             a, b = sorted([at(body["from"]), at(body["to"])])
             lp = {"from": a, "to": b}
+            if f.get('playback_orders'):
+                self._resolved_playback_span((f['orders'][a[0]]['order'], a[1], f['orders'][b[0]]['order'], b[1]))
         with self.lock:
             self.meta["loop"] = lp
             self.save_meta()
@@ -689,6 +953,12 @@ class State:
             raise ValueError(f"no pattern {i}")
         return i
 
+    def _need_tracker_operation(self, operation):
+        """Cell-only operations must never silently edit just the backing of a native score."""
+        self._need_compiled()
+        if self.mod.native_score is not None:
+            raise ValueError(f'{operation} requires exact score-aware editing; use TAB note/beat edits for this song')
+
     @staticmethod
     def _chan(items, i):
         """Channel index `i` of the song's channel lines, checked (a negative one would pick from the end)."""
@@ -702,6 +972,8 @@ class State:
     def section_start(self):
         """Where the rendered section starts in the song, in seconds (the order times of the facts)."""
         f, o = self.facts, self.orders
+        if f and f.get('playback_orders') and o:
+            return self._resolved_playback_span(self._order_region(o))['start']
         return f["orders"][o[0]]["start"] if f and o and o[0] < len(f["orders"]) else 0.0
 
     def set_reference(self, path, body):
@@ -807,13 +1079,15 @@ class State:
         if cand:
             stamps = f"{_stamp(cand)}|{stamps}"
         inst = json.dumps(self.mix().get("instrument"), sort_keys=True)  # the instrument panel is compiled in, not patched
-        return hashlib.sha1(f"{api.RENDER_VERSION}|{self.text_sha()}|{self.slot}|{self.orders}|{stamps}|{inst}".encode()).hexdigest()[:16]
+        native = '|native-v1' if 'score' in self.song else ''
+        return hashlib.sha1(f"{api.RENDER_VERSION}|{self.text_sha()}|{self.slot}|{self.orders}|{stamps}|{inst}{native}".encode()).hexdigest()[:16]
 
     def key(self, cand=None):
         """Render cache key: the compile key plus what is patched into the module's header, mutes, the unwritten mix and,
         for a candidate, MATCH LEVEL (its gain follows from the WAVs' stamps in the compile key)."""
         match = "|match" if cand and self.meta.get("match_level") else ""
-        return hashlib.sha1(f"{self.ckey(cand)}|{self.silenced()}|{json.dumps(self.mix(), sort_keys=True)}{match}".encode()).hexdigest()[:16]
+        ending = "|native-ending-v2" if 'score' in self.song else ""
+        return hashlib.sha1(f"{self.ckey(cand)}|{self.silenced()}|{json.dumps(self.mix(), sort_keys=True)}{match}{ending}".encode()).hexdigest()[:16]
 
     # ---- MATCH LEVEL: each candidate played as loud as the slot's current sample. Playback only: the gain never reaches
     # the song, the mix or what U writes
@@ -924,7 +1198,7 @@ class State:
                     if not 0 <= a < b <= len(playable):
                         raise ValueError('Selected order range is no longer valid')
                     span = (playable[a]['order'], playable[b-1]['order']+1)
-                base, slot = api.tryout_song(self.song, span), self.slot
+                base, slot = api.tryout_song(self.song, span, compiled=self.mod), self.slot
                 inst = self.mix().get("instrument") or {}
             for n, edit in inst.items():
                 if int(n) in (base.get("instruments") or {}):
@@ -943,6 +1217,130 @@ class State:
         """What the live engine plays: the whole song as it is now with the unwritten mix (faders patched into the header,
         the instrument panel compiled in); mutes are the engine's own."""
         return patch_it(self.compiled_it(whole=True), (), self.mix())
+
+    def _order_region(self, orders):
+        """The selected playable order span as the exporter's inclusive rows."""
+        if not orders:
+            return None
+        a, b = orders
+        playable = self.facts['orders'] if self.facts else []
+        if not 0 <= a < b <= len(playable):
+            raise ValueError('Selected order range is no longer valid')
+        region = playable[a]['order'], 0, playable[b-1]['order'], playable[b-1]['rows']-1
+        if self.facts.get('playback_orders'):
+            self._resolved_playback_span(region)
+        return region
+
+    def _resolved_playback_span(self, region):
+        """Resolve authored inclusive rows without broadening disjoint repeated selections."""
+        from .tablature import resolve_source_region, TempoClock
+        plan = self.mod.native_score['plan']
+        a, r0, b, r1 = resolve_source_region(plan, region)
+        step = Fraction(*plan['row_step'])
+        start = Fraction(*plan['occurrences'][a]['at']) + r0 * step
+        end = Fraction(*plan['occurrences'][b]['at']) + (r1 + 1) * step
+        clock = TempoClock(plan['tempo'], plan.get('tempos'))
+        return dict(revision=self.text_sha(), **{'from': [a, r0], 'to': [b, r1]},
+                    start=float(clock.seconds_at(start)), end=float(clock.seconds_at(end)))
+
+    def _playback_selection(self):
+        if not self.facts or not self.facts.get('playback_orders'):
+            return {}
+        region, loop, error = None, None, None
+        try:
+            if self.orders:
+                region = self._resolved_playback_span(self._order_region(self.orders))
+            if self.meta.get('loop'):
+                a, r0 = self.meta['loop']['from']
+                b, r1 = self.meta['loop']['to']
+                orders = self.facts['orders']
+                loop = self._resolved_playback_span((orders[a]['order'], r0, orders[b]['order'], r1))
+        except (ValueError, IndexError) as exc:
+            error = str(exc) or 'Playback selection is no longer valid'
+        return dict(playback_revision=self.text_sha(), playback_region=region, playback_loop=loop, playback_selection_error=error)
+
+    def prepared_playback(self, sample_rate, cand=None, whole=False):
+        """Capture and prepare one playback revision.
+
+        `sample_rate` is the actual mixer rate, including offline oversampling. Whole-song playback leaves mutes to
+        the live engine; tryout playback includes mute/solo. Apply the returned `gain` to rendered PCM for MATCH LEVEL.
+        Native selections retain the full backing/plan and an exporter snapshot for replay-to-start and exact end.
+        """
+        if type(sample_rate) is not int or not 8000 <= sample_rate <= 384000:
+            raise ValueError('sample_rate must be an integer mixer rate in 8000..384000')
+        if type(whole) is not bool:
+            raise ValueError('whole must be a boolean')
+        candidate = str(Path(cand).resolve()) if cand else None
+        with self.lock:
+            if self.closed:
+                raise ValueError('The song was closed before playback preparation')
+            text, revision, song_path = self.text, self.text_sha(), str(self.song_path)
+            base = api.from_yaml(text)
+            if not isinstance(base, dict):
+                raise ValueError('Playback requires a song mapping')
+            slot, orders = self.slot, copy.deepcopy(self.orders)
+            mix, silenced = copy.deepcopy(self.mix()), tuple(self.silenced())
+            matching = bool(self.meta.get('match_level'))
+            span, region = None, None
+            if not whole and orders:
+                a, b = orders
+                playable = self.facts['orders'] if self.facts else []
+                if not 0 <= a < b <= len(playable):
+                    raise ValueError('Selected order range is no longer valid')
+                if 'score' in base:
+                    region = self._order_region(orders)
+                else:
+                    span = (playable[a]['order'], playable[b - 1]['order'] + 1)
+            samples = base.get('samples') or {}
+            files = [str((self.base_dir / entry['file']).resolve())
+                     for entry in (samples.values() if isinstance(samples, dict) else ())
+                     if isinstance(entry, dict) and isinstance(entry.get('file'), str)]
+            if candidate:
+                files.append(candidate)
+            stamps = tuple(_stamp(path) for path in files)  # Do not reuse snapshot's temporarily cached _stamps.
+            db = self.match_db(candidate) if candidate and matching else None
+            key = hashlib.sha1(json.dumps([api.RENDER_VERSION, song_path, revision, sample_rate, whole,
+                                          slot, orders, candidate, mix, silenced if not whole else (), db, stamps],
+                                         sort_keys=True).encode()).hexdigest()[:16]
+            if key in self.prepared:
+                return copy.deepcopy(self.prepared[key])
+        base = api.tryout_song(base, span)
+        for number, edit in (mix.get('instrument') or {}).items():
+            if int(number) in (base.get('instruments') or {}):
+                base['instruments'][int(number)] = voice_entry(base['instruments'][int(number)], edit)
+        if candidate:
+            api.swap_sample(base, slot, Path(candidate))
+        snapshot = None
+        if region is not None:
+            from .export import snapshot as export_snapshot, _plan_at_rate
+            # The instrument panel was applied above; the snapshot patches only
+            # the remaining mixer fields, so envelopes are not edited twice.
+            snapshot = export_snapshot(base, self.base_dir, region=region,
+                                       mix={k: v for k, v in mix.items() if k != 'instrument'},
+                                       muted=silenced, tail=0)
+            snapshot['plan'] = _plan_at_rate(snapshot['plan'], sample_rate)
+            prepared = dict(backing_it=snapshot['render_it'], plan=snapshot['plan'])
+            data = prepared['backing_it']
+        else:
+            prepared = api.prepare_playback(base, self.base_dir, sample_rate)
+            data = patch_it(prepared['backing_it'], () if whole else silenced, mix)
+        gain = 1.0
+        if db:
+            data, gain = match_level(data, slot, db)
+        bundle = dict(key=key, revision=revision, song=song_path, sample_rate=sample_rate,
+                      backing_it=data, plan=prepared['plan'], gain=gain)
+        if snapshot is not None:
+            snapshot['render_it'] = data
+            bundle['snapshot'] = snapshot
+        with self.lock:
+            if (self.closed or str(self.song_path) != song_path or self.text != text or self.slot != slot or self.orders != orders or self.mix() != mix or
+                    tuple(self.silenced()) != silenced or bool(self.meta.get('match_level')) != matching or
+                    tuple(_stamp(path) for path in files) != stamps):
+                raise ValueError('Playback inputs changed during preparation; retry with the current song and mix')
+            while len(self.prepared) >= 8:
+                self.prepared.pop(next(iter(self.prepared)))
+            self.prepared[key] = bundle
+            return copy.deepcopy(bundle)
 
     def retry(self, path):
         with self.lock:
@@ -1002,16 +1400,27 @@ class State:
                 silenced, mix, slot = self.silenced(), self.mix(), self.slot
                 db = self.match_db(cand) if cand and self.meta.get("match_level") else None
             try:
-                data, gain = patch_it(self.compiled_it(cand), silenced, mix), 1.0
-                if db:
-                    data, gain = match_level(data, slot, db)
-                with LoadedModule(data) as lm:
-                    pcm = lm.render(RATE)
+                if self.mod is not None and self.mod.native_score is not None:
+                    bundle = self.prepared_playback(RATE * 2, cand)
+                    data, gain, plan = bundle['backing_it'], bundle['gain'], bundle['plan']
+                else:
+                    data, gain, plan = patch_it(self.compiled_it(cand), silenced, mix), 1.0, None
+                    if db:
+                        data, gain = match_level(data, slot, db)
+                if plan is not None and bundle.get('snapshot') is not None:
+                    from .export import render
+                    pcm = render(bundle['snapshot'], cancel=lambda: self.closed or self.key(cand) != k)
+                else:
+                    with LoadedModule(data, rate=RATE, oversample=2, plan=plan) as lm:
+                        pcm = lm.render(RATE)
                 if gain != 1.0:
                     pcm = scale_pcm(pcm, gain)
                 out = self.cache_dir / f"{k}.wav"
                 _write_pcm(out, pcm)
                 with self.lock:
+                    if self.key(cand) != k:
+                        self.renders.pop(k, None)
+                        continue
                     self.renders[k].update(status="ready", file=str(out), peak=_peak(pcm))
                 if cand is None or cand == self.want:
                     mix_numbers(out)  # measured now, so the page's next poll does not wait for it
@@ -1043,7 +1452,21 @@ class State:
             self.meters["status"] = "measuring"
             mix, nch = self.meters["mix"], len(self.facts["channels"])
         try:
-            levels = channel_levels(patch_it(self.compiled_it(), (), mix), nch, cancel=lambda: self.meters["key"] != mk)
+            snapshot = None
+            if self.mod is not None and self.mod.native_score is not None:
+                if self.orders:
+                    from .export import snapshot as export_snapshot
+                    with self.lock:
+                        base, region = copy.deepcopy(self.song), self._order_region(self.orders)
+                    snapshot = export_snapshot(base, self.base_dir, region=region, mix=mix, tail=0)
+                    data, plan = snapshot['render_it'], snapshot['plan']
+                else:
+                    bundle = self.prepared_playback(RATE, whole=True)
+                    data, plan = bundle['backing_it'], bundle['plan']
+            else:
+                data, plan = patch_it(self.compiled_it(), (), mix), None
+            levels = channel_levels(data, nch, cancel=lambda: self.meters["key"] != mk,
+                                    plan=plan, snapshot=snapshot)
             with self.lock:
                 if levels is not None and self.meters["key"] == mk:
                     self.meters.update(status="ready", levels=levels)
@@ -1224,9 +1647,38 @@ class State:
         return {"hash": self.text_sha()[:8],
                 "mtime": datetime.datetime.fromtimestamp(self.mtime).isoformat(timespec="seconds")}
 
-    def sounding(self, order, row):
+    def _played_order(self, order, play_id=None, revision=None, row=None):
+        visits = (self.facts or {}).get('playback_orders')
+        if not visits:
+            return order
+        if not 0 <= order < len(self.facts['orders']):
+            raise ValueError('No such authored order')
+        source = self.facts['orders'][order]
+        matches = [v for v in visits if v['source_order'] == source['order'] and
+                   v['source_occurrence'] == source['occurrence'] and (play_id is None or v['id'] == play_id)]
+        if row is not None:
+            step = Fraction(*self.mod.native_score['plan']['row_step'])
+            matches = [v for v in matches if Fraction(*v['source_from']) <= row * step < Fraction(*v['source_to'])]
+        if play_id is not None and revision != self.text_sha():
+            raise ValueError('Playback revision changed; resolve the current pass again')
+        if len(matches) != 1:
+            raise ValueError('Select a reachable playback pass for this authored order')
+        return matches[0]['order']
+
+    def _played_position(self, order, row, play_id=None, revision=None):
+        played = self._played_order(order, play_id, revision, row)
+        if self.facts.get('playback_orders'):
+            visit = self.facts['playback_orders'][played]
+            offset = Fraction(*visit['source_from']) / Fraction(*self.mod.native_score['plan']['row_step'])
+            if offset.denominator != 1:
+                raise ValueError('Playback fragment is not aligned to a source row')
+            row -= int(offset)
+        return played, row
+
+    def sounding(self, order, row, *, play_id=None, revision=None):
         """The channels sounding at (order, row) of the facts' order list (see sounding_table)."""
         with self.lock:
+            order, row = self._played_position(order, row, play_id, revision)
             if self.sound_table is None:
                 self.sound_table = sounding_table(self.mod, self.facts)
                 self._rescan_notes()
@@ -1238,19 +1690,25 @@ class State:
         improve; the listener's tag, words and picked channels are untouched)."""
         v, changed = self.version()["hash"], False
         for n in self.notes:
-            if (n.get("version") or {}).get("hash") == v and 0 <= n["order"] < len(self.sound_table):
-                rows = self.sound_table[n["order"]]
-                new = rows[min(n["row"], len(rows) - 1)] if rows else []
+            order = n.get('play_order', n['order'])
+            if (n.get("version") or {}).get("hash") == v and 0 <= order < len(self.sound_table):
+                rows = self.sound_table[order]
+                row = n.get('play_row', n['row'])
+                new = rows[row] if 0 <= row < len(rows) else []
                 if new != n.get("sounding"):
                     n["sounding"], changed = new, True
         if changed:
             self.save_notes()
 
-    def sounding_rows(self, order):
+    def sounding_rows(self, order, *, play_id=None, revision=None):
         """One order for the page's live strip: per row, [channel, sample, looped] triples."""
-        self.sounding(order, 0)
-        rows = self.sound_table[order] if 0 <= order < len(self.sound_table) else []
-        return [[[e["ch"], e["sample"], int(e["loop"])] for e in r] for r in rows]
+        with self.lock:
+            order = self._played_order(order, play_id, revision)
+            if self.sound_table is None:
+                self.sound_table = sounding_table(self.mod, self.facts)
+                self._rescan_notes()
+            rows = self.sound_table[order] if 0 <= order < len(self.sound_table) else []
+            return [[[e["ch"], e["sample"], int(e["loop"])] for e in r] for r in rows]
 
     def add_note(self, body):
         """A note at (order, row) of the facts' order list with what was playing; the channels sounding there and the song
@@ -1262,14 +1720,19 @@ class State:
         order = max(0, min(len(f["orders"]) - 1, int(body.get("order") or 0)))
         o = f["orders"][order]
         row = max(0, min(o["rows"] - 1, int(body.get("row") or 0)))
+        played, play_row = self._played_position(order, row, body.get('play_id'), body.get('revision'))
+        timing = f['playback_orders'][played] if f.get('playback_orders') else o
+        row_time = timing["row_times"][play_row] if "row_times" in timing else timing["seconds"] * play_row / timing["rows"]
         with self.lock:
             note = {"id": max((n["id"] for n in self.notes), default=0) + 1, "when": datetime.datetime.now().isoformat(timespec="seconds"),
                     "version": self.version(), "order": order, "pattern": o["pattern"], "row": row,
-                    "span": [o["start"], o["seconds"]],  # the order's place in this version (an archive's report uses it)
-                    "time": round(o["start"] + o["seconds"] * row / o["rows"], 2),
+                    "span": [timing["start"], timing["seconds"]],
+                    "time": round(timing["start"] + row_time, 2),
+                    **({'play_order': played, 'play_row': play_row, 'play_id': timing['id'], 'pass': timing['pass'],
+                        'source_occurrence': timing['source_occurrence']} if f.get('playback_orders') else {}),
                     "tag": str(body.get("tag") or "note")[:40], "text": str(body.get("text") or "")[:2000],
                     "channels": sorted({int(c) for c in body.get("channels") or []}),
-                    "sounding": self.sounding(order, row),
+                    "sounding": self.sounding(order, row, play_id=body.get('play_id'), revision=body.get('revision')),
                     "playing": {"source": str(body.get("source") or "song"), "candidate": body.get("candidate"), "slot": self.slot,
                                 "section": list(self.orders) if self.orders else None, "loop": self.meta.get("loop"),
                                 "muted": self.silenced(), "mix": self.mix()}}
@@ -1336,17 +1799,20 @@ class State:
              "what was sounding there (sample number after the name; `~` marks a looped tone still held from an earlier note).", ""]
         by = {}
         for n in notes:
-            by.setdefault(n["order"], []).append(n)
-        for order in sorted(by):
+            by.setdefault((n["order"], n.get('play_order', -1)), []).append(n)
+        for key in sorted(by):
+            order, played = key
+            group = by[key]
             # the order as the notes' own version had it (an archive's notes were made on another order list); notes from
             # before the span was kept fall back to the current song for notes on this version, else to the pattern name
-            n0 = next((n for n in by[order] if n.get("span")), None)
+            n0 = next((n for n in group if n.get("span")), None)
             o = {"pattern": n0["pattern"], "start": n0["span"][0], "seconds": n0["span"][1]} if n0 else (
                 f["orders"][order] if f and order < len(f["orders"]) and version is None else None)
-            name = o["pattern"] if o else by[order][0].get("pattern")
-            L += [f"## ord {order} `{name}` ({fmt(o['start'])} to {fmt(o['start'] + o['seconds'])})" if o
+            name = o["pattern"] if o else group[0].get("pattern")
+            label = f"ord {order}" + (f" pass {group[0]['pass']} (played {played})" if played >= 0 else '')
+            L += [f"## {label} `{name}` ({fmt(o['start'])} to {fmt(o['start'] + o['seconds'])})" if o and o['start'] is not None
                   else f"## ord {order} `{name}`" if name else f"## ord {order}", ""]
-            for n in sorted(by[order], key=lambda n: (n["row"], n["id"])):
+            for n in sorted(group, key=lambda n: (n["row"], n["id"])):
                 picked = set(n.get("channels") or [])
                 snd = []
                 for s in n.get("sounding") or []:
@@ -1536,8 +2002,19 @@ class State:
         for n, edit in (mix.get("instrument") or {}).items():
             if int(n) in (song.get("instruments") or {}):
                 song["instruments"][int(n)] = ins[int(n)] = voice_entry(song["instruments"][int(n)], edit)
-        return self._edit_text(song, samples=smp, channels=touched, mix_volume=mix.get("mix_volume"),
-                               keys=("volume", "pan", "global_volume"), instruments=ins)
+        new, redump = self._edit_text(song, samples=smp, channels=touched, mix_volume=mix.get("mix_volume"),
+                                     keys=("volume", "pan", "global_volume"), instruments=ins)
+        score_changed = False
+        for track in song.get('score', {}).get('tracks', {}).values():
+            midi = track.get('midi', {})
+            for field in ('pan', 'volume'):
+                touched_channels = {int(ch) for ch in mix.get(field, {})}
+                if 'source_' + field in midi and touched_channels.intersection(track['channels']):
+                    del midi['source_' + field]
+                    score_changed = True
+        if score_changed:
+            new = replace_values(new, [(('score',), song['score'])])
+        return new, redump
 
     def _diff(self, new, redump):
         d = list(difflib.unified_diff(self.text.splitlines(), new.splitlines(), self.song_path.name, self.song_path.name, lineterm="", n=2))
@@ -1556,7 +2033,7 @@ class State:
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.patched_text(cand)
-            loaded = load_song_text(new, self.base_dir, str(self.song_path))  # SongError: nothing is written
+            loaded = load_for_state(new, self.base_dir, str(self.song_path))  # SongError: nothing is written
             meta = copy.deepcopy(self.meta)
             meta['candidates'].pop(str(self.slot), None)
             meta['selected_candidate'] = None
@@ -1570,7 +2047,7 @@ class State:
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the write does not overwrite that change")
             new, _ = self.mix_text()
-            loaded = load_song_text(new, self.base_dir, str(self.song_path))
+            loaded = load_for_state(new, self.base_dir, str(self.song_path))
             self._commit(new, loaded, meta=dict(self.meta, mix={}))
         self._put(0, ("build", False))
 
@@ -1674,23 +2151,47 @@ class State:
         place, as one undoable step (see edit_patterns)."""
         self.edit_patterns([(index, cells)])
 
-    def edit_patterns(self, groups, who=None, guard=None):
+    def edit_patterns(self, groups, who=None, guard=None, *, occurrences=None, revision=None, transform=None):
         """Write each (pattern index, cells) of `groups` in place, all as one undoable step. The whole song is compiled
         first: an edit that breaks it is refused (SongError) and nothing is written. Refused too when the song changed on
         disk since it was read (reload first). `who` "agent": the patterns are marked `by: agent` (one that had notes
         and no mark becomes `you and agent`); the owner's edit of a pattern marked `agent` makes it `you and agent`."""
         with self.lock:
+            self._writable()
             if self.dirty():
                 raise ValueError("the song changed on disk: RELOAD first, so the edit does not overwrite that change")
             self._need_compiled()
+            if self.mod.native_score is not None and revision != self.text_sha():
+                raise ValueError('The song changed before this Pattern edit; refresh and try again')
             lines = self.text.splitlines(keepends=True)
-            for index, cells in groups:
+            score = None
+            residual = groups
+            if self.mod.native_score is not None:
+                from .tablature import translate_native_pattern_edits, transform_native_selections
+                if transform is not None:
+                    score, residual = transform_native_selections(self.song, self.mod.patterns, transform)
+                    groups = residual
+                else:
+                    score, residual = translate_native_pattern_edits(self.song, self.mod.patterns, groups,
+                                                                      occurrences=occurrences,
+                                                                      view=self.mod.native_score['view'])
+                for index, _ in groups:
+                    name = self.mod.patterns[self.pattern_at(index)].name
+                    if self.pattern_entry(name).get('approved'):
+                        raise ValueError(f"pattern '{name}' is approved: clear its mark before editing")
+            elif transform is not None:
+                raise ValueError('exact selection transforms require a native score')
+            elif self.mod.score_projection is not None:
+                from .tablature import translate_pattern_edits
+                score, residual = translate_pattern_edits(self.song, self.mod.score_projection, groups)
+            for index, cells in residual:
                 self._edit_block(lines, int(index), cells)
             for index in {int(i) for i, _ in groups}:
                 pat = self.mod.patterns[index]
                 cur = self.pattern_entry(pat.name).get("by")
                 if who == "agent":
-                    blank = all(c.is_empty() for row in pat.rows for c in row)
+                    blank = (all(c.is_empty() for row in pat.rows for c in row) and
+                             not self.song.get('score', {}).get('patterns', {}).get(pat.name, {}).get('beats'))
                     new = "agent" if cur == "agent" or (cur is None and blank) else "you and agent"
                 else:
                     new = "you and agent" if cur == "agent" else cur
@@ -1699,7 +2200,438 @@ class State:
                         self._pattern_mark(lines, pat.name, {"by": new})
                     except ValueError:  # a pattern written as one block carries no marks
                         pass
-            self._commit("".join(lines), guard=guard)  # compiled first (SongError: nothing is written)
+            new = "".join(lines)
+            if score is not None:
+                new = replace_values(new, [(('score',), score)])
+            self._commit(new, guard=guard)  # compiled first (SongError: nothing is written)
+
+    def score_view(self):
+        """The saved score and its compiled links; the renderer owns no song or playback state."""
+        from .tablature import Projection, raw_note_view, native_raw_note_view, measure_errors
+        with self.lock:
+            self._need_compiled()
+            if self.mod.native_score is not None:
+                view = copy.deepcopy(self.mod.native_score['view'])
+                return {**view, "score": copy.deepcopy(self.song.get('score')), "revision": self.text_sha(),
+                        "measure_errors": measure_errors(self.song, {p.name: len(p.rows) for p in self.mod.patterns}),
+                        "title": self.song.get('score', {}).get('metadata', {}).get('title', self.mod.title), "song": str(self.song_path), "native": True,
+                        "raw_positions": native_raw_note_view(self.song, self.mod.patterns, view=view),
+                        "orders": list(self.song.get('orders') or []),
+                        "pattern_names": [p.name for p in self.mod.patterns],
+                        "rows": [len(p.rows) for p in self.mod.patterns],
+                        "channels": [c.name for c in self.mod.channels], "tempo": self.mod.tempo,
+                        "editable": not bool(self.read_only or self.dirty())}
+            projection = self.mod.score_projection
+            return {"score": self.song.get("score"), "revision": self.text_sha(),
+                    "title": self.mod.title, "song": str(self.song_path),
+                    "positions": projection.positions if projection else [],
+                    "raw_positions": raw_note_view(self.song, projection or Projection(self.mod.patterns, self.mod.patterns)),
+                    "diagnostics": projection.diagnostics if projection else [],
+                    "orders": list(self.song.get("orders") or []),
+                    "pattern_names": [p.name for p in self.mod.patterns],
+                    "rows": [len(p.rows) for p in self.mod.patterns],
+                    "channels": [c.name for c in self.mod.channels],
+                    "row_step": [self.mod.speed, 24], "tempo": self.mod.tempo,
+                    "editable": not bool(self.read_only or self.dirty())}
+
+    def score_clipboard(self, body):
+        from .tablature import capture_score_clipboard
+        with self.lock:
+            self._need_compiled()
+            if body.get('revision') != self.text_sha():
+                raise ValueError('The song changed before this copy; refresh and try again')
+            model = self.mod if self.mod.native_score is not None else self.mod.score_projection
+            if model is None:
+                raise ValueError('score copy requires an existing score pattern name')
+            raw = model.raw_patterns if hasattr(model, 'raw_patterns') else model.patterns
+            return {'clipboard': capture_score_clipboard(self.song, body.get('pattern'), body.get('beats'),
+                                                        body.get('occurrence'), selection=body.get('selection'),
+                                                        raw_patterns=raw, complete_silence=True), 'revision': self.text_sha()}
+
+    def pattern_clipboard(self, body, who=None, guard=None):
+        """Capture first; publish a cut clipboard only after the one deletion commits."""
+        from .tablature import capture_native_clipboard
+        with self.lock:
+            self._need_compiled()
+            if self.mod.native_score is None:
+                raise ValueError('native Pattern clipboard requires a score')
+            if body.get('revision') != self.text_sha() or self.dirty():
+                raise ValueError('The song changed before this copy; refresh and try again')
+            cut = body.get('cut', False)
+            if type(cut) is not bool:
+                raise ValueError('cut must be a boolean')
+            clipboard = capture_native_clipboard(self.song, self.mod.patterns, body['selection'])
+            if cut:
+                self.edit_patterns([], who=who, guard=guard, revision=body['revision'],
+                                   transform=dict(action='cut', selections=[body['selection']]))
+            return dict(ok=True, clipboard=clipboard, revision=self.text_sha())
+
+    def paste_pattern_clipboard(self, body, who=None, guard=None):
+        with self.lock:
+            self.edit_patterns([], who=who, guard=guard, revision=body.get('revision'),
+                               transform=dict(body, action='paste'))
+            return dict(ok=True, revision=self.text_sha())
+
+    def chord_suggestions(self, body, *, generate=False):
+        """Read-only names or voicings against the open track's unoffset tuning."""
+        from .chord_tools import generate_chords, recognize_chord
+        from .tablature import _keys
+        fields = (('spec', 'profile', 'min_fret', 'max_fret', 'open_strings', 'count') if generate
+                  else ('chord', 'sharp', 'incomplete'))
+        _keys(body, ('revision', 'track', *fields), 'chord suggestions')
+        with self.lock:
+            self._need_compiled()
+            if self.dirty() or body.get('revision') != self.text_sha():
+                raise ValueError('The song changed since this chord request; refresh and retry')
+            identity = body.get('track')
+            if not isinstance(identity, str):
+                raise ValueError('Chord suggestions need a track ID')
+            track = self.song.get('score', {}).get('tracks', {}).get(identity)
+            if track is None:
+                raise ValueError('Choose an existing TAB track')
+            if generate:
+                result = generate_chords(track, body.get('spec'),
+                                         **{key: body[key] for key in fields if key != 'spec' and key in body})
+                return dict(revision=self.text_sha(), track=identity, **result)
+            proposals = recognize_chord(track, body.get('chord'), sharp=body.get('sharp', True),
+                                        incomplete=body.get('incomplete', 4))
+            return dict(revision=self.text_sha(), track=identity, proposals=proposals,
+                        naming='Fret-shape names use track tuning without capo; scores are source heuristics, not probabilities.')
+
+    def score_edit(self, edit, who=None, guard=None):
+        """A native TAB edit is a single existing song/history transaction."""
+        from .tablature import apply_score_edit, resize_beat, move_note, move_beat, promote_pattern, paste_score_clipboard, tempo_edit
+        with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first")
+            self._need_compiled()
+            if edit.get("revision") != self.text_sha():
+                raise ValueError("The song changed since this TAB edit; refresh and try again")
+            name = edit.get("pattern")
+            if type(name) is int:
+                name = self.mod.patterns[self.pattern_at(name)].name
+                if edit.get('op') not in ('beat_resize', 'note_move', 'beat_move', 'beats_paste'):
+                    edit = {**edit, 'pattern': name}
+            if name is not None and self.pattern_entry(name).get("approved"):
+                raise ValueError(f"pattern '{name}' is approved: clear its mark in the SONG tab first")
+            residual = []
+            paste_report = {}
+            model = self.mod if self.mod.native_score is not None else self.mod.score_projection
+            if edit.get('op') == 'tempo_set':
+                if self.mod.native_score is None:
+                    raise ValueError('TAB tempo editing requires native score timing')
+                residual = tempo_edit(self.song, self.mod.patterns,
+                                      {k: v for k, v in edit.items() if k != 'revision'})
+                if not residual:
+                    return
+                candidate = self.song
+            elif edit.get('op') == 'notes_set':
+                patches = edit.get('notes')
+                if not isinstance(patches, list) or not 1 <= len(patches) <= 1024:
+                    raise ValueError('notes_set requires 1..1024 note patches')
+                candidate, seen = self.song, set()
+                for patch in patches:
+                    if (not isinstance(patch, dict) or set(patch) != {'beat', 'note'} or
+                            not isinstance(patch.get('note'), dict)):
+                        raise ValueError('each note patch needs a beat ID and note mapping')
+                    identity = patch.get('beat'), patch['note'].get('id')
+                    if not all(isinstance(key, str) for key in identity) or identity in seen:
+                        raise ValueError('note patches need distinct beat/note identities')
+                    seen.add(identity)
+                    candidate = apply_score_edit(candidate, dict(op='note_set', pattern=name,
+                                                                 beat=patch['beat'], note=patch['note']))
+            elif edit.get('op') == 'promote_pattern':
+                if model is None:
+                    raise ValueError('Set up a TAB track before adopting Pattern notes')
+                index = next((i for i, p in enumerate(self.mod.patterns) if p.name == name), None)
+                if index is None:
+                    raise ValueError('Choose an existing pattern to adopt')
+                candidate, residual = promote_pattern(self.song, model, index, edit['track'], edit.get('cells'),
+                                                       occurrence=edit.get('occurrence'))
+            elif edit.get('op') == 'beat_resize':
+                candidate = resize_beat(self.song, model, self.pattern_at(edit['pattern']),
+                                        edit['beat'], edit['end_row'])
+            elif edit.get('op') == 'note_move':
+                candidate = move_note(self.song, model, self.pattern_at(edit['pattern']),
+                                      edit['note'], edit['to_row'], edit.get('pitch'))
+            elif edit.get('op') == 'beat_move':
+                candidate = move_beat(self.song, model, self.pattern_at(edit['pattern']),
+                                      edit['beat'], edit['to_row'])
+            elif edit.get('op') == 'beats_paste':
+                candidate = paste_score_clipboard(self.song, model, self.pattern_at(edit['pattern']),
+                                                 edit['row'], edit['clipboard'], edit.get('occurrence'),
+                                                 across=edit.get('across', False), replace=edit.get('replace', False),
+                                                 track_map=edit.get('track_map'), mode=edit.get('mode'), voice_map=edit.get('voice_map'),
+                                                 independent=edit.get('independent', False), report=paste_report)
+            else:
+                candidate = apply_score_edit(self.song, {k: v for k, v in edit.items() if k != 'revision'})
+            if not residual and candidate['score'] == self.song.get('score'):
+                return  # A semantic no-op must not reformat YAML or consume undo history.
+            lines = self.text.splitlines(keepends=True)
+            for index, cells in residual:
+                raw_patterns = self.mod.patterns if self.mod.native_score is not None else self.mod.score_projection.raw_patterns
+                self._edit_block(lines, index, cells, pat=raw_patterns[index])
+            updates = [(('score',), candidate['score'])]
+            if edit.get('op') == 'beats_paste':
+                api.compile_song(candidate, self.base_dir)
+                updates.extend((('patterns', name), entry) for name, entry in candidate['patterns'].items()
+                               if name not in self.song['patterns'])
+                if candidate['orders'] != self.song['orders']:
+                    updates.append((('orders',), candidate['orders']))
+            new = replace_values(''.join(lines), updates)
+            loaded = load_for_state(new, self.base_dir, str(self.song_path))
+            paste_selection = paste_report.get('selection')
+            if paste_selection is None and edit.get('op') == 'beats_paste' and edit.get('occurrence') and loaded[0].native_score is not None:
+                from .tablature import authoring_view, duration_quarters
+                tracks = {(edit.get('track_map') or {}).get(b['track'], b['track']) for b in edit['clipboard']['beats']}
+                if len(tracks) == 1:
+                    track = next(iter(tracks))
+                    view = authoring_view(candidate, loaded[0].patterns)
+                    own = next(o for o in view['occurrences'] if o['id'] == edit['occurrence'])
+                    row = Fraction(*edit['row']) if isinstance(edit['row'], list) else Fraction(edit['row'])
+                    start = Fraction(*own['at']) + row * Fraction(*view['row_step'])
+                    stop = start + max(Fraction(*b['at']) + duration_quarters(b['written'])
+                                       for b in edit['clipboard']['beats'])
+                    groups = []
+                    for occurrence in view['occurrences']:
+                        ids = [b['id'] for b in candidate['score']['patterns'].get(occurrence['pattern'], {}).get('beats', [])
+                               if b['track'] == track and start <= Fraction(*occurrence['at']) + Fraction(*b['at']) < stop]
+                        if ids:
+                            groups.append(dict(occurrence=occurrence['id'], beats=ids))
+                    first = next(o for o in view['occurrences'] if o['id'] == groups[0]['occurrence'])
+                    at = start - Fraction(*first['at'])
+                    paste_selection = dict(occurrence=first['id'], track=track,
+                        voice=edit['clipboard']['beats'][0].get('voice', 0), at=[at.numerator, at.denominator],
+                        beats=groups[0]['beats'], range=groups)
+            old_score, new_score = self.song.get('score', {}), candidate['score']
+            changed = set()
+            for pi, pattern in enumerate(self.mod.patterns):
+                before = old_score.get('patterns', {}).get(pattern.name)
+                after = new_score.get('patterns', {}).get(pattern.name)
+                if (before != after or pattern != loaded[0].patterns[pi] or
+                        score_context(self.song, pattern.name) != score_context(candidate, pattern.name)):
+                    changed.add(pattern.name)
+                    if self.pattern_entry(pattern.name).get('approved'):
+                        raise ValueError(f"pattern '{pattern.name}' is approved: clear its mark in the SONG tab first")
+            if who == 'agent':
+                lines = new.splitlines(keepends=True)
+                for pi, pattern in enumerate(self.mod.patterns):
+                    if pattern.name in changed:
+                        current = self.pattern_entry(pattern.name).get('by')
+                        blank = (all(c.is_empty() for row in pattern.rows for c in row) and
+                                 not old_score.get('patterns', {}).get(pattern.name, {}).get('beats'))
+                        mark = 'agent' if current == 'agent' or current is None and blank else 'you and agent'
+                        self._pattern_mark(lines, pattern.name, {'by': mark})
+                new = ''.join(lines)
+            self._commit(new, loaded=loaded, guard=guard)
+
+            if paste_selection is not None:
+                return dict(ok=True, selection=paste_selection, revision=self.text_sha())
+
+    def score_instrument(self, body, guard=None):
+        """Bind an existing sound to a logical part, through the shared score and history."""
+        with self.lock:
+            if not isinstance(body, dict) or set(body) - {'revision', 'track', 'instrument', 'replace_overrides'}:
+                raise ValueError('Part sound needs revision, track, instrument and optional replace_overrides')
+            if self.dirty():
+                raise ValueError('the song changed on disk: RELOAD first')
+            self._need_compiled()
+            if body.get('revision') != self.text_sha():
+                raise ValueError('The song changed since this sound assignment; refresh and try again')
+            if self.mod.native_score is None:
+                raise ValueError('Part sound assignment requires native score timing')
+            identity, number = body.get('track'), body.get('instrument')
+            tracks = self.song['score']['tracks']
+            if not isinstance(identity, str) or identity not in tracks:
+                raise ValueError('Choose an existing score part')
+            sounds = self.song.get('instruments') if self.mod.instruments is not None else self.song.get('samples')
+            if type(number) is not int or number not in (sounds or {}):
+                raise ValueError('Choose an existing instrument or sample slot from this song')
+            replace = body.get('replace_overrides', False)
+            if type(replace) is not bool:
+                raise ValueError('replace_overrides must be boolean')
+            candidate = copy.deepcopy(self.song)
+            track = candidate['score']['tracks'][identity]
+            track['instrument'] = number
+            overrides = 0
+            for pattern in candidate['score']['patterns'].values():
+                for beat in pattern['beats']:
+                    if beat['track'] != identity:
+                        continue
+                    for note in beat['notes']:
+                        if 'instrument' in note:
+                            overrides += 1
+                            if replace:
+                                del note['instrument']
+            result = dict(ok=True, track=identity, instrument=number,
+                          overrides_replaced=overrides if replace else 0,
+                          overrides_preserved=0 if replace else overrides)
+            if candidate == self.song:
+                return dict(result, revision=self.text_sha(), report='Part sound is unchanged.')
+            channels = set(track['channels'])
+            for pattern in self.mod.patterns:
+                if any(row[ch].note is not None and row[ch].note < 120 and not row[ch].instrument
+                       for row in pattern.rows for ch in channels):
+                    raise ValueError('Raw notes inherit sound memory on this part; give those notes explicit instruments first')
+                if (score_context(self.song, pattern.name) != score_context(candidate, pattern.name) or
+                        self.song['score']['patterns'].get(pattern.name) != candidate['score']['patterns'].get(pattern.name)):
+                    if self.pattern_entry(pattern.name).get('approved'):
+                        raise ValueError(f"pattern '{pattern.name}' is approved: clear its mark in the SONG tab first")
+            # The native plan, tracker export and live engine all consume this same binding.
+            api.compile_song(candidate, self.base_dir)
+            new = replace_values(self.text, [(('score',), candidate['score'])])
+            loaded = load_for_state(new, self.base_dir, str(self.song_path))
+            self._commit(new, loaded=loaded, guard=guard)
+            detail = f'{overrides} note sound overrides ' + ('replaced.' if replace else 'preserved.')
+            return dict(result, revision=self.text_sha(), report=f'Assigned sound {number:02d} to {identity}. {detail}')
+
+    def score_command(self, body, who='user', guard=None):
+        """Score commands publish their result only after one guarded commit."""
+        from .tablature import score_command, MEASURE_ACTIONS
+        if body.get('action') in MEASURE_ACTIONS:
+            return self.measure_edit(body, guard=guard)
+        with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first")
+            self._need_compiled()
+            if body.get('revision') != self.text_sha():
+                raise ValueError("The song changed since this TAB command; refresh and try again")
+            if self.mod.native_score is None:
+                raise ValueError('TAB commands require native score timing')
+            candidate, result = score_command(self.song, self.mod.patterns, body)
+            if body.get('action') == 'route_voices' and candidate != self.song:
+                channels = self.song['score']['tracks'][body['track']]['channels']
+                silenced, mix = set(self.silenced()), self.mix()
+                states = {(ch in silenced, mix.get('volume', {}).get(str(ch), self.mod.channels[ch].volume),
+                           mix.get('pan', {}).get(str(ch), self.mod.channels[ch].pan)) for ch in channels}
+                if len(states) != 1:
+                    raise ValueError('This part has different channel mix or mute settings; align them before separating voices')
+                api.compile_song(candidate, self.base_dir)
+            if candidate == self.song and list(candidate.get('score', {}).get('tracks', {})) == list(self.song.get('score', {}).get('tracks', {})):
+                return dict(ok=True, **result, revision=self.text_sha())
+            duration_edit = body.get('action') == 'set_duration'
+            if body.get('action') == 'place':
+                name = str(self.song['orders'][self.song['score']['order_ids'].index(body['occurrence'])])
+                previous = next((b for b in self.song['score']['patterns'].get(name, {}).get('beats', [])
+                                 if b['id'] == body['beat']['id']), None)
+                duration_edit = previous is not None and previous['written'] != body['beat']['written']
+            if body.get('action') in ('matrix_entry', 'shift_pitch', 'set_expression', 'cut', 'repeat', 'rest', 'delete', 'delete_beats', 'clean_beat', 'move_beats', 'transfer_voice', 'track_add', 'track_clone', 'track_remove', 'track_move') or duration_edit:
+                # Single-beat and range duration edits promise the same exact standalone IT timing.
+                api.compile_song(candidate, self.base_dir)
+            changes = [(('score',), candidate['score'])]
+            if candidate['module'] != self.song['module']:
+                changes.append((('module',), candidate['module']))
+            if candidate.get('instruments') != self.song.get('instruments'):
+                changes.append((('instruments',), candidate['instruments']))
+            changed = []
+            for name, entry in candidate['patterns'].items():
+                before = self.song['score']['patterns'].get(str(name))
+                after = candidate['score']['patterns'].get(str(name))
+                if (before != after or score_context(self.song, str(name)) != score_context(candidate, str(name))):
+                    if self.pattern_entry(str(name)).get('approved'):
+                        raise ValueError(f"pattern '{name}' is approved: clear its mark in the SONG tab first")
+                    changed.append(str(name))
+                if name not in self.song['patterns']:
+                    changes.append((('patterns', name), entry))
+            if candidate['orders'] != self.song['orders']:
+                changes.append((('orders',), candidate['orders']))
+            new = replace_values(self.text, changes)
+            # A command may grow a pattern (free-edit Insert rest): its rows are written as the Song tab writes them.
+            grown = [str(n) for n, e in candidate['patterns'].items() if n in self.song['patterns'] and isinstance(e, dict)
+                     and isinstance(self.song['patterns'][n], dict) and e.get('rows') != self.song['patterns'][n].get('rows')]
+            if grown:
+                lines = new.splitlines(keepends=True)
+                for n in grown:
+                    self._song_op(lines, [str(o) for o in self.song['orders']],
+                                  {'op': 'pattern_rows', 'name': n, 'rows': candidate['patterns'][n]['rows']}, [])
+                new = ''.join(lines)
+            if who == 'agent':
+                lines = new.splitlines(keepends=True)
+                for name in changed:
+                    previous = self.pattern_entry(name).get('by')
+                    old = self.song['score']['patterns'].get(name, {}).get('beats', [])
+                    raw = next((p for p in self.mod.patterns if p.name == name), None)
+                    blank = not old and (raw is None or all(c.is_empty() for row in raw.rows for c in row))
+                    mark = 'agent' if previous == 'agent' or previous is None and blank else 'you and agent'
+                    self._pattern_mark(lines, name, {'by': mark})
+                new = ''.join(lines)
+            loaded = load_for_state(new, self.base_dir, str(self.song_path))
+            self._commit(new, loaded=loaded, guard=guard)
+            return dict(ok=True, **result, revision=self.text_sha())
+
+    def measure_edit(self, body, guard=None):
+        """TuxGuitar's Measure menu (tablature.measure_command) as one undo step: new patterns are written as Song tab
+        patterns are, the order list through arrangement.reorder (sections, jumps, the loop), then the score."""
+        from .tablature import measure_command
+        with self.lock:
+            if self.dirty():
+                raise ValueError("the song changed on disk: RELOAD first")
+            self._need_compiled()
+            if body.get('revision') != self.text_sha():
+                raise ValueError("The song changed since this TAB command; refresh and try again")
+            if self.mod.native_score is None:
+                raise ValueError('TAB commands require native score timing')
+            raw = self.mod.score_projection.raw_patterns if self.mod.score_projection else self.mod.patterns
+            raw_last = {p.name: max((r for r, row in enumerate(p.rows) if any(not c.is_empty() for c in row)), default=-1)
+                        for p in raw}
+            plan = measure_command(self.song, body, raw_last, raw)
+            for name in plan['changed'] + plan['deleted'] + list(plan['resized']):
+                if self.pattern_entry(name).get('approved'):
+                    raise ValueError(f"pattern '{name}' is approved: clear its mark in the SONG tab first")
+            before = [str(o) for o in self.song['orders']]
+            lines, meta, orders = self.text.splitlines(keepends=True), copy.deepcopy(self.meta), list(before)
+            if body.get('independent') or body.get('action') == 'prepare_measures':
+                after = plan['orders']
+                if after != before:
+                    reorder(self, lines, before, after, plan['origins'], meta, widen=True, shrink=True)
+                # Order indices alone cannot retain a loop inside a newly split pattern.
+                # Carry its exact row endpoints through bar preparation and then the requested edit.
+                if self.meta.get('loop'):
+                    endpoints = {}
+                    for side, (order, row) in self.meta['loop'].items():
+                        position = plan['source_spans'][order] + row
+                        if body.get('action') == 'measure_meter':
+                            offset, mapped = 0, None
+                            for index, name in enumerate(after):
+                                count = plan['song']['patterns'][name]['rows']
+                                if offset <= position < offset + count:
+                                    mapped = [index, position - offset]
+                                    break
+                                offset += count
+                        else:
+                            old = next((i for i, (a, b) in enumerate(plan['source_bars']) if a <= position < b), None)
+                            index = next((i for i, origin in enumerate(plan['bar_origins']) if origin == old), None) if old is not None else None
+                            mapped = [index, position - plan['source_bars'][old][0]] if index is not None else None
+                            if mapped and mapped[1] >= plan['song']['patterns'][after[index]]['rows']:
+                                mapped = None
+                        endpoints[side] = mapped
+                    meta['loop'] = endpoints if all(endpoints.values()) and endpoints['from'] <= endpoints['to'] else None
+                new = replace_values(''.join(lines), [(('patterns',), plan['song']['patterns']),
+                    (('orders',), after), (('score',), plan['song']['score'])])
+                if new == self.text:
+                    return dict(ok=True, report=plan['report'], revision=self.text_sha())
+                api.compile_song(api.from_yaml(new), self.base_dir)
+                loaded = load_for_state(new, self.base_dir, str(self.song_path))
+                self._commit(new, loaded=loaded, meta=meta, guard=guard)
+                return dict(ok=True, report=plan['report'], revision=self.text_sha())
+            for name, spec in plan['created'].items():
+                self._song_op(lines, orders, {'op': 'pattern_clone', 'src': spec['clone'], 'name': name} if spec['clone']
+                              else {'op': 'pattern_new', 'name': name, 'rows': spec['rows']}, [])
+            for name, rows in plan['resized'].items():
+                self._song_op(lines, orders, {'op': 'pattern_rows', 'name': name, 'rows': rows}, [])
+            after = plan['orders']
+            if after != before:
+                reorder(self, lines, before, after, plan['origins'], meta, widen=True, shrink=True)
+                self._write_orders(lines, after)
+            for name in plan['deleted']:
+                self._song_op(lines, after, {'op': 'pattern_delete', 'name': name}, [])
+            new = replace_values(''.join(lines), [(('score',), plan['song']['score'])])
+            if new == self.text:
+                return dict(ok=True, report=plan['report'], revision=self.text_sha())
+            api.compile_song(api.from_yaml(new), self.base_dir)
+            loaded = load_for_state(new, self.base_dir, str(self.song_path))
+            self._commit(new, loaded=loaded, meta=meta, guard=guard)
+            return dict(ok=True, report=plan['report'], revision=self.text_sha())
 
     def pattern_entry(self, name):
         """The song file's entry of pattern `name` as a dict ({} when it is written as one block)."""
@@ -1711,6 +2643,18 @@ class State:
         """Pattern `name`'s marks (`by`, `approved`) set in `lines`; a value of None or False removes the key."""
         j = self._pattern_key(lines, name)
         if lines[j].split("#")[0].split(":", 1)[1].strip():
+            if self.mod is not None and self.mod.native_score is not None:
+                current = api.from_yaml(''.join(lines))
+                key = next(k for k in current['patterns'] if str(k) == str(name))
+                entry = current['patterns'][key]
+                if isinstance(entry, dict):
+                    for field, value in fields.items():
+                        if value is None or value is False:
+                            entry.pop(field, None)
+                        else:
+                            entry[field] = value
+                    lines[:] = replace_values(''.join(lines), [(('patterns', key), entry)]).splitlines(keepends=True)
+                    return
             raise ValueError(f"pattern '{name}' is written as one block: give it 'rows:' and 'data: |' to mark it")
         kids = self._children(lines, j)
         ind = " " * (self._ind(lines[kids[0][0]]) if kids else self._ind(lines[j]) + 2)
@@ -1730,7 +2674,8 @@ class State:
         """Make the compiled cells explicit; one undo restores the original pattern notation."""
         with self.lock:
             self._need_compiled()
-            pat = self.mod.patterns[self.pattern_at(index)]
+            idx = self.pattern_at(index)
+            pat = (self.mod.score_projection.raw_patterns if self.mod.score_projection else self.mod.patterns)[idx]
             lines = self.text.splitlines(keepends=True)
             data = ''.join(f"{r:02d}: {' | '.join(format_cell(c) for c in row)}\n"
                            for r, row in enumerate(pat.rows))
@@ -1758,7 +2703,23 @@ class State:
         same step added channels."""
         pat = pat or self.mod.patterns[self.pattern_at(index)]
         nch, nrows = nch or len(self.mod.channels), len(pat.rows)
-        first, end = self._pattern_block(lines, pat.name)
+        try:
+            first, end = self._pattern_block(lines, pat.name)
+        except ValueError:
+            # Native score-only patterns commonly start with empty, inline data. Expand that raw source, not score cells.
+            if self.mod.native_score is None:
+                raise
+            current = api.from_yaml(''.join(lines))
+            entry = next(v for k, v in current['patterns'].items() if str(k) == pat.name)
+            if not isinstance(entry, dict) or not isinstance(entry.get('data', ''), str):
+                raise
+            entry['data'] = (entry.get('data') or
+                             ''.join(f"{r:02d}: {' | '.join(['... .. ... ...'] * nch)}\n" for r in range(nrows)))
+            entry['data'] = entry['data'].rstrip('\n') + '\n'
+            at = self._pattern_key(lines, pat.name)
+            indent = ' ' * self._ind(lines[at])
+            lines[at:self._span(lines, at)] = [indent + line + '\n' for line in api.to_yaml({pat.name: entry}).splitlines()]
+            first, end = self._pattern_block(lines, pat.name)
         rows = [i for i in range(first, end) if lines[i].split(";", 1)[0].strip()]
         labels = [re.match(r"^\s*(\d+)\s*:", lines[i]) for i in rows]
         width, labelled = next((len(m.group(1)) for m in labels if m), 2), any(labels) or not rows
@@ -1986,7 +2947,11 @@ class State:
         if new == self.text and meta == self.meta:
             return
         new = api.refresh_written_by(new)  # a comment, in place: what `loaded` compiled stays line for line the same
-        loaded = loaded or load_song_text(new, self.base_dir, str(self.song_path))
+        if loaded is not None and loaded[0].score_projection is not None:
+            loaded = None
+        loaded = loaded or load_for_state(new, self.base_dir, str(self.song_path))
+        if loaded[0].native_score is not None:
+            facts_of(*loaded)  # Validate derived State before any file/history publication.
         if guard is not None:
             guard(new, loaded, meta)
         changed = {k: copy.deepcopy(self.meta.get(k)) for k in self.META_KEYS if self.meta.get(k) != meta.get(k)}
@@ -2079,14 +3044,37 @@ class State:
     def _map_rows(self, lines, fn):
         """Every row of every pattern with its cells' texts passed through `fn` (a channel removed or moved)."""
         self._need_compiled()
-        for pat in self.mod.patterns:
-            first, end = self._pattern_block(lines, pat.name)
+        current = api.from_yaml(''.join(lines))
+        channels = current['module']['channels']
+        width = len(channels)
+        mapped = fn(list(range(width)))
+        automation = []
+        for name, entry in current['patterns'].items():
+            if isinstance(entry, dict):
+                for index, lane in enumerate(entry.get('automation', [])):
+                    channel = lane.get('channel', 1)
+                    old = channel - 1 if type(channel) is int else next(i for i, c in enumerate(channels) if str(c.get('name', '')) == str(channel))
+                    if old not in mapped:
+                        raise ValueError(f"pattern '{name}': remove automation lane {index + 1} before deleting its channel")
+                    if type(channel) is int:
+                        target = mapped.index(old) + 1
+                        if 'channel' in lane:
+                            automation.append((('patterns', name, 'automation', index, 'channel'), target))
+                        else:
+                            automation.append((('patterns', name, 'automation', index), dict(lane, channel=target)))
+                if not entry.get('data') and set(entry) <= {'rows', 'data', 'by', 'approved', 'automation'}:
+                    continue  # Empty residual source; score and automation have their own mappings.
+            elif not entry:
+                continue
+            first, end = self._pattern_block(lines, str(name))
             for i in range(first, end):
                 if lines[i].split(";", 1)[0].strip():
                     head, parts, tail = self._row(lines[i])
                     cells = [p.strip() for p in parts]
-                    cells += ['... .. ... ...'] * (len(self.mod.channels) - len(cells))
+                    cells += ['... .. ... ...'] * (width - len(cells))
                     lines[i] = self._rejoin(head, parts, fn(cells), tail)
+        if automation:
+            lines[:] = replace_values(''.join(lines), automation).splitlines(keepends=True)
 
     def _channel_lines(self, lines):
         mod = self._top(lines, "module")
@@ -2144,7 +3132,8 @@ class State:
             # each order that plays the source; sections around those orders widen to take it, jumps (Bxx) follow
             from types import SimpleNamespace
             self._need_compiled()
-            pat = self.mod.patterns[self.pattern_at(op["pattern"])]
+            idx = self.pattern_at(op["pattern"])
+            pat = (self.mod.score_projection.raw_patterns if self.mod.score_projection else self.mod.patterns)[idx]
             row, n = int(op.get("row") or 0), len(pat.rows)
             if not 1 <= row < n:
                 raise ValueError(f"split at a row from 1 to {n - 1}: the rows from it go to a new pattern")
@@ -2189,6 +3178,14 @@ class State:
             del lines[j:self._span(lines, j)]
         elif kind == "pattern_rows":
             name, rows = str(op["name"]), max(1, min(200, int(op["rows"])))
+            if self.mod is not None and self.mod.native_score is not None:
+                current = api.from_yaml(''.join(lines))
+                key = next(k for k in current['patterns'] if str(k) == name)
+                entry = current['patterns'][key]
+                if isinstance(entry, dict) and not entry.get('data'):
+                    entry['rows'] = rows
+                    lines[:] = replace_values(''.join(lines), [(('patterns', key), entry)]).splitlines(keepends=True)
+                    return
             j = self._pattern_key(lines, name)
             kids = self._children(lines, j)
             at = next((i for i, k in kids if k == "rows"), None)
@@ -2508,7 +3505,7 @@ class State:
         effects. A copy that lands past its pattern's end is dropped, and one onto a cell that is not empty is skipped,
         each counted in the report. Part of the song edit's one undo step."""
         from .model import Cell, NOTE_FADE
-        self._need_compiled()
+        self._need_tracker_operation('Echo')
         mod, nch = self.mod, len(self.mod.channels)
         src, delay, ticks = int(op["ch"]), int(op.get("rows") or 0), int(op.get("ticks") or 0)
         level = max(0.0, min(400.0, float(op.get("level", 60)))) / 100
@@ -2626,8 +3623,19 @@ class State:
         silenced = [c for c in range(nch) if c not in set(chans)] if chans is not None else self.silenced()
         if len(silenced) >= nch:
             raise ValueError("no channel to render: every one is muted or left out")
+        if mod.native_score is not None:
+            from .export import snapshot, render
+            with self.lock:
+                base, mix = copy.deepcopy(self.song), copy.deepcopy(self.mix())
+            snap = snapshot(base, self.base_dir, region=(order, r0, order, r1), mix=mix,
+                            muted=silenced, tail=tail)
+            pcm = render(snap, cancel=lambda: self.closed)
+            x = np.frombuffer(pcm, "<i2").reshape(-1, 2)
+            rows_end = min(len(x), snap['frames'] - round(tail * RATE))
+            loud = np.nonzero(np.abs(x[rows_end:].astype(np.int32)).max(axis=1) > 2)[0]
+            return x[:rows_end + (loud[-1] + 1 if len(loud) else 0)].tobytes(), snap['seconds']
         with self.lock:
-            base = api.tryout_song(self.song, (0, order + 1))  # the orders up to this one, jumps kept inside them
+            base = api.tryout_song(self.song, (0, order + 1), compiled=self.mod)  # the orders up to this one, jumps kept inside them
             inst, mix = self.mix().get("instrument") or {}, self.mix()
         for n, edit in inst.items():
             if int(n) in (base.get("instruments") or {}):
@@ -2811,6 +3819,7 @@ class State:
         """One pattern's cells for a composition op (the ops `_compose` writes; see there), computed on the compiled
         rows and not written: (cells, skipped, extra notes for the report). The agent's transform_patterns calls it too,
         so the page and the agent run one dispatch."""
+        self._need_tracker_operation('Pattern transforms')
         from . import compose
         mod, kind, nch = self.mod, op["op"], len(self.mod.channels)
         whole = op.get("pattern") is None
@@ -3042,6 +4051,7 @@ class State:
                 playable = [i for i, o in enumerate(self.facts['orders']) if a <= o['order'] < b]
                 if not playable:
                     raise ValueError('The section has no playable orders')
+                self._order_region([playable[0], playable[-1] + 1])
                 meta['orders'] = [playable[0], playable[-1]+1]
                 if action == 'loop':
                     meta['loop'] = {'from': [playable[0], 0], 'to': [playable[-1], self.facts['orders'][playable[-1]]['rows']-1]}
@@ -3067,7 +4077,9 @@ class State:
                 for src in dict.fromkeys(before[a:b]):
                     if src in ('+++', '---'):
                         continue
-                    first, end = self._pattern_block(lines, src)
+                    raw = self.song['patterns'][src]
+                    empty = isinstance(raw, dict) and not raw.get('data')
+                    first, end = (0, 0) if empty else self._pattern_block(lines, src)
                     if not independent and any(a <= int(m.group(1), 16) < b for line in lines[first:end]
                                               for m in api._JUMP.finditer(line.partition(';')[0])):
                         raise ValueError('Shared copy has jumps into its section; choose independent patterns to keep those jumps inside the copy')
@@ -3075,6 +4087,11 @@ class State:
                         clone = next(n for n in (src + '_copy' + str(i) for i in itertools.count(1)) if n not in names)
                         names.add(clone)
                         self._song_op(lines, list(before), {'op': 'pattern_clone', 'src': src, 'name': clone}, [])
+                        if 'score' in self.song:
+                            from .tablature import apply_structure_edit
+                            current = api.from_yaml(''.join(lines))
+                            mapped = apply_structure_edit(current, {'op': 'pattern_clone', 'src': src, 'name': clone})
+                            lines = replace_values(''.join(lines), [(('score',), mapped['score'])]).splitlines(keepends=True)
                         clones[src] = clone
                 segment = [clones.get(p, p) for p in before[a:b]]
                 after = before[:at] + segment + before[at:]
@@ -3084,6 +4101,9 @@ class State:
             mapping = reorder(self, lines, before, after, origins, meta)
             if action == 'duplicate':
                 for clone in clones.values():
+                    raw = api.from_yaml(''.join(lines))['patterns'][clone]
+                    if isinstance(raw, dict) and not raw.get('data'):
+                        continue
                     first, end = self._pattern_block(lines, clone)
                     inside = {mapping[i]: insert + i-a for i in range(a, b)}
                     for i in range(first, end):
@@ -3095,6 +4115,28 @@ class State:
                     new_name = next(f'{new_name} {i}' for i in itertools.count(2) if f'{new_name} {i}' not in sections)
                 sections[new_name] = [insert, insert + b-a]
                 lines = sections_text(''.join(lines), sections).splitlines(keepends=True)
+            if 'score' in self.song:
+                from .tablature import apply_structure_edit
+                current = api.from_yaml(''.join(lines))
+                mapped = apply_structure_edit(current, {'op': 'orders', 'orders': after, 'origins': origins})['score']
+                if action == 'duplicate':
+                    copied = dict(zip(self.song['score']['order_ids'][a:b], mapped['order_ids'][insert:insert + b-a]))
+                    for collection in ('ties', 'measures'):
+                        used = {item.get('id') for item in mapped.get(collection, [])}
+                        for item in self.song['score'].get(collection, []):
+                            inside = [item[side]['occurrence'] in copied for side in ('from', 'to')]
+                            if any(inside) and not all(inside):
+                                raise ValueError(f'Section boundary crosses a score {collection[:-1]}; adjust its boundaries first')
+                            if all(inside):
+                                duplicate = copy.deepcopy(item)
+                                for side in ('from', 'to'):
+                                    duplicate[side]['occurrence'] = copied[item[side]['occurrence']]
+                                if 'id' in duplicate:
+                                    duplicate['id'] = next(f"{item['id']}_copy{i}" for i in itertools.count(1)
+                                                           if f"{item['id']}_copy{i}" not in used)
+                                    used.add(duplicate['id'])
+                                mapped.setdefault(collection, []).append(duplicate)
+                lines = replace_values(''.join(lines), [(('score',), mapped)]).splitlines(keepends=True)
             self._write_orders(lines, after)
             self._commit(''.join(lines), meta=meta, guard=guard)
 
@@ -3167,7 +4209,21 @@ class State:
             self._report = []   # what an op tells the page (the echo's counts)
             try:
                 for op in ops:
+                    mapped_score = None
+                    if 'score' in self.song and op.get('op') != 'mark':
+                        from .tablature import apply_structure_edit
+                        current = api.from_yaml(''.join(lines))
+                        current['orders'] = list(orders)
+                        operation = dict(op)
+                        if op.get('op') == 'pattern_split':
+                            pat = self.mod.patterns[self.pattern_at(op['pattern'])]
+                            names = {k for _, k in self._children(lines, self._top(lines, 'patterns'))}
+                            operation.update(name=pat.name, new=next(f'{pat.name}_{i}' for i in itertools.count(2)
+                                                                    if f'{pat.name}_{i}' not in names))
+                        mapped_score = apply_structure_edit(current, operation)['score']
                     self._song_op(lines, orders, op, remap)
+                    if mapped_score is not None:
+                        lines = replace_values(''.join(lines), [(('score',), mapped_score)]).splitlines(keepends=True)
                 if orders != before:
                     explicit = [op['origins'] for op in ops if op.get('op') == 'orders' and 'origins' in op]
                     origins = explicit[-1] if explicit else (list(range(len(before))) if all(op.get('op') == 'pattern_rename' for op in ops)
@@ -3178,7 +4234,7 @@ class State:
                     reorder(self, lines, before, orders, origins, meta,
                             widen=any(op.get("op") == "pattern_split" for op in ops))  # a split's part joins its sections
                     self._write_orders(lines, orders)
-                loaded = load_song_text("".join(lines), self.base_dir, str(self.song_path))
+                loaded = load_for_state("".join(lines), self.base_dir, str(self.song_path))
             except Exception:
                 for f in self._created:
                     f.unlink(missing_ok=True)
@@ -3222,7 +4278,9 @@ class State:
             target = copy.deepcopy(self.meta)
             if meta:
                 target.update(copy.deepcopy(meta))
-            loaded = load_song_text(step['text'], self.base_dir, str(self.song_path))
+            loaded = load_for_state(step['text'], self.base_dir, str(self.song_path))
+            if loaded[0].native_score is not None:
+                facts_of(*loaded)
             history, future = (dst + [back], src[:-1]) if redo else (src[:-1], dst + [back])
             self.history, self.future = self._write_step(step['text'], target, history, future)
             self.meta = target
@@ -3547,9 +4605,9 @@ class State:
         if getattr(self, "_unused", (None,))[0] == self.text:
             return self._unused[1]
         mod, out = self.mod, {"patterns": [], "instruments": [], "samples": []}
-        if mod:
+        if mod and not self.error:
             played = {o for o in mod.orders if o < 254}
-            cells = {c.instrument for i in played for row in mod.patterns[i].rows for c in row if c.instrument}
+            cells = voice_references(self.song, mod, played=True)
             out["patterns"] = [p.name for i, p in enumerate(mod.patterns) if i not in played]
             if mod.instruments is not None:
                 used = {n for n in cells if 0 < n <= len(mod.instruments)}
@@ -3589,10 +4647,20 @@ class State:
 
     # ---- pattern view
 
-    def pattern_rows(self, index):
+    def pattern_rows(self, index, occurrence=None):
         """One pattern as read-only tracker rows; each cell in the 'C-5 01 v64 A06' layout libopenmpt prints."""
         pat = self.mod.patterns[self.pattern_at(index)]
+        if self.mod.native_score is not None:
+            from .tablature import pattern_authoring_view
+            view = pattern_authoring_view(self.song, self.mod.patterns, self.pattern_at(index), occurrence,
+                                          view=self.mod.native_score['view'])
+            return {**view, "name": pat.name, "revision": self.text_sha(), "native": True,
+                    "score_positions": view['positions'],
+                    "lanes": [[r, ch, col, lane] for (r, ch), (col, lane) in sorted(pat.lanes.items())]}
+        projection = self.mod.score_projection
         return {"name": pat.name, "index": index, "rows": [[format_cell(c) for c in row] for row in pat.rows],
+                "revision": self.text_sha(),
+                "score_positions": [p for p in projection.positions if p['pattern'] == index] if projection else [],
                 "lanes": [[r, ch, col, lane] for (r, ch), (col, lane) in sorted(pat.lanes.items())]}
 
     # ---- snapshot for the page
@@ -3652,6 +4720,7 @@ class State:
                          "slot_meas": slot_meas},
                 "slot": slot, "slot_entry": entry, "slot_file": cur, "ref": ref, "selected_candidate": self.want,
                 "orders": list(self.orders) if self.orders else None, "loop": self.meta.get("loop"),
+                **self._playback_selection(),
                 "match": bool(self.meta.get("match_level")),
                 "muted": sorted(set(self.meta.get("muted") or [])), "solo": self.meta.get("solo"),
                 "own": {"key": ok, "status": own["status"], "error": own.get("error"), "peak": own.get("peak"),
@@ -3659,6 +4728,10 @@ class State:
                 "chosen_numbers": next((mix_numbers(self.renders[c["key"]]["file"]) for c in cands
                                         if c["path"] == self.want and c["status"] == "ready"), None),
                 "mix": self.mix(), "meters": self.meters, "voice": voice, "spec": {"db": SPEC_DB, "stops": SPEC_STOPS, "nyquist": RATE / 2},
+                "source_pan_channels": sorted({ch for track in self.song.get('score', {}).get('tracks', {}).values()
+                                               if 'source_pan' in track.get('midi', {}) for ch in track['channels']}),
+                "source_volume_channels": sorted({ch for track in self.song.get('score', {}).get('tracks', {}).values()
+                                                  if 'source_volume' in track.get('midi', {}) for ch in track['channels']}),
                 "reference": self.meta.get("reference"), "delta": {"db": DELTA_DB, "stops": DELTA_STOPS},
                 "voice_range": VOICE_RANGE, "dmo": DMO,
                 "candidates": cands, "build": self.build, "stems": self.stems, "export": self.export_result,

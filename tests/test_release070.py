@@ -296,6 +296,38 @@ class TestRelease070(unittest.TestCase):
         self.assertIn('data: |', st.text)
         st.edit_cells(0, [{'row': 0, 'ch': 0, 'cell': 'E-5 01 ... ...'}])
 
+    def test_native_backing_uses_the_recorder_clock(self):
+        from fractions import Fraction
+        from tests.test_tablature_sync import TestNativeLoadedModule
+        from vulturetracker import export
+        from vulturetracker.wavload import write_wav
+        song = TestNativeLoadedModule().native_song()
+        song['module']['tempo'] = 137
+        song['sections'] = {'First': [0, 1]}
+        write_wav(self.dir / 'tone.wav', 48000, [fixtures.sine(220, seconds=0.5)])
+        st = self.song(api.to_yaml(song))
+        before = st.text
+        r = fake_recorder()
+        with mock.patch.object(server.Handler, 'state', st), mock.patch.object(server.Handler, 'recorder', r):
+            try:
+                for rate in (44100, 48000):
+                    with self.subTest(rate=rate):
+                        r.open(0, '1', rate)
+                        result = server.Handler.rec_command({'cmd': 'start', 'backing': True, 'section': 'First',
+                                                            'output': 0, 'countin': 0, 'loops': 2})
+                        self.assertNotIn('error', result)
+                        snap = export.snapshot(st.song, st.base_dir, (0, 0, 0, len(st.mod.patterns[0].rows)-1),
+                                               st.mix(), st.silenced(), tail=0)
+                        boundaries = [Fraction(*q) * rate * 60 / 137 for q in snap['range_at']]
+                        frames = [int(q + Fraction(1, 2)) for q in boundaries]
+                        self.assertEqual(len(r.backing['pcm']), frames[1] - frames[0])
+                        expected = np.frombuffer(export.render(snap, rate=rate), dtype='<i2').reshape(-1, 2) / 32768
+                        np.testing.assert_array_equal(r.backing['pcm'], expected)
+                        r.close()
+                self.assertEqual(st.text, before)
+            finally:
+                r.close()
+
     def test_backing_route_saves_separate_untrimmed_takes(self):
         st = self.song(fixtures.SONG_BLOCK)
         r = fake_recorder()

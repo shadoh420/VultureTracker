@@ -19,6 +19,9 @@ song.yaml ──build──▶ song.it ──render──▶ .wav / .mp3 / .ogg 
 - **A tracker on a text file:** patterns, instruments and the order list with OpenMPT's keys and behaviour, MIDI input,
   and a live engine that plays every edit. Automation lanes, microtuning (Scala `.scl`/`.kbm`), arpeggios, strums,
   grooves and OpenMPT's interpolate, grow and shrink.
+- **Native TAB and score editing:** Guitar Pro and TuxGuitar import, editable notation and tablature linked to Pattern,
+  one shared Undo history, native playback, and a continuously scrollable Pattern song view. See
+  [GUIDE.md](GUIDE.md) for interchange limits and the [parity inventory](TABLATURE-PARITY.md) for remaining differences.
 - **Choosing sounds in context:** the Tryout renders candidate samples inside the song and measures them; a mixer,
   listening notes, and a sample library mapped by timbre.
 - **Making sounds:** a sample editor with effects and slicing, recording from an audio interface, Faust, painted

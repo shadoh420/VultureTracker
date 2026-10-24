@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tempfile
 import zipfile
 
@@ -15,6 +17,40 @@ from . import api
 from .fileio import atomic_write, link_new, protect_outputs
 from .history import SIDE_SCHEMA, digest, json_bytes
 from .song import it_text
+
+
+def song_shortcut(state, destination):
+    """Write the Windows link selected by a native Save dialog, without changing the song."""
+    if sys.platform != 'win32':
+        raise ValueError('Song shortcuts are available on Windows only')
+    path = Path(destination)
+    if not path.is_absolute() or path.suffix.lower() != '.lnk' or path.is_symlink():
+        raise ValueError('Choose an absolute Windows shortcut filename ending in .lnk')
+    from .export import sources
+    executable = Path(sys.executable).resolve()
+    if getattr(sys, 'frozen', False):
+        arguments, working = ['gui', str(state.song_path.resolve())], executable.parent
+    else:
+        executable = executable.with_name('pythonw.exe')
+        arguments, working = ['-m', 'vulturetracker', 'gui', str(state.song_path.resolve())], Path(__file__).resolve().parent.parent
+    if not executable.is_file():
+        raise ValueError(f'Shortcut launcher does not exist: {executable}')
+    protected = [*sources(state), executable, Path(sys.executable)]
+    protect_outputs([path], protected)
+    # All user values are data, never PowerShell source or shell-interpolated commands.
+    script = "$ErrorActionPreference='Stop'; $s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:VT_LINK_PATH); $s.TargetPath=$env:VT_LINK_TARGET; $s.Arguments=$env:VT_LINK_ARGS; $s.WorkingDirectory=$env:VT_LINK_CWD; $s.Description='Open song in VultureTracker'; $s.Save()"
+    with tempfile.TemporaryDirectory(prefix='vt-shortcut-') as folder:
+        tmp = Path(folder) / 'song.lnk'
+        env = dict(os.environ, VT_LINK_PATH=str(tmp), VT_LINK_TARGET=str(executable),
+                   VT_LINK_ARGS=subprocess.list2cmdline(arguments), VT_LINK_CWD=str(working))
+        powershell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        result = subprocess.run([str(powershell), '-NoProfile', '-NonInteractive', '-Command', script],
+                                env=env, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        if result.returncode:
+            raise ValueError('Windows could not create the song shortcut')
+        protect_outputs([path], protected)
+        atomic_write(path, tmp.read_bytes())
+    return str(path)
 
 
 def _same_key(node, key):
@@ -47,6 +83,11 @@ def replace_values(text, replacements):
                 raise ValueError(f'{keys}: not a YAML mapping or sequence')
         else:
             span = node.start_mark.index, node.end_mark.index
+            if isinstance(node, (yaml.MappingNode, yaml.SequenceNode)) and not node.flow_style:
+                raw = text[span[0]:span[1]]
+                newline = raw.rfind('\n')
+                if newline >= 0 and not raw[newline:].strip():
+                    encoded += raw[newline:]  # block-node spans include the separator before the following key
             if span in edits and edits[span] != encoded:
                 raise ValueError('Shared YAML alias needs different values; expand that alias before editing')
             edits[span] = encoded

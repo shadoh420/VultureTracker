@@ -1,0 +1,112 @@
+.vt-tab {display:flex;flex-direction:column;gap:8px;min-height:0;padding:10px;color:var(--fg,#d8dfe3);font:12px var(--mono,monospace);overflow:auto}
+.vt-tab:focus {outline:1px solid var(--acc,#69ceb4);outline-offset:-1px}
+.vt-tab-tools,.vt-tab-entry,.vt-tab-setup,.vt-tab-measures,.vt-tab-transpose {display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px}
+.vt-tab-nav,.vt-tab-nav [role=group] {display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.vt-tab-nav {gap:12px}
+.vt-tab label {display:inline-flex;align-items:center;gap:5px}
+.vt-tab label[hidden],.vt-tab-entry[hidden] {display:none}
+.vt-tab input,.vt-tab select,.vt-tab button {font:inherit;color:inherit;background:var(--panel,#20292e);border:1px solid var(--line,#46535b);border-radius:3px;padding:5px 7px}
+.vt-tab button {cursor:pointer}
+.vt-tab button:hover,.vt-tab button:focus-visible {border-color:var(--acc,#69ceb4)}
+.vt-tab button:disabled {opacity:.45;cursor:default}
+.vt-tab button[aria-pressed=true] {border-color:var(--acc,#69ceb4)}
+.vt-tab input[type=number] {width:55px}
+.vt-tab [data-ui=at] {width:65px}
+.vt-tab .vt-tab-setup,.vt-tab .vt-tab-measures,.vt-tab .vt-tab-transpose {padding:10px;background:var(--panel,#20292e)}
+.vt-tab .vt-tab-setup[hidden],.vt-tab .vt-tab-measures[hidden],.vt-tab .vt-tab-transpose[hidden] {display:none}
+.vt-tab-setup p,.vt-tab-measures p {flex-basis:100%;margin:0;color:var(--dim,#98a9b2)}
+.vt-tab-measures input:not([type=number]) {width:70px}
+.vt-tab p {margin:0;line-height:1.5}
+.vt-tab-status {min-height:18px;color:var(--acc,#69ceb4)}
+.vt-tab-help {color:var(--dim,#98a9b2)}
+.vt-tab-diagnostics,.vt-tab-warning {color:var(--amber,#e9bd6e)}
+.vt-tab-grid {overflow:auto;flex-shrink:0;max-height:300px}
+.vt-tab-raw {overflow:auto;flex-shrink:0;max-height:240px;color:var(--dim,#98a9b2)}
+.vt-tab-raw td {padding:3px 8px 3px 0}
+.vt-tab-grid table {border-collapse:collapse;min-width:250px}
+.vt-tab-grid th {font-weight:normal;white-space:nowrap;padding:3px}
+.vt-tab-grid td {padding:1px 3px;background:linear-gradient(transparent 48%,#566269 48%,#566269 52%,transparent 52%)}
+.vt-tab-grid button {min-width:45px;width:100%;position:relative}
+.vt-tab-grid button.selected {background:var(--acc,#69ceb4);color:#10191b;border-color:var(--acc,#69ceb4)}
+.vt-tab-grid button.playing {box-shadow:inset 0 -3px var(--amber,#e9bd6e)}
+.vt-tab-grid button.copy-selected {border-bottom:2px solid var(--acc,#69ceb4)}
+.vt-tab-playhead {position:absolute;width:3px;background:#d47c0c;opacity:.65;pointer-events:none;z-index:2}
+.vt-tab-edit-caret {position:absolute;width:20px;box-sizing:border-box;border:2px solid #006f80;background:#00a0b31c;border-radius:2px;transform:translate(-50%,-50%);pointer-events:none;z-index:3}
+.vt-tab-edit-caret[hidden],.vt-tab-playhead[hidden] {display:none}
+.vt-tab-inspector,.vt-tab-grid-details,.vt-tab-keyboard-help {flex-shrink:0}
+.vt-tab summary {cursor:pointer;padding:5px 0;color:var(--dim,#98a9b2)}
+.vt-tab-inspector[open] {display:flex;flex-direction:column;gap:8px}
+.vt-tab-inspector[open] > div {margin:8px 0}
+.vt-tab-inspector[open] {max-height:250px;overflow:auto;overscroll-behavior:contain;border-block:1px solid var(--line,#46535b)}
+.vt-tab-inspector > summary {position:sticky;top:0;background:var(--panel,#20292e);z-index:4}
+.vt-tab-quick-nav {display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.vt-tab-shortcut-editor {display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 0}
+.vt-tab-shortcut-editor input {width:140px}
+.vt-tab-score {position:relative;background:#fff;color:#222;min-height:160px;flex-shrink:0;padding:4px;overflow:hidden;border-radius:3px}
+.vt-tab-score svg {max-width:100%}
+.vt-tab-score[data-layout=horizontal] {overflow-x:auto}
+.vt-tab-score[data-layout=horizontal] svg {max-width:none}
+.vt-tab-view {flex-shrink:0}
+.vt-tab-view .vt-tab-tools {margin:6px 0}
+.vt-tab-view [data-ui=view-scale] {width:65px}
+.vt-fretboard {flex-shrink:0}
+.vt-fretboard > .vt-tab-tools {margin:5px 0}
+.vt-fretboard-settings > .vt-tab-tools {margin:5px 0}
+.vt-fretboard [data-fb=scale] {max-width:min(420px,70vw)}
+.vt-fretboard [data-fb=font] {width:130px}
+.vt-fretboard input[type=color] {padding:1px;width:32px;height:25px}
+.vt-fretboard-scroll {overflow:auto;max-height:450px;margin:6px 0;border:1px solid var(--line,#47565e)}
+.vt-fretboard svg {display:block;max-width:none}
+.vt-fretboard [role=button] {cursor:pointer}
+.vt-fretboard [role=button][aria-disabled=true] {cursor:default}
+.vt-fretboard [role=button]:focus {outline:none}
+.vt-fretboard [role=button]:focus-visible > rect {stroke:#ffcf57;stroke-width:3}
+.vt-fretboard [role=button]:hover > rect {stroke:#69ceb4}
+.vt-fretboard text {pointer-events:none}
+.vt-piano {flex-shrink:0}
+.vt-piano .vt-tab-tools {margin:6px 0}
+.vt-piano-scroll {overflow:auto;border:1px solid var(--line,#47565e);margin:6px 0}
+.vt-piano-keys {position:relative;height:130px}
+.vt-piano-keys button {position:absolute;bottom:0;width:38px;height:130px;border-radius:0;padding:3px;display:flex;align-items:end;justify-content:center;font-size:10px;background:#f0f1ee;color:#172027;border-color:#626d73}
+.vt-piano-keys button.sharp {width:24px;height:82px;top:0;z-index:1;background:#222c33;color:white}
+.vt-piano-keys button[data-scale=true] {box-shadow:inset 0 -7px #8c79c8}
+.vt-piano-keys button[aria-pressed=true] {background:#69ceb4;color:#11272a}
+.vt-piano-keys button[aria-disabled=true] {cursor:default;opacity:.55}
+.vt-piano-keys button:focus-visible {outline:3px solid #edb542;outline-offset:-3px}
+.vt-piano-keys.drums {display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));height:auto;gap:3px;padding:4px}
+.vt-piano-keys.drums button {position:static;width:auto;height:40px;align-items:center}
+.vt-print {font:14px system-ui,sans-serif;color:#20262b;background:#e5e8eb;padding:16px;min-height:100vh;box-sizing:border-box}
+.vt-print-controls {max-width:1100px;margin:0 auto 16px;padding:16px;background:#fff;border:1px solid #bcc5cc;border-radius:5px}
+.vt-print-controls h1 {font-size:22px;margin:0 0 8px}
+.vt-print-controls p {line-height:1.5}
+.vt-print-controls fieldset,.vt-print-options {display:flex;gap:12px;flex-wrap:wrap;margin:12px 0}
+.vt-print-controls label {display:flex;align-items:center;gap:6px}
+.vt-print-controls input,.vt-print-controls select,.vt-print-controls button {font:inherit;padding:6px;border:1px solid #8a98a3;border-radius:3px;background:#fff;color:#20262b}
+.vt-print-controls input[type=number] {width:64px}
+.vt-print-controls input[type=checkbox] {width:18px;height:18px}
+.vt-print-controls button {cursor:pointer;background:#e6f2ef}
+.vt-print-controls button:disabled {opacity:.5;cursor:default}
+.vt-print-status {max-width:1100px;margin:12px auto;line-height:1.5}
+.vt-print-pages {display:flex;flex-direction:column;align-items:safe center;gap:20px;overflow:auto}
+.vt-print-page {position:relative;width:var(--vt-paper-width);height:var(--vt-paper-height);padding:var(--vt-paper-margins);box-sizing:border-box;background:white;box-shadow:0 2px 8px #0003;flex-shrink:0}
+.vt-print-footer {position:absolute;bottom:2mm;left:15mm;width:calc(100% - 30mm);height:8mm;display:block}
+.vt-print-content {font-size:0;line-height:0;position:relative;width:100%;height:100%}
+.vt-print-part {position:relative;break-inside:avoid;line-height:0}
+.vt-print-part svg {display:block}
+.vt-print-render {position:absolute;left:-100000px;top:0;pointer-events:none}
+@media print {
+  html,body {margin:0!important;padding:0!important;background:white!important}
+  .vt-print {padding:0;min-height:0;background:white}
+  .vt-print-controls,.vt-print-status,.vt-print-render {display:none!important}
+  .vt-print-pages {display:block;overflow:visible}
+  .vt-print-page {margin:0;box-shadow:none;break-after:page;break-inside:avoid;overflow:hidden}
+  .vt-print-page:last-child {break-after:auto}
+}
+@media (max-height:600px) {
+  .vt-tab {gap:5px;padding:6px;font-size:11px}
+  .vt-tab-tools,.vt-tab-entry {gap:4px 7px}
+  .vt-tab input,.vt-tab select,.vt-tab button {padding:3px 5px}
+  .vt-tab-grid {max-height:180px}
+  .vt-tab-help {font-size:10px}
+}
+.vt-tab-selection{position:absolute;pointer-events:none;background:rgba(80,160,255,.18);outline:1px solid rgba(80,160,255,.6)}

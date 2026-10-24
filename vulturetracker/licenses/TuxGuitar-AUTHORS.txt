@@ -1,0 +1,244 @@
+Julián Casadesús
+    * Project founder and long-time developer
+
+Hernán Casadesús
+    * Developer
+    * Contact: https://www.herac.com.ar
+
+Guiv42
+    * Developer
+    * French translation
+    * Contact: https://github.com/guiv42
+
+Helge17
+    * Binary builds
+    * Breeze Theme
+    * German and Italian translation
+    * Contact: https://github.com/helge17
+
+Nate Brewer
+    * Developer
+    * Contact: https://github.com/brewern5
+
+Ffio
+    * Developer
+    * Contact: https://github.com/ffio1
+
+m5ls7h
+    * Developer
+    * Contact: https://github.com/m5ls7h
+
+G-eos
+    * Developer
+    * Contact: https://github.com/G-eos
+
+BeFrankly
+    * Developer
+    * Documentation
+    * Contact: https://github.com/BeFrankly
+
+Makoha
+    * Developer
+    * Contact: https://github.com/Makoha
+
+harborsiem
+    * Developer
+    * Contact: https://github.com/harborsiem
+
+Lukramancer
+    * Developer
+    * Contact: https://github.com/Lukramancer
+
+Trung An (An Đức Trung)
+    * Developer
+    * Contact: https://github.com/tdan
+
+Vendelisk
+    * Documentation
+    * Contact: https://github.com/Vendelisk
+
+Olivier Humbert
+    * French translation
+    * Contact: https://github.com/trebmuh
+
+Dennis Deutschmann
+    * Magic Sound Font v2.0 Contribution
+    * Contact: <magic_dd@freenet.de>
+
+Cyclopsian
+    * Developer
+    * Symbolic Theme
+    * Contact: https://gitlab.com/cycloptic
+
+Nahuel Portilla
+    * Developer
+    * Contact: <nahu51@hotmail.com>
+
+Nikola Kolarović
+    * Developer
+    * Documentation
+    * Serbian translation
+    * Contact: <nikola.kolarovic@gmail.com>
+
+Aaron Spike
+    * Developer
+    * Contact: <aaron@ekips.org> https://www.ekips.org
+
+Auria
+    * Audio Unit plugin for macOS
+    * Contact: <auria@users.sourceforge.net>
+
+Herak
+    * Developer
+    * Contact: <herak.sen@gmail.com>
+
+Tomasz Bojczuk
+    * Polish translation
+    * Contact: <tomaszbojczuk@plusnet.pl>
+
+Grzegorz Pruchniakowski
+    * Polish translation
+    * Contact: https://github.com/Pruchniakowski
+
+Jose Gato
+    * Mac version
+    * Contact: <jgato@gsyc.info>
+
+Benjamin Scherrer
+    * German translation
+
+Thomas Thiel
+    * German translation
+    * Contact: <kv@wolfchild.de> https://www.wolfchild.de
+
+Leonardo Frazão
+    * Portuguese translation
+    * Contact: https://github.com/LeonardoQF
+
+Hebert Coelho de Oliveira
+    * Portuguese translation
+    * Contact: https://github.com/uaihebert
+
+Markon
+    * Italian translation
+    * Contact: <marco.buccini@alice.it>
+
+Zdenek Kunicky
+    * Czech translation
+    * Contact: <zdenekkunicky@seznam.cz>
+
+Máté Huszár
+    * Hungarian translation
+
+Tim Loo
+    * Chinese (Taiwan) translation
+    * Contact: http://www.sinan-melody.co.cc
+
+PTT Team
+    * Chinese (Taiwan) translation
+    * Contact: https://www.ptt.cc
+
+Shuo Huang
+    * Chinese (GB) translation
+    * Contact: <ucudbm@hotmail.com> http://www.cucum.cn
+
+雅乐诗(Auase)
+    * Chinese translation
+    * Contact: <auase@users.sourceforge.net> https://www.auase.com
+
+Philippe Coval
+    * Debian/Ubuntu package maintainer; Startup script
+    * French translation
+    * Contact: <rzr@users.sf.net> http://rzr.online.fr/contrib.htm
+
+Orcan Ogetbil
+    * Fedora package maintainer
+    * Contact: <orcanbahri@yahoo.com>
+
+John Gustafsson
+    * Swedish translation
+    * Contact: <jamminjohn@users.sourceforge.net>
+
+Pietro Cerutti
+    * FreeBSD port maintainer
+    * Contact: <gahr@gahr.ch> https://www.gahr.ch
+
+Facundo Corradini
+    * Documentation
+    * Contact: <facundocorradini@gmail.com> http://www.exitoweb.com.ar
+
+Gabe Hargrave
+    * Documentation
+    * Contact: <rinkrinkerfink@gmail.com>
+
+Olesya Gerasimenko
+    * Russian translation
+    * Contact: https://github.com/OlesyaGerasimenko
+
+Vadim Ipatov
+    * Russian translation
+    * Contact: <euphoria.vi@gmail.com> http://www.kmtn.ru/~euphoria
+
+Zoya Ignatova
+    * Russian translation
+    * Contact: <grotty@yandex.ru>
+
+Serge van Namen
+    * Dutch translation
+    * Contact: <serge@easyict.net>
+
+Yuriy Shakalov
+    * Ukrainian translation
+    * Contact: <yuriy.shakalov@gmail.com>
+
+Nguyen Dinh Trung
+    * Vietnamese translation
+    * Contact: <nguyendinhtrung141@gmail.com>
+
+Keisuke Kato
+    * Japanese translation
+    * Contact: <kisk.kato@gmail.com> http://mingaku.selfip.org
+
+Beat Weisskopf
+    * German translation
+    * Contact: <bweisskopf@gmail.com>
+
+Xevi Noe i Nogueiras
+    * Catalan translation
+    * Contact: <xevi.noe@gmail.com>
+
+Jean-Pierre POULIN
+    * Scales contributor
+    * Contact: <jeanpierre.poulin@free.fr> https://www.jeanpierrepoulin.com
+
+Lobo
+    * Basque translation
+    * Contact: <lobo1985guitarrista@hotmail.es> https://www.myspace.com/lobotheguitardude
+
+Pekka Manninen
+    * Finnish translation
+    * Contact: <pekka.t.manninen@iki.fi>
+
+Rytis Umbrasas
+    * Lithuanian translation
+    * Contact: <rytumb@gmail.com>
+
+Periklis Ntanasis
+    * Greek translation
+    * Contact: <pntanasis@gmail.com> http://www.greekrocktabs.gr
+
+Svetoslav Stefanov
+    * Bulgarian translation
+    * Contact: <lfu.project@gmail.com> https://learnfree.eu
+
+Taehun Yun
+    * Korean translation
+    * Contact: https://github.com/yth1130
+
+Alejandro6626
+    * Spanish translation
+    * Contact: https://github.com/alejandro6626
+
+Klaus Rettinghaus
+    * MusicXML export
+    * Contact: https://github.com/rettinghaus

@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-OWN = {"vulturetracker/web/engine-core.js", "vulturetracker/web/engine-worklet.js", "vulturetracker/web/faust-render.mjs"}
+OWN = {"vulturetracker/web/engine-core.js", "vulturetracker/web/engine-worklet.js", "vulturetracker/web/faust-render.mjs",
+       "vulturetracker/web/tablature.js", "vulturetracker/web/tablature.css", "vulturetracker/web/score-print.html"}
 
 
 def digest(p):

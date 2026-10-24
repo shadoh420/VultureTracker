@@ -1,0 +1,35 @@
+## License
+
+TuxGuitar is released under the GNU Lesser General Public License.
+
+Copyright (C) 2005-2022 Julián Casadesús
+              2023-2025 guiv42, helge17
+
+
+vulturetracker/notation_export.py ports these TuxGuitar 2.1.0 writers
+(2c46e2a1cccdfdfa6e6f2692f241bd60bf418129) to Python, 2026-10-20:
+
+common/TuxGuitar-lilypond/src/app/tuxguitar/io/lilypond/LilypondOutputStream.java
+common/TuxGuitar-lilypond/src/app/tuxguitar/io/lilypond/LilypondSettings.java
+desktop/TuxGuitar-musicxml/src/app/tuxguitar/io/musicxml/MusicXMLWriter.java
+desktop/TuxGuitar-musicxml/src/app/tuxguitar/io/musicxml/MusicXMLLyricWriter.java
+/**
+ * MusicXMLLyricWriter is used to convert TGLyric to multiple MusicXMLMeasureLyric chunks.
+ * @author Menno Vossen
+ */
+common/TuxGuitar-lib/src/main/java/app/tuxguitar/util/TGMusicKeyUtils.java
+common/TuxGuitar-lib/src/main/java/app/tuxguitar/song/models/effects/TGEffectBend.java
+common/TuxGuitar-gm-utils/src/app/tuxguitar/gm/GMChannelRouter.java
+
+
+vulturetracker/asciitab.py ports these TuxGuitar 2.1.0 writers and the parts of
+the model they read (same commit), 2026-10-20:
+
+common/TuxGuitar-ascii/src/app/tuxguitar/io/ascii/ASCIITabOutputStream.java
+common/TuxGuitar-ascii/src/app/tuxguitar/io/ascii/ASCIIOutputStream.java
+common/TuxGuitar-lib/src/main/java/app/tuxguitar/song/models/effects/TGEffectBend.java (updateMovements)
+common/TuxGuitar-lib/src/main/java/app/tuxguitar/song/managers/TGMeasureManager.java (getNote, getFirstBeat, getNextBeat)
+
+These source-derived portions remain under LGPL-2.1; the full license and the
+project authors are in TuxGuitar-LGPL-2.1.txt and TuxGuitar-AUTHORS.txt beside
+this file. The complete editable Python source is distributed with VultureTracker.

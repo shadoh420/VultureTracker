@@ -2,6 +2,7 @@
 server and its port, and the lock an app holds on each song it has open (app_lock_path). The State it serves lives in
 gui.py: gui and server import each other as modules and reach each other's names at call time, so either may be
 imported first."""
+import base64
 import functools
 import hashlib
 import hmac
@@ -32,6 +33,82 @@ PORT = 8723
 BODY_BYTES = 8 << 20      # the most a request body may claim (JSON: edits, settings, the FAUST tab's code) ...
 UPLOAD_BYTES = 512 << 20  # ... and an upload's (a dropped or rendered WAV)
 LOCKS = user_dir() / "open"  # one locked file per song open in an app (app_lock_path), beside the recent-songs list
+
+
+def _score_log_fields(source):
+    """Only diagnostic identifiers/timing, never arbitrary score or request content."""
+    if not isinstance(source, dict):
+        return {}
+    out = {}
+    for key in ('action', 'op', 'occurrence', 'beat', 'track', 'pattern', 'revision', 'fit', 'free', 'voice', 'id'):
+        value = source.get(key)
+        if isinstance(value, (str, int, bool)):
+            out[key] = value[:160] if isinstance(value, str) else value
+    for key in ('at', 'tuplet', 'amount'):
+        value = source.get(key)
+        if isinstance(value, list) and len(value) == 2 and all(type(v) is int for v in value):
+            out[key] = value
+    written = source.get('written')
+    if isinstance(written, dict):
+        out['written'] = {k: written[k] for k in ('value', 'dots') if type(written.get(k)) is int}
+        out['written'].update(_score_log_fields({'tuplet': written.get('tuplet')}))
+    return out
+
+
+def _score_request(st, body, endpoint):
+    """One bounded completion event, with the pre-edit selection held under the song lock."""
+    body = dict(body)
+    ui_context = body.pop('ui_context', None)
+    ui_context = {k: ui_context[k] for k in ('action', 'occurrence', 'beat', 'written', 'fit', 'free', 'voice')
+                  if k in ui_context} if isinstance(ui_context, dict) else {}
+    with st.lock:
+        before = st.text_sha()
+        event = dict(endpoint=endpoint, song=str(st.song_path)[:1024], request=_score_log_fields(body),
+                     ui_context=_score_log_fields(ui_context), before_revision=before, selected=[], selected_total=0)
+        score = st.song.get('score', {})
+        occurrences = dict(zip(score.get('order_ids', []), st.song.get('orders', [])))
+        groups = body.get('selection')
+        if not isinstance(groups, list):
+            beat = body.get('beat')
+            ids = body.get('beats', [beat.get('id')] if isinstance(beat, dict) else [beat] if isinstance(beat, str) else [])
+            groups = [dict(occurrence=body.get('occurrence'), pattern=body.get('pattern'), beats=ids)]
+            if isinstance(beat, dict):
+                event['request']['placed'] = _score_log_fields(beat)
+        for group in groups:
+            if not isinstance(group, dict) or not isinstance(group.get('beats'), list):
+                continue
+            ids = group['beats']
+            event['selected_total'] += len(ids)
+            occurrence = group.get('occurrence')
+            name = occurrences.get(occurrence) if isinstance(occurrence, str) else group.get('pattern')
+            pattern = score.get('patterns', {}).get(str(name), {})
+            for identity in ids[:max(0, 32 - len(event['selected']))]:
+                item = _score_log_fields(dict(occurrence=occurrence, id=identity))
+                current = next((b for b in pattern.get('beats', []) if b.get('id') == identity), None)
+                if current is not None:
+                    item.update(_score_log_fields(current), rest=not bool(current.get('notes')))
+                event['selected'].append(item)
+        event['selected_truncated'] = event['selected_total'] - len(event['selected'])
+        try:
+            if endpoint == 'score_command':
+                result = st.score_command(body)
+            else:
+                result = st.score_edit(body) or dict(ok=True, revision=st.text_sha())
+            event['outcome'] = 'noop' if st.text_sha() == before else 'changed'
+            if body.get('action') == 'set_duration':
+                kept = result.get('kept_durations', [])
+                event['duration_result'] = dict(kept_total=len(kept),
+                    kept=[dict(_score_log_fields(item), reason=item.get('reason')) for item in kept[:32]
+                          if item.get('reason') in ('bar_end', 'no_space')],
+                    consumed_rests=len(result.get('consumed_rests', [])),
+                    removed_ties=len(result.get('removed_ties', [])))
+            return result
+        except Exception as e:
+            event.update(outcome='refused', error=f'{type(e).__name__}: {e}'[:512])
+            raise
+        finally:
+            event['after_revision'] = st.text_sha()
+            gui._log.info('TAB edit %s', json.dumps(event, ensure_ascii=True, separators=(',', ':')))
 
 
 def start_snapshot():
@@ -141,6 +218,46 @@ class Handler(BaseHTTPRequestHandler):
     rec_devices = None   # the input devices, listed once (again on REFRESH)
     library = None       # library.Library, read on the first FIND SIMILAR or MAP request
     faust_job = None     # the faustwasm download: {"status", "got", "size", "error"}
+    collection_job = None
+    collection_cancel = threading.Event()
+    collection_lock = threading.RLock()
+
+    @classmethod
+    def collection(cls, body=None):
+        from . import score_collection
+        with cls.collection_lock:
+            if body is None:
+                return json.loads(json.dumps(cls.collection_job))
+            action = body.get('action', 'scan')
+            if action == 'scan':
+                return score_collection.scan(body.get('folder', ''), bool(body.get('recursive')))
+            if action == 'cancel':
+                cls.collection_cancel.set()
+                return cls.collection_job
+            if action != 'convert':
+                raise ValueError('Choose scan, convert or cancel')
+            if cls.collection_job and cls.collection_job['status'] == 'running':
+                raise ValueError('A score conversion is already running')
+            settings = score_collection.options(body)
+            cls.collection_cancel = threading.Event()
+            job = cls.collection_job = dict(status='running', results=[], total=len(settings['paths']), destination=settings['destination'])
+            cancel = cls.collection_cancel
+
+        def progress(item):
+            with cls.collection_lock:
+                job['results'] = [r for r in job['results'] if r['source'] != item['source']] + [item]
+
+        def work():
+            try:
+                results = score_collection.convert(settings, progress, cancel)
+                with cls.collection_lock:
+                    job['results'] = results
+                    job['status'] = 'cancelled' if cancel.is_set() else 'finished'
+            except Exception as exc:
+                with cls.collection_lock:
+                    job.update(status='failed', error=f'{type(exc).__name__}: {exc}')
+        threading.Thread(target=work, name='score conversion', daemon=True).start()
+        return job
 
     @classmethod
     def fetch_faust(cls):
@@ -261,9 +378,14 @@ class Handler(BaseHTTPRequestHandler):
                             region = (a, 0, b, len(st.mod.patterns[st.mod.orders[b]].rows)-1)
                         snap = snapshot(st.song, st.base_dir, region, st.mix(), st.silenced(), tail=0)
                         bpm = st.facts['bpm']
-                    pcm = np.frombuffer(render(snap), dtype='<i2').astype(np.float32).reshape(-1, 2) / 32768
-                    if r.rate != RATE:
-                        pcm = np.stack([resample(pcm[:, c], RATE, r.rate) for c in range(2)], axis=1)
+                        if snap.get('plan') is not None:
+                            from .tablature import TempoClock
+                            plan = snap['plan']
+                            bpm = TempoClock(plan['tempo'], plan.get('tempos')).tempo_at(snap['range_at'][0])
+                    render_rate = r.rate if snap.get('plan') is not None else RATE
+                    pcm = np.frombuffer(render(snap, rate=render_rate), dtype='<i2').astype(np.float32).reshape(-1, 2) / 32768
+                    if r.rate != render_rate:
+                        pcm = np.stack([resample(pcm[:, c], render_rate, r.rate) for c in range(2)], axis=1)
                     if cls.state is not st:
                         raise RecordError('The song changed while preparing playback; start again')
                     r.start_backing(pcm, body['output'], countin=body.get('countin', 4), bpm=bpm,
@@ -370,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
     def browse(cls, wav=False, module=False, sf2=False):
         """Native file dialog, returning the chosen song (or, with `wav`, WAV; with `module`, module; with `sf2`,
         SoundFont) path or None."""
-        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Module tab and MIDI files", "*.it;*.xm;*.s3m;*.mod;*.gp3;*.gp4;*.gp5;*.mid;*.midi") if module else ("SoundFonts and GUS patches", "*.sf2;*.pat") if sf2 else ("Song files", "*.yaml;*.yml")
+        kind, pat = ("Sound files", ";".join(f"*{x}" for x in (".wav", *SOUND_FILES))) if wav else ("Module tab and MIDI files", "*.it;*.xm;*.s3m;*.mod;*.gtp;*.gp3;*.gp4;*.gp5;*.gpx;*.gp;*.tg;*.ptb;*.tef;*.mid;*.midi") if module else ("SoundFonts and GUS patches", "*.sf2;*.pat") if sf2 else ("Song files", "*.yaml;*.yml")
         if cls.window is not None:
             import webview
             r = cls.window.create_file_dialog(webview.OPEN_DIALOG, file_types=(f"{kind} ({pat})", "All files (*.*)"))
@@ -382,6 +504,111 @@ class Handler(BaseHTTPRequestHandler):
         r = filedialog.askopenfilename(parent=root, title="VultureTracker", filetypes=[(kind, pat.replace(";", " ")), ("All files", "*")])
         root.destroy()
         return r or None
+
+    @classmethod
+    def save_score_export(cls, body):
+        """Save one rendered score page chosen in the native dialog, without changing the song."""
+        from .fileio import atomic_write, protect_outputs
+        from xml.etree import ElementTree
+        state = cls.state
+        if state is None:
+            raise ValueError('Open a song first')
+        def current():
+            if cls.state is not state or body.get('song') != str(state.song_path) or body.get('revision') != state.text_sha() or state.dirty():
+                raise ValueError('The song changed; refresh the print preview before exporting')
+        with cls.song_lock, state.lock:
+            current()
+        fmt = body.get('format')
+        if fmt not in ('svg', 'png', 'jpg', 'bmp'):
+            raise ValueError('Choose SVG, PNG, JPEG or BMP')
+        try:
+            data = base64.b64decode(body.get('data', ''), validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError('Invalid score image data') from exc
+        limit = (24 if fmt == 'bmp' else 6) << 20
+        if not data or len(data) > limit:
+            raise ValueError(f'Score image must be between1 byte and{limit >> 20} MiB')
+        if fmt == 'png':
+            if not data.startswith(b'\x89PNG\r\n\x1a\n') or not data.endswith(b'IEND\xaeB`\x82'):
+                raise ValueError('Invalid PNG score image')
+        elif fmt == 'jpg':
+            if not data.startswith(b'\xff\xd8\xff') or not data.endswith(b'\xff\xd9'):
+                raise ValueError('Invalid JPEG score image')
+        elif fmt == 'bmp':
+            import struct
+            if len(data) < 54 or data[:2] != b'BM':
+                raise ValueError('Invalid BMP score image')
+            size, offset, dib, width, height, planes, bits, compression = (
+                struct.unpack_from('<I', data, 2)[0], *struct.unpack_from('<IIiiHHI', data, 10))
+            if (size != len(data) or offset != 54 or dib != 40 or width <= 0 or height <= 0 or
+                    planes != 1 or bits != 24 or compression != 0 or
+                    54 + ((width * 3 + 3) & ~3) * height != len(data)):
+                raise ValueError('Invalid BMP score dimensions or pixel data')
+        else:
+            try:
+                root = ElementTree.fromstring(data)
+            except ElementTree.ParseError as exc:
+                raise ValueError('Invalid SVG score image') from exc
+            if root.tag != '{http://www.w3.org/2000/svg}svg':
+                raise ValueError('Invalid SVG score image')
+        name = Path(str(body.get('name') or 'score-page')).stem + '.' + fmt
+        if cls.window is not None:
+            import webview
+            chosen = cls.window.create_file_dialog(webview.SAVE_DIALOG, directory=str(state.base_dir),
+                save_filename=name, file_types=(f'{fmt.upper()} score (*.{fmt})',))
+        else:
+            from tkinter import Tk, filedialog
+            dialog = Tk(); dialog.withdraw(); dialog.attributes('-topmost', True)
+            try:
+                chosen = filedialog.asksaveasfilename(parent=dialog, title='Save score page',
+                    initialdir=str(state.base_dir), initialfile=name, defaultextension='.' + fmt,
+                    filetypes=[(fmt.upper() + ' score', '*.' + fmt)], confirmoverwrite=True)
+            finally:
+                dialog.destroy()
+        if isinstance(chosen, (tuple, list)):
+            chosen = chosen[0] if chosen else None
+        if not chosen:
+            return {'path': None}
+        path = Path(chosen).resolve()
+        if path.suffix.lower() != '.' + fmt:
+            raise ValueError('Choose a .' + fmt + ' file')
+        with cls.song_lock, state.lock:
+            current()
+            sources = [state.song_path] + [state.base_dir / s['file'] for s in state.song.get('samples', {}).values() if s.get('file')]
+            protect_outputs([path], sources)
+            atomic_write(path, data)
+        return {'path': str(path)}
+
+    @classmethod
+    def save_song_shortcut(cls):
+        if sys.platform != 'win32':
+            raise ValueError('Song shortcuts are available on Windows only')
+        state = cls.state
+        if state is None:
+            raise ValueError('Open a song first')
+        filename = state.song_path.stem + '.lnk'
+        if cls.window is not None:
+            import webview
+            chosen = cls.window.create_file_dialog(webview.SAVE_DIALOG, directory=str(state.base_dir),
+                        save_filename=filename, file_types=('Windows shortcut (*.lnk)',))
+        else:
+            from tkinter import Tk, filedialog
+            root = Tk(); root.withdraw(); root.attributes('-topmost', True)
+            try:
+                chosen = filedialog.asksaveasfilename(parent=root, title='Create song shortcut',
+                    initialdir=str(state.base_dir), initialfile=filename, defaultextension='.lnk',
+                    filetypes=[('Windows shortcut', '*.lnk')], confirmoverwrite=True)
+            finally:
+                root.destroy()
+        if isinstance(chosen, (tuple, list)):
+            chosen = chosen[0] if chosen else None
+        if not chosen:
+            return {'path': None}
+        with cls.song_lock:
+            if cls.state is not state:
+                raise ValueError('The open song changed while choosing the shortcut; try again')
+            from .project import song_shortcut
+            return {'path': song_shortcut(state, chosen)}
 
     def log_message(self, *a):
         pass
@@ -499,14 +726,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, gui.HTML.read_bytes().replace(b"<title>VultureTracker</title>", f"<title>VultureTracker {__version__}</title>".encode())
                               .replace(b'<meta name="vt-token" content="">', f'<meta name="vt-token" content="{self.server.token}">'.encode()),
                               "text/html; charset=utf-8")
+        if path == "/score-print":
+            return self._send(200, gui.WEB.joinpath("score-print.html").read_bytes(), "text/html; charset=utf-8")
         if path == "/engine-worklet.js":
             return self._send(200, worklet_js(), "text/javascript; charset=utf-8")
         if path == "/web/libopenmpt.wasm":
             return self._send(200, gui.WEB.joinpath("libopenmpt.wasm").read_bytes(), "application/wasm")
+        tab_assets = {"/web/tablature.js": "text/javascript; charset=utf-8",
+                      "/web/engine-core.js": "text/javascript; charset=utf-8",
+                      "/web/tablature.css": "text/css; charset=utf-8",
+                      "/web/alphaTab.min.js": "text/javascript; charset=utf-8",
+                      "/web/Bravura.woff2": "font/woff2",
+                      "/web/licenses/Bravura-OFL.txt": "text/plain; charset=utf-8"}
+        if path in tab_assets:
+            return self._send(200, gui.WEB.joinpath(path.removeprefix('/web/')).read_bytes(), tab_assets[path])
         if path == "/icon.png":
             return self._send(200, gui.HTML.with_name("icon.png").read_bytes(), "image/png")
         if path == "/api/state":
             return self._send(200, {**(st.snapshot() if st else start_snapshot()), "library": self.lib_snapshot()})
+        if path == "/api/score":
+            if not st:
+                return self._send(400, {"error": "Open a song first"})
+            return self._send(200, st.score_view())
+        if path == "/api/chord_library":
+            from .chord_library import read_library
+            try:
+                return self._send(200, read_library())
+            except (ValueError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
         if path == "/api/library":
             self.lib()
             return self._send(200, self.lib_snapshot())
@@ -545,6 +792,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"tools": agent.tool_list(), "song": str(self.state.song_path) if self.state else None})
         if path == "/api/start":
             return self._send(200, start_snapshot())
+        if path == '/api/score_collection':
+            return self._send(200, self.collection())
         if path == "/api/rec":
             return self._send(200, self.rec_snapshot("devices=1" in self.path, spill=False))
         if st is None:
@@ -559,7 +808,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/api/pattern/"):
             try:
-                return self._send(200, st.pattern_rows(int(path[13:])))
+                from urllib.parse import parse_qs
+                occurrences = parse_qs(self.path.partition("?")[2]).get("occurrence", [])
+                if len(occurrences) > 1:
+                    raise ValueError('Give one occurrence')
+                return self._send(200, st.pattern_rows(int(path[13:]), occurrences[0] if occurrences else None))
             except (ValueError, IndexError, AttributeError):
                 return self._send(404, {"error": "no such pattern"})
         if path.startswith("/api/slices/"):
@@ -579,9 +832,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/api/sounding/"):
             try:
-                return self._send(200, {"rows": st.sounding_rows(int(path[14:]))})
-            except (ValueError, IndexError, AttributeError, TypeError):
-                return self._send(404, {"error": "no such order"})
+                from urllib.parse import parse_qs
+                q = {k: v[0] for k, v in parse_qs(self.path.partition('?')[2]).items()}
+                return self._send(200, {"rows": st.sounding_rows(int(path[14:]), play_id=q.get('play_id'), revision=q.get('revision'))})
+            except (ValueError, IndexError, AttributeError, TypeError) as exc:
+                return self._send(404, {"error": str(exc) or "no such order"})
         if path.startswith("/wav/"):
             k = path[5:]
             r = st.renders.get(k)
@@ -631,6 +886,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, st.mix_diff() if path == "/api/mixdiff" else st.diff(st.cand(path[10:])))
             except (KeyError, ValueError, IndexError, TypeError, AttributeError, OSError) as e:
                 return self._send(400, {"error": f"{type(e).__name__}: {e}"})
+        if path == "/api/playback":
+            from urllib.parse import parse_qs
+            try:
+                rates = parse_qs(self.path.partition("?")[2]).get("sample_rate", [])
+                if len(rates) != 1:
+                    raise ValueError('Give one sample_rate: the actual audio mixer rate')
+                bundle = st.prepared_playback(int(rates[0]), whole=True)
+                return self._send(200, {**bundle, "backing_it": base64.b64encode(bundle["backing_it"]).decode("ascii")})
+            except (SongError, OSError, ValueError, OpenMPTError) as e:
+                return self._send(400, {"error": "\n".join(getattr(e, "errors", []) or [str(e)])})
         if path == "/api/it":
             try:
                 return self._send(200, st.live_it(), "application/octet-stream")
@@ -648,6 +913,8 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         act = self.path.split("?")[0].rsplit("/", 1)[-1]
         cap = UPLOAD_BYTES if act == "upload" else BODY_BYTES
+        if act == 'score_export':
+            cap = (32 << 20) + 8192  # bounded 24-MiB BMP as base64 plus its JSON envelope
         if n > cap:  # a size from the request is what rfile.read allocates
             return self._send(413, {"error": f"the request is over {cap >> 20} MiB"})
         if act == "upload":  # raw WAV bytes, ?name=
@@ -664,13 +931,22 @@ class Handler(BaseHTTPRequestHandler):
             LABEL.name = _step_label(act, body)
             if act == "open":
                 self.open_song(body["path"])
+            elif act == 'score_collection':
+                return self._send(200, self.collection(body))
+            elif act == "chord_library":
+                from .chord_library import edit_library
+                return self._send(200, edit_library(body))
             elif act == "new":
-                self.open_song(gui.create_song(body["path"], body.get("channels") or 8, body.get("sample") or None))
+                self.open_song(gui.create_song(body["path"], body.get("channels") or 8, body.get("sample") or None,
+                                               template=body.get('template'), bars=body.get('bars', 4)))
             elif act == "import":  # a module converted beside itself and opened; `browse` picks it in a dialog
                 src = self.browse(module=True) if body.get("browse") else body.get("path")
                 if not src:
                     return self._send(200, {"path": None})
-                out, warnings = gui.import_beside(src)
+                native_tab = body.get('native_tab', False)
+                if type(native_tab) is not bool:
+                    raise ValueError('native_tab must be boolean')
+                out, warnings = gui.import_beside(src, native_tab=native_tab, midi_options=body.get('midi_options'),gp_encoding=body.get('gp_encoding'))
                 self.open_song(out)
                 return self._send(200, {"path": str(out), "warnings": warnings})
             elif act == "browsewav":
@@ -714,6 +990,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"path": p})
             elif st is None:
                 return self._send(404, {"error": "no song open"})
+            elif act == 'songshortcut':
+                return self._send(200, self.save_song_shortcut())
             elif act == "agentallow":  # ALLOW REPLACE: the agent's next export_song may replace earlier exports
                 if body.get("what") != "replace":
                     raise ValueError("only replace can be allowed")
@@ -749,6 +1027,8 @@ class Handler(BaseHTTPRequestHandler):
                 o = body.get("orders")
                 if o is not None and not (isinstance(o, list) and len(o) == 2 and all(type(x) is int for x in o) and 0 <= o[0] < o[1]):
                     raise ValueError("the section is null or [first order, last order + 1]")
+                if o is not None and st.mod is not None and st.mod.native_score is not None:
+                    st._order_region(o)
                 st.meta["orders"] = o
                 st.save_meta()
                 st.queue_all()
@@ -816,8 +1096,58 @@ class Handler(BaseHTTPRequestHandler):
             elif act == "mix":
                 st.set_mix(body)
             elif act == "edit":  # one pattern (pattern, cells) or several in one step (patterns: [{pattern, cells}])
-                st.edit_patterns([(g["pattern"], g["cells"]) for g in body["patterns"]] if "patterns" in body
-                                 else [(body["pattern"], body["cells"])])
+                groups = body["patterns"] if "patterns" in body else [body]
+                occurrences = {}
+                for group in groups:
+                    index, occurrence = int(group["pattern"]), group.get("occurrence")
+                    if occurrence is not None:
+                        if index in occurrences and occurrences[index] != occurrence:
+                            raise ValueError('One Pattern edit must use one occurrence per pattern')
+                        occurrences[index] = occurrence
+                with st.lock:
+                    st.edit_patterns([(g["pattern"], g["cells"]) for g in groups],
+                                     occurrences=occurrences,
+                                     revision=body.get("revision"))
+                    result = {"ok": True, "revision": st.text_sha()}
+                return self._send(200, result)
+            elif act == "transform":
+                with st.lock:
+                    st.edit_patterns([], transform=body, revision=body.get("revision"))
+                    result = {"ok": True, "revision": st.text_sha()}
+                return self._send(200, result)
+            elif act == "pattern_copy":
+                return self._send(200, st.pattern_clipboard(body))
+            elif act == "pattern_paste":
+                return self._send(200, st.paste_pattern_clipboard(body))
+            elif act == "score":
+                return self._send(200, _score_request(st, body, act))
+            elif act == "score_command":
+                return self._send(200, _score_request(st, body, act))
+            elif act == "score_instrument":
+                return self._send(200, st.score_instrument(body))
+            elif act == "chord_recognize":
+                return self._send(200, st.chord_suggestions(body))
+            elif act == "chord_generate":
+                return self._send(200, st.chord_suggestions(body, generate=True))
+            elif act == "score_copy":
+                return self._send(200, st.score_clipboard(body))
+            elif act == "measure_copy":
+                from .tablature import measure_segment
+                with st.lock:
+                    if body.get('revision') != st.text_sha() or st.dirty():
+                        raise ValueError('The song changed; refresh before copying measures')
+                    st._need_compiled()
+                    return self._send(200, {'segment': measure_segment(st.song, body['from'], body['to'],
+                        body.get('track'), copy_markers=body.get('copy_markers', False),
+                        independent=body.get('independent', False), raw_patterns=st.mod.patterns)})
+            elif act == 'score_template':
+                from .tablature import score_template
+                with st.lock:
+                    if body.get('revision') != st.text_sha() or st.dirty():
+                        raise ValueError('The song changed; refresh before saving a template')
+                    return self._send(200, {'template': score_template(st.song)})
+            elif act == "score_export":
+                return self._send(200, self.save_score_export(body))
             elif act == "phrase":
                 from .phrases import action
                 return self._send(200, action(st, body))
@@ -874,6 +1204,9 @@ class Handler(BaseHTTPRequestHandler):
 
 class _Server(ThreadingHTTPServer):
     allow_reuse_address = False  # on Windows SO_REUSEADDR would let a second app take a port the first still listens on
+    # Rapid edits replace WAV/score/image requests together while compilation holds the GIL.
+    # The stdlib's five pending connections dropped localhost bursts before handlers could accept them.
+    request_queue_size = 64
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)

@@ -2,6 +2,387 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## 1.9.0 (2026-10-24)
+
+- Standalone IT export handles the sub-tick gates, strums, grace notes and pitch controls in Boys In The Band
+  and Advent Of Panurge by rendering only the affected passages into samples. Export notices identify them;
+  other passages remain tracker notes and the native song retains every editable note. Unsafe conversions
+  still refuse before writing. Ordinary tempo changes no longer produce a misleading score warning.
+- Pattern defaults to a continuously scrollable song: neighbouring bars fill the pane, with a scrollbar through
+  every order and click-to-edit rows. Up/Down and Page Up/Down cross pattern boundaries; manual browsing pauses Follow.
+  Previous/next, direct song position and the optional single-pattern view remain available.
+- TAB/SCORE starts with the clean TuxGuitar layout: horizontal all-track staff/TAB at 80%, no printed dynamics,
+  and TuxGuitar written staff pitch. Explicitly saved view choices survive upgrades. The preset remains available;
+  these are view preferences and notes, velocities, playback and Undo stay unchanged.
+
+- Native GP5 import accepts ordinary double barlines, key changes, declared drum fret counts and GP5
+  display/mix metadata. Ignored source values remain in the import report; placeholder sounds do not
+  emulate source MIDI effects or program changes. Bend coordinates follow TuxGuitar rounding with
+  the original values retained. Tied notes now find their actual preceding beat instead of an earlier
+  equal-looking beat. Key/clef changes remain visible through following bars; GP3/4/5 export retains
+  shared key changes and double barlines. TG export explicitly refuses double barlines.
+- Switching the displayed Part or Track keeps Follow playback enabled and the playing marker in view;
+  an explicitly paused Follow setting stays paused.
+- Voice changes also preserve Follow playback. Selecting an empty editing voice no longer hides the
+  part's playback marker. Ctrl+F6 and Ctrl+F7 retain a native caret's exact fractional start position.
+- Finishing a rhythm, phrase, Paste or string-move edit no longer overrides a Voice/caret change made
+  while the save was pending. The submitted edit still completes as one Undo/Redo step.
+- The navigation bar wraps at narrow window widths so Project and Notes stay reachable alongside TAB/SCORE.
+- Editing repeated patterns no longer falsely refuses a boundary release already supplied by a following note,
+  or a harmless release at song start. Releases that would truncate another predecessor still refuse atomically.
+
+- Free duration repacks whole beat groups across both voices using TuxGuitar's voice-end rules. Notes,
+  rests, annotations and adjacent ties move together, with one exact Undo/Redo step. Matrix Free entry
+  retains its distinct anchored behavior. Free duration closes unwritten gaps, including gaps created by a
+  previous two-voice edit. Invalid authored bars automatically require Free mode; the control explains why.
+  Free overflow preserves an unmetered pattern's original length as a meter for later repair.
+  Independent beat groups that coincide retain their identity across another Free edit, save/reopen and
+  TG XML/legacy interchange. Their strokes and chord metadata remain separate. Normal rest insertion,
+  caret-rest deletion and unannotated Fit join the correct destination group and retain exact history.
+  Rest insertion/deletion and Fit transfer chords and strokes with the last sounding voice, while text stays
+  with a remaining voice, including a rest. Conflicting annotations, inexact IT timing, consumed annotated
+  rests and complex ambiguous paste still refuse explicitly. GP3–5 export accepts redundant group labels;
+  true independent same-onset groups still refuse because GP reimport merges their identity.
+
+- Native Copy/Paste follows the latest beat or measure clipboard. Ctrl+C without a beat selection opens
+  measure controls; Ctrl+V dispatches by clipboard kind and replaces whole beats at selection start.
+  Paste safe retains empty-only behavior. Failed copies and cancelled measure controls keep the previous copy.
+  Whole-beat replacement clears both voices and follows TuxGuitar's unequal-duration advancement;
+  copying across unwritten silence preserves the gap, including across source bar lines. Span paste and
+  sparse selections retain their existing offsets; source songs and copied data remain unchanged.
+  Paste span retains exact offsets, exterior fragments and tied bar splitting. Unsafe overflow refuses atomically.
+
+- Native ROLL adds Matrix / toggle entry: containing-beat pitch toggles across voices, caret-duration rest
+  subdivision and atomic chord resizing/entry. Grid / drag remains available. Shared Undo, Pattern and
+  standalone IT checks preserve the same song; unsafe peer-note loss is refused.
+  Free Matrix entry stays on the containing beat and can grow a unique final bar. Successful entry previews
+  the original beat's voices for 500ms; absent voices audition without editing, and unsafe overlaps refuse.
+
+- Native stem controls and Ctrl+Up/Down apply to the caret voice's beam group, following TuxGuitar,
+  including triplets and compound meter. Rests do nothing; playback and standalone IT stay unchanged.
+
+- Delete, Cut and Rest edit the active voice across local and cross-bar selections; Cut still copies
+  both voices, while Clean Beat clears both. Empty voices leave the other voice untouched.
+
+- Native pitch/string shortcuts apply to the active voice across local and cross-bar selections. Semitone
+  edits keep the original string and refuse the whole edit at a fret limit; range edits retain voice/caret.
+  Select All spans the written track and checks measure-duration errors, following TuxGuitar.
+
+- Score view adds compact beat spacing with TuxGuitar's duration/voice policy, saved as a local display
+  preference. Full native glyphs keep collision spacing; multitrack view temporarily disables compact mode.
+
+- Native range expressions now target the active voice, following TuxGuitar; untouched peer notes and ties
+  remain intact. Ctrl+A/copy retain both voices, and empty voices no longer borrow expression controls.
+
+- Native score view offers saved page/horizontal layout, zoom, staff/TAB, all tracks and chord visibility.
+  Hit targets, range selection, caret and playback markers identify the part. One-bar expression ranges
+  now use the same atomic command as longer phrases; display preferences never alter song history.
+
+- Native percussion supports drum rolls and grace-note flams with independent mapped drum samples, shared
+  Pattern/history/playback, drum notation, TG/GP interchange and MIDI. Existing unsupported pitch techniques
+  and inexact standalone IT timing still refuse. Legacy TG no longer mistakes drum keys for guitar frets.
+
+- Guitar Pro text encoding is selectable for GP1–5 imports and GP3–5 exports in the app, collections,
+  CLI and agent tools. UTF-8, Cyrillic and Japanese text retain encoded byte limits and exact round-trip
+  guards; GP6/7 keeps its XML encoding. GP1/2 credits now map to author, following TuxGuitar.
+
+- Native MIDI export exposes transpose and Strip CC/PC in single/collection delivery, CLI and agent tools.
+  TuxGuitar's grace/trill exceptions and stripped lead-in are preserved and reported; out-of-range keys
+  refuse. Saved collection choices affect only exported files, leaving the shared document/history intact.
+
+- GP5 export retains all six tapped harmonic intervals and data-0 pinch/semi harmonics, including ties and
+  repeats. GP4 retains tapped/pinch/semi data0 and artificial data0/2/3. GP3 and nonrepresentable harmonic
+  data keep their atomic refusals; native export preserves GP4 artificial data that TuxGuitar's writer collapses.
+
+- GP6/7 native import retains double-dotted durations, including supported tuplets, and each measure's
+  bass/alto/tenor/treble clef. These use the existing native rhythm/staff model and shared editing history.
+
+- Native MIDI import exposes transpose, quantization, shortest-note and tuplet limits in the app, collections,
+  CLI and agent. Saved collection settings also apply when opening MIDI files. Source volume/pan survives;
+  later controller changes are explicitly reported as final whole-track values, following TuxGuitar.
+
+- PowerTab and TablEdit imports retain source MIDI volume/pan through native editing, TG and MIDI export.
+  TEF attenuation and pan follow TuxGuitar's exact conversion; native audio uses the existing tracker scale.
+  Invalid controller values refuse before creating the destination song or samples.
+
+- Notation delivery: single-file and collection LilyPond export expose part/range and layout settings,
+  including saved collection choices. Print preview saves JPEG and lossless BMP alongside SVG/PNG.
+  Invalid LilyPond selections and malformed image uploads refuse before publishing output.
+
+- Mixer interchange: TG imports all source volume/pan values; TG and GP3–5 export uniform part mixes within
+  each format's exact limits. Untouched TG/GP MIDI controllers survive round trips. Explicit mixer writes,
+  including same-value writes, replace the corresponding source binding with exact shared Undo/Redo.
+  Native/standalone IT audio retains the tracker mixer scale; unsupported effects and shared routes still refuse.
+
+- Alternate tuning and part adaptation: automatic string-channel allocation, atomic tuning and track setup,
+  and exact shared Undo/Redo. Reducing strings preserves raw Pattern channels; unsafe harmonic and
+  string-dependent technique changes refuse atomically. First-track setup on legacy tracker songs works again.
+
+- Repeat-aware rehearsal: follow repeats/endings, select individual visits, or play a passage once to its exact
+  endpoint. Edits stop stale practice; ordinary playback reloads retain the repeat visit. Printed pages identify
+  parts, source bars and continuing sections. Windows Edge PDF export avoids a detached compatibility relaunch
+  and reports browser completion failures explicitly.
+
+- Advanced rhythm and phrase rearrangement: Free duration handles explicit overfull bars and repair;
+  partial paste crops representable bend/whammy curves; safe cross-bar let-ring paste preserves its gate.
+  Dense exact rhythms export through finer IT rows without changing native timing or authored patterns.
+  Shared Undo/Redo and raw-effect ownership remain guarded; unsupported cuts and timing refuse atomically.
+
+- Expressive arrangement editing: Fit retains intact expression and authored velocity; safe let-ring/strum
+  crossings and static-expression partial paste share exact Undo. Voice separation supports qualified
+  Continue/Off envelopes and fadeout, preserving coincident key-offs in standalone IT. GP5 exports chord
+  and pick/brush metadata and projects neutral spare-channel routing; Band package now includes GP5.
+  TuxGuitar GP5.00 unset reverb imports correctly; conversion reports credit/encoding limitations.
+
+- Part sounds and the score's Track selector now share one selected part. Changing either updates the
+  score and sound controls immediately, without editing the song or adding Undo steps.
+
+- Complex-score editing: full expressive notes retain their performance across rebar, Move, measure
+  preparation and cross-bar paste. Explicit voice separation uses compatible spare part channels for
+  strict IT export, with atomic refusal for stateful instruments and unsafe routing. Dense beat/chord
+  labels reserve space in editor and print. GP3/4/5 retain supported grace notes; GP/TG fill export-only
+  rests for sparse voices and pickups; TEF3 retains supported grace metadata and extended frets.
+  Collection conversion applies remembered audio bit depth only to formats that support it, fixing
+  notation and band exports after selecting 24-bit audio.
+
+- Mixed tab library to band delivery: native PowerTab and TablEdit v2/v3 imports with explicit unsupported
+  constructs; range techniques/curves/strokes; logical-part sound assignment and native SF2 preset import;
+  batch PDF score/parts and audio/part stems with remembered settings, cancellation and per-format reports.
+  Fixed an audition startup race by waiting for the worklet before publishing its command port.
+
+- Native TAB now has compact controls, saved panel preferences, written-bar navigation and configurable
+  score-action shortcuts. Explicit independent edits and measure preparation support reused passages and
+  written bars inside larger patterns with one-step Undo. A local score collection browser and batch
+  converter reuse the existing import/export paths, preserve sources and report per-file losses/errors.
+  Native MIDI import fixes track-chunk parsing that rejected valid exported files.
+
+- Native score authoring now starts from guitar/bass/drum/band or saved setup templates, with reusable tuning
+  presets, independent track duplication and ordering. Mix/Push paste and Move/Copy voice extend arrangement
+  editing with exact history and strict timing guards. Rehearsal adds selected-bar loops, count-in,
+  meter-aware metronome, part solo/mute and stepped practice speed without rewriting the song.
+  Song credits persist through supported interchange and printed parts; pages are numbered. SVG/PNG exports
+  now preserve text fonts correctly instead of treating header text as music glyphs.
+
+- Native TAB whole-song authoring now transfers phrases between tracks and songs with destination tuning
+  and audio routing, maps copied measure parts, optionally copies headers/markers, makes passages unique
+  and moves beats by an exact custom amount. Print preview exports selected tracks/bars to PDF and individual
+  pages to self-contained SVG or PNG. GP3/4/5 import/export preserves the bass clef inferred from tuning.
+  The local server accepts larger request bursts during score/audio refresh.
+
+- Native TAB section composition now repeats and pastes phrases past the song end, splits crossing notes
+  into ties, preserves the untouched parts of replacement destinations and selects the pasted phrase.
+  Rest, Delete and Clean work across measures; Copy/Cut handle boundary ties. Measures can move complete
+  passages, repair boundary ties on structural edits and rebar straddling notes. Move beats can extend the
+  song. All use shared history and strict standalone IT checks, preserving other voices and tracker data.
+
+- Native TAB everyday rhythm editing now keeps a complete phrase selected through Longer/Shorter, dots
+  and tuplets, including regenerated rests. Selected bare rests can be absorbed without aborting the edit;
+  ordinary lack of room keeps that beat's duration and reports it. Fit supports partial rests and implicit
+  gaps while preserving the other voice. Copy, expression edits and exact Undo/Redo work through repeated
+  edits, and selection shading survives refresh. Real conflicts still refuse the whole transaction.
+
+- Native TAB duration edits now accept tied notes, preserving connected ties across bars and through qualified
+  Fit movement. Links broken by an edit are removed with a visible report so following notes still play;
+  one Undo restores the durations and ties. Single-note and range edits both check exact standalone IT timing
+  before saving.
+
+- Native TAB cross-measure duration editing now applies explicit lengths, dots, tuplets and Longer/Shorter to
+  the selected voice through the existing Place/Fit path. It retains original selected identities, other voices
+  and exact Undo, and repeated Apply is a no-op. Unsafe Fit and IT conflicts refuse atomically;
+  generated rests join the resulting phrase selection for subsequent commands.
+
+- Native TAB cross-measure selections now accept dynamics/custom velocity and explicit Set/Clear for ghost,
+  accent, heavy accent, staccato, palm mute and dead notes. Mixed values are visible, the whole selection survives
+  refresh, and each change shares one Undo without changing the clipboard. Existing technique exclusivity and
+  strict IT timing/ownership checks apply atomically; unchanged settings create no history entry.
+
+- Native TAB selected phrases now transpose across measures/patterns through semitone keys or the Transpose
+  dialog, and shift to adjacent strings while preserving actual native playback and IT data. Qualified selection
+  survives refresh, edits share one Undo, and unsafe strings/ties/harmonic intervals/shared patterns refuse.
+  Whole-track and local edits keep their existing behavior; alternate fingering retains its audio-channel routing.
+
+- Native TAB Cut/Ctrl+X and Repeat/Ctrl+R now handle cross-measure selections. Cut preserves note durations and
+  existing rests; Repeat places the exact phrase after its end in existing compatible spans. Both use the shared
+  clipboard/transaction, retain internal ties and exact Undo, and refuse unsafe boundaries without changing
+  the previous clipboard. Local commands remain unchanged; cross-range rest-only Cut and song growth refuse.
+
+- Native TAB has an explicit **Paste replace** action across existing measures/patterns. It replaces whole
+  beats in copied track/voice lanes, including phrase gaps, with fresh IDs and one exact Undo. Partial beats,
+  boundary ties, shared/approved destinations and unsafe tracker conflicts refuse atomically. Ctrl+V keeps
+  safe Paste; other voices, raw cells, playback and standalone IT use the same shared document/compiler.
+
+- TAB selection and Copy/Paste now span written measures and pattern/order boundaries. Repeated source visits
+  keep distinct IDs; compatible empty destination spans retain voices, techniques and internal ties in one
+  undoable edit. Reused/occupied destinations and unsupported boundary splits refuse without partial writes.
+  Existing single-pattern shared pastes, tracker cells and native/IT timing remain intact.
+
+- Authored tempo beat units and dots now appear in both score and print. Measures includes whole notes;
+  imported units retain their exact written values. Stale units fall back to the effective quarter-note tempo
+  with a warning and can be repaired by applying the same unit. Tracker, playback and IT timing are unchanged.
+
+- Dense lyrics now reserve their measured text width in the shared score/print layout, preserving words,
+  anchors, fonts and playback. A measure too wide for the view/page reports a width limitation instead of
+  crowding its lyrics; widening the view restores navigation. Mixed voices retain their native lyric bands.
+
+- Native-score IT export accepts lyrics and chord diagrams with explicit notation-loss warnings, preserving the
+  original musical data and source annotations. Diagrams do not add notes and lyrics do not synthesize vocals.
+- PROJECT can create a Windows song-opening shortcut with a native Save dialog, cancellation/overwrite
+  confirmation and saved-path feedback. Packaged links target the installed exe; source runs use pythonw and
+  the workspace. The shortcut does not copy the song or alter its history/mix.
+
+- Native T/S/P and harmonic labels no longer collide in score or print previews. Dedicated effect bands and
+  alphaTab's layout padding preserve the original glyphs, authored text and all playback/export data; combined
+  and TAB-only print checks cover the supported scale extremes.
+
+- Native-score IT export accepts tapping, slapping and popping as notation-only markings, matching the native
+  playback path. Export warns that IT omits these markings while keeping source/history and sound unchanged.
+  Marked/cleared IT bytes and native audio match; real control/export/Undo and independent renders cover the path.
+
+- Fade-in now sounds in native live/rendered playback and exports. Native audio and MIDI share the TG track-wide
+  expression schedule, preserving velocity, harmonic layers and released tails through existing gain controls.
+  Standalone IT uses bounded volume-column projection with visible approximation warnings and atomic refusals
+  for unsafe timing/state. Independent 44.1/48-kHz gain/tail checks and actual controls cover the path. Uniform
+  fade glyphs no longer have duplicate overlapping text; authored cues and compact sparse-note labels remain.
+
+- Native-score standalone IT export supports eighth/sixteenth triplet feels through the existing performed
+  attack/release projection, preserving written timing, source phase, repeats and eligible voice/rest semantics.
+  Exact IT ticks and safe cells/state are required; unsupported combinations refuse atomically. Independent
+  44.1/48-kHz renders, real feel controls and a musical example cover the conversion. Integer tick rounding and
+  short cut-ramp differences remain documented sound limitations; native playback is unchanged.
+
+- Score and print previews no longer duplicate brush arrows and grace-note glyphs with overlapping generated
+  text. Full parameters remain in controls/tooltips; mixed-timing grace keeps a compact label and authored beat
+  text is retained. Song data, native playback and standalone IT are unchanged.
+
+- Native-score standalone IT export supports brush/strum strokes on the exact IT tick grid, using native
+  performed attacks/gates and shared voice cohorts. Both directions, tied strings, short gates, repeats and safe
+  combinations retain their native timing. Off-grid rates, occupied cells, overlaps and unsafe mappings refuse
+  atomically. Independent keyed renders, actual stroke controls and musical transport captures cover the path;
+  tick rounding and short transition differences remain documented sound limitations.
+
+- Native-score standalone IT export supports before/on-beat grace notes through the native performed events,
+  including independent dynamics, delayed main notes and preceding-pattern gaps. Exact-grid 16th/32nd and
+  representable dead gates are supported; overlaps, off-grid gates and unsafe cells/mapping refuse before writing.
+  Transition labels remain notation only. Independent renders, actual page controls and full musical transport
+  captures cover the conversion; IT tick rounding and short cut-ramp differences remain documented limitations.
+
+- Native-score standalone IT export supports the native natural/artificial/tapped/pinch/semi harmonic layers
+  through fixed appended channels. Layer pitches, velocities, keymaps, releases and parent mix/mutes are retained;
+  unused layer tails retire on the next parent attack. Unsafe state inheritance, channel capacity, collisions and
+  missing final release space refuse atomically. Independent renders and real-control checks cover the bounded
+  conversion; IT volume/tick rounding and short transition differences remain audible-data limitations.
+
+- Native-score standalone IT export writes trill/tremolo-picking pulses from the native performance plan as
+  editable notes, preserving alternate keymaps, dynamics, ties and repeat traversal. Attacks require exact IT ticks
+  and an available cell. Only the final TG pulse's one-legacy-tick-short key-off can extend by 1/960 quarter, with
+  an export warning; other unsupported timing/ownership refuses atomically. Independent renders, real controls
+  and a musical four-bars example cover the supported subset, including IT tick-rounding differences.
+
+- Native-score standalone IT export supports bounded tremolo-bar/whammy dives, rises and mixed curves through
+  the existing pitch-control projection. Native units, string scope, keymaps and envelopes remain intact;
+  steep curves, oversized resets and unsafe ownership/effect collisions refuse before output replacement.
+  Independent 44.1/48-kHz renders, real-control export and a musical four-bars example cover the supported subset.
+
+- Native-score standalone IT export supports bounded bends, vibrato and shift slides through the existing native
+  control plan and IT fine linear portamento. Row-aligned controls retain their times; off-row controls warn in CLI
+  and RENDER & EXPORT, with preserved turning points and a checked 37.5-cent discrete-trajectory ceiling. Unsafe
+  resets, effect/voice conflicts and missing slide targets refuse before replacing output. Samples/keymaps remain
+  editable; independent 44.1/48-kHz renders and the real controls exercise the supported subset.
+
+- Native-score IT export supports ghost/accent/heavy accent, hammer-derived velocity, and exactly representable
+  staccato/palm-mute/dead/let-ring releases through the existing native performance plan. Between-row key-offs use
+  IT note delay; incompatible timing, cells, channel overlaps or inherited state refuse without replacing output.
+
+- Native-score IT export now supports percussion through the shared tracker conversion: drum keys, instrument
+  keymaps/sample pitches, simultaneous voices, velocity, releases and repeats remain editable in the module.
+  Missing drum sample mappings and channel collisions refuse before an existing output can be replaced.
+
+- Native TAB / SCORE editing is in development. Fret, chord, rest and written-duration edits share the song,
+  Pattern/ROLL, instruments, transport and persistent undo/redo. Staff/tab rendering uses bundled alphaTab assets;
+  playback uses VultureTracker's existing engine. Score identities survive supported arrangement and phrase edits.
+  The engraved TAB is the default editing surface, with string selection, fret entry and a separate editing cursor.
+  Detailed properties and the alternate string grid are collapsible.
+  An optional fretboard shares the score selection and edit history, with note toggling, separate audition,
+  275 reference scales, orientation and appearance settings. Concert-pitch labels include capo.
+  An optional native piano shares exact score selection, duration controls and undo, with both-voice
+  note toggles, capo-aware string allocation and percussion keys. Stale queued entry is cancelled.
+  Piano placement and native duration changes can split or consume bare rests in one undo step,
+  preserving the exact caret, clipboard and later notes. Annotated rests and sounding overlaps refuse.
+  Direct fret typing and fretboard insertion use the same rest placement; serial digit entry cancels
+  stale targets while retaining successful earlier digits and their undo history.
+  Optional Fit within measure applies supported note/rest rearrangements and reports the actual duration;
+  it can reuse a destination that only the other voice occupies and keeps that voice unchanged.
+  Apply duration, + and − change every selected beat of the current voice as one undo step.
+  Remove unused voice clears a rest-only voice from the selected measures, and Clean beat turns the selected
+  beats into plain rests, as in TuxGuitar. The TAB takes more of TuxGuitar's default keys: * / X O H P S V F,
+  Ctrl+Delete, Ctrl+1/2, Ctrl+A and Alt+arrows for markers. Setup tuning changes retune the notes (tuning written as
+  note names with presets; a capo applies at once, keeps frets and raises the sound, shown as "Capo N"), a
+  Transpose dialog follows TuxGuitar's, and Ins inserts a rest as TuxGuitar does. Dragging across the engraved TAB selects a beat
+  range, shown shaded, for the range commands; Select buttons extend or clear it as TuxGuitar's Edit > Selection.
+  The Measures panel carries TuxGuitar's Measure menu: add, remove, clean, copy and paste (replace or insert) measure
+  ranges, one undo step each, on songs with one measure per order (as imported tabs are). A new meter length
+  re-bars the music as TuxGuitar's time signature does (notes keep their times, bars added at the end as needed); tempos can be written in other beat units (also in .tg files);
+  alternate endings are checkboxes; the header line counts TuxGuitar's measure errors. A live reload superseded by a
+  newer edit no longer flashes "compile failed". A native score now exports to a standalone, editable IT (RENDER &
+  EXPORT and `build`): notes as tracker cells, authored velocities as volume-column values. Repeats and alternate
+  endings now expand into ordinary IT patterns/orders using native playback's traversal, retaining performed ties,
+  raw tracker cells and repeat-entry tempo resets without changing the written song. Unsupported conversion or
+  excessive expansion refuses before writing.
+  ROLL's Native track scope edits each source note of a track, across its channels and both voices, with
+  separate lanes for notes that overlap. Ghosts stay read-only, and a drag is cancelled when its context changes.
+  Its GRID draws meter-aware guide lines (1–16 per beat), and percussion rows show drum key names.
+  A blank click there enters a note at the grid line through the TAB's own note entry, with one Undo step.
+  Unchanged duration commands preserve the file, undo history and redo branch.
+  Native playback and audio exports preserve fractional timing between tracker rows, including section exports
+  and aligned stems. Default native SONG renders discard empty padding after the written ending while keeping
+  note decay and written rests; explicitly requested export tails retain their lengths.
+  GP5.00 notation export is available through RENDER & EXPORT, CLI and agent tools for a checked subset of
+  authored scores. Unsupported content is refused before publication; sample sounds are not embedded.
+  The same paths also export GP3.00 and GP4.00, TuxGuitar 2.0 or legacy 1.x files, and TuxGuitar's ASCII tab,
+  LilyPond and MusicXML text. Losses are listed in the export's warnings. Guitar Pro 1 and 2 `.gtp`, GP6 `.gpx` and GP7 `.gp` tabs import.
+  GP5 exports retain ghost/accent/heavy-accent, staccato, dead, palm-mute and let-ring markings per note,
+  including independent chord notes and voices; conflicting combinations refuse without writing a file.
+  Supported GP5 pitched effects include natural/artificial data-0 harmonics and representable trill/
+  tremolo-picking rates, with explicit warnings for the artificial-harmonic payload convention.
+  GP5 bend curves and shift slides preserve written metadata; destructive combinations refuse.
+  GP5 vibrato and hammer-on/pull-off flags retain note ownership and tied metadata.
+  GP5 whammy-bar curves export with uniform per-voice ownership; conflicting note-local curves refuse.
+  GP5 fade-in and tap/slap/pop export as beat flags when every note of the beat agrees; mixed beats refuse.
+  Absolute tempo changes share one clock across TAB, Pattern, seek, playback and exports;
+  TAB measure tempo edits use the existing Pattern commands and history. Harmonics retain their separate sounding
+  layers, with supported native TG/GP interchange and independent MIDI pitch controls. Trill and tremolo-picking
+  edits preserve written notes while scheduling their repeated attacks through the same playback and export paths.
+  Grace notes retain their own timing and velocity; supported let-ring, harmonic, repetition and grace overlaps
+  keep independent note heads on one tracker channel. These share editor/print, history, TG/GP import and
+  native/MIDI playback paths.
+  Measure swing keeps written positions while changing performed timing. Native repeats and alternate endings
+  preserve source bars and map playback passes back to TAB/Pattern, tempo, sections, exports and listening notes.
+  Row-aligned measure boundaries can split or span patterns without changing authored orders. Stroke and
+  pick-stroke controls share beat metadata across voices while retaining written Pattern positions.
+  Different written voices can overlap on one supported tracker channel, retaining separate source notes and gates.
+  Ambiguous Pattern cells require selecting a source note or an explicit range covering all voices.
+  Fade-in markings retain per-note ownership. Native live/audio and MIDI export apply the same ordered track-wide
+  expression schedule; standalone IT supports bounded volume-column projection with explicit approximation warnings.
+  Chord diagrams retain shared-beat annotations independently of played notes, with native editing and print.
+  A separate diagram-to-notes action replaces the selected voice through shared Pattern/history state.
+  Native imports retain exact source MIDI pan without changing the audio mixer's scale or overriding later pan edits.
+  Tap, slap and pop retain per-note markings, including mixed chords and tied continuations, without changing audio.
+  Chord diagrams have a persistent custom-shape library, name recognition and four voicing-generation profiles.
+  Suggestions change only the dialog draft until explicitly applied; library changes persist separately from songs.
+  Track lyrics preserve raw text and starting measure through native song saves, agent edits and shared history.
+  Written placement uses authored measures without changing playback. Native TG retains lyrics; GP4/5 accepts
+  the first lyric line and refuses additional nonempty lines. MIDI export reports omitted lyrics explicitly.
+  The editor engraves the entire written arrangement in wrapped systems, with cross-bar note selection and
+  a shared playback highlight. Following playback scrolls through the score without replacing its bars.
+  Percussion tracks retain authored drum keys and lanes through Pattern edits, native playback and MIDI export.
+  Drum entry and print use percussion notation, with keys 1–100, qualified dynamics/gate techniques and let-ring.
+  TG interchange preserves these markings; GP3–5 accepts drum keys 1–99 with version-specific technique
+  support and explicit refusal of unrepresentable or conflicting flags.
+  MIDI uses channel 10 and refuses conflicting controls or overlapping gates on the same drum key.
+  Short Pattern windows keep a usable piano-roll viewport.
+  Unsupported timing or structural edits fail before saving. Full TuxGuitar parity is still in progress; see
+  `TABLATURE-PARITY.md` and the current implementation status in `BACKLOG.md`.
+
 ## 1.8.0 (2026-10-18)
 
 - Pattern tab: ACCENT sets a repeating list of volumes (vNN, or a percent of the note's own) on the selected channels'
