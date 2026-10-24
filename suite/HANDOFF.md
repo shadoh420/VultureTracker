@@ -1,72 +1,58 @@
-# Suite handoff (2026-09-24, Nadir v6 = the last pass; Rift: nine layers picked, the full form laid out; updated 2026-10-08)
+# VultureTracker handoff
 
-Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
+## Current release: 1.9.0 published (2026-10-24)
 
-Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication and clean defaults first.
-Current branch/head: `codex/native-tablature-release` / `cf88e55`; shared-focus fix awaiting CI.
-PR: https://github.com/shadoh420/VultureTracker/pull/4
-Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40121367314
-Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40121363414
-The final clean Windows build, executable smoke and artifact upload pass
-(`ci-shared-focus-build.log`). Its first upload rejected the slash in the branch name
-(`ci-clean-build-failure.log`); branch artifacts now use the commit SHA, tag names stay unchanged.
-Run40118130817 passed Windows/Python3.10 and fixed Linux PDF/compact checks, but found two browser failures.
-The layout audit counted invisible controls inside closed details; the reproduced false overlap now
-uses actual browser visibility (`toolbar-visibility-repro.log`). A real pending-save focus gap dropped
-Ctrl+Z after a clicked button became disabled. Focus is now retained immediately; the delayed-response
-regression queues Undo and verifies Redo/restoration (`button-focus-before.log`, `button-focus-verified.log`).
-The first focus repair checked only body focus and missed browsers retaining the disabled button until
-the event ended (`button-focus-final.log`). Four focused control cases now pass in
-`focus-visibility-final.log`; the exact false-overlap probe passes in `toolbar-visibility-final.log`.
-The first packaged focus check also exposed delayed phrase preparation; focus retention now lives in
-the shared control update, at the point a focused button becomes disabled. `async-focus-final.log`
-passes immediate stem Undo/Redo, delayed phrase navigation/history, panels and track controls.
-`package-focus-final.log`/`package-focus-verified.log` retain the earlier package failures; the route
-cleanup now releases held requests before unregistering, preserving the original assertion diagnostic.
-`build-shared-focus-final.log` and `package-release-qualified.log` pass the new package, including
-pending focus, playback, markers, standalone IT and exact history. An earlier failed probe left15
-velocity edits in the generated marker fixture; `restore-marker-probe.log` verifies only that known
-change and restores the exact generator-original through Undo before the passing run.
-Run40121367314 passed Windows/Python3.10, PDF, compact layout and shared-focus cases. Its only browser
-failure was a test dereferencing temporarily null render bounds during track-setup reload. All79
-equivalent readiness predicates in15 test/runner files now wait for bounds instead of throwing; their
-finished-render requirement is unchanged. `ci-shared-focus-failures.log` retains the failure and
-`render-waits-final.log` records focused setup qualification. Application/package source is unchanged.
-No merge, tag or publication yet. Next: qualify the readiness fixes in CI, then merge PR4, tag
-v1.9.0, publish the three local dist assets, run `tools/release.py 1.9.0 --check`, record final results.
+[Release and downloads](https://github.com/shadoh420/VultureTracker/releases/tag/v1.9.0).
+[PR #4](https://github.com/shadoh420/VultureTracker/pull/4) is merged. Tag `v1.9.0` points to
+`9f19c34584a54c5b3840f961d7ed9de355a38cbc`; local and remote main contain the release.
+The owner authorized merge/publication and requested clean defaults first.
 
-Current delivery: `dist/vulturetracker.exe` (1.9.0), including the shared-focus fix.
-EXE SHA256: `5905b37a14baed379411a0711f90ba9ef2f8b94d5f1e30d256a35fd6f0560eb4`.
-The five existing preview/GP5/edit shortcuts target it with their original song arguments. Private
-songs/notes remain in scratch. Selected rollback: `scratch/tab-package-range-expression`.
-Fresh score views default to horizontal all-track staff/TAB at80%, hidden dynamics and written pitch;
-saved choices survive. Pattern scrolls continuously through orders. Compact spacing now respects its
-declared glyph floor across fonts. No musical-data/Undo guards were relaxed.
+Fresh score views use horizontal all-track staff/TAB at 80%, hidden dynamics and TuxGuitar written pitch.
+Explicit saved preferences survive. Pattern scrolls continuously through every order. The release includes
+the real GP5 imports, sound-preserving standalone IT fallback, part/voice playback markers, compact glyph
+spacing and pending-save keyboard focus fixes. Notes, shared Undo and atomic failure guards remain intact.
 
-Evidence: `scratch/tab-test-fixtures/release-1.9.0`. Package checks `package-qualified.log` and
-`package-compact-controls-final.log` pass native/WASM playback, standalone IT, part markers, pending edits,
-compact editing/fallback fonts, exact Undo/Redo and packed selfchecks. `package-real-pattern.log` verifies
-actual Boys232-bar wheel/scrollbar/last-bar playback and unchanged source (GUI source unchanged since).
-ZIP integrity/private-fixture exclusion and9 docs checks pass. `layout-controls.log` and
-`marker-default.log` cover fresh defaults/persistence/capo/markers. Before/after score and compact-font
-captures are headless evidence, not owner visual acceptance or foreground performance measurements.
+Current delivery: `dist/vulturetracker.exe`, also published in `vulturetracker-win64.zip`.
+The five existing preview/GP5/edit shortcuts target this executable with their original song arguments.
+Private songs, notes and samples remain in scratch. Selected rollback: `scratch/tab-package-range-expression`.
+Published asset hashes match local dist and the release body:
 
-CI failure history retained in the evidence logs: Python3.10 fixture syntax; mocked webview/obsolete
-strict-export expectations; Pattern stale channels/colours; asynchronous test reads and coordinates.
-Run40115777909 passed Windows/Python3.10 portable. Its414 browser cases had five failures:
-compact font spacing (now fixed), piano/fretboard details-toggle reads (now awaited; local2case pass
-in `details-toggle-final.log`), and two PDF starts. `ci-pdf-diagnostic.log` proves Ubuntu AppArmor denied
-Chromium's sandbox. CI now allows namespaces only for its pinned browser executable; production sandbox
-flags remain unchanged. Earlier failures and final focused results remain together in the log folder.
-`compact-default-fixture-final.log` passes ordinary/25-string controls. The first package compact check
-assumed old view defaults; the helper now normalizes actual controls and skips unchanged values.
-Test/config-only changes after the current EXE require no rebuild.
+- EXE: `5905b37a14baed379411a0711f90ba9ef2f8b94d5f1e30d256a35fd6f0560eb4`
+- ffmpeg: `2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3`
+- ZIP: `e40ea5148b3e2e3509d5317fbfd06f9940af32e85dc79c70bfcd07d4f5bf1463`
 
-Owner accepted Boys/Advent standalone IT sound. Full TuxGuitar parity and owner visual/feel acceptance
-are not claimed. Peripheral coverage/LilyPond and documented format limits remain visible, deferred
-from this release by the owner. Earlier workers remain stopped; one bounded read-only PDF worker
-finished and was stopped. No automations were started/resumed. Current release authorization supersedes
-historical no-publication notes below.
+Verified:
+
+- [Final PR CI](https://github.com/shadoh420/VultureTracker/actions/runs/40123344055): 414 browser cases
+  (3 optional skips), plus 1,699 portable cases on Linux/Python 3.14 (15 skips), Linux/Python 3.10
+  (17 skips) and Windows/Python 3.14 (16 skips), all successful.
+- [Tagged clean Windows build](https://github.com/shadoh420/VultureTracker/actions/runs/40126117955):
+  build, executable smoke, packed selfchecks and artifact upload passed.
+- Final local package: native/WASM playback, standalone IT, part/empty-voice markers, delayed edits,
+  pending-button focus, exact Undo/Redo and packed selfchecks passed. Applicable unchanged compact
+  ordinary/25-string/fallback-font and real Boys 232-bar wheel/scrollbar/last-bar checks are reused.
+- ZIP integrity/private-fixture exclusion, 9 docs checks and `tools/release.py 1.9.0 --check` passed.
+  GitHub reports all three assets uploaded and their SHA-256 digests match.
+
+Evidence: `scratch/tab-test-fixtures/release-1.9.0`, especially `ci-release-final.log`,
+`ci-tag-build-final.log`, `package-release-qualified.log`, `package-compact-controls-final.log`,
+`package-real-pattern.log` and `published-release-check.log`.
+Earlier failures remain there: compact font spacing; pending-save focus (including delayed phrase
+preparation); hidden-control overlap test; null render-bounds waits; Windows test HTTP transport;
+Linux PDF sandbox policy; and branch artifact naming. Each was repaired and qualified by the final
+runs. The generated marker fixture's known failed-test edits were restored through exact Undo;
+`restore-marker-probe.log` records that bounded recovery. No owner data was cleaned or reset.
+
+Owner accepted Boys/Advent standalone IT sound. Automated/headless checks do not establish owner
+engraving/feel acceptance or foreground performance. Full TuxGuitar parity is not claimed; peripheral
+coverage, external LilyPond availability and documented format restrictions remain deferred.
+No remaining identified release blocker. Next: collect feedback on 1.9.0; do not resume old workers
+or automations. All owned jobs are finished. Unrelated preview shortcut and Rift build log are preserved.
+
+## Historical checkpoints
+
+The music state below originated on 2026-09-24 and was updated on 2026-10-08; see "Since 2026-09-24"
+for that history. Earlier no-publication instructions and candidate paths below are historical.
 
 Previous candidate checkpoint: continuous Pattern scrolling implemented and packaged.
 Owner rejected the one-bar pane: previous/next navigation was insufficient. Continuous song is now on by

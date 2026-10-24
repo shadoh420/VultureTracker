@@ -8,8 +8,8 @@ configurable beat spacing, and shared phrase-sample storage.
 
 Owner's scope: full TuxGuitar parity, fully native inside VultureTracker, synchronized with Pattern and everything
 else. This replaces the deferred read-only tab proposal. The screenshot is a visual reference, not a complete
-feature specification. Status: the first native editor and shared score projection are implemented locally and
-under validation. Full parity remains incomplete. The pinned-source inventory is `TABLATURE-PARITY.md`.
+feature specification. Status: the native editor and shared score projection shipped in 1.9.0.
+Full parity remains incomplete. The pinned-source inventory is `TABLATURE-PARITY.md`.
 
 ### Resumed under Claude Code AO workers (2026-10-20)
 
@@ -26,12 +26,13 @@ as a user does (click or key) and asserts what the user perceives: visible butto
 both staves, readable values (note names, not MIDI numbers), measured render/live pitch and duration, byte-exact
 Undo. Edits that TuxGuitar also has are compared with TuxGuitar 2.1.0 by `tools/tg_edit_oracle.py` (CPU lease).
 
-### Current state: continuous Pattern follow-up (2026-10-24)
+### Current state: 1.9.0 released (2026-10-24)
 
-Release1.9.0 is now authorized. The owner requested the clean TuxGuitar layout as the default first;
-fresh-view defaults and preserved explicit preferences pass4 focused control tests. The versioned package
-passes native/IT/control smoke checks; PR CI is pending. Current handoff records publication state.
-Exhaustive parity is not claimed.
+Release 1.9.0 is published after PR #4 merged. The clean TuxGuitar layout is the fresh-view default;
+explicit preferences survive. Final CI passes 414 browser cases and 1,699 portable cases on each of
+Linux/Python 3.14, Linux/Python 3.10 and Windows/Python 3.14, with documented optional skips. The tagged
+Windows build and final local native/IT/control smoke checks pass. Published asset digests are verified;
+the current handoff links the release and evidence. Exhaustive parity is not claimed.
 
 The owner clarified that one bar with previous/next controls was insufficient. Pattern now defaults to a
 continuous order-list view: several bars visible together, wheel/scrollbar access through the whole song,
