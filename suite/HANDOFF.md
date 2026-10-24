@@ -3,16 +3,26 @@
 Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
 Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication and clean defaults first.
-Current branch/head: `codex/native-tablature-release` / `73a741f`.
+Current branch/head: `codex/native-tablature-release` / `1946534`.
 PR: https://github.com/shadoh420/VultureTracker/pull/4
-Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40117884374
-Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40117901302
-Tests are pending. The clean Windows build and executable smoke passed; artifact upload failed because
-the branch name contains a slash (`ci-clean-build-failure.log`). Branch artifacts now use the commit SHA;
-tag artifact names stay unchanged. No merge, tag or publication yet. Next: qualify CI, merge PR4, tag
+Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40118130817
+Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40118126492
+The previous clean Windows build, executable smoke and artifact upload pass
+(`ci-clean-build-final.log`). Its first upload rejected the slash in the branch name
+(`ci-clean-build-failure.log`); branch artifacts now use the commit SHA, tag names stay unchanged.
+Run40118130817 passed Windows/Python3.10 and fixed Linux PDF/compact checks, but found two browser failures.
+The layout audit counted invisible controls inside closed details; the reproduced false overlap now
+uses actual browser visibility (`toolbar-visibility-repro.log`). A real pending-save focus gap dropped
+Ctrl+Z after a clicked button became disabled. Focus is now retained immediately; the delayed-response
+regression queues Undo and verifies Redo/restoration (`button-focus-before.log`, `button-focus-verified.log`).
+The first focus repair checked only body focus and missed browsers retaining the disabled button until
+the event ended (`button-focus-final.log`). Four focused control cases now pass in
+`focus-visibility-final.log`; the exact false-overlap probe passes in `toolbar-visibility-final.log`.
+This application change requires a fresh package.
+No merge, tag or publication yet. Next: qualify the two repairs and rebuild once, then merge PR4, tag
 v1.9.0, publish the three local dist assets, run `tools/release.py 1.9.0 --check`, record final results.
 
-Current delivery: `dist/vulturetracker.exe` (1.9.0), built from the final application source.
+Current delivery: `dist/vulturetracker.exe` (1.9.0); the focus fix awaits the next build.
 EXE SHA256: `e1da6644530f94f362d5d0885da5920be0987d2ef821e6aab0a3ef23b7251526`.
 The five existing preview/GP5/edit shortcuts target it with their original song arguments. Private
 songs/notes remain in scratch. Selected rollback: `scratch/tab-package-range-expression`.

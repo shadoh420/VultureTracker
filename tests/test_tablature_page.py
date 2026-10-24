@@ -3670,7 +3670,7 @@ class TestTablaturePage(unittest.TestCase):
                     page.wait_for_timeout(300)
                     problems = page.evaluate("""() => {
                         const controls = [...document.querySelectorAll('#tab-editor .vt-tab-tools button, #tab-editor .vt-tab-tools input, #tab-editor .vt-tab-tools select, #tab-editor .vt-tab-nav button')]
-                            .filter(e => e.offsetParent && e.getClientRects().length);
+                            .filter(e => e.checkVisibility());
                         const rects = controls.map(e => [e, e.getBoundingClientRect()]), out = [];
                         const name = e => (e.dataset.action || e.dataset.ui || e.textContent.trim()).slice(0, 30);
                         const page = document.documentElement.clientWidth;
@@ -4657,7 +4657,18 @@ class TestTablaturePage(unittest.TestCase):
             self.click_tab_lane(page, 0, 0, 3, voice=1)
             page.locator('.vt-tab-inspector > summary').click()
             page.select_option('[data-ui=beat-stem]', 'down')
+            held = []
+            page.route('**/api/score_command', lambda route: held.append(route))
             page.click('[data-action=beat-stem]')
+            page.wait_for_function('EDQ.n===1')
+            self.assertEqual(page.evaluate('document.activeElement.id'), 'tab-editor')
+            # Undo remains usable while the focused action button is disabled.
+            page.keyboard.press('Control+z')
+            page.wait_for_function('EDQ.n===2')
+            held.pop().continue_()
+            page.unroute('**/api/score_command')
+            self.settled(page, "SCORE.view.score.patterns.verse.beats[3].stem==null")
+            page.keyboard.press('Control+y')
             self.settled(page, "SCORE.view.score.patterns.verse.beats[3].stem==='down'")
             page.keyboard.press('Control+z')
             self.settled(page, "SCORE.view.score.patterns.verse.beats[3].stem==null")

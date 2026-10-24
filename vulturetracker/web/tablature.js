@@ -3604,7 +3604,12 @@
       if (isPercussion(spec()) && drumActions.has(button.dataset.action)) return percussionRefusal();
       const restoreFocus = document.activeElement === button;
       try {
-        Promise.resolve(actions[button.dataset.action]()).catch(err => status(err.message || String(err))).finally(() => {
+        const action = actions[button.dataset.action]();
+        // Disabling the clicked button can blur it immediately. Keep keyboard
+        // Undo available during the save, without stealing a dialog's focus.
+        if (restoreFocus && !destroyed && (document.activeElement === document.body ||
+            document.activeElement === button && button.disabled)) root.focus({preventScroll: true});
+        Promise.resolve(action).catch(err => status(err.message || String(err))).finally(() => {
           if (restoreFocus && !destroyed && document.activeElement === document.body) root.focus({preventScroll: true});
         });
       } catch (err) { status(err.message || String(err)); }
