@@ -284,7 +284,8 @@ def rich_xml():
         return f'<duration value="{value}"{a}>{t}</duration>'
 
     def n(string, fret, vel=95, inner='', tied=False):
-        return f'<note string="{string}" value="{fret}" velocity="{vel}"{" tiedNote=\"true\"" if tied else ""}>{inner}</note>'
+        tie = ' tiedNote="true"' if tied else ''
+        return f'<note string="{string}" value="{fret}" velocity="{vel}"{tie}>{inner}</note>'
 
     third = Fraction(1, 3)
     m1 = [beat(0, [voice(d(4), n(1, 0) + n(2, 0) + n(3, 0)), voice(d(2), n(6, 0, 80), ' direction="down"')],

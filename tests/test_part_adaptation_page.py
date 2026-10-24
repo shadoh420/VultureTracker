@@ -65,12 +65,18 @@ class TestPartAdaptationPage(unittest.TestCase):
         # later no-rerender check deliberately navigates channel zero.
         page.select_option('[data-ui=track]', 'guitar')
         page.evaluate('async()=>{setCursor(0,0,0,0);await scoreRefresh()}')
-        page.wait_for_function("document.querySelector('.vt-tab-score').dataset.tracks==='guitar' && document.querySelector('.vt-tab-score').dataset.bars")
+        page.wait_for_function("document.querySelector('.vt-tab-score').dataset.tracks.split(',').includes('guitar') && document.querySelector('.vt-tab-score').dataset.bars")
         return dict(part_switch_before_and_during_playback=True, moving_visible_marker=True,
                     empty_voice_marker=True, voice_follow=True, explicit_follow_pause_preserved=True, song_unchanged=True)
 
     def test_part_switch_preserves_playback_marker_follow(self):
         with self.muted_page(api.to_yaml(adaptation_song()), compact=True, width=1000, height=750) as (page, state, folder):
+            self.assertFalse(state.error, state.error)
+            print(self.run_part_marker(page, state.song_path))
+
+    def test_part_marker_in_clean_default_multitrack_view(self):
+        with self.muted_page(api.to_yaml(adaptation_song()), compact=True, score_view=None,
+                             width=1000, height=750) as (page, state, folder):
             self.assertFalse(state.error, state.error)
             print(self.run_part_marker(page, state.song_path))
 

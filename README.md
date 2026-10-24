@@ -42,8 +42,8 @@ song.yaml ──build──▶ song.it ──render──▶ .wav / .mp3 / .ogg 
 **Windows:** download `vulturetracker-win64.zip` from the [latest release](https://github.com/shadoh420/VultureTracker/releases/latest),
 unzip it and run `vulturetracker.exe`. The exe is not code-signed, so Windows SmartScreen may warn about an unknown
 publisher. Check that it is the published file before running it: `certutil -hashfile vulturetracker.exe SHA256` (or
-`Get-FileHash vulturetracker.exe` in PowerShell) must print the SHA-256 listed in the release notes; for 1.8.0 it is
-`d49102e848b3724acdbdde0a8d7a33a06fadaa12cfa4029acb2aed5273ebd39f`.
+`Get-FileHash vulturetracker.exe` in PowerShell) must print the SHA-256 listed in the release notes; for 1.9.0 it is
+`16dbbdf956ff26d303d667e00dee1a4697fd12d1a874823c82ceb9a8b16f5c50`.
 
 **From source** (Python 3.10+; tested on Windows and Linux; outside Windows install libopenmpt, e.g.
 `apt install libopenmpt0t64`):
@@ -54,6 +54,11 @@ cd VultureTracker
 pip install -e ".[all]"
 python -m vulturetracker gui demo2/iron_relay.yaml
 ```
+
+Native score playback needs the patched libopenmpt engine described in
+[THIRD_PARTY.md](THIRD_PARTY.md#patched-engine-source-and-reproduction). The Windows download includes it.
+On Linux, build the pinned source with `tools/native-score-engine.patch` as in the tests workflow and set
+`LIBOPENMPT` to the resulting `libopenmpt.so`; the distribution's stock library supports ordinary tracker songs.
 
 The app is a small web server on 127.0.0.1 (port 8723; a second window takes the next free one) shown in its own
 window, or in your browser without pywebview or WebView2. Nothing outside your computer can reach it, and each launch
