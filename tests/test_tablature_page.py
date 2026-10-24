@@ -9,6 +9,7 @@ import io
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 import wave
@@ -17,6 +18,7 @@ from urllib.parse import urlencode, urlsplit
 from pathlib import Path
 from fractions import Fraction
 from unittest import mock
+from types import SimpleNamespace
 
 from tests import test_release100_page as page_fixture
 from tests.test_gui import RATE, sine
@@ -3307,7 +3309,8 @@ class TestTablaturePage(unittest.TestCase):
                 link=folder/"Café's & $ shortcut.lnk";window=mock.Mock()
                 window.create_file_dialog.side_effect=[(str(link),),None]
                 page.click('[data-t=project]')
-                with mock.patch.object(server.Handler,'window',window):
+                with mock.patch.dict(sys.modules, {'webview': SimpleNamespace(SAVE_DIALOG=30)}), \
+                     mock.patch.object(server.Handler,'window',window):
                     page.click('#song-shortcut');page.wait_for_function("document.querySelector('#shortcut-result').textContent.startsWith('Saved shortcut:')")
                     self.assertIn(str(folder/'song.yaml'),read_song_shortcut(link)['args'])
                     page.click('#song-shortcut');page.wait_for_function("document.querySelector('#shortcut-result').textContent.startsWith('Cancelled')")
@@ -12360,7 +12363,8 @@ class TestScoreDeliveryPage(unittest.TestCase):
                 from vulturetracker import server
                 window = mock.Mock()
                 window.create_file_dialog.side_effect = [(str(output / ('score-page.'+fmt)),) for fmt in ('svg','png','jpg','bmp')]
-                with mock.patch.object(server.Handler, 'window', window):
+                with mock.patch.dict(sys.modules, {'webview': SimpleNamespace(SAVE_DIALOG=30)}), \
+                     mock.patch.object(server.Handler, 'window', window):
                     self.export_preview(preview, output, native=True)
                 self.assertEqual(window.create_file_dialog.call_count, 4)
                 preview.uncheck('[name=track][value=bass]')

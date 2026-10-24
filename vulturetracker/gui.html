@@ -1157,13 +1157,14 @@ function patSongLayout(){const canvas=$('pat-song-canvas'),active=$('pat'),conte
   if(old!==PAT_SONG.heights[PAT.order]&&sc.scrollTop>top+old)patScrollTo(sc.scrollTop+PAT_SONG.heights[PAT.order]-old);
   patSongContext();}
 function patSongContext(){if(!patContinuous()||!PAT_SONG.offsets.length||!$('t-pattern').classList.contains('on'))return;
-  const sc=$('patscroll'),f=S.song.facts,cols=PAT.fo?.length?PAT.fo:[...f.channels.keys()],key=PAT_SONG.key;
+  const sc=$('patscroll'),f=S.song.facts,cols=(PAT.fo||[]).filter(c=>c<f.channels.length),key=PAT_SONG.key;
+  if(!cols.length)cols.push(...f.channels.keys());
   const width=26+cols.length*86+16,low=Math.max(0,sc.scrollTop-sc.clientHeight),high=sc.scrollTop+2*sc.clientHeight;
   const visible=f.orders.map((o,i)=>i).filter(i=>i!==PAT.order&&PAT_SONG.offsets[i]<high&&PAT_SONG.offsets[i]+PAT_SONG.heights[i]>low);
   $('pat-context').innerHTML=visible.map(i=>{const o=f.orders[i],j=PAT_SONG.cache.get(i)?.data,rows=j?.display_rows||j?.rows;
     return `<div class="pat-preview" data-order="${i}" style="position:absolute;top:${PAT_SONG.offsets[i]}px;height:${PAT_SONG.heights[i]}px;min-width:100%;width:${width}px;overflow:hidden">
       <div class="pat-song-title">${i+1} / ${f.orders.length} · ${esc(o.pattern)} · ${o.rows} rows</div>
-      <div style="padding:0 8px 8px"><div class="pathead"><span></span>${cols.map(c=>`<span>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}</span>`).join('')}</div>
+      <div style="padding:0 8px 8px"><div class="pathead"><span></span>${cols.map(c=>`<span class="${audible(c)?'':'off'}"${ownCol(c)?` style="box-shadow:inset 0 -2px 0 ${ownCol(c)}"`:''}>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}</span>`).join('')}</div>
       ${rows?rows.map((r,n)=>`<div class="pat-preview-row" data-row="${n}"><span class="rn">${rowNum(n)}</span>${cols.map(c=>{const [a,b,v,e]=r[c].split(' ');return `<span class="pat-preview-cell pc" data-ch="${c}">${[a,b,v,e[0],e.slice(1)].map((s,col)=>`<span data-col="${col}" class="${['n','i','v','e','e'][col]}${s[0]==='.'?' z':''}">${esc(s)}</span>${col<3?' ':''}`).join('')}</span>`}).join('')}</div>`).join(''):`<div>${esc(j?.error||'Loading pattern…')}</div>`}</div></div>`}).join('');
   for(const i of visible)if(!PAT_SONG.cache.has(i))patData(i).then(()=>{if(PAT_SONG.key===key)patSongContext()}).catch(e=>{EDQ.err=e.message;renderLiveBar()});}
 $('patscroll').addEventListener('scroll',()=>{if(!patContinuous())return;

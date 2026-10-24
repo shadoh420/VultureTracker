@@ -16,7 +16,17 @@ CI first exposed Python3.10 fixture syntax, repaired. Run40106599385 then found 
 portable dialog tests and old export-only refusal expectations. The fallback also hid the original IT
 diagnostic; both refusal reasons now survive. Strict projection tests remain strict; sampled-export audio
 and failed-output atomicity are separately checked. `ci-portable-fixes-final.log`:12 focused cases pass.
-Next: rerun CI, rebuild/smoke after the diagnostic fix, then authorized merge/tag/build-CI/publish.
+Run40108117705 passed Linux portable and Python3.10 (1698 tests each). Windows had one connection abort
+in the Origin:null security test;30 focused repetitions passed unchanged. Browser CI hit its30-minute
+limit after recording two Pattern regressions and a missing mocked GUI module in the image-export test.
+Channel deletion now filters stale preview columns while loading; adjacent bars retain channel colours.
+`ci-page-fixes.log` retains reproduction; `ci-page-qualified.log`:all3 affected real-control cases pass,
+including native SVG/PNG/JPEG/BMP/PDF export. Same-view `channel-color-before.png`/`channel-color-after.png`
+show the corrected preview header. Captures are headless, not foreground performance measurements.
+CI browser budget is60 minutes with named, fail-fast reporting; every module remains in the run.
+`pattern-source.log`:32 syntax/docs checks. Final EXE SHA256:
+`c5fdb06bfcd31694e9149a926a7be9518940ca656332fb094dbdf7f2b1f93805`.
+Next: final rebuilt-package checks and CI, then authorized merge/tag/build-CI/publish.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
 selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.
