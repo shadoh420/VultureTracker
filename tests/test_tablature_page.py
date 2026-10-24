@@ -7921,6 +7921,7 @@ class TestTablaturePage(unittest.TestCase):
 
     def run_compact_score(self,page,path):
         original=path.read_bytes();errors=[];writes=[]
+        page.set_viewport_size(dict(width=1920,height=1080))
         page.on('pageerror',lambda error:errors.append(str(error)))
         page.on('request',lambda r:writes.append(r.url) if '/api/score_' in r.url and r.method=='POST' else None)
         saved=page.evaluate("localStorage.getItem('vt.scoreView')")
@@ -7933,6 +7934,8 @@ class TestTablaturePage(unittest.TestCase):
             self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
         def change(field,value):
             count=page.evaluate('window.tabRenderCount||0');control=page.locator('[data-ui=view-'+field+']')
+            if (control.is_checked() == value if isinstance(value,bool) else control.input_value() == str(value)):
+                return
             if isinstance(value,bool):control.set_checked(value)
             elif field=='scale':control.fill(str(value));control.press('Tab')
             else:control.select_option(value)
@@ -7943,6 +7946,7 @@ class TestTablaturePage(unittest.TestCase):
                 const xs=beats.map(b=>tabRenderApi.boundsLookup.findBeats(b).at(-1).onNotesX);
                 return xs.slice(1).map((x,i)=>x-xs[i]);
             }""")
+        change('multitrack',False);change('scale',100)
         change('layout','horizontal');change('notation','tab')
         normal=gaps();change('compact',True);compact=gaps()
         self.assertTrue(all(x>0 for x in compact),compact)

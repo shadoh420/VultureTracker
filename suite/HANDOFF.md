@@ -62,8 +62,15 @@ label space to43.553px. Compact positions now clamp to their declared minimum st
 `compact-font-fixed.log` records the measured floor; `compact-font-regression-final.log` passes ordinary
 and25-string real editing/history cases with the fallback font. The initial regression measured a grace
 beat instead of the chord; `compact-font-regression.log` preserves that test error. No overlap guard relaxed.
-Next: collect PDF stderr from CI, repair its actual cause, qualify compact fix in CI, final package smoke,
-then authorized merge/tag/build-CI/publish.
+The EXE was rebuilt with the compact floor and PDF diagnostic (`build-qualified.log`), SHA256:
+`e1da6644530f94f362d5d0885da5920be0987d2ef821e6aab0a3ef23b7251526`.
+`package-qualified.log` passes native playback, standalone IT, part markers, delayed-edit Undo/Redo and
+packed selfchecks. `package-compact-controls-final.log` also passes actual compact editing and fallback
+font spacing against that EXE. The first compact package check timed out because the helper assumed old
+view defaults; it now normalizes actual controls and skips unchanged choices. `package-compact-controls.log`
+retains that failure; `compact-default-fixture-final.log` passes both ordinary and25-string source cases.
+Next: collect PDF stderr from CI, repair its actual cause, qualify compact fix in CI,
+then authorized merge/tag/build-CI/publish. Test-only changes after this build require no rebuild.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
 selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.
