@@ -1964,7 +1964,8 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('.vt-piano')
             self.assertFalse(page.locator('.vt-piano').evaluate('e=>e.open'))
             page.locator('.vt-piano > summary').click()
-            page.wait_for_function('SCORE.view && !SCORE.fetching')
+            # The details toggle event fills the keyboard after the click returns.
+            page.wait_for_function("document.querySelectorAll('[data-piano-pitch]').length === 120")
             self.assertEqual(page.locator('[data-piano-pitch]').count(), 120)
             self.assertNotIn('[object Object]', page.locator('.vt-piano').inner_text())
             page.locator('.vt-fretboard > summary').click()
@@ -3660,6 +3661,7 @@ class TestTablaturePage(unittest.TestCase):
             board = page.locator('details.vt-fretboard')
             if not board.evaluate('e => e.open'):
                 board.locator(':scope > summary').click()
+            page.wait_for_function("document.querySelector('[data-fb=context]').textContent.includes('tuning')")
             self.assertIn('tuning E4 B3 G3 D3 A2 E2', page.inner_text('[data-fb=context]'))
             # Layout at the default and the narrowest width: no two toolbar controls overlap, none is clipped or pushed off.
             for width in (1400, 1180):   # 1180: the app's own minimum (#app min-width); narrower, the whole app scrolls

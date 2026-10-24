@@ -69,8 +69,13 @@ packed selfchecks. `package-compact-controls-final.log` also passes actual compa
 font spacing against that EXE. The first compact package check timed out because the helper assumed old
 view defaults; it now normalizes actual controls and skips unchanged choices. `package-compact-controls.log`
 retains that failure; `compact-default-fixture-final.log` passes both ordinary and25-string source cases.
-Next: collect PDF stderr from CI, repair its actual cause, qualify compact fix in CI,
-then authorized merge/tag/build-CI/publish. Test-only changes after this build require no rebuild.
+Run40115777909 finished: Windows and Python3.10 portable pass;414 browser cases have five failures.
+`ci-pdf-diagnostic.log` confirms Ubuntu's AppArmor denies the downloaded PDF browser's sandbox.
+CI now allows user namespaces for only its pinned Chromium executable and selects it consistently;
+production sandbox flags remain unchanged. Two tests now await details-toggle population (piano keys/
+fretboard context); the remaining compact failure is the already fixed minimum-spacing floor.
+Next: qualify these fixes in CI, then authorized merge/tag/build-CI/publish. Test/config changes after
+this build require no rebuild. Final ZIP integrity/private-fixture exclusion and9 docs checks pass.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
 selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.

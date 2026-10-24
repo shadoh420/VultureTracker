@@ -79,6 +79,16 @@ jobs:
           python -m pip install -q --no-deps --no-build-isolation .
           python -m playwright install --with-deps chromium
           python -c "from vulturetracker import faust; faust.have() or faust.fetch()" || true
+      - name: Allow the pinned browser sandbox
+        # Ubuntu's AppArmor policy blocks downloaded Chromium's user namespaces.
+        # Allow only this executable; keep the production PDF sandbox enabled.
+        # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+        run: |
+          chromium_path=$(python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()")
+          test -x "$chromium_path"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile vt-ci-chromium "%s" flags=(unconfined) { userns, }\n' "$chromium_path" | sudo tee /etc/apparmor.d/vt-ci-chromium
+          sudo apparmor_parser -r /etc/apparmor.d/vt-ci-chromium
+          echo "VT_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
       - name: Page tests
         run: >-
           python -u -m unittest -v tests.test_page tests.test_workflow_page tests.test_release070_page
