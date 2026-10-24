@@ -2,85 +2,48 @@
 
 Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
-Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication, with clean TuxGuitar defaults first.
-Fresh score views now use horizontal all-track staff/TAB at80%, hidden printed dynamics and written pitch;
-explicit saved choices survive upgrades. PR: https://github.com/shadoh420/VultureTracker/pull/4
-Branch: `codex/native-tablature-release`. No tag/publication yet; full parity is not claimed.
-Evidence: `scratch/tab-test-fixtures/release-1.9.0`. `layout-controls.log`:4 real default/persistence/preset/
-capo/view-mode cases; `marker-default.log`:fresh multitrack playback markers; `source.log`:32 syntax/docs;
-`compatibility.log`:35 TG/docs checks. `score-before.png` and `score-default-release.png` show the same
-1920x1040 Boys song view; `score-before-final.log`/`score-default.log` pass without source/history writes.
-`package-final.log` passes version1.9 native playback, standalone IT, markers, delayed-edit Undo/Redo and
-packed selfchecks. Initial package/before-capture failures were harness assumptions, fixed in final logs.
-CI first exposed Python3.10 fixture syntax, repaired. Run40106599385 then found missing mocked webview in
-portable dialog tests and old export-only refusal expectations. The fallback also hid the original IT
-diagnostic; both refusal reasons now survive. Strict projection tests remain strict; sampled-export audio
-and failed-output atomicity are separately checked. `ci-portable-fixes-final.log`:12 focused cases pass.
-Run40108117705 passed Linux portable and Python3.10 (1698 tests each). Windows had one connection abort
-in the Origin:null security test;30 focused repetitions passed unchanged. Browser CI hit its30-minute
-limit after recording two Pattern regressions and a missing mocked GUI module in the image-export test.
-Channel deletion now filters stale preview columns while loading; adjacent bars retain channel colours.
-`ci-page-fixes.log` retains reproduction; `ci-page-qualified.log`:all3 affected real-control cases pass,
-including native SVG/PNG/JPEG/BMP/PDF export. Same-view `channel-color-before.png`/`channel-color-after.png`
-show the corrected preview header. Captures are headless, not foreground performance measurements.
-CI browser budget is60 minutes with named reporting; every module remains in the run.
-`pattern-source.log`:32 syntax/docs checks. Final EXE SHA256:
-`c5fdb06bfcd31694e9149a926a7be9518940ca656332fb094dbdf7f2b1f93805`.
-`package-pattern.log` and `package-real-pattern.log` pass the final EXE, including actual Boys232-bar
-wheel/scrollbar/last-bar playback and source preservation. Run40110960905 passed all three portable
-environments; browser tests stopped at compact-score hit testing at a narrow viewport on Linux.
-Its chord-label overlap guard was correctly active. The test now follows the widening instruction before
-testing hit targets/Undo, without changing the guard; `compact-width-final.log` passes. The first local
-repair incorrectly waited for renderScore on a resize; `compact-width.log` retains that harness timeout.
-Browser CI now runs first, then the unchanged portable command, to expose browser failures sooner.
-Run40112793146 exposed a chord-test load race: selecting a voice before the initial score response
-allowed tracker-caret restoration to override it. The test now waits for that response before selecting.
-`chord-ci.log` passes locally; CI now collects all browser failures rather than stopping at the first.
-Current CI run40113391924 is on02b828d. Windows finished1698 cases with one early-rejection transport
-error; Linux results are still pending and GitHub's combined jobs endpoint repeatedly returns502.
-The Windows failure is reproduced deterministically by delaying urllib's separate body send in
-`probe_refusal_transport.py`: both token/Origin tests abort (`refusal-transport-before.log`). The test
-client now sends each fixture in one write, still requiring401/403 and unchanged state; both pass
-with the diagnostic delay (`refusal-transport-final.log`). Routes/ranges, upload-size guards and score
-HTTP responses also pass (`http-fixture-final.log`). An initial command used the wrong test class;
-`http-fixture-invocation.log` retains that invocation error. These are test-only changes, awaiting the
-current browser result before pushing so it is not cancelled mid-qualification.
-Run40113391924 completed414 browser cases with18 failures/2 errors across13 distinct cases; Python3.10
-portable passed. `browser-failures-local.log` reproduces only the stale staff-change expectation locally.
-Tests now wait for completed copy/load/render/Undo responses, scroll each ghost target into view and compare
-overlap lanes in content coordinates. Staff excerpt expectations match the documented persistent changes.
-`browser-fixes-local.log`:four cases pass, one harness coordinate mistake; `roll-overlap-final.log` fixes
-that mistake and passes. Linux compact spacing remains unqualified; its next failure includes geometry.
-PDF startup failure now includes bounded/redacted Chromium stderr (focused atomic-failure test passes),
-so Linux's exit-6 cause can be diagnosed without disabling its sandbox. The PDF diagnostic changes source
-after the EXE above; rebuild once remaining CI defects are resolved. One read-only PDF worker finished
-and was stopped; no other workers or automations were started/resumed.
-Run40115777909 is qualifying6246aa9; do not cancel it before collecting the PDF diagnostic.
-Compact font cause is now reproduced locally: Georgia fallback to Times/serif compressed43.656px of
-label space to43.553px. Compact positions now clamp to their declared minimum stretch force. Same-view
-`compact-font-fallback-before.png`/`compact-font-fallback.png` show hidden/rendered score; headless only.
-`compact-font-fixed.log` records the measured floor; `compact-font-regression-final.log` passes ordinary
-and25-string real editing/history cases with the fallback font. The initial regression measured a grace
-beat instead of the chord; `compact-font-regression.log` preserves that test error. No overlap guard relaxed.
-The EXE was rebuilt with the compact floor and PDF diagnostic (`build-qualified.log`), SHA256:
-`e1da6644530f94f362d5d0885da5920be0987d2ef821e6aab0a3ef23b7251526`.
-`package-qualified.log` passes native playback, standalone IT, part markers, delayed-edit Undo/Redo and
-packed selfchecks. `package-compact-controls-final.log` also passes actual compact editing and fallback
-font spacing against that EXE. The first compact package check timed out because the helper assumed old
-view defaults; it now normalizes actual controls and skips unchanged choices. `package-compact-controls.log`
-retains that failure; `compact-default-fixture-final.log` passes both ordinary and25-string source cases.
-Run40115777909 finished: Windows and Python3.10 portable pass;414 browser cases have five failures.
-`ci-pdf-diagnostic.log` confirms Ubuntu's AppArmor denies the downloaded PDF browser's sandbox.
-CI now allows user namespaces for only its pinned Chromium executable and selects it consistently;
-production sandbox flags remain unchanged. Two tests now await details-toggle population (piano keys/
-fretboard context); the remaining compact failure is the already fixed minimum-spacing floor.
-Next: qualify these fixes in CI, then authorized merge/tag/build-CI/publish. Test/config changes after
-this build require no rebuild. Final ZIP integrity/private-fixture exclusion and9 docs checks pass.
-Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
-target it with original song arguments. Private songs/notes remain in their existing scratch locations;
-selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.
-Owner accepted Boys/Advent standalone IT sound; no additional visual/listening acceptance is fabricated.
-Earlier workers remain stopped; no automations were started. This authorization supersedes older no-publication notes.
+Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication and clean defaults first.
+Current branch/head: `codex/native-tablature-release` / `73a741f`.
+PR: https://github.com/shadoh420/VultureTracker/pull/4
+Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40117884374
+Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40117901302
+Tests are pending. The clean Windows build and executable smoke passed; artifact upload failed because
+the branch name contains a slash (`ci-clean-build-failure.log`). Branch artifacts now use the commit SHA;
+tag artifact names stay unchanged. No merge, tag or publication yet. Next: qualify CI, merge PR4, tag
+v1.9.0, publish the three local dist assets, run `tools/release.py 1.9.0 --check`, record final results.
+
+Current delivery: `dist/vulturetracker.exe` (1.9.0), built from the final application source.
+EXE SHA256: `e1da6644530f94f362d5d0885da5920be0987d2ef821e6aab0a3ef23b7251526`.
+The five existing preview/GP5/edit shortcuts target it with their original song arguments. Private
+songs/notes remain in scratch. Selected rollback: `scratch/tab-package-range-expression`.
+Fresh score views default to horizontal all-track staff/TAB at80%, hidden dynamics and written pitch;
+saved choices survive. Pattern scrolls continuously through orders. Compact spacing now respects its
+declared glyph floor across fonts. No musical-data/Undo guards were relaxed.
+
+Evidence: `scratch/tab-test-fixtures/release-1.9.0`. Package checks `package-qualified.log` and
+`package-compact-controls-final.log` pass native/WASM playback, standalone IT, part markers, pending edits,
+compact editing/fallback fonts, exact Undo/Redo and packed selfchecks. `package-real-pattern.log` verifies
+actual Boys232-bar wheel/scrollbar/last-bar playback and unchanged source (GUI source unchanged since).
+ZIP integrity/private-fixture exclusion and9 docs checks pass. `layout-controls.log` and
+`marker-default.log` cover fresh defaults/persistence/capo/markers. Before/after score and compact-font
+captures are headless evidence, not owner visual acceptance or foreground performance measurements.
+
+CI failure history retained in the evidence logs: Python3.10 fixture syntax; mocked webview/obsolete
+strict-export expectations; Pattern stale channels/colours; asynchronous test reads and coordinates.
+Run40115777909 passed Windows/Python3.10 portable. Its414 browser cases had five failures:
+compact font spacing (now fixed), piano/fretboard details-toggle reads (now awaited; local2case pass
+in `details-toggle-final.log`), and two PDF starts. `ci-pdf-diagnostic.log` proves Ubuntu AppArmor denied
+Chromium's sandbox. CI now allows namespaces only for its pinned browser executable; production sandbox
+flags remain unchanged. Earlier failures and final focused results remain together in the log folder.
+`compact-default-fixture-final.log` passes ordinary/25-string controls. The first package compact check
+assumed old view defaults; the helper now normalizes actual controls and skips unchanged values.
+Test/config-only changes after the current EXE require no rebuild.
+
+Owner accepted Boys/Advent standalone IT sound. Full TuxGuitar parity and owner visual/feel acceptance
+are not claimed. Peripheral coverage/LilyPond and documented format limits remain visible, deferred
+from this release by the owner. Earlier workers remain stopped; one bounded read-only PDF worker
+finished and was stopped. No automations were started/resumed. Current release authorization supersedes
+historical no-publication notes below.
 
 Previous candidate checkpoint: continuous Pattern scrolling implemented and packaged.
 Owner rejected the one-bar pane: previous/next navigation was insufficient. Continuous song is now on by
