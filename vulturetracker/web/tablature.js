@@ -1558,6 +1558,7 @@
       if (notify) { notifying = true; try { host.select(selection()); } finally { notifying = false; } }
     }
     function controls() {
+      const focused = document.activeElement;
       host.trackChanged?.(track);
       const automaticFree = (view?.measure_errors || []).some(e => e.automatic_free && e.occurrence === occurrence() &&
         e.track === track && cmp(e.at, at) <= 0 && cmp(at, e.end) < 0);
@@ -1710,6 +1711,10 @@
       }
       root.querySelector('[data-action=string-up]').textContent = drums ? 'Lane ↑' : 'String ↑';
       root.querySelector('[data-action=string-down]').textContent = drums ? 'Lane ↓' : 'String ↓';
+      // Saves can disable their button after an asynchronous preparation step.
+      // Retain keyboard Undo at the point focus would otherwise leave the editor.
+      if (focused?.tagName === 'BUTTON' && root.contains(focused) && focused.disabled &&
+          (document.activeElement === focused || document.activeElement === document.body)) root.focus({preventScroll: true});
       drawFretboard(); drawPiano();
     }
     function entryRefusal() {
@@ -3604,12 +3609,7 @@
       if (isPercussion(spec()) && drumActions.has(button.dataset.action)) return percussionRefusal();
       const restoreFocus = document.activeElement === button;
       try {
-        const action = actions[button.dataset.action]();
-        // Disabling the clicked button can blur it immediately. Keep keyboard
-        // Undo available during the save, without stealing a dialog's focus.
-        if (restoreFocus && !destroyed && (document.activeElement === document.body ||
-            document.activeElement === button && button.disabled)) root.focus({preventScroll: true});
-        Promise.resolve(action).catch(err => status(err.message || String(err))).finally(() => {
+        Promise.resolve(actions[button.dataset.action]()).catch(err => status(err.message || String(err))).finally(() => {
           if (restoreFocus && !destroyed && document.activeElement === document.body) root.focus({preventScroll: true});
         });
       } catch (err) { status(err.message || String(err)); }

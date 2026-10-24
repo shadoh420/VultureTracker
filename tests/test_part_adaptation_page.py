@@ -102,6 +102,7 @@ class TestPartAdaptationPage(unittest.TestCase):
                 page.click('[data-action=velocity]')
             page.wait_for_function('EDQ.n===1')
             assert len(held) == 1
+            assert page.evaluate("!!document.activeElement.closest('#tab-editor') && !document.activeElement.disabled"), 'pending save must retain keyboard focus'
             page.select_option('[data-ui=voice]', label='2')
             assert page.input_value('[data-ui=voice]') == '1'
             selection = page.evaluate('JSON.stringify(CUR.score)')
@@ -111,9 +112,9 @@ class TestPartAdaptationPage(unittest.TestCase):
             assert page.evaluate('JSON.stringify(CUR.score)') == selection
             assert page.input_value('[data-ui=voice]') == '1'
         finally:
-            page.unroute('**/api/score_command', hold)
             for route in held:
                 route.continue_()
+            page.unroute('**/api/score_command', hold)
         saved = path.read_bytes()
         assert saved != original
         for action, count, expected in [('undo', history, original), ('redo', history + 1, saved), ('undo', history, original)]:

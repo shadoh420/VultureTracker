@@ -43,7 +43,7 @@ song.yaml ──build──▶ song.it ──render──▶ .wav / .mp3 / .ogg 
 unzip it and run `vulturetracker.exe`. The exe is not code-signed, so Windows SmartScreen may warn about an unknown
 publisher. Check that it is the published file before running it: `certutil -hashfile vulturetracker.exe SHA256` (or
 `Get-FileHash vulturetracker.exe` in PowerShell) must print the SHA-256 listed in the release notes; for 1.9.0 it is
-`e1da6644530f94f362d5d0885da5920be0987d2ef821e6aab0a3ef23b7251526`.
+`5905b37a14baed379411a0711f90ba9ef2f8b94d5f1e30d256a35fd6f0560eb4`.
 
 **From source** (Python 3.10+; tested on Windows and Linux; outside Windows install libopenmpt, e.g.
 `apt install libopenmpt0t64`):

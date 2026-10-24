@@ -3,7 +3,7 @@
 Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
 Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication and clean defaults first.
-Current branch/head: `codex/native-tablature-release` / `1946534`.
+Current branch: `codex/native-tablature-release`; final shared-focus fix is awaiting CI.
 PR: https://github.com/shadoh420/VultureTracker/pull/4
 Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40118130817
 Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40118126492
@@ -18,12 +18,20 @@ regression queues Undo and verifies Redo/restoration (`button-focus-before.log`,
 The first focus repair checked only body focus and missed browsers retaining the disabled button until
 the event ended (`button-focus-final.log`). Four focused control cases now pass in
 `focus-visibility-final.log`; the exact false-overlap probe passes in `toolbar-visibility-final.log`.
-This application change requires a fresh package.
-No merge, tag or publication yet. Next: qualify the two repairs and rebuild once, then merge PR4, tag
+The first packaged focus check also exposed delayed phrase preparation; focus retention now lives in
+the shared control update, at the point a focused button becomes disabled. `async-focus-final.log`
+passes immediate stem Undo/Redo, delayed phrase navigation/history, panels and track controls.
+`package-focus-final.log`/`package-focus-verified.log` retain the earlier package failures; the route
+cleanup now releases held requests before unregistering, preserving the original assertion diagnostic.
+`build-shared-focus-final.log` and `package-release-qualified.log` pass the new package, including
+pending focus, playback, markers, standalone IT and exact history. An earlier failed probe left15
+velocity edits in the generated marker fixture; `restore-marker-probe.log` verifies only that known
+change and restores the exact generator-original through Undo before the passing run.
+No merge, tag or publication yet. Next: qualify the shared-focus fix in CI, then merge PR4, tag
 v1.9.0, publish the three local dist assets, run `tools/release.py 1.9.0 --check`, record final results.
 
-Current delivery: `dist/vulturetracker.exe` (1.9.0); the focus fix awaits the next build.
-EXE SHA256: `e1da6644530f94f362d5d0885da5920be0987d2ef821e6aab0a3ef23b7251526`.
+Current delivery: `dist/vulturetracker.exe` (1.9.0), including the shared-focus fix.
+EXE SHA256: `5905b37a14baed379411a0711f90ba9ef2f8b94d5f1e30d256a35fd6f0560eb4`.
 The five existing preview/GP5/edit shortcuts target it with their original song arguments. Private
 songs/notes remain in scratch. Selected rollback: `scratch/tab-package-range-expression`.
 Fresh score views default to horizontal all-track staff/TAB at80%, hidden dynamics and written pitch;
