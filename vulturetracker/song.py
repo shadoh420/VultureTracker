@@ -1277,7 +1277,10 @@ def compile_tree(tree, ctx, base_dir, *, native_score_rate=None, render_timing=F
                         raise
                     from .tablature import sampled_timing_projection
                     old_samples, old_instruments = len(mod.samples), len(mod.instruments or [])
-                    mod.score_projection = sampled_timing_projection(tree, mod, default_volume)
+                    try:
+                        mod.score_projection = sampled_timing_projection(tree, mod, default_volume)
+                    except ValueError as fallback_error:
+                        raise ValueError(f'{error}; sampled export also refused: {fallback_error}') from fallback_error
                     sample_numbers.update(range(old_samples + 1, len(mod.samples) + 1))
                     instrument_numbers.update(range(old_instruments + 1, len(mod.instruments or []) + 1))
                 mod.patterns = mod.score_projection.patterns

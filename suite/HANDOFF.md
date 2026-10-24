@@ -2,16 +2,26 @@
 
 Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
-Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication after checking blockers, then
-explicitly requested the clean TuxGuitar layout as the default first. Implemented horizontal all-track
-staff/TAB at80%, hidden printed dynamics and written staff pitch; explicit saved choices survive upgrades.
-`scratch/tab-test-fixtures/release-1.9.0/layout-controls.log`:4 focused default/persistence/preset/capo-entry/
-view-mode cases pass. Shared geometry fixtures explicitly request their original view; a separate fresh-install
-case exercises the new default. `source.log`:32 syntax/docs checks. Prior broad release qualification and
-unchanged audio/import evidence below are reused. Release branch: `codex/native-tablature-release`.
-Next: PR CI, same-view real-song capture, versioned package smoke, then authorized merge/tag/publish.
-This authorization supersedes the older no-Git/no-publication notes below; private songs, shortcuts and
-owner logs remain local. No background automation or old worker resumption is authorized.
+Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication, with clean TuxGuitar defaults first.
+Fresh score views now use horizontal all-track staff/TAB at80%, hidden printed dynamics and written pitch;
+explicit saved choices survive upgrades. PR: https://github.com/shadoh420/VultureTracker/pull/4
+Branch: `codex/native-tablature-release`. No tag/publication yet; full parity is not claimed.
+Evidence: `scratch/tab-test-fixtures/release-1.9.0`. `layout-controls.log`:4 real default/persistence/preset/
+capo/view-mode cases; `marker-default.log`:fresh multitrack playback markers; `source.log`:32 syntax/docs;
+`compatibility.log`:35 TG/docs checks. `score-before.png` and `score-default-release.png` show the same
+1920x1040 Boys song view; `score-before-final.log`/`score-default.log` pass without source/history writes.
+`package-final.log` passes version1.9 native playback, standalone IT, markers, delayed-edit Undo/Redo and
+packed selfchecks. Initial package/before-capture failures were harness assumptions, fixed in final logs.
+CI first exposed Python3.10 fixture syntax, repaired. Run40106599385 then found missing mocked webview in
+portable dialog tests and old export-only refusal expectations. The fallback also hid the original IT
+diagnostic; both refusal reasons now survive. Strict projection tests remain strict; sampled-export audio
+and failed-output atomicity are separately checked. `ci-portable-fixes-final.log`:12 focused cases pass.
+Next: rerun CI, rebuild/smoke after the diagnostic fix, then authorized merge/tag/build-CI/publish.
+Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
+target it with original song arguments. Private songs/notes remain in their existing scratch locations;
+selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.
+Owner accepted Boys/Advent standalone IT sound; no additional visual/listening acceptance is fabricated.
+No new/resumed workers or automations. This release authorization supersedes older no-publication notes.
 
 Previous candidate checkpoint: continuous Pattern scrolling implemented and packaged.
 Owner rejected the one-bar pane: previous/next navigation was insufficient. Continuous song is now on by

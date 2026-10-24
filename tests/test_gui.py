@@ -69,13 +69,15 @@ SONG_BLOCK = SONG.replace("module: {title: T, tempo: 125, speed: 6, channels: [{
 class TestGui(unittest.TestCase):
     @unittest.skipUnless(sys.platform == 'win32', 'Windows shortcuts')
     def test_song_shortcut_readback_cancel_paths_and_state(self):
+        from types import SimpleNamespace
         from vulturetracker import project, server
         special=self.dir/"Café's & $ song.yaml";special.write_bytes((self.dir/'song.yaml').read_bytes())
         st=gui.State(special);self.states.append(st)
         before=(st.song_path.read_bytes(),list(st.history),dict(st.meta))
         target=self.dir/"Café's & $ song link.lnk"
         window=mock.Mock();window.create_file_dialog.return_value=(str(target),)
-        with mock.patch.object(server.Handler,'state',st),mock.patch.object(server.Handler,'window',window):
+        with mock.patch.dict(sys.modules, {'webview': SimpleNamespace(SAVE_DIALOG=30)}), \
+             mock.patch.object(server.Handler,'state',st),mock.patch.object(server.Handler,'window',window):
             self.assertEqual(server.Handler.save_song_shortcut(),{'path':str(target)})
             data=read_song_shortcut(target)
             self.assertEqual(Path(data['target']),Path(sys.executable).with_name('pythonw.exe'))
@@ -2609,6 +2611,7 @@ class TestSongDeliveryServer(unittest.TestCase):
 
     def test_score_image_save_cancel_and_stale_dialog(self):
         import base64
+        import sys
         import threading
         from types import SimpleNamespace
         from vulturetracker import server
@@ -2622,7 +2625,8 @@ class TestSongDeliveryServer(unittest.TestCase):
             body = dict(song=str(source), revision='current', format='svg', name='part.svg',
                 data=base64.b64encode(data).decode('ascii'))
             window = mock.Mock()
-            with mock.patch.object(server.Handler, 'state', state), mock.patch.object(server.Handler, 'window', window):
+            with mock.patch.dict(sys.modules, {'webview': SimpleNamespace(SAVE_DIALOG=30)}), \
+                 mock.patch.object(server.Handler, 'state', state), mock.patch.object(server.Handler, 'window', window):
                 window.create_file_dialog.return_value = (str(target),)
                 self.assertEqual(server.Handler.save_score_export(body), {'path': str(target)})
                 self.assertEqual(target.read_bytes(), data)

@@ -2708,8 +2708,10 @@ class TestNativePlaybackPreparation(unittest.TestCase):
         bad=copy.deepcopy(song);bad['patterns']['a']['data']='00: ... .. v32 ...\n'
         path=self.base/'atomic.yaml';path.write_bytes(api.to_yaml(bad).encode())
         original=path.read_bytes();out=self.base/'keep.it';out.write_bytes(b'owner output')
-        with self.assertRaisesRegex(SongError, 'raw notes, mix controls'):
+        with self.assertRaisesRegex(SongError, 'raw notes, mix controls') as refused:
             api.build(path,out)
+        self.assertIn('IT tick grid', str(refused.exception))
+        self.assertIn('sampled export also refused', str(refused.exception))
         self.assertEqual(path.read_bytes(),original);self.assertEqual(out.read_bytes(),b'owner output')
 
     def setUp(self):
@@ -6305,6 +6307,14 @@ class TestNativeStandaloneIt(unittest.TestCase):
             cases.append((song,'stroke attack.*tick grid'))
         song=copy.deepcopy(base);song['score']['patterns']['a']['beats'].append(beat('short',[0,1],[],value=16,voice=1))
         cases.append((song,'stroke attack.*tick grid'))
+        # Strict projection still refuses sub-tick strokes. Explicit export may now
+        # sample them; its audio and failed-fallback atomicity are covered above.
+        for song,message in cases:
+            before=copy.deepcopy(song)
+            with self.subTest(message=message),self.assertRaisesRegex(SongError,message):
+                api.compile_song(song,self.path.parent)
+            self.assertEqual(song,before)
+        cases=[]
         for key,value in [('nna','continue'),('volume_envelope',dict(nodes=[[0,64],[2,64]],carry=True))]:
             song=copy.deepcopy(base);song['instruments'][1][key]=value;cases.append((song,'cut NNA'))
         song=copy.deepcopy(base);song['instruments'][1]['keymap']=[dict(notes='E-5',sample=1)]
@@ -7033,12 +7043,16 @@ class TestNativeStandaloneIt(unittest.TestCase):
                 api.build(song,target,self.path.parent)
             self.assertEqual(song,before)
             self.assertEqual(target.read_bytes(),b'previous module')
-        plan = api.prepare_playback(self.path)['plan']
-        middle = next(e for e in plan['events'] if e['type']=='note_off' and e['id']=='first/trill/pulse/1')
-        end = Fraction(*middle['at'])-Fraction(1,960)
-        middle['at'] = [end.numerator,end.denominator]
-        with patch('vulturetracker.tablature._playback_plan', return_value=plan), self.assertRaisesRegex(SongError,'release.*IT tick grid'):
-            api.build(base,target,self.path.parent)
+        from vulturetracker import tablature
+        original_plan = tablature._playback_plan
+        def off_grid_release(*args, **kwargs):
+            plan = original_plan(*args, **kwargs)
+            middle = next(e for e in plan['events'] if e['type']=='note_off' and e['id']=='first/trill/pulse/1')
+            end = Fraction(*middle['at'])-Fraction(1,960)
+            middle['at'] = [end.numerator,end.denominator]
+            return plan
+        with patch('vulturetracker.tablature._playback_plan', side_effect=off_grid_release), self.assertRaisesRegex(SongError,'release.*IT tick grid'):
+            api.compile_song(base,self.path.parent)
         self.assertEqual(target.read_bytes(),b'previous module')
 
     def test_whammy_chord_untouched_string_ties_repeats_and_sample_ownership(self):
