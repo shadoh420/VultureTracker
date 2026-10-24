@@ -45,12 +45,22 @@ with the diagnostic delay (`refusal-transport-final.log`). Routes/ranges, upload
 HTTP responses also pass (`http-fixture-final.log`). An initial command used the wrong test class;
 `http-fixture-invocation.log` retains that invocation error. These are test-only changes, awaiting the
 current browser result before pushing so it is not cancelled mid-qualification.
-Next: final CI, then authorized merge/tag/build-CI/publish. No further application changes since the EXE above.
+Run40113391924 completed414 browser cases with18 failures/2 errors across13 distinct cases; Python3.10
+portable passed. `browser-failures-local.log` reproduces only the stale staff-change expectation locally.
+Tests now wait for completed copy/load/render/Undo responses, scroll each ghost target into view and compare
+overlap lanes in content coordinates. Staff excerpt expectations match the documented persistent changes.
+`browser-fixes-local.log`:four cases pass, one harness coordinate mistake; `roll-overlap-final.log` fixes
+that mistake and passes. Linux compact spacing remains unqualified; its next failure includes geometry.
+PDF startup failure now includes bounded/redacted Chromium stderr (focused atomic-failure test passes),
+so Linux's exit-6 cause can be diagnosed without disabling its sandbox. The PDF diagnostic changes source
+after the EXE above; rebuild once remaining CI defects are resolved. One read-only PDF worker finished
+and was stopped; no other workers or automations were started/resumed.
+Next: CI diagnostics/fixes, final package smoke, then authorized merge/tag/build-CI/publish.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
 selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.
 Owner accepted Boys/Advent standalone IT sound; no additional visual/listening acceptance is fabricated.
-No new/resumed workers or automations. This release authorization supersedes older no-publication notes.
+Earlier workers remain stopped; no automations were started. This authorization supersedes older no-publication notes.
 
 Previous candidate checkpoint: continuous Pattern scrolling implemented and packaged.
 Owner rejected the one-bar pane: previous/next navigation was insufficient. Continuous song is now on by

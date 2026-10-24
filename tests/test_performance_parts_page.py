@@ -37,7 +37,9 @@ class TestPerformancePartsPage(unittest.TestCase):
             model = "tabRendered.tracks[0].staves[0].bars.map(b=>[b.clef,b.keySignature,b.keySignatureType])"
             bass = page.evaluate('alphaTab.model.Clef.F4')
             treble = page.evaluate('alphaTab.model.Clef.G2')
-            self.assertEqual(page.evaluate(model)[1:], [[bass, -2, 1], [treble, 0, 0], [treble, 1, 0]])
+            # Staff changes remain effective until changed again, including
+            # when the first changed measure is outside the printed excerpt.
+            self.assertEqual(page.evaluate(model)[1:], [[bass, -2, 1], [bass, -2, 1], [bass, 1, 0]])
             preview = page.context.browser.new_page()
             preview.on('pageerror', lambda e: errors.append(str(e)))
             preview.goto(self.print_url(page, state))
@@ -47,7 +49,7 @@ class TestPerformancePartsPage(unittest.TestCase):
             preview.fill('[name=last]', '4')
             preview.locator('form button[type=submit]').click()
             self.print_ready(preview)
-            self.assertEqual(preview.evaluate(model), [[treble, 0, 0], [treble, 1, 0]])
+            self.assertEqual(preview.evaluate(model), [[bass, -2, 1], [bass, 1, 0]])
             self.assertIn('Bars 3–4', preview.locator('.vt-print-footer').text_content())
             self.assertEqual(state.song_path.read_bytes(), before)
             self.assertFalse(errors, errors)

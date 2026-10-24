@@ -1430,14 +1430,19 @@ class TestTablaturePage(unittest.TestCase):
                 for host in ('roll','rollvel'):
                     x, y, hit = self.roll_hit(page, f'#{host} [data-score-id="a-1/{nid}"]')
                     self.assertTrue(hit, f'{host} {nid} must be hittable')
-                    geometry[host, nid] = (x, y)
+                    # Content coordinates distinguish lanes even when scrolling
+                    # different notes to the edge gives them the same viewport y.
+                    geometry[host, nid] = page.locator(f'#{host} [data-score-id="a-1/{nid}"]').evaluate(
+                        'e=>[e.offsetLeft,e.offsetTop]')
             self.assertNotEqual(geometry['roll','g0'][1], geometry['roll','g1'][1], 'same-pitch voices need separate lanes')
             self.assertNotEqual(geometry['rollvel','g0'][0], geometry['rollvel','g1'][0])
             ghosts = page.evaluate("""[...document.querySelectorAll('#roll [data-roll-ghost]')].map(e=>
                 [e.dataset.rollGhost,!!e.dataset.scoreId,getComputedStyle(e).pointerEvents])""")
             self.assertEqual(sorted(ghosts), [['raw',False,'none'],['track',False,'none']])
             for nid in ('g0','g1'):
-                page.mouse.click(*geometry['roll',nid])
+                x, y, hit = self.roll_hit(page, f'#roll [data-score-id="a-1/{nid}"]')
+                self.assertTrue(hit)
+                page.mouse.click(x, y)
                 self.assertEqual(page.evaluate('[CUR.score.id,CUR.score.voice,CUR.ch]'),
                                  [f'a-1/{nid}', int(nid[1]), int(nid[1])])
             self.assertEqual((folder/'song.yaml').read_bytes(), before, 'a plain click selects; it does not edit')
@@ -1502,14 +1507,18 @@ class TestTablaturePage(unittest.TestCase):
             page.on('request', lambda r: posts.append(r.url)
                     if r.method=='POST' and urlsplit(r.url).path in ('/api/score','/api/edit','/api/score_command') else None)
             # Ghosts sit after the guitar notes (bass at row 24, raw and its foreign copy at row 36).
-            points = page.evaluate("""()=>{const at=e=>{const r=e.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2]};
-                const own=document.querySelector('#roll [data-score-id="a-1/g0"]').getBoundingClientRect(),
-                    from=[...document.querySelectorAll('#roll .rnote.from')].sort((a,b)=>parseFloat(b.style.left)-parseFloat(a.style.left))[0];
-                return {foreign:at(from),track:at(document.querySelector('#roll [data-roll-ghost=track]')),
-                    raw:at(document.querySelector('#roll [data-roll-ghost=raw]')),blank:[own.right+30*zf(),own.y+own.height/2]}}""")
-            for name, (x, y) in points.items():
+            foreign_index = page.evaluate("""()=>{const e=[...document.querySelectorAll('#roll .rnote.from')]
+                .sort((a,b)=>parseFloat(b.style.left)-parseFloat(a.style.left))[0];
+                return [...e.parentElement.children].indexOf(e)+1}""")
+            for name, selector in [('foreign', f'#roll > :nth-child({foreign_index})'),
+                                   ('track', '#roll [data-roll-ghost=track]'),
+                                   ('raw', '#roll [data-roll-ghost=raw]'),
+                                   ('blank', '#roll [data-score-id="a-1/g0"]')]:
                 for button in ('left','right'):
                     with self.subTest(target=name, button=button):
+                        box = roll_scroll(page, selector)
+                        x = box['x'] + (box['width'] + 30*page.evaluate('zf()') if name == 'blank' else box['width']/2)
+                        y = box['y'] + box['height']/2
                         # Ghosts let the pointer through to the roll's background, never to a note.
                         self.assertTrue(page.evaluate("""([x,y])=>{const e=document.elementFromPoint(x,y);
                             return $('roll').contains(e)&&!e.closest('.rnote')}""", [x, y]))
@@ -1624,7 +1633,7 @@ class TestTablaturePage(unittest.TestCase):
             page.mouse.click(x, y)
             page.wait_for_function('!EDQ.n')
             self.assertEqual(posts, [])
-            self.assertIn('already has that pitch', page.inner_text('#rollhint'))
+            page.wait_for_function("$('rollhint').textContent.includes('already has that pitch')")
             self.assertEqual((folder/'song.yaml').read_bytes(), before)
             self.assertEqual(errors, [])
 
@@ -1955,6 +1964,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('.vt-piano')
             self.assertFalse(page.locator('.vt-piano').evaluate('e=>e.open'))
             page.locator('.vt-piano > summary').click()
+            page.wait_for_function('SCORE.view && !SCORE.fetching')
             self.assertEqual(page.locator('[data-piano-pitch]').count(), 120)
             self.assertNotIn('[object Object]', page.locator('.vt-piano').inner_text())
             page.locator('.vt-fretboard > summary').click()
@@ -2594,7 +2604,7 @@ class TestTablaturePage(unittest.TestCase):
             self.settled(page, 'SCORE.view.orders.length===3')
             page.check('[data-ui=ops-all]')
             page.click('[data-action=measure-copy]')
-            self.assertEqual(page.inner_text('.vt-tab-status'), 'Copied measure 1 (all tracks).')
+            page.wait_for_function("document.querySelector('.vt-tab-status').textContent==='Copied measure 1 (all tracks).'")
             # The occurrence pickers name each order readably; an overlapping new measure refuses.
             self.assertIn('1: a (first)', page.inner_text('[data-ui=measure-from-occ]'))
             page.select_option('[data-ui=measure]', '')
@@ -3635,7 +3645,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             page.wait_for_selector('.vt-tab-grid [data-note="note0"]')
             self.check_side_panels(page, 'note0')
             unnamed = page.evaluate("""[...document.querySelectorAll('#tab-editor button')]
@@ -3926,7 +3936,7 @@ class TestTablaturePage(unittest.TestCase):
             undo(['a', 'b', 'c'])
             page.fill('[data-ui=ops-from]', '1'); page.fill('[data-ui=ops-to]', '1'); page.fill('[data-ui=ops-count]', '1')
             page.click('[data-action=measure-copy]')
-            self.assertEqual(page.inner_text('.vt-tab-status'), 'Copied measure 1 (guitar).')
+            page.wait_for_function("document.querySelector('.vt-tab-status').textContent==='Copied measure 1 (guitar).'")
             page.fill('[data-ui=ops-from]', '3')
             run('measure-paste', "SCORE.view.score.patterns.c.beats[0].notes[0].pitch===64")
             self.assertEqual(orders(), ['a', 'b', 'c'])
@@ -7970,7 +7980,13 @@ class TestTablaturePage(unittest.TestCase):
         # width guard. Follow its instruction before testing edit hit targets.
         page.set_viewport_size(dict(width=1920,height=1080))
         change('scale',80);change('scale',100)
-        self.assertNotIn('need more width',page.locator('.vt-tab-status').inner_text())
+        self.assertNotIn('need more width',page.locator('.vt-tab-status').inner_text(), page.evaluate("""() => ({
+            width:document.querySelector('.vt-tab-score').clientWidth,
+            font:tabRenderApi.settings.display.resources.elementFonts.get(alphaTab.NotationElement.EffectChordNames)?.toCssString(),
+            chords:tabRendered.tracks[0].staves[0].bars.flatMap(bar=>bar.voices.flatMap(v=>v.beats
+                .filter(b=>b.hasChord&&b.chord.showName).map(b=>({bar:bar.index,name:b.chord.name,
+                    bounds:tabRenderApi.boundsLookup.findBeat(b)?.barBounds.realBounds,
+                    x:tabRenderApi.boundsLookup.findBeat(b)?.onNotesX}))))})"""))
         # Hit targets, selection and playback markers use the compact geometry.
         self.click_tab_lane(page,0,1,2)
         self.settled(page,"CUR.score?.note==='compact-note1'")
@@ -9354,6 +9370,7 @@ class TestTablaturePage(unittest.TestCase):
         self.assertNotIn('source_volume',api.from_yaml(changed.decode())['score']['tracks'][tid]['midi'])
         page.click('[data-t=tab]')
         for action,expected in [('undo',original),('redo',changed),('undo',original)]:
+            self.settled(page, 'SCORE.view.revision.startsWith(S.version.hash)')
             revision=page.evaluate('SCORE.view.revision')
             page.click(f'[data-action={action}]')
             self.settled(page,'SCORE.view.revision!=='+json.dumps(revision))
@@ -11074,7 +11091,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             self.assertTrue(page.is_disabled('[data-action=paste-replace]'))
             self.click_tab_lane(page, 0, 0, 2)
             end = self.tab_lane_point(page, 1, 3, 3)

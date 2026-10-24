@@ -133,6 +133,14 @@ form.dispatchEvent(new Event('submit',{cancelable:true}));
                 import re
                 reason = re.search(r'Cannot print: ([^<]+)|data-failure="([^"]+)"', dom)
                 detail = (reason[1] or reason[2]) if reason else f'browser exit {proc.returncode}; no completed score'
+                if not reason:
+                    with (root / 'browser.log').open('rb') as log:
+                        log.seek(0, os.SEEK_END)
+                        log.seek(max(0, log.tell() - 4096))
+                        diagnostic = log.read().decode('utf-8', errors='replace')
+                    diagnostic = diagnostic.replace(token, '<token>').replace(str(root), '<pdf-temp>').strip()
+                    if diagnostic:
+                        detail += '; browser stderr: ' + diagnostic
                 raise ValueError('PDF rendering did not finish: ' + detail)
             if not pdf.is_file() or not pdf.read_bytes().startswith(b'%PDF-'):
                 raise ValueError('Browser did not produce a PDF')

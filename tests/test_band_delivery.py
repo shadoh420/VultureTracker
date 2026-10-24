@@ -13,6 +13,32 @@ class TestBandDelivery(unittest.TestCase):
     setUp = collection_helpers.TestScoreCollection.setUp
     unchanged = collection_helpers.TestScoreCollection.unchanged
 
+    def test_pdf_startup_failure_is_bounded_redacted_and_atomic(self):
+        from types import SimpleNamespace
+        from vulturetracker import score_pdf
+        def fail(args, **kwargs):
+            kwargs['stderr'].write(b'x' * 6000 + ('\nSandbox startup failed: ' + args[-1] + '\n' +
+                str(Path(kwargs['stderr'].name).parent)).encode())
+            return SimpleNamespace(returncode=-6, poll=lambda: -6, wait=lambda: -6)
+        st = gui.State(self.path, headless=True)
+        output = self.root / 'failure.pdf'
+        try:
+            with patch.object(score_pdf, 'browser_executable', return_value='test-browser'), \
+                    patch.object(score_pdf.subprocess, 'Popen', side_effect=fail), \
+                    patch.object(score_pdf.secrets, 'token_urlsafe', return_value='private-pdf-token'), \
+                    self.assertRaisesRegex(ValueError, 'Sandbox startup failed') as caught:
+                score_pdf.write_pdf(st.score_view(), output, dict(paper='a4', notation='both', scale=65), threading.Event())
+            message = str(caught.exception)
+            self.assertLess(len(message), 4300)
+            self.assertNotIn('private-pdf-token', message)
+            self.assertNotIn('vt-score-pdf-', message)
+            self.assertIn('<token>', message)
+            self.assertIn('<pdf-temp>', message)
+            self.assertFalse(output.exists())
+        finally:
+            st.close()
+        self.unchanged()
+
     def test_grouped_part_stems_and_real_audio(self):
         st = gui.State(self.path, headless=True)
         try:
