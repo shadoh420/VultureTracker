@@ -26,7 +26,14 @@ show the corrected preview header. Captures are headless, not foreground perform
 CI browser budget is60 minutes with named, fail-fast reporting; every module remains in the run.
 `pattern-source.log`:32 syntax/docs checks. Final EXE SHA256:
 `c5fdb06bfcd31694e9149a926a7be9518940ca656332fb094dbdf7f2b1f93805`.
-Next: final rebuilt-package checks and CI, then authorized merge/tag/build-CI/publish.
+`package-pattern.log` and `package-real-pattern.log` pass the final EXE, including actual Boys232-bar
+wheel/scrollbar/last-bar playback and source preservation. Run40110960905 passed all three portable
+environments; browser tests stopped at compact-score hit testing at a narrow viewport on Linux.
+Its chord-label overlap guard was correctly active. The test now follows the widening instruction before
+testing hit targets/Undo, without changing the guard; `compact-width-final.log` passes. The first local
+repair incorrectly waited for renderScore on a resize; `compact-width.log` retains that harness timeout.
+Browser CI now runs first, then the unchanged portable command, to expose browser failures sooner.
+Next: final CI, then authorized merge/tag/build-CI/publish. No further application changes since the EXE above.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
 selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.

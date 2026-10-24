@@ -79,8 +79,6 @@ jobs:
           python -m pip install -q --no-deps --no-build-isolation .
           python -m playwright install --with-deps chromium
           python -c "from vulturetracker import faust; faust.have() or faust.fetch()" || true
-      - name: Portable tests
-        run: python -m unittest $PORTABLE
       - name: Page tests
         run: >-
           python -u -m unittest -v -f tests.test_page tests.test_workflow_page tests.test_release070_page
@@ -99,6 +97,8 @@ jobs:
           tests.test_repeat_rehearsal tests.test_repeat_rehearsal_page tests.test_performance_parts_page
           tests.test_part_adaptation tests.test_part_adaptation_page
           tests.test_rehearsal_delivery tests.test_real_interchange tests.test_rehearsal_playback
+      - name: Portable tests
+        run: python -m unittest $PORTABLE
 
   floor:
     runs-on: ubuntu-24.04

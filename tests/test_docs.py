@@ -78,7 +78,7 @@ class TestDocs(unittest.TestCase):
         setups = [s for job in flow["jobs"].values() for s in job["steps"] if "setup-python" in s.get("uses", "")]
         self.assertTrue(setups and all(s["with"].get("cache") == "pip" for s in setups))
         portable = flow["env"]["PORTABLE"].split()
-        page = flow["jobs"]["tests"]["steps"][-1]["run"].split()
+        page = next(s["run"] for s in flow["jobs"]["tests"]["steps"] if s.get("name") == "Page tests").split()
         modules = {f"tests.{p.stem}" for p in (ROOT / "tests").glob("test_*.py")}
         self.assertEqual(modules - set(portable) - set(page), set())
         # Native workflow regression modules run together with their browser

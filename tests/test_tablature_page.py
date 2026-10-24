@@ -7964,6 +7964,11 @@ class TestTablaturePage(unittest.TestCase):
         page.set_viewport_size(dict(width=1280,height=900))
         page.wait_for_function('tabRenderApi.boundsLookup.isFinished')
         self.assertEqual(path.read_bytes(),original);self.assertEqual(writes,[])
+        # Font metrics can make the narrow page trigger the existing chord-label
+        # width guard. Follow its instruction before testing edit hit targets.
+        page.set_viewport_size(dict(width=1920,height=1080))
+        change('scale',80);change('scale',100)
+        self.assertNotIn('need more width',page.locator('.vt-tab-status').inner_text())
         # Hit targets, selection and playback markers use the compact geometry.
         self.click_tab_lane(page,0,1,2)
         self.settled(page,"CUR.score?.note==='compact-note1'")
