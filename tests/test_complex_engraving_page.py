@@ -75,7 +75,7 @@ class TestComplexEngravingPage(unittest.TestCase):
             page.evaluate('() => document.fonts.ready')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             self.assertEqual(len(page.evaluate('tabRendered.tracks[0].staves[0].bars[0].voices')), 2)
             print('Editor annotation gaps:', self.annotation_boxes(page, '.vt-tab-score'))
             evidence = os.environ.get('VT_ENGRAVING_EVIDENCE')
@@ -94,7 +94,7 @@ class TestComplexEngravingPage(unittest.TestCase):
             self.assertEqual(page.locator('.vt-tab-playhead svg').count(), 0)
             for track in ('guitar2', 'bass', 'drums', 'guitar'):
                 page.select_option('[data-ui=track]', track)
-                self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+                self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
                 self.assertFalse(page.locator('.vt-tab-score .at-surface').evaluate('e=>e.hidden'))
                 self.assertEqual(page.locator('.vt-tab-edit-caret svg').count(), 0)
             preview = page.context.browser.new_page()
@@ -163,7 +163,7 @@ class TestComplexEngravingPage(unittest.TestCase):
             page.evaluate('() => document.fonts.ready')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             # The two initial chord-chart captions are separate from the 16
             # beat labels, but both must be readable and remain authored text.
             info = helpers.lyric_boxes(page, '.vt-tab-score', list(names) + list(names) * 8)

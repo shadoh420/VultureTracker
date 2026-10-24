@@ -74,14 +74,14 @@ class TestBandInstrumentsPage(unittest.TestCase):
         page.on('pageerror', lambda error: errors.append(str(error)))
         self.capture_engraving(page)
         page.select_option('[data-ui=track]', 'guitar')
-        self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         history = page.evaluate('[S.undo,S.redo]')
         for selector, track in (('#part-sound-track', 'bass'), ('[data-ui=track]', 'guitar2'),
                                 ('#part-sound-track', 'drums'), ('[data-ui=track]', 'guitar')):
             page.select_option(selector, track)
             try:
                 page.wait_for_function("""name=>window.tabRendered?.tracks[0].name===name&&
-                    tabRenderApi.boundsLookup.isFinished&&
+                    tabRenderApi.boundsLookup?.isFinished&&
                     document.querySelector('[data-ui=track]').value===document.querySelector('#part-sound-track').value""",
                     arg=tracks[track]['name'], timeout=5000)
             finally:

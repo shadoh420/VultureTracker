@@ -3,12 +3,12 @@
 Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
 Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication and clean defaults first.
-Current branch: `codex/native-tablature-release`; final shared-focus fix is awaiting CI.
+Current branch/head: `codex/native-tablature-release` / `cf88e55`; shared-focus fix awaiting CI.
 PR: https://github.com/shadoh420/VultureTracker/pull/4
-Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40118130817
-Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40118126492
-The previous clean Windows build, executable smoke and artifact upload pass
-(`ci-clean-build-final.log`). Its first upload rejected the slash in the branch name
+Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40121367314
+Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40121363414
+The final clean Windows build, executable smoke and artifact upload pass
+(`ci-shared-focus-build.log`). Its first upload rejected the slash in the branch name
 (`ci-clean-build-failure.log`); branch artifacts now use the commit SHA, tag names stay unchanged.
 Run40118130817 passed Windows/Python3.10 and fixed Linux PDF/compact checks, but found two browser failures.
 The layout audit counted invisible controls inside closed details; the reproduced false overlap now
@@ -27,7 +27,12 @@ cleanup now releases held requests before unregistering, preserving the original
 pending focus, playback, markers, standalone IT and exact history. An earlier failed probe left15
 velocity edits in the generated marker fixture; `restore-marker-probe.log` verifies only that known
 change and restores the exact generator-original through Undo before the passing run.
-No merge, tag or publication yet. Next: qualify the shared-focus fix in CI, then merge PR4, tag
+Run40121367314 passed Windows/Python3.10, PDF, compact layout and shared-focus cases. Its only browser
+failure was a test dereferencing temporarily null render bounds during track-setup reload. All79
+equivalent readiness predicates in15 test/runner files now wait for bounds instead of throwing; their
+finished-render requirement is unchanged. `ci-shared-focus-failures.log` retains the failure and
+`render-waits-final.log` records focused setup qualification. Application/package source is unchanged.
+No merge, tag or publication yet. Next: qualify the readiness fixes in CI, then merge PR4, tag
 v1.9.0, publish the three local dist assets, run `tools/release.py 1.9.0 --check`, record final results.
 
 Current delivery: `dist/vulturetracker.exe` (1.9.0), including the shared-focus fix.

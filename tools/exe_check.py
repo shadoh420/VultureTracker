@@ -600,7 +600,7 @@ def native_page(base, token, timeout, target_frame=0, score_seconds=0, gp5_expor
                 from tests.test_tablature_page import TestTablaturePage
                 helper=TestTablaturePage();original=it_song.read_bytes()
                 helper.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
                 page.evaluate('setEdit(true)');page.locator('.vt-tab-inspector > summary').click()
                 helper.click_tab_lane(page,2,0,3);end=helper.tab_lane_point(page,3,3,4)
                 page.keyboard.down('Shift');page.mouse.click(end['x'],end['y']);page.keyboard.up('Shift')
@@ -629,7 +629,7 @@ def native_page(base, token, timeout, target_frame=0, score_seconds=0, gp5_expor
                 from vulturetracker import api as source_api
                 helper=TestTablaturePage();original=it_song.read_bytes()
                 helper.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
                 page.evaluate('setEdit(true)');page.locator('.vt-tab-inspector > summary').click()
                 helper.click_tab_lane(page,2,0,2);end=helper.tab_lane_point(page,3,3,3)
                 page.keyboard.down('Shift');page.mouse.click(end['x'],end['y']);page.keyboard.up('Shift')
@@ -663,7 +663,7 @@ def native_page(base, token, timeout, target_frame=0, score_seconds=0, gp5_expor
                 original_score = view['score']['patterns']
                 helper.capture_engraving(page)
                 page.select_option('[data-ui=track]', 'guitar')
-                page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+                page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
                 page.evaluate('setEdit(true)')
                 helper.click_tab_lane(page, 0, 0, 2)
                 end = helper.tab_lane_point(page, 1, 3, 3)

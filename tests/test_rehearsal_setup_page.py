@@ -25,7 +25,7 @@ class TestRehearsalSetupPage(unittest.TestCase):
         self.rendered(page)
 
     def rendered(self, page):
-        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
     def command(self, page, selector):
         with page.expect_response('**/api/score_command') as response:

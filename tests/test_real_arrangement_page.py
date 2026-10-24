@@ -80,7 +80,7 @@ class TestRealArrangementPage(unittest.TestCase):
         page.click('[data-action=measures]')
         if page.locator('.vt-tab-inspector').get_attribute('open') is None:
             page.locator('.vt-tab-inspector > summary').click()
-        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         self.click_tab_lane(page, 0, 0, 1)
         result = command('shorter')
         edited = api.from_yaml(song_path.read_text(encoding='utf-8'))

@@ -20,7 +20,7 @@ class TestRealWorkspacePage(unittest.TestCase):
         page.wait_for_function('SCORE.view?.score?.tracks && document.querySelector("[data-ui=track]").options.length>1')
         page.select_option('[data-ui=track]', index=1)
         page.select_option('[data-ui=track]', index=0)
-        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
     def run_workspace(self, page, song_path):
         """Reusable against the package; leaves document bytes and preferences intact."""

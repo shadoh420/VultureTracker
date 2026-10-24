@@ -293,7 +293,7 @@ class TestPartAdaptationPage(unittest.TestCase):
         assert track['name'] == 'Seven-string lead' and track['midi']['program'] == 27
         assert track['channels'] == [0, 1, 2, 3, 4, 5, 19]
         assert page.input_value('[data-ui=channels]') == '1,2,3,4,5,6,20'
-        helper.settled(page, 'window.tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        helper.settled(page, 'window.tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         assert 'rendering failed' not in page.inner_text('.vt-tab-status')
         page.click('[data-action=undo]')
         helper.settled(page, 'SCORE.view.revision==='+json.dumps(revision))
@@ -319,7 +319,7 @@ class TestPartAdaptationPage(unittest.TestCase):
             page.fill('[data-ui=tuning]', '64 59 55 50 45 40' + ' 35' * (count - 6))
             page.locator('.vt-tab-setup button[type=submit]').first.click()
             helper.settled(page, f'SCORE.view.score.tracks.guitar.channels.length==={count}')
-            helper.settled(page, 'window.tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            helper.settled(page, 'window.tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
             assert 'rendering failed' not in page.inner_text('.vt-tab-status')
             page.click('[data-action=undo]')
             helper.settled(page, 'SCORE.view.revision==='+json.dumps(revision))

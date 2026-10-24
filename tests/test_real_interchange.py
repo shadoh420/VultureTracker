@@ -193,7 +193,7 @@ class TestRealInterchangePage(unittest.TestCase):
         page.select_option('[data-ui=track]',list(song['score']['tracks'])[-1])
         page.select_option('[data-ui=track]',first_track)
         page.select_option('[data-ui=voice]','0')
-        self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         revision = page.evaluate('SCORE.view.revision')
         # Sparse and pickup imports may have an explicit rest before this note.
         rendered_beat = page.evaluate('tabRendered.tracks[0].staves[0].bars[0].voices[0].beats.findIndex(b=>b.notes.length)')

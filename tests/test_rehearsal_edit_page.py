@@ -38,7 +38,7 @@ class TestRehearsalEditPage(unittest.TestCase):
         revision = page.evaluate('SCORE.view.revision')
 
         def rendered():
-            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
         def select(bar, string, at=0):
             page.select_option('[data-ui=voice]', '0')

@@ -27,10 +27,10 @@ class TestBandExpressionPage(unittest.TestCase):
         page.wait_for_selector('[data-ui=track]', state='attached')
         self.capture_engraving(page)
         page.select_option('[data-ui=track]', 'guitar')
-        self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page, 'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         original_revision = page.evaluate('SCORE.view.revision')
         def select_phrase():
-            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
             self.click_tab_lane(page, 0, 0, 2)
             page.keyboard.down('Shift')
             try:
@@ -56,7 +56,7 @@ class TestBandExpressionPage(unittest.TestCase):
             def history(action, revision):
                 page.click(f'[data-action={action}]')
                 # Queue completion precedes the asynchronous State/score refresh.
-                page.wait_for_function("revision=>!EDQ.n&&!SCORE.fetching&&S.version.hash===revision.slice(0,8)&&SCORE.view.revision===revision&&tabRenderedRevision===revision&&tabRenderApi.boundsLookup.isFinished", arg=revision, timeout=10000)
+                page.wait_for_function("revision=>!EDQ.n&&!SCORE.fetching&&S.version.hash===revision.slice(0,8)&&SCORE.view.revision===revision&&tabRenderedRevision===revision&&tabRenderApi.boundsLookup?.isFinished", arg=revision, timeout=10000)
             history('undo', original_revision)
             self.assertEqual(song_path.read_bytes(), original)
             history('redo', changed_revision)

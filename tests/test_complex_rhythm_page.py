@@ -38,7 +38,7 @@ class TestComplexRhythmPage(unittest.TestCase):
         revision = page.evaluate('SCORE.view.revision')
 
         def ready():
-            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
         def command(selector, endpoint='score_command'):
             with page.expect_response(lambda r: r.request.method == 'POST' and r.url.endswith('/api/' + endpoint)) as response:
@@ -134,7 +134,7 @@ class TestExpressiveArrangementPage(TestComplexRhythmPage):
         page.select_option('[data-ui=track]', 'guitar')
         revision = page.evaluate('SCORE.view.revision')
         def ready():
-            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         def command(selector, endpoint='score_command'):
             with page.expect_response(lambda r: r.request.method == 'POST' and r.url.endswith('/api/' + endpoint)) as response:
                 page.click(selector)

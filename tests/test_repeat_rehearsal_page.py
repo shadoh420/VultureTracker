@@ -78,7 +78,7 @@ class TestRepeatRehearsalPage(unittest.TestCase):
         helper.capture_engraving(page)
         page.evaluate('setEdit(true)')
         page.select_option('[data-ui=track]','guitar')
-        helper.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        helper.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         helper.click_tab_lane(page,0,0,2)
         if page.locator('.vt-tab-inspector').get_attribute('open') is None:
             page.locator('.vt-tab-inspector > summary').click()

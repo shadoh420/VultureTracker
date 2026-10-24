@@ -1156,7 +1156,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('.vt-tab-score svg')
             self.capture_engraving(page)
             page.click('[data-ui=view-tuxguitar]')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             self.assertEqual(page.get_attribute('.vt-tab-score', 'data-layout'), 'horizontal')
             self.assertEqual(page.get_attribute('.vt-tab-score', 'data-tracks'), 'guitar,guitar2,bass,drums')
             self.assertFalse(page.is_checked('[data-ui=view-dynamics]'))
@@ -1167,7 +1167,7 @@ class TestTablaturePage(unittest.TestCase):
             pitches = page.evaluate(pitches_js)
             before = page.evaluate('window.tabRenderCount')
             page.select_option('[data-ui=view-pitch]', 'concert')
-            page.wait_for_function('n=>tabRenderCount>n && tabRenderApi.boundsLookup.isFinished', arg=before)
+            page.wait_for_function('n=>tabRenderCount>n && tabRenderApi.boundsLookup?.isFinished', arg=before)
             self.assertEqual(page.evaluate(pitches_js), pitches)
             self.assertEqual((folder/'song.yaml').read_bytes(), original)
             self.assertEqual(list(state.history), history)
@@ -1192,10 +1192,10 @@ class TestTablaturePage(unittest.TestCase):
             self.capture_engraving(page)
             page.locator('.vt-tab-view > summary').click()
             page.select_option('[data-ui=view-pitch]', 'concert')
-            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             pitches = page.evaluate('tabRendered.tracks.flatMap(t=>t.staves.flatMap(s=>s.bars.flatMap(b=>b.voices.flatMap(v=>v.beats.flatMap(b=>b.notes.map(n=>n.realValue))))))')
             page.click('[data-ui=view-tuxguitar]')
-            page.wait_for_function('tabRendered.tracks[0].staves[0].displayTranspositionPitch===-12&&tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('tabRendered.tracks[0].staves[0].displayTranspositionPitch===-12&&tabRenderApi.boundsLookup?.isFinished')
             self.assertEqual(page.evaluate('tabRendered.tracks.flatMap(t=>t.staves.flatMap(s=>s.bars.flatMap(b=>b.voices.flatMap(v=>v.beats.flatMap(b=>b.notes.map(n=>n.realValue))))))'), pitches)
             self.assertFalse(page.evaluate('tabRenderApi.settings.notation.elements.get(alphaTab.NotationElement.EffectDynamics)'))
             page.select_option('[data-ui=view-layout]', 'page')
@@ -1219,7 +1219,7 @@ class TestTablaturePage(unittest.TestCase):
             page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
             self.capture_engraving(page)
             page.click('[data-ui=view-tuxguitar]')
-            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             point=page.evaluate("""()=>{
               const beat=tabRendered.tracks[0].staves[0].bars[0].voices[0].beats.find(b=>b.notes.some(n=>n.fret===3));
               const bounds=tabRenderApi.boundsLookup.findBeats(beat)[0];
@@ -2324,7 +2324,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             # fit_song: a, b, a rest r and c, one per quarter of the first bar.
             start, end = (self.tab_lane_point(page, 0, i, 1) for i in (0, 2))
             page.mouse.move(start['x'], start['y'])
@@ -2395,7 +2395,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             shaded = lambda: sorted(page.evaluate("[...document.querySelectorAll('.vt-tab-selection')].map(e=>e.dataset.beat)"))
 
             def shift_click(beat):
@@ -2432,7 +2432,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             # (1) Space plays through the live engine; the main button must show pause, then play again.
             page.locator('#tab-editor').focus()
             page.keyboard.press(' ')
@@ -2734,7 +2734,7 @@ class TestTablaturePage(unittest.TestCase):
         page.select_option('[data-ui=track]', 'guitar')
         for fit in (False, True):
             for action, value in (('shorter', 32), ('longer', 8)):
-                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
                 self.click_tab_lane(page, 2, 7, 5)
                 self.settled(page, 'SCORE.view.order===2')
                 page.keyboard.down('Shift')
@@ -2755,11 +2755,11 @@ class TestTablaturePage(unittest.TestCase):
                 self.assertEqual(page.evaluate("SCORE.view.score.patterns.G.beats.find(b=>b.id==='rest_copy_visit0_beat3').written.value"),
                                  16 if action == 'longer' else 32)
                 # The API refresh completes before alphaTab's postRenderFinished paints the range.
-                self.settled(page, "tabRenderApi.boundsLookup.isFinished&&document.querySelector('.vt-tab-score').dataset.bars==='4'&&document.querySelectorAll('.vt-tab-selection').length==="
+                self.settled(page, "tabRenderApi.boundsLookup?.isFinished&&document.querySelector('.vt-tab-score').dataset.bars==='4'&&document.querySelectorAll('.vt-tab-selection').length==="
                              + ('4' if action == 'shorter' else '2'))
                 page.click('[data-action=undo]')
                 self.settled(page, "SCORE.view.score.patterns.C2.beats.find(b=>b.id==='copy_visit1_beat0').written.value===16")
-                page.wait_for_function("tabRenderApi.boundsLookup.isFinished&&document.querySelector('.vt-tab-score').dataset.bars==='4'")
+                page.wait_for_function("tabRenderApi.boundsLookup?.isFinished&&document.querySelector('.vt-tab-score').dataset.bars==='4'")
                 self.assertEqual(song_path.read_bytes(), original)
         self.assertFalse(errors, errors)
 
@@ -2796,7 +2796,7 @@ class TestTablaturePage(unittest.TestCase):
         for fit in (False, True):
             for action, value, dots, tuplet in (('shorter', 8, 0, [1, 1]), ('longer', 2, 0, [1, 1]),
                                                 ('dots', 4, 1, [1, 1]), ('tuplet', 4, 0, [3, 2])):
-                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+                page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
                 self.click_tab_lane(page, 1, 0, 1)
                 self.settled(page, 'SCORE.view.order===1')
                 if peer is None:
@@ -2815,13 +2815,13 @@ class TestTablaturePage(unittest.TestCase):
                 self.assertNotIn('refused', page.inner_text('.vt-tab-status'))
                 self.assertEqual(page.evaluate('SCORE.view.score.ties.length'), 1)
                 self.assertEqual(page.evaluate("SCORE.view.score.patterns.F.beats.find(b=>b.id==='lower')"), peer)
-                self.settled(page, "tabRenderApi.boundsLookup.isFinished&&document.querySelector('.vt-tab-grid [data-note=\"tie_F\"]').getAttribute('aria-pressed')==='true'")
+                self.settled(page, "tabRenderApi.boundsLookup?.isFinished&&document.querySelector('.vt-tab-grid [data-note=\"tie_F\"]').getAttribute('aria-pressed')==='true'")
                 self.assertEqual(page.input_value('[data-ui=duration]'), str(value))
                 page.click('[data-action=undo]')
                 self.settled(page, "SCORE.view.score.patterns.F.beats.find(b=>b.id==='beat0').written.value===4&&SCORE.view.score.patterns.F.beats.find(b=>b.id==='beat0').written.dots===0&&SCORE.view.score.patterns.F.beats.find(b=>b.id==='beat0').written.tuplet[0]===1")
                 self.assertEqual(song_path.read_bytes(), original)
         for ranged in (False, True):
-            page.wait_for_function('tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('tabRenderApi.boundsLookup?.isFinished')
             self.click_tab_lane(page, 0, 3, 1)
             self.settled(page, 'SCORE.view.order===0')
             if ranged:
@@ -2836,7 +2836,7 @@ class TestTablaturePage(unittest.TestCase):
             self.assertIn('1 tie removed; separated notes play normally.', page.inner_text('.vt-tab-status'))
             self.assertEqual(page.evaluate("SCORE.view.score.patterns.F.beats.find(b=>b.id==='lower')"), peer)
             # The full-bar peer keeps the existing F rest in the phrase, alongside both new tails.
-            self.settled(page, "tabRenderApi.boundsLookup.isFinished&&" + ("document.querySelectorAll('.vt-tab-selection').length===6" if ranged
+            self.settled(page, "tabRenderApi.boundsLookup?.isFinished&&" + ("document.querySelectorAll('.vt-tab-selection').length===6" if ranged
                          else "document.querySelector('.vt-tab-grid [data-note=\"tie_C\"]').getAttribute('aria-pressed')==='true'"))
             if ranged:
                 self.assertEqual(page.evaluate("SCORE.view.score.patterns.F.beats.find(b=>b.id==='beat0').written.value"), 8)
@@ -2884,7 +2884,7 @@ class TestTablaturePage(unittest.TestCase):
             page.locator('.vt-tab-inspector > summary').click()
         original_revision = page.evaluate('SCORE.view.revision')
         rendered = "window.tabRendered&&SCORE.view.revision===" + json.dumps(original_revision) + \
-            "&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished&&document.querySelector('.vt-tab-score').dataset.bars==='4'"
+            "&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished&&document.querySelector('.vt-tab-score').dataset.bars==='4'"
         for fit in (False, True):
             page.wait_for_function(rendered)
             self.click_tab_lane(page, 0, 0, 2)
@@ -2912,7 +2912,7 @@ class TestTablaturePage(unittest.TestCase):
                     + f"b.written.value==={value}&&b.written.dots==={dots}&&b.written.tuplet[0]==={tuplet[0]}))")
                 self.assertNotIn('refused', page.inner_text('.vt-tab-status'))
                 self.assertEqual(page.evaluate("SCORE.view.score.patterns.C.beats.find(b=>b.id==='lower')"), peer)
-                self.settled(page, 'tabRenderApi.boundsLookup.isFinished' +
+                self.settled(page, 'tabRenderApi.boundsLookup?.isFinished' +
                              (f"&&document.querySelectorAll('.vt-tab-selection').length==={highlights}" if highlights else ''))
                 changed_bytes.append(song_path.read_bytes())
                 # Copy must see a complete phrase, including current rest fills, after every duration change.
@@ -2990,7 +2990,7 @@ class TestTablaturePage(unittest.TestCase):
         snapshots = [(original, original_revision)]
 
         def rendered():
-            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
         def select(first, last, first_beat=0, last_beat=3):
             rendered()
@@ -3629,7 +3629,7 @@ class TestTablaturePage(unittest.TestCase):
             self.assertEqual(onsets(), played)   # what the live engine plays: every note at the same frame
             # Bar 3 (pattern G) now starts at quarter 7: bar 2's last quarter (F's fourth note, A3) opens it.
             self.assertEqual(parse_cell(state.pattern_rows(2, occurrence='bar3')['display_rows'][0][2]).note, 57)
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished && tabRendered.masterBars.length === 5')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished && tabRendered.masterBars.length === 5')
             self.assertEqual(len(state.history), 1)
             page.click('[data-action=undo]')
             self.settled(page, 'SCORE.view.orders.length === 4')
@@ -3688,7 +3688,7 @@ class TestTablaturePage(unittest.TestCase):
                     self.assertEqual(problems, [])
             page.set_viewport_size({'width': 1400, 'height': 900})
             # The whole piece is engraved: four bars, each drawn inside the score area.
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             self.assertEqual(page.evaluate('tabRendered.masterBars.length'), 4)
             shot = Path(os.environ.get('VT_UI_AUDIT_DIR') or folder) / 'four-bars-score.png'
             shot.parent.mkdir(parents=True, exist_ok=True)
@@ -3704,7 +3704,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             self.assertEqual(page.input_value('[data-ui=staff-mode]'), 'natural')   # TuxGuitar's default edition mode
             # The treble staff's G4 line (second from the bottom: six steps under the top line F5) at beat-b (D4).
             point = page.evaluate("""() => {
@@ -4034,7 +4034,7 @@ class TestTablaturePage(unittest.TestCase):
             self.assertTrue(page.inner_text('.vt-tab-status').startswith('Selected 12 beats'))
             # Select All spans every written occurrence; this shortcut check edits a local range.
             self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-            self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             start,end=(self.tab_lane_point(page,0,i,1) for i in (0,3))
             page.mouse.move(start['x'],start['y']);page.mouse.down();page.mouse.move(end['x'],end['y'],steps=5);page.mouse.up()
             page.locator('#tab-editor').focus()
@@ -4483,7 +4483,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('.vt-tab-edit-caret:not([hidden])')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             self.assertEqual(page.locator('[data-ui=entry-label]').inner_text(), 'Drum key')
             self.assertTrue(page.locator('[data-ui=fret]').is_visible())
             self.assertTrue(page.locator('.vt-tab-grid').is_hidden())
@@ -4601,7 +4601,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('.vt-tab-edit-caret:not([hidden])')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             self.assertFalse(page.locator('.vt-tab-inspector').evaluate('e=>e.open'))
             self.assertFalse(page.locator('.vt-tab-grid-details').evaluate('e=>e.open'))
             self.assertTrue(page.locator('.vt-tab-grid').is_hidden())
@@ -7944,7 +7944,7 @@ class TestTablaturePage(unittest.TestCase):
         page.select_option('[data-ui=track]','guitar');page.select_option('[data-ui=staff-mode]','select')
         self.capture_engraving(page)
         def rendered():
-            self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         def change(field,value):
             count=page.evaluate('window.tabRenderCount||0');control=page.locator('[data-ui=view-'+field+']')
             if (control.is_checked() == value if isinstance(value,bool) else control.input_value() == str(value)):
@@ -7991,7 +7991,7 @@ class TestTablaturePage(unittest.TestCase):
         self.assertTrue(page.locator('[data-ui=view-compact]').is_checked())
         change('layout','page');change('notation','both');change('scale',100)
         page.set_viewport_size(dict(width=1280,height=900))
-        page.wait_for_function('tabRenderApi.boundsLookup.isFinished')
+        page.wait_for_function('tabRenderApi.boundsLookup?.isFinished')
         self.assertEqual(path.read_bytes(),original);self.assertEqual(writes,[])
         # Font metrics can make the narrow page trigger the existing chord-label
         # width guard. Follow its instruction before testing edit hit targets.
@@ -8071,18 +8071,18 @@ class TestTablaturePage(unittest.TestCase):
         page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
         if not page.locator('.vt-tab-inspector').evaluate('e=>e.open'):page.locator('.vt-tab-inspector > summary').click()
         self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         def action(key):
             rev=page.evaluate('SCORE.view.revision')
             if key in ('Delete','Control+x','Control+Delete'):
                 page.locator('#tab-editor').focus();page.keyboard.press(key)
             else:page.click('[data-action='+key+']')
-            self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         def select(voice,local):
             page.select_option('[data-ui=voice]',index=voice)
             if local:
                 self.click_tab_lane(page,0,0,2)
-                self.settled(page,'SCORE.view.order===0&&tabRenderApi.boundsLookup.isFinished')
+                self.settled(page,'SCORE.view.order===0&&tabRenderApi.boundsLookup?.isFinished')
                 start,end=(self.tab_lane_point(page,0,i,2) for i in (0,1))
                 page.mouse.move(start['x'],start['y']);page.mouse.down();page.mouse.move(end['x'],end['y'],steps=5);page.mouse.up()
             else:
@@ -8114,7 +8114,7 @@ class TestTablaturePage(unittest.TestCase):
         self.settled(page,"document.querySelector('.vt-tab-status').textContent.startsWith('Selected phrase updated')")
         self.assertEqual(path.read_bytes(),original);self.assertEqual(errors,[])
         page.select_option('[data-ui=voice]',index=0);page.select_option('[data-ui=track]','guitar')
-        self.settled(page,'tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         page.evaluate('setEdit(false)')
         return dict(local_and_whole_track=True,active_voice=True,clipboard_both_voices=True,clean_both_voices=True,empty_voice_noop=True,exact_history=True,page_errors=errors)
 
@@ -8136,13 +8136,13 @@ class TestTablaturePage(unittest.TestCase):
         page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
         if not page.locator('.vt-tab-inspector').evaluate('e=>e.open'):page.locator('.vt-tab-inspector > summary').click()
         self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         def action(key):
             rev=page.evaluate('SCORE.view.revision')
             if key.startswith('Control+'):
                 page.locator('#tab-editor').focus();page.keyboard.press(key)
             else:page.click('[data-action='+key+']')
-            self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         for bar,voice,count in ((0,0,2),(0,1,1),(1,0,3),(1,1,3),(3,0,3)):
             self.click_tab_lane(page,bar,0,1 if voice==0 else 6,voice=voice)
             self.settled(page,f'CUR.score.voice==={voice}&&SCORE.view.order==={bar}')
@@ -8650,9 +8650,9 @@ class TestTablaturePage(unittest.TestCase):
         page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
         if not page.locator('.vt-tab-inspector').evaluate('e=>e.open'):page.locator('.vt-tab-inspector > summary').click()
         self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         def ready(count):
-            self.settled(page,f'S.undo==={count}&&SCORE.view.revision.startsWith(S.version.hash)&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,f'S.undo==={count}&&SCORE.view.revision.startsWith(S.version.hash)&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         self.click_tab_lane(page,0,0,1)
         page.keyboard.down('Shift');self.click_tab_lane(page,0,second_index,1);page.keyboard.up('Shift')
         page.click('[data-action=copy]');page.wait_for_function(f"document.querySelector('.vt-tab-status').textContent.startsWith('Copied {2 if implicit else 3} beats')")
@@ -8709,13 +8709,13 @@ class TestTablaturePage(unittest.TestCase):
         page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
         if not page.locator('.vt-tab-inspector').evaluate('e=>e.open'):page.locator('.vt-tab-inspector > summary').click()
         self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         def key(keys):page.locator('#tab-editor').focus();page.keyboard.press(keys)
         def history():
             saved=path.read_bytes()
             for redo,expected,count in ((False,original,0),(True,saved,1),(False,original,0)):
                 page.evaluate('redo=>patUndo(redo)',redo)
-                self.settled(page,f'S.undo==={count}&&SCORE.view.revision.startsWith(S.version.hash)&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+                self.settled(page,f'S.undo==={count}&&SCORE.view.revision.startsWith(S.version.hash)&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
                 self.assertEqual(path.read_bytes(),expected)
         self.click_tab_lane(page,0,0,1);key('Control+c')
         self.assertTrue(page.locator('[data-panel=measures]').is_visible());self.assertEqual(posts,[])
@@ -8727,7 +8727,7 @@ class TestTablaturePage(unittest.TestCase):
         self.assertTrue(page.locator('[data-panel=measures]').is_visible());self.assertEqual(posts,[])
         self.assertTrue(page.is_disabled('[data-action=paste-safe]'))
         page.fill('[data-ui=ops-from]','1');page.fill('[data-ui=ops-count]','1');page.click('[data-action=measure-paste]')
-        self.settled(page,'S.undo===1&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'S.undo===1&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         actual=api.from_yaml(path.read_text(encoding='utf-8'))
         self.assertEqual([n['pitch'] for b in actual['score']['patterns']['A']['beats'] for n in b['notes']],[69,70,71,72])
         page.click('[data-action=close-measures]');history()
@@ -8740,7 +8740,7 @@ class TestTablaturePage(unittest.TestCase):
             self.click_tab_lane(page,*first,1)
             page.keyboard.down('Shift');self.click_tab_lane(page,*last,1);page.keyboard.up('Shift')
             posts.clear();key('Control+v')
-            self.settled(page,'S.undo===1&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,'S.undo===1&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
             request=next(p for p in posts if p.get('op')=='beats_paste')
             self.assertTrue(request['replace']);self.assertEqual(request['occurrence'],'oa' if pattern=='A' else 'ob')
             self.assertEqual(request['row'],[onset*12,1])
@@ -8789,7 +8789,7 @@ class TestTablaturePage(unittest.TestCase):
         page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
         if not page.locator('.vt-tab-inspector').evaluate('e=>e.open'):page.locator('.vt-tab-inspector > summary').click()
         self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         def local_range():
             page.select_option('[data-ui=voice]',index=0)
             start,end=(self.tab_lane_point(page,0,i,2) for i in (0,1))
@@ -8799,7 +8799,7 @@ class TestTablaturePage(unittest.TestCase):
             rev=page.evaluate('SCORE.view.revision')
             if key.startswith('Shift+'):page.locator('#tab-editor').focus();page.keyboard.press(key)
             else:page.click('[data-action='+key+']')
-            self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         def history():
             saved=path.read_bytes();self.assertNotEqual(saved,original)
             action('undo');self.assertEqual(path.read_bytes(),original)
@@ -8852,7 +8852,7 @@ class TestTablaturePage(unittest.TestCase):
             self.assertFalse(state.error,state.error);original=(folder/'song.yaml').read_bytes()
             page.evaluate("tab('tab');setEdit(true)");page.wait_for_selector('.vt-tab-score svg')
             self.capture_engraving(page);page.select_option('[data-ui=track]','guitar')
-            self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,'window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             self.click_tab_lane(page,0,0,2);page.locator('#tab-editor').focus()
             before=page.evaluate("[...document.querySelectorAll('.vt-tab-selection')].map(e=>({...e.dataset}))")
             page.keyboard.press('Control+a')
@@ -8939,7 +8939,7 @@ class TestTablaturePage(unittest.TestCase):
                 page.locator(selector+' > summary').click();opened.append(selector)
         self.capture_engraving(page)
         def rendered():
-            self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished&&document.querySelector(".vt-tab-score").dataset.bars')
+            self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished&&document.querySelector(".vt-tab-score").dataset.bars')
         def change_view(field,value):
             count=page.evaluate('window.tabRenderCount||0')
             control=page.locator('[data-ui=view-'+field+']')
@@ -9049,7 +9049,7 @@ class TestTablaturePage(unittest.TestCase):
         def changed(action):
             rev=page.evaluate('SCORE.view.revision');page.click('[data-action='+action+']')
             self.settled(page,f'SCORE.view.revision!=={json.dumps(rev)}')
-            self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         def history():
             saved=path.read_bytes();self.assertNotEqual(saved,original)
             changed('undo');self.assertEqual(path.read_bytes(),original)
@@ -9091,7 +9091,7 @@ class TestTablaturePage(unittest.TestCase):
         page.click('[data-action=print]')
         frame=page.locator('#score-print-frame').element_handle().content_frame();self.print_ready(frame)
         self.capture_engraving(frame);frame.locator('form button[type=submit]').click();self.print_ready(frame)
-        frame.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        frame.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         self.assertTrue(frame.evaluate('tabRendered.tracks[0].staves[0].isPercussion'))
         self.assertEqual(frame.evaluate('tabRendered.tracks[0].staves[0].bars.flatMap(b=>b.voices.flatMap(v=>v.beats.filter(b=>b.graceType!==alphaTab.model.GraceType.None).flatMap(b=>b.notes.map(n=>n.percussionArticulation))))'),[42])
         self.assertGreater(frame.locator('.vt-print-page svg').count(),0)
@@ -9276,7 +9276,7 @@ class TestTablaturePage(unittest.TestCase):
         errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
         page.click('[data-t=tab]');page.wait_for_selector('.vt-tab-score .at-surface svg');self.capture_engraving(page)
         page.select_option('[data-ui=track]','t1')
-        self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page,'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
         def verify(surface):
             self.assertEqual(surface.evaluate('tabRendered.tracks[0].staves[0].bars.map(b=>b.clef)'),
                 surface.evaluate('[alphaTab.model.Clef.F4,alphaTab.model.Clef.C3,alphaTab.model.Clef.C4,alphaTab.model.Clef.G2]'))
@@ -9288,7 +9288,7 @@ class TestTablaturePage(unittest.TestCase):
         frame=page.locator('#score-print-frame').element_handle().content_frame();self.print_ready(frame)
         self.capture_engraving(frame)
         frame.locator('form button[type=submit]').click();self.print_ready(frame)
-        frame.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+        frame.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
         verify(frame)
         self.assertGreater(frame.locator('.vt-print-page svg').count(),0)
         page.get_by_role('button',name='Close preview',exact=True).click()
@@ -11035,7 +11035,7 @@ class TestTablaturePage(unittest.TestCase):
             page.wait_for_selector('[data-ui=track]', state='attached')
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function("window.tabRendered && tabRenderApi.boundsLookup.isFinished")
+            page.wait_for_function("window.tabRendered && tabRenderApi.boundsLookup?.isFinished")
             # Drag and Extend Right cross the same order boundary as Shift-click.
             start = self.tab_lane_point(page, 0, 3, 1)
             end = self.tab_lane_point(page, 1, 0, 1)
@@ -11168,7 +11168,7 @@ class TestTablaturePage(unittest.TestCase):
             original=(folder/'song.yaml').read_bytes();errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
             page.evaluate("tab('tab');setEdit(true)")
             page.wait_for_selector('[data-ui=track]',state='attached');self.capture_engraving(page)
-            page.select_option('[data-ui=track]','guitar');page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            page.select_option('[data-ui=track]','guitar');page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             self.click_tab_lane(page,0,0,2);self.settled(page,'SCORE.view.order===0')
             page.keyboard.down('Shift')
             try:self.click_tab_lane(page,1,3,3)
@@ -11237,7 +11237,7 @@ class TestTablaturePage(unittest.TestCase):
             page.evaluate("tab('tab');setEdit(true)")
             page.wait_for_selector('[data-ui=track]',state='attached');self.capture_engraving(page)
             page.select_option('[data-ui=track]','guitar')
-            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             self.click_tab_lane(page,0,0,2);page.keyboard.down('Shift')
             try:self.click_tab_lane(page,1,3,3)
             finally:page.keyboard.up('Shift')
@@ -11299,7 +11299,7 @@ class TestTablaturePage(unittest.TestCase):
             page.evaluate("tab('tab');setEdit(true)")
             page.wait_for_selector('[data-ui=track]',state='attached');self.capture_engraving(page)
             page.select_option('[data-ui=track]','guitar')
-            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             self.click_tab_lane(page,0,0,1);page.keyboard.down('Shift')
             try:self.click_tab_lane(page,1,3,1)
             finally:page.keyboard.up('Shift')
@@ -11358,10 +11358,10 @@ class TestTablaturePage(unittest.TestCase):
             page.evaluate("tab('tab');setEdit(true)")
             page.wait_for_selector('[data-ui=track]',state='attached'); self.capture_engraving(page)
             page.select_option('[data-ui=track]','guitar')
-            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered && tabRenderApi.boundsLookup?.isFinished')
             def select(firstbar,firstbeat,lastbar,lastbeat):
                 self.click_tab_lane(page,firstbar,firstbeat,1)
-                self.settled(page,f'SCORE.view.order==={firstbar} && tabRenderApi.boundsLookup.isFinished')
+                self.settled(page,f'SCORE.view.order==={firstbar} && tabRenderApi.boundsLookup?.isFinished')
                 end=self.tab_lane_point(page,lastbar,lastbeat,1)
                 page.keyboard.down('Shift');page.mouse.click(end['x'],end['y']);page.keyboard.up('Shift')
                 self.settled(page,f'SCORE.view.order==={lastbar}')
@@ -11372,7 +11372,7 @@ class TestTablaturePage(unittest.TestCase):
             page.locator('span[title="approved: an agent\'s tools leave this pattern alone"]').nth(1).click()
             self.settled(page,"S.marks.patterns.F?.approved")
             protected=(folder/'song.yaml').read_bytes()
-            page.evaluate("tab('tab')");self.settled(page,'tabRenderApi.boundsLookup.isFinished')
+            page.evaluate("tab('tab')");self.settled(page,'tabRenderApi.boundsLookup?.isFinished')
             select(0,2,1,0)
             page.locator('#tab-editor').focus(); page.keyboard.press('Control+x')
             self.settled(page,"document.querySelector('.vt-tab-status').textContent.includes('approved')")
@@ -11402,7 +11402,7 @@ class TestTablaturePage(unittest.TestCase):
             page.locator('#tab-editor').focus();page.keyboard.press('Control+r')
             self.settled(page,"SCORE.view.order===2&&SCORE.view.score.patterns.C2.beats.every(b=>b.id.startsWith('copy_'))")
             page.evaluate("async()=>{SCORE.key=null;await scoreRefresh()}")
-            page.wait_for_function('tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('tabRenderApi.boundsLookup?.isFinished')
             self.settled(page,"document.querySelectorAll('.vt-tab-selection').length===8")
             self.assertEqual(sorted(page.locator('.vt-tab-selection').evaluate_all('els=>els.map(e=>e.dataset.occurrence)')),
                              ['bar3']*4+['bar4']*4)
@@ -12459,7 +12459,7 @@ class TestCompleteSongClipboardPage(unittest.TestCase):
             page.select_option('[data-ui=track]', track)
             if page.locator('.vt-tab-inspector').get_attribute('open') is None:
                 page.locator('.vt-tab-inspector > summary').click()
-            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+            self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
         def paste(track, path, expected):
             prepare(track)
@@ -12547,7 +12547,7 @@ class TestCompleteSongArrangementPage(unittest.TestCase):
         self.rendered(page)
 
     def rendered(self, page):
-        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup.isFinished')
+        self.settled(page, 'window.tabRendered&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
 
     def command(self, page, selector, endpoint='score_command'):
         with page.expect_response('**/api/' + endpoint) as response:

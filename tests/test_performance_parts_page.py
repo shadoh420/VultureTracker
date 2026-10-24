@@ -33,7 +33,7 @@ class TestPerformancePartsPage(unittest.TestCase):
             self.capture_engraving(page)
             page.select_option('[data-ui=track]', 'guitar2')
             page.select_option('[data-ui=track]', 'guitar')
-            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup.isFinished')
+            page.wait_for_function('window.tabRendered&&tabRenderApi.boundsLookup?.isFinished')
             model = "tabRendered.tracks[0].staves[0].bars.map(b=>[b.clef,b.keySignature,b.keySignatureType])"
             bass = page.evaluate('alphaTab.model.Clef.F4')
             treble = page.evaluate('alphaTab.model.Clef.G2')
