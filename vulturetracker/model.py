@@ -129,3 +129,12 @@ class Module:
     plugins: dict = field(default_factory=dict)   # {1..: {effect, params [0..1], name, output, bypass, gain, dry,
     #                                               master}} (plugins.py); only OpenMPT and libopenmpt play them
     macros: dict = field(default_factory=dict)    # {0..15: SFx macro text} over OpenMPT's defaults (SF0 = cutoff)
+    score_projection: object | None = field(default=None, compare=False, repr=False)
+    # Preparation-only residual module. Its IT bytes are incomplete without this plan.
+    native_score: dict | None = field(default=None, compare=False, repr=False)
+
+    def playback_backing(self):
+        """Disposable performed orders; the editor always retains this authored module."""
+        from dataclasses import replace
+        projection = (self.native_score or {}).get('backing')
+        return replace(self, patterns=projection.patterns, orders=projection.orders) if projection else self

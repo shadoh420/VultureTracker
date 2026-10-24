@@ -78,10 +78,15 @@ class TestDocs(unittest.TestCase):
         setups = [s for job in flow["jobs"].values() for s in job["steps"] if "setup-python" in s.get("uses", "")]
         self.assertTrue(setups and all(s["with"].get("cache") == "pip" for s in setups))
         portable = flow["env"]["PORTABLE"].split()
-        page = flow["jobs"]["tests"]["steps"][-1]["run"].split()
+        page = next(s["run"] for s in flow["jobs"]["tests"]["steps"] if s.get("name") == "Page tests").split()
         modules = {f"tests.{p.stem}" for p in (ROOT / "tests").glob("test_*.py")}
         self.assertEqual(modules - set(portable) - set(page), set())
-        self.assertTrue(all(m.endswith("_page") for m in page if m.startswith("tests.")))
+        # Native workflow regression modules run together with their browser
+        # cases in the Chromium job. Windows model coverage is also run locally.
+        mixed = {'tests.test_rehearsal_delivery', 'tests.test_real_interchange', 'tests.test_rehearsal_playback',
+                 'tests.test_complex_rhythm', 'tests.test_complex_interchange', 'tests.test_complex_routing',
+                 'tests.test_expressive_gp5', 'tests.test_advanced_rhythm', 'tests.test_advanced_timing', 'tests.test_repeat_rehearsal', 'tests.test_part_adaptation'}
+        self.assertTrue(all(m.endswith("_page") or m in mixed for m in page if m.startswith("tests.")))
         agents = re.search(r"`python -m unittest (tests\.[^`]+)`", read("AGENTS.md")).group(1).split()
         self.assertEqual(sorted(agents), sorted(portable))
 

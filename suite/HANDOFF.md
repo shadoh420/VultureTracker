@@ -2,6 +2,255 @@
 
 Updated 2026-10-08: the state below is 2026-09-24's; see "Since 2026-09-24" at the end for what followed.
 
+Release 1.9.0 preparation (2026-10-24): owner authorized merge/publication and clean defaults first.
+Current branch/head: `codex/native-tablature-release` / `cf88e55`; shared-focus fix awaiting CI.
+PR: https://github.com/shadoh420/VultureTracker/pull/4
+Final CI: https://github.com/shadoh420/VultureTracker/actions/runs/40121367314
+Clean Windows build: https://github.com/shadoh420/VultureTracker/actions/runs/40121363414
+The final clean Windows build, executable smoke and artifact upload pass
+(`ci-shared-focus-build.log`). Its first upload rejected the slash in the branch name
+(`ci-clean-build-failure.log`); branch artifacts now use the commit SHA, tag names stay unchanged.
+Run40118130817 passed Windows/Python3.10 and fixed Linux PDF/compact checks, but found two browser failures.
+The layout audit counted invisible controls inside closed details; the reproduced false overlap now
+uses actual browser visibility (`toolbar-visibility-repro.log`). A real pending-save focus gap dropped
+Ctrl+Z after a clicked button became disabled. Focus is now retained immediately; the delayed-response
+regression queues Undo and verifies Redo/restoration (`button-focus-before.log`, `button-focus-verified.log`).
+The first focus repair checked only body focus and missed browsers retaining the disabled button until
+the event ended (`button-focus-final.log`). Four focused control cases now pass in
+`focus-visibility-final.log`; the exact false-overlap probe passes in `toolbar-visibility-final.log`.
+The first packaged focus check also exposed delayed phrase preparation; focus retention now lives in
+the shared control update, at the point a focused button becomes disabled. `async-focus-final.log`
+passes immediate stem Undo/Redo, delayed phrase navigation/history, panels and track controls.
+`package-focus-final.log`/`package-focus-verified.log` retain the earlier package failures; the route
+cleanup now releases held requests before unregistering, preserving the original assertion diagnostic.
+`build-shared-focus-final.log` and `package-release-qualified.log` pass the new package, including
+pending focus, playback, markers, standalone IT and exact history. An earlier failed probe left15
+velocity edits in the generated marker fixture; `restore-marker-probe.log` verifies only that known
+change and restores the exact generator-original through Undo before the passing run.
+Run40121367314 passed Windows/Python3.10, PDF, compact layout and shared-focus cases. Its only browser
+failure was a test dereferencing temporarily null render bounds during track-setup reload. All79
+equivalent readiness predicates in15 test/runner files now wait for bounds instead of throwing; their
+finished-render requirement is unchanged. `ci-shared-focus-failures.log` retains the failure and
+`render-waits-final.log` records focused setup qualification. Application/package source is unchanged.
+No merge, tag or publication yet. Next: qualify the readiness fixes in CI, then merge PR4, tag
+v1.9.0, publish the three local dist assets, run `tools/release.py 1.9.0 --check`, record final results.
+
+Current delivery: `dist/vulturetracker.exe` (1.9.0), including the shared-focus fix.
+EXE SHA256: `5905b37a14baed379411a0711f90ba9ef2f8b94d5f1e30d256a35fd6f0560eb4`.
+The five existing preview/GP5/edit shortcuts target it with their original song arguments. Private
+songs/notes remain in scratch. Selected rollback: `scratch/tab-package-range-expression`.
+Fresh score views default to horizontal all-track staff/TAB at80%, hidden dynamics and written pitch;
+saved choices survive. Pattern scrolls continuously through orders. Compact spacing now respects its
+declared glyph floor across fonts. No musical-data/Undo guards were relaxed.
+
+Evidence: `scratch/tab-test-fixtures/release-1.9.0`. Package checks `package-qualified.log` and
+`package-compact-controls-final.log` pass native/WASM playback, standalone IT, part markers, pending edits,
+compact editing/fallback fonts, exact Undo/Redo and packed selfchecks. `package-real-pattern.log` verifies
+actual Boys232-bar wheel/scrollbar/last-bar playback and unchanged source (GUI source unchanged since).
+ZIP integrity/private-fixture exclusion and9 docs checks pass. `layout-controls.log` and
+`marker-default.log` cover fresh defaults/persistence/capo/markers. Before/after score and compact-font
+captures are headless evidence, not owner visual acceptance or foreground performance measurements.
+
+CI failure history retained in the evidence logs: Python3.10 fixture syntax; mocked webview/obsolete
+strict-export expectations; Pattern stale channels/colours; asynchronous test reads and coordinates.
+Run40115777909 passed Windows/Python3.10 portable. Its414 browser cases had five failures:
+compact font spacing (now fixed), piano/fretboard details-toggle reads (now awaited; local2case pass
+in `details-toggle-final.log`), and two PDF starts. `ci-pdf-diagnostic.log` proves Ubuntu AppArmor denied
+Chromium's sandbox. CI now allows namespaces only for its pinned browser executable; production sandbox
+flags remain unchanged. Earlier failures and final focused results remain together in the log folder.
+`compact-default-fixture-final.log` passes ordinary/25-string controls. The first package compact check
+assumed old view defaults; the helper now normalizes actual controls and skips unchanged values.
+Test/config-only changes after the current EXE require no rebuild.
+
+Owner accepted Boys/Advent standalone IT sound. Full TuxGuitar parity and owner visual/feel acceptance
+are not claimed. Peripheral coverage/LilyPond and documented format limits remain visible, deferred
+from this release by the owner. Earlier workers remain stopped; one bounded read-only PDF worker
+finished and was stopped. No automations were started/resumed. Current release authorization supersedes
+historical no-publication notes below.
+
+Previous candidate checkpoint: continuous Pattern scrolling implemented and packaged.
+Owner rejected the one-bar pane: previous/next navigation was insufficient. Continuous song is now on by
+default, showing adjacent bars together with a vertical scrollbar through every order. Only nearby bars
+are rendered; clicking a row/column activates the existing editor and preserves source occurrence identity.
+Columns stay aligned across bars. Up/Down and Page Up/Down cross orders (pinned OpenMPT View_pat.cpp comparison);
+selection ranges and Home/End stay within the current pattern. Manual scrolling pauses Follow; playback
+scrolls to the correct row without disabling itself. Resize refills the viewport. Single-pattern mode remains.
+
+Evidence: `scratch/tab-test-fixtures/continuous-pattern`. `source-final.log`:32 syntax/docs checks;
+`controls-third.log`, `regression.log`, `atomic.log`:7 distinct real-control cases, including raw/native
+byte-exact Undo/Redo, repeated occurrences/cache refresh, fractional selection/clipboard, ROLL synchronization,
+keyboard boundaries, live Follow and atomic failed Cut/Paste. `controls-first.log` retains a wrong test-only
+transport selector timeout, corrected in `controls-second.log` and the final controls run.
+`view-before.log` / `view-source-final.log` and same1920x1040 captures show the actual Boys232-bar song before
+and after. `package-scrollbar.log` verifies the final packaged page equals source, three bar headings in
+the initial viewport, wheel scrolling, dragging the visible scrollbar to bar232, clicking/edit-caret identity,
+last-bar native playback, resize and a clean console; source unchanged. Headless functional/visual evidence,
+not foreground performance measurement or owner acceptance.
+`build-final.log` and `package-final.log` pass retained part/empty-voice markers, pending edit exact Undo/Redo,
+ordinary standalone IT, native controls/assets/WASM and packed selfchecks. `delivery-final.log` passes ZIP,
+retained study, shortcuts and selected rollback. Finalizer ran once on the final ZIP. No Git/publication actions.
+Current delivery: `scratch/tab-package-range-duration`; rollback: `scratch/tab-package-range-expression`.
+EXE SHA256: `410dc2579735ca9e97dd4078ad79c9c3997f714747211c56358a740084581757`.
+ZIP SHA256: `a9d9afbe612fa7f34bf05e5ff576ec1c8202fd2f385bcdf145b8c01d813341af`.
+Launch: `scratch/tab-test-fixtures/download-gp5/Play Boys In The Band.lnk`; close an older running window first.
+No new/resumed workers or automations; all owned jobs finished. Accepted Boys/Advent IT audio remains unchanged.
+Next: owner checks continuous browsing feel in this build. The separate score-default clutter concern remains:
+TuxGuitar layout is still opt-in; do not claim its current default engraving accepted or full parity complete.
+
+Prior delivered checkpoint: owner GP5 standalone IT, score view and Pattern navigation fixes.
+Evidence: `scratch/tab-test-fixtures/gp5-release-fixes`; unchanged imports/oracle evidence: `download-gp5`.
+All three original Downloads files remain unchanged. Existing imports: Boys232 bars/7 parts/5,664 notes;
+Advent116/9/3,957; Talybont129/10/1,942. The prior installed-TG2.1.0 oracle matched all11,563 notes;
+prior152 importer/export tests and real import/edit/history/native playback checks remain applicable.
+
+The owner explicitly accepted rendered passages in standalone IT to preserve sound while retaining all
+native notes and shared Undo. Export subdivides ordinary rows; sub-tick attacks/gates/pitch controls use
+short samples bounded by silent rows. Native rendering includes preceding releases and replacement ramps.
+Only explicit export enables this path; strict validation/edit guards retain their previous behavior.
+`it-final.log`: all3 standalone files reopen without a native plan. Boys5,492 IT attacks (32 native attacks
+inside3 sampled passages); Advent3,592 (21 inside6); Talybont2,210 ordinary attacks. `audio-final.log` checks
+all9 decoded IT samples played in standalone libopenmpt against native PCM: max error7.63e-6 (16-bit
+rounding). Exact remaining attack counts and source preservation pass. Whole-song IT tick/volume limits
+still apply. Raw controls, unsafe instrument state, clipping, repeated orders, missing silence, capacity
+and >10-minute arrangements remain explicit fallback limits; do not claim universal IT parity.
+
+Pattern has song-position/previous/next controls and wheel boundary navigation. Manual browsing pauses
+Follow, including paused transport positions which previously forced the old order back. The first wheel
+event is no longer swallowed during fast startup. TAB/SCORE's TuxGuitar preset selects horizontal all-track
+staff/TAB, written pitch excluding capo,80% zoom and no printed dynamics. These are local view choices;
+audio/velocities/history stay unchanged. Written staff entry includes capo with byte-exact Undo/Redo.
+Absolute tempo commands no longer generate the false raw-controls warning; genuinely raw controls still do.
+`source-final.log`:42 focused checks pass. `ui-final.log` passes the existing comprehensive view-mode case;
+its wheel failure is closed in `controls-qualified.log` (wheel + written/capo entry), and the preset/reload
+case passed in `controls-final.log`. `view-before.log`/`view-after-qualified.log` and matching1920x1040 PNGs
+verify the actual Boys page, clean console, all232 positions, preset and wheel access to the last bars.
+These headless captures are functional/visual evidence, not owner acceptance or foreground performance data.
+Initial prototype `note-render-probe/probe-tail-qualified.log` exposed lost tails/double ramps; that isolated
+note approach was not shipped. Earlier IT logs retain adapter integration failures; `it-final.log` closes them.
+Earlier UI logs retain startup-wheel and staff-boundary harness failures; final checks above close them.
+
+Candidate rebuilt (`build-final.log`). `package-exports.log` passes all3 packaged CLI builds and actual
+RENDER & EXPORT controls, byte-equal to source-tested IT; native live PCM, wheel/order navigation and view
+preset also pass on each. `package-final.log` passes retained part/empty-voice markers, pending edit exact
+Undo/Redo, ordinary standalone IT, native controls/assets/WASM and packed selfchecks. `delivery-final.log`
+passes the fresh ZIP, retained study, shortcuts and rollback; finalizer ran once. No release/version,
+staging, commit, push, reset, stash or cleanup. Both bounded workers and all owned validation jobs stopped.
+Current delivery: `scratch/tab-package-range-duration`; rollback: `scratch/tab-package-range-expression`.
+The current distribution digests are in the checkpoint above; prior evidence remains applicable to unchanged audio.
+Existing shortcuts under `download-gp5`: `Play Boys In The Band.lnk`, `Play Advent Of Panurge.lnk`,
+`Play Talybont.lnk`, each pointing to the current EXE and its separate mutable imported song.
+Owner listening acceptance (2026-10-24): Boys In The Band and Advent Of Panurge exported IT files sound good.
+This accepts those two exports; separate native-playback listening and score/interaction approval were not stated.
+Remaining release work: continuous Pattern scrolling and cleaner score defaults, followed by owner
+view/spacing and browsing/editing acceptance. Release preparation/publication still requires the owner's instruction;
+this listening approval does not authorize staging, committing, pushing or publishing.
+Source MIDI effects/program changes and ignored GP5 display fields are
+reported, not emulated; programs use existing synthesized placeholders. TG export still refuses double bars.
+No old workers or automations resumed; no background continuation after this conversation is authorized.
+
+Previous release-readiness qualification (2026-10-23), reused for unchanged behavior:
+Owner narrowed scope to bug fixes and a releasable candidate. Peripheral platform/plugin/device/language/style
+coverage and external LilyPond are deferred for this release. Full parity and owner acceptance are not claimed.
+
+Fixed: whole-beat Copy preserves implicit silence across local/source-bar gaps without changing sparse/span
+copies; repeated-pattern edits no longer reject a release already supplied by an attack or harmless at song
+start; navigation wraps at1180px so Project/Notes remain reachable. Edit diagnostics now retain Free mode.
+Owner then reported the marker disappearing after selecting Drop D guitar in Part. Selecting a part called
+the shared edit-caret path, silently disabling Follow playback. Part/Track changes now preserve Follow,
+release selector focus during playback and avoid scrolling back to the editing caret. Explicitly paused
+Follow stays paused; no musical data or playback engine semantics changed.
+The follow-up audit fixed Voice controls also disabling Follow, an empty editing voice hiding the entire
+part's marker, and Ctrl+F6/Ctrl+F7 rounding native caret starts down to tracker rows. Voice selection is
+retained; the marker falls back to the part's other rendered voice when needed. Native cursor keys now use
+the same exact row as the existing cursor-play button. Tracker-only cursor behavior is unchanged.
+The requested editing audit then reproduced delayed rhythm edits reverting a later Voice choice and
+string moves repositioning a later caret. Completion now adopts the returned selection only if the user
+is still at the submission position; the same guard covers phrase commands, Matrix and Paste. Musical
+semantics and backend guards are unchanged. The edit still completes with exact Undo/Redo.
+Different-predecessor releases, unsafe technique splits, ambiguous independent-group Mix/Push/splits,
+consumed annotated rests, metadata conflicts and lossy external-format mappings still refuse atomically.
+
+Evidence: `scratch/tab-test-fixtures/release-readiness`. The existing CI lists ran locally once:1,692 portable
+tests and399 page/advanced tests. Initial failures remain in `portable-release.log` (11 failures/2 errors)
+and `page-release.log` (21 failures/16 errors, including duplicate/subtest reports). Every failure now has a
+passing focused rerun; do not repeat either full list without a new relevant risk. Remote CI was not run.
+- Portable closure: `portable-failures-final.log`, `legacy-phrase-final.log`, `interchange-worker-tests.log`,
+  and `boundary-syntax-final.log` (boundary guard and repeat-reload harness).
+- Browser closure: passing cases in `controls-triage.log`, `native-controls-triage.log`, `remaining-controls.log`,
+  `controls-final-triage.log`, `last-controls.log`, and final `tied-controls-final.log`. Earlier logs retain their
+  subsequently corrected failures. Source-backed harness/fixture reconciliation did not remove safety checks.
+- Clipboard: four pinned-manager matches in `clipboard-oracle-final.json`; actual controls, source/clipboard
+  preservation, remapping, exact history, Pattern, native playback and standalone IT pass in clipboard final logs.
+- Repeated-pattern guard: `repeated-boundary-state-qualified.log` covers six performed attacks, Pattern,
+  standalone IT, reopen and byte-exact Undo/Redo; different-predecessor refusal/source preservation also pass.
+- Headless navigation bounds: scrollWidth/clientWidth1180, all tabs within two rows (`controls-triage.log`).
+  This proves reachability, not owner visual acceptance. Logging/docs checks pass. PDF checks initially skipped
+  in the portable job passed in the browser job. Dexed is absent; native desktop Save dialog remains unexercised
+  under the no-Computer-Use instruction. Neither is represented as a pass.
+- Part marker: `marker-regression-before.log` reproduces the silent Follow toggle; three focused controls/
+  navigation tests pass in `marker-navigation-final.log`. `marker-study-final.log` confirms visible advancing
+  Drop D marker bounds on a disposable copy of the owner's 32-bar study. These are headless functional checks,
+  not owner visual acceptance. The first package pass (`marker-package-final.log`) passed the new controls
+  but its helper left Bass selected, invalidating a later channel-zero no-rerender assumption. The helper now
+  restores its starting part/order; the unchanged executable passes `marker-package-qualified.log`.
+- Related-control audit: 13 distinct browser cases have passing results across `part-audit-before.log`
+  (five passing existing cases), `part-audit-fixes.log`, `part-audit-follow-clock.log` and
+  `part-audit-pending-sound.log`; two existing Node clock/transport contract tests also pass. Coverage:
+  both part selectors, first/last/previous/next track, voice selector/shortcuts, explicit Follow pause,
+  live and rendered playback, paused part changes/resume, mute/solo/clear, pending sound choice, repeat/stale
+  positions, seek/tempo/speed, strummed voices, exact fractional cursor starts and unchanged source/history.
+  `empty-voice-qualified-before.log` and `caret-play-before.log` retain the product failures. Earlier voice
+  probes selected visible label 1 instead of value 1; tests now use label 2 explicitly and assert the choice.
+  The first keyboard package smoke passed the keys but left its grid open; restoring that helper's initial
+  grid state closed the unrelated default-layout assertion (`audit-keyboard-package-final.log` ->
+  `audit-keyboard-package-qualified.log`). No extra executable rebuild was needed for that harness correction.
+- Editing audit:39 distinct browser test methods have passing results across `editing-controls-audit.log`
+  (22 passes), `editing-related-controls-final.log` (19 passes; two harness failures closed below), and
+  `editing-new-regressions-final.log` (three passes, including four delayed-edit subcases).
+  Coverage includes note/chord entry, duration/Fit, expressions, clipboard and voice transfer, capo/tuning,
+  transpose, measure/beat/rest/track operations, native playback, Pattern/ROLL, atomic refusals and exact
+  history. `editing-navigation-qualified-before.log` retains the reproduced Voice/caret regressions.
+  Initial probes also exposed request-route timing mistakes; those are harness failures, not product defects.
+  `editing-navigation-fix.log` used the wrong revision comparison after Undo; corrected in
+  `editing-navigation-final.log`. The expanded regression then addressed a leading rebuilt rest by index;
+  it now finds the edited note by stable ID. The track-delete check's synthetic stopped playhead was cleared
+  by the actual transport refresh; it now verifies real F6 playback after delete/Undo. Both corrections pass
+  in `editing-new-regressions-final.log`. The shared EXE runner now exercises delayed phrase completion and
+  byte-exact Undo/Redo/restoration as well as the previous part/voice/playback controls.
+  JS parsing and nine documentation checks pass in `editing-source-docs-final.log`.
+
+Previous candidate qualification (superseded by the GP5 build above):
+Build log: `release-readiness/editing-build-final.log`. Final packaged `exe_check --browser --native-it` passed
+against `release-readiness/marker-controls/song.yaml`: Part/Track switches before/during real playback,
+visible advancing/empty-voice marker, Voice controls, explicit Follow pause, unchanged song, native/WASM
+playback and standalone IT (74 attacks/192 rows/9.996s reopened without a native plan): `editing-package-final.log`.
+That log also verifies delayed phrase completion retains the new Voice selection and exact Undo/Redo,
+restoring the original song. `audit-keyboard-package-qualified.log` qualified Ctrl+F6/Ctrl+F7 at row48/13
+in the previous candidate; the unchanged host keyboard/transport code retains that evidence.
+Earlier unchanged clipboard/history/atomic evidence remains applicable. ZIP, retained listening study,
+shortcuts and selected rollback pass in `editing-delivery-final.log`; finalizer has run once on this ZIP.
+Mutable acceptance shortcut: `release-readiness/Try release candidate.lnk`.
+Musical delivery/root `Listen to current preview.lnk`: current package's `listening/part-adaptation/song.yaml`,
+32 bars/four parts/38 performed occurrences, seven-string Drop D lead, five-string bass,659 notes/53 ties;
+GP5/TG/MIDI/IT, PDFs and aligned mix/stems retained. Owner edits, notes and samples remain preserved.
+Next owner queue: reopen the current preview and retry switching Part during playback; listen to that study;
+inspect TAB/score/PDF engraving and narrow-window
+navigation; try Copy/Paste, Fit and Undo/Redo for feel. Earlier annotation/GP/TG evidence remains reusable.
+No known failing check remained in that earlier qualification scope. Optional Dexed and native desktop Save remain
+unexercised as above. After owner acceptance, versioning/commit/publication require explicit authorization;
+this candidate still reports 1.8.0 and is not a newly published release.
+All workers are stopped. Do not resume old workers or automations. No Computer Use, staging, commit, push,
+version bump or publication was performed or authorized. BACKLOG and TABLATURE-PARITY retain remaining exceptions.
+
+Owner-authorized artifact cleanup (2026-10-23) removed 4,088,041,075 file bytes (3.81 GiB): eleven superseded
+agent previews under dist, three PyInstaller cache targets, the disposable PDF browser profile, 89 audition
+caches, two duplicate delivered-song folders and 43 identical generated outputs. Current package, selected
+rollback, published 1.8.0 distribution, unique songs/samples, listening notes/history and regression inputs
+remain. Both current shortcuts resolve. Duplicate delivery keepers are under the current package's listening
+folder; eight small metadata files were byte-verified in the recovery ZIP before deletion. The exact map and
+single receipt are `scratch/cleanup-generated-20261023/plan.json` and `receipt.json`. No product tests were
+rerun for artifact-only cleanup; no processes were stopped or workers resumed.
+
 The compact resume authority for the UT99 tribute suite, the anti-aliasing work and the mixer GUI. Read this first; the
 other docs (README, GUIDE, SONG_FORMAT, SAMPLING, PROVENANCE) hold the durable rules.
 

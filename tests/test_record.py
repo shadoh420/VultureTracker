@@ -240,6 +240,52 @@ class TestTakesInTheSong(unittest.TestCase):
             self.assertEqual((record.spilled(), list(spills.iterdir())), ([], []))
             H.rec_command({"cmd": "close"})
 
+class TestBackingCountin(unittest.TestCase):
+    def test_native_range_start_tempo_and_legacy_default(self):
+        from vulturetracker import api
+        from tests.test_tablature_sync import score_song
+        song = score_song()
+        song['samples'][1]['file'] = 'a.wav'
+        song['sections'] = {'Later': [1, 2]}
+        song['patterns']['a']['data'] = ''.join(
+            f"{row:02d}: ... .. ... { {0: 'TB4', 24: 'T3C'}.get(row, '...')}\n" for row in range(48))
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            for name in ('a.wav', 'b.wav'):
+                write_wav(folder / name, RATE, [sine(440)])
+            path = folder / 'native-countin.yaml'
+            path.write_bytes(api.to_yaml(song).encode())
+            before = path.read_bytes()
+            legacy_path = folder / 'legacy.yaml'
+            legacy_path.write_bytes(SONG.encode())
+            native = gui.State(path, headless=True)
+            legacy = gui.State(legacy_path, headless=True)
+            try:
+                self.assertIsNone(native.error)
+                for state, section, bpm in ((native, None, 180), (native, 'Later', 60),
+                                            (legacy, None, legacy.facts['bpm'])):
+                    with self.subTest(native=state is native, section=section):
+                        recorder = fake_recorder()
+                        recorder.open(0, '1', RATE)
+                        try:
+                            # Render timing is separately qualified. Exercise
+                            # the route and actual fake count-in construction.
+                            with mock.patch.object(server.Handler, 'state', state), \
+                                    mock.patch.object(server.Handler, 'pending_recording', None), \
+                                    mock.patch.object(server.Handler, 'rec', return_value=recorder), \
+                                    mock.patch('vulturetracker.export.render', return_value=bytes(4)):
+                                result = server.Handler.rec_command(dict(cmd='start', backing=True, output=0,
+                                                                         section=section, countin=4))
+                            self.assertEqual(result, {})
+                            self.assertEqual(recorder.backing['head'], round(4 * 60 / bpm * RATE))
+                            self.assertEqual(len(recorder.backing['click']), recorder.backing['head'])
+                        finally:
+                            recorder.close()
+                self.assertEqual(path.read_bytes(), before)
+            finally:
+                native.close()
+                legacy.close()
+
 
 class TestSoundDeviceErrors(unittest.TestCase):
     def test_every_portaudio_call_on_one_thread(self):

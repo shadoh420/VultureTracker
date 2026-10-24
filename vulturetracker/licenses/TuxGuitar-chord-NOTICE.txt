@@ -1,0 +1,27 @@
+## License
+
+TuxGuitar is released under the GNU Lesser General Public License.
+
+Copyright (C) 2005-2022 Julián Casadesús
+              2023-2025 guiv42, helge17
+
+
+desktop/TuxGuitar/src/app/tuxguitar/app/view/dialog/chord/TGChordCreatorUtil.java
+/**
+ *
+ * Class that helps to create a chord from information put in ChordSelector
+ * dialog.
+ *
+ * Also contains ChordDatabase static field.
+ *
+ * @author Nikola Kolarovic
+ *
+ * @author julian
+ *
+ */
+
+desktop/TuxGuitar/src/app/tuxguitar/app/view/dialog/chord/TGChordRecognizer.java
+/**
+ * @author Nikola Kolarovic
+ *
+ */

@@ -1,0 +1,26 @@
+Native PowerTab and TablEdit readers (Python ports, 2026-10-23)
+
+vulturetracker/ptb.py, tef.py and tab_binary.py follow TuxGuitar 2.1.0,
+commit 2c46e2a1cccdfdfa6e6f2692f241bd60bf418129:
+
+common/TuxGuitar-ptb/src/app/tuxguitar/io/ptb/PTInputStream.java
+common/TuxGuitar-ptb/src/app/tuxguitar/io/ptb/PTSongParser.java
+common/TuxGuitar-ptb/src/app/tuxguitar/io/ptb/PTSongSynchronizerUtil.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef2/TEInputStream.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef2/TESongParser.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef3/TEInputStream.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef3/TESongParser.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef3/base/TEPosition.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef3/base/TETrack.java
+desktop/TuxGuitar-tef/src/app/tuxguitar/io/tef3/base/TEComponentNote.java
+
+Copyright (C) 2005-2022 Julian Casadesus
+              2023-2025 guiv42, helge17 and TuxGuitar contributors.
+See the accompanying TuxGuitar-AUTHORS.txt and TuxGuitar-LGPL-2.1.txt.
+These ports are distributed under LGPL-2.1-or-later, without warranty.
+Upstream source: https://github.com/helge17/tuxguitar/tree/2c46e2a1cccdfdfa6e6f2692f241bd60bf418129
+
+The native reader validates unsupported musical constructs before publishing.
+It retains written repeats and fixes TEF3's first-string bar-boundary lookup;
+it does not reproduce every TuxGuitar display loss or legacy-provider quirk.
+Generated test songs are original synthetic fixtures, not third-party tabs.

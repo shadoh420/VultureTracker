@@ -37,7 +37,8 @@ def _phrase_guard(st, order, channels):
 
 @tool('read_phrase', 'Inspect the active frozen phrase comparison, its ID, alternatives, ratings, captured mix and '
       'staleness. Optional variant is 0-based; -1 is line absent. It returns up to 32 rows starting at offset (relative '
-      'to the captured range). Without variant, returns summaries only. Ratings and acceptance belong to the owner.',
+      'to the captured range), plus bounded captured score positions when present. These positions describe the '
+      'capture, not later row edits. Without variant, returns summaries only. Ratings and acceptance belong to the owner.',
       {'variant': {'type': 'integer'}, 'offset': {'type': 'integer'}, 'limit': {'type': 'integer'}})
 def read_phrase(st, a):
     with st.lock:
@@ -50,6 +51,8 @@ def read_phrase(st, a):
         out['variants'] = [dict(index=i, **{k: v for k, v in item.items() if k != 'data'})
                            for i, item in enumerate(ph['variants'])]
         out['absent'] = dict(index=-1, **ph['absent'])
+        if 'score_positions' in ph:
+            out['captured_score_notes'] = len(ph['score_positions'])
         out['stale'] = (st.dirty() or st.text_sha() != ph['base_hash'] or st.mix() != ph['mix']
                         or st.silenced() != ph['muted'] or st.want != ph.get('want'))
         try:
@@ -65,6 +68,12 @@ def read_phrase(st, a):
                     for r in range(0, len(cells), len(ph['chans']))]
             out.update(variant=i, offset=offset, rows=rows[offset:offset+limit],
                        next_offset=offset+limit if offset+limit < len(rows) else None)
+            if 'score_positions' in ph:
+                from fractions import Fraction
+                positions = [p for p in ph['score_positions']
+                             if ph['r0'] + offset <= Fraction(*p['row']) < ph['r0'] + offset + limit]
+                out['captured_score_positions'] = [dict(copy.deepcopy(p), ch=p['ch'] + 1) for p in positions[:32]]
+                out['captured_score_positions_omitted'] = max(0, len(positions) - 32)
         return out
 
 
@@ -165,16 +174,20 @@ def create_project(st, a):
     return {'path': str(path), 'summary': 'new project created; use open_project to switch to it'}
 
 
-@tool('import_project', 'Import IT/XM/S3M/MOD, Guitar Pro 3-5 or MIDI using the app importer. Writes a new YAML and '
+@tool('import_project', 'Import modules, TG/PTB/TEF, Guitar Pro or MIDI using the app importer. Writes a new YAML and '
       'sample folder beside the source, numbered on collision; preserves the source. GP/MIDI use placeholder sounds. '
+      'native_tab preserves editable GP/MIDI score; midi_options sets native MIDI transpose, quantize, max_duration and max_division. '
       'Returns warnings. Does not switch songs; call open_project on the returned path.',
-      {'file': {'type': 'string'}}, ['file'])
+      {'file': {'type': 'string'},'native_tab':{'type':'boolean'},'gp_encoding':{'type':'string','description':'Legacy Guitar Pro text encoding; cp1252 default, utf-8/cp1251/shift_jis and other ASCII-compatible text codecs'},'midi_options':{'type':'object',
+       'properties':{'transpose':{'type':'integer'},'quantize':{'type':'boolean'},'max_duration':{'type':'integer'},'max_division':{'type':'integer'}}}}, ['file'])
 def import_project(st, a):
     from .gui import import_beside, GP_SUFFIXES, MIDI_SUFFIXES
     path = _path(st, a['file'])
-    if path.suffix.lower() not in ('.it', '.xm', '.s3m', '.mod', *GP_SUFFIXES, *MIDI_SUFFIXES):
-        raise ValueError('choose IT/XM/S3M/MOD, GP3-5 or MIDI')
-    out, warnings = import_beside(path)
+    if path.suffix.lower() not in ('.it', '.xm', '.s3m', '.mod', '.tg', '.ptb', '.tef', *GP_SUFFIXES, *MIDI_SUFFIXES):
+        raise ValueError('choose a module, TG/PTB/TEF, Guitar Pro or MIDI file')
+    native=a.get('native_tab',False)
+    if type(native) is not bool:raise ValueError('native_tab must be boolean')
+    out, warnings = import_beside(path,native_tab=native,midi_options=a.get('midi_options'),gp_encoding=a.get('gp_encoding'))
     return {'path': str(out), 'warnings': warnings, 'summary': 'imported a new project; use open_project to open it'}
 
 

@@ -79,7 +79,7 @@ class TestFeatures080Page(unittest.TestCase):
                     # and back: Ctrl+C puts OpenMPT's format on the system clipboard
                     page.evaluate("SEL={o:0,a:{row:0,ch:0,col:0},b:{row:1,ch:1,col:4}};renderPat()")
                     page.keyboard.press('Control+C')
-                    page.wait_for_timeout(100)
+                    page.wait_for_function("async()=> (await navigator.clipboard.readText()).includes('|D-502v32...|')")
                     self.assertEqual(page.evaluate('navigator.clipboard.readText()'),
                                      'ModPlug Tracker  IT\r\n|D-502v32...|...........\r\n|===........|E-501...B..\r\n')
                     # the computer's piano keys with CHORD (OpenMPT's way): keys struck together go in as one chord, written

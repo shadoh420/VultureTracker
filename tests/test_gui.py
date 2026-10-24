@@ -23,6 +23,13 @@ RATE = 44100
 TOKENS = {}  # port -> the API token of a server the tests started (serve); fetch sends it
 
 
+def read_song_shortcut(path):
+    """Read the real Windows shell link for source and packaged checks."""
+    script = "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new(); $s=(New-Object -ComObject WScript.Shell).CreateShortcut($env:VT_LINK_READ); @{target=$s.TargetPath;args=$s.Arguments;cwd=$s.WorkingDirectory}|ConvertTo-Json -Compress"
+    result=subprocess.run(['powershell.exe','-NoProfile','-NonInteractive','-Command',script],
+        env=dict(os.environ,VT_LINK_READ=str(path)),capture_output=True,check=True,creationflags=subprocess.CREATE_NO_WINDOW)
+    return json.loads(result.stdout.decode('utf-8-sig'))
+
 
 def sine(freq, seconds=0.3, amp=20000):
     return [round(amp * math.sin(2 * math.pi * freq * i / RATE) * (1 - i / (RATE * seconds))) for i in range(int(RATE * seconds))]
@@ -60,6 +67,42 @@ SONG_BLOCK = SONG.replace("module: {title: T, tempo: 125, speed: 6, channels: [{
 
 
 class TestGui(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows shortcuts')
+    def test_song_shortcut_readback_cancel_paths_and_state(self):
+        from types import SimpleNamespace
+        from vulturetracker import project, server
+        special=self.dir/"Café's & $ song.yaml";special.write_bytes((self.dir/'song.yaml').read_bytes())
+        st=gui.State(special);self.states.append(st)
+        before=(st.song_path.read_bytes(),list(st.history),dict(st.meta))
+        target=self.dir/"Café's & $ song link.lnk"
+        window=mock.Mock();window.create_file_dialog.return_value=(str(target),)
+        with mock.patch.dict(sys.modules, {'webview': SimpleNamespace(SAVE_DIALOG=30)}), \
+             mock.patch.object(server.Handler,'state',st),mock.patch.object(server.Handler,'window',window):
+            self.assertEqual(server.Handler.save_song_shortcut(),{'path':str(target)})
+            data=read_song_shortcut(target)
+            self.assertEqual(Path(data['target']),Path(sys.executable).with_name('pythonw.exe'))
+            self.assertEqual(data['args'],subprocess.list2cmdline(['-m','vulturetracker','gui',str(st.song_path)]))
+            self.assertEqual(Path(data['cwd']),Path(project.__file__).resolve().parent.parent)
+            saved=target.read_bytes();window.create_file_dialog.return_value=None
+            self.assertEqual(server.Handler.save_song_shortcut(),{'path':None});self.assertEqual(target.read_bytes(),saved)
+            with mock.patch.object(project.subprocess,'run',return_value=subprocess.CompletedProcess([],1)):
+                with self.assertRaisesRegex(ValueError,'could not create'):project.song_shortcut(st,target)
+            self.assertEqual(target.read_bytes(),saved)
+            for bad in ('relative.lnk',str(self.dir/'wrong.txt')):
+                with self.assertRaises(ValueError):project.song_shortcut(st,bad)
+            alias=self.dir/'protected.lnk';os.link(st.song_path,alias)
+            with self.assertRaisesRegex(ValueError,'source asset'):project.song_shortcut(st,alias)
+            with mock.patch.object(project.sys,'platform','linux'):
+                with self.assertRaisesRegex(ValueError,'Windows only'):server.Handler.save_song_shortcut()
+            with mock.patch.object(project.sys,'frozen',True,create=True):
+                project.song_shortcut(st,target)
+                data=read_song_shortcut(target)
+                self.assertEqual(Path(data['target']),Path(sys.executable))
+                self.assertEqual(data['args'],subprocess.list2cmdline(['gui',str(st.song_path)]))
+            window.create_file_dialog.side_effect=lambda *a,**k:(setattr(server.Handler,'state',None) or str(target))
+            with self.assertRaisesRegex(ValueError,'open song changed'):server.Handler.save_song_shortcut()
+        self.assertEqual((st.song_path.read_bytes(),list(st.history),dict(st.meta)),before)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
@@ -102,6 +145,60 @@ class TestGui(unittest.TestCase):
         # each playable order keeps its index in the module (the live engine reports that), past a +++ marker too
         g = gui.song_facts(SONG.replace("orders: [p1, p2]", "orders: [p1, +++, p2]"), self.dir, "song")
         self.assertEqual([o["order"] for o in g["orders"]], [0, 2])
+
+    def test_native_tempo_facts_use_piecewise_order_and_row_times(self):
+        from tests.test_tablature_sync import score_song
+        from fractions import Fraction
+        source = score_song()
+        source['samples'][1]['file'] = 'a.wav'
+        source['patterns']['a']['data'] = ''.join(f"{row:02d}: ... .. ... {'T3C' if row == 12 else '...'}\n" for row in range(48))
+        (self.dir / 'song.yaml').write_bytes(api.to_yaml(source).encode())
+        state = self.state()
+        self.assertIsNone(state.error)
+        facts = state.facts
+        self.assertAlmostEqual(facts['orders'][0]['seconds'], 3.5)
+        self.assertAlmostEqual(facts['orders'][1]['start'], 3.5)
+        self.assertAlmostEqual(facts['duration'], 7.5)
+        times = facts['orders'][0]['row_times']
+        self.assertEqual(len(times), 49)
+        for row, expected in ((0, 0), (12, Fraction(1, 2)), (13, Fraction(7, 12)), (48, Fraction(7, 2))):
+            self.assertAlmostEqual(times[row], float(expected))
+
+    def test_native_repetition_uses_performed_order_and_keeps_zero_pulse_positions(self):
+        from tests.test_tablature_sync import score_song
+        from tests.test_tablature import beat, note
+        source = score_song()
+        source['samples'] = {1: {'file': 'a.wav'}, 2: {'file': 'b.wav'}}
+        source['instruments'] = {1: {'keymap': [
+            {'notes': 'C-0..E-5', 'sample': 1}, {'notes': 'F-5..B-9', 'sample': 2}]}}
+        tail = source['score']['patterns']['a']['beats'][-1]
+        tail['notes'][0].update(velocity=95, trill={'fret': 2, 'value': 8})
+        tiny = beat('tiny', [0, 1], [dict(note('silent', 64, 1, 0), velocity=95,
+                                       tremolo_picking={'value': 8})], value=64, tuplet=[7, 1])
+        source['score']['patterns']['a']['beats'] = [tiny, tail]
+        source['patterns']['a']['data'] = ''
+        (self.dir / 'song.yaml').write_bytes(api.to_yaml(source).encode())
+        state = self.state()
+        self.assertIsNone(state.error)
+        plan = state.mod.native_score['plan']
+        self.assertFalse(any(e.get('source_id') == 'first/silent' for e in plan['events']))
+        self.assertTrue(any(p['id'] == 'first/silent' for p in plan['positions']))
+        pulses = [e for e in gui.native_actions(state.mod) if e['type'] == 'note_on']
+        self.assertEqual([(e['pitch'], e['order'], e['occurrence']) for e in pulses],
+                         [(64, 0, 'first'), (66, 1, 'first')])
+        self.assertEqual(state.facts['use'][0][0], [1])
+        self.assertEqual(state.facts['use'][1][0], [1, 2])
+
+    def test_native_held_gates_keep_both_notes_in_sounding_context(self):
+        from tests.test_tablature_sync import let_ring_song
+        source = let_ring_song()
+        source['samples'][1]['file'] = 'a.wav'
+        source['score']['patterns']['a']['beats'][1]['notes'][0].update(pitch=66, string=1, fret=2)
+        loaded = gui.load_for_state(api.to_yaml(source), self.dir, 'held')
+        table = gui.native_sounding_table(loaded[0])
+        self.assertEqual([(n['ch'], n['note']) for n in table[0][0]], [(0, 'E-5')])
+        self.assertEqual([(n['ch'], n['note']) for n in table[0][12]], [(0, 'E-5'), (0, 'F#5')])
+        self.assertEqual(table[0][24], [])
 
     def test_candidate_lists_change_under_the_lock(self):
         """add_candidates and remove_candidate change the slot's list and save it holding State.lock (the page's requests
@@ -444,6 +541,10 @@ class TestGui(unittest.TestCase):
         # order 1 row 0: A restarts with sample 2, B's hit from order 0 row 2 is still ringing
         self.assertEqual([(x["ch"], x["sample"], x["ago"], x["order"]) for x in st.sounding(1, 0)], [(0, 2, 0, 1), (1, 2, 2, 0)])
         self.assertEqual(st.sounding_rows(1)[0], [[0, 2, 0], [1, 2, 0]])
+        # These probes mutate cells directly; compiled patterns share the parse cache.
+        # Isolate the probe so subsequent song loads do not inherit its injected notes.
+        import copy
+        st.mod.patterns = copy.deepcopy(st.mod.patterns)
         # a note-off silences the channel from there on
         st.mod.patterns[1].rows[0][1].note = 255
         st.sound_table = None
@@ -457,6 +558,29 @@ class TestGui(unittest.TestCase):
         st.sound_table = None
         self.assertEqual([x["ch"] for x in st.sounding(0, 1)], [0])
         self.assertEqual([x["ch"] for x in st.sounding(0, 2)], [1])
+
+    def test_native_listening_notes_use_tempo_row_times(self):
+        from tests.test_tablature_sync import score_song
+        song = score_song()
+        song['samples'][1]['file'] = 'a.wav'
+        song['patterns']['a']['data'] = ''.join(
+            f"{row:02d}: ... .. ... {'T3C' if row == 24 else '...'}\n" for row in range(48))
+        path = self.dir / 'native-notes.yaml'
+        path.write_bytes(api.to_yaml(song).encode())
+        before = path.read_bytes()
+        st = gui.State(path, headless=True)
+        try:
+            self.assertIsNone(st.error)
+            for order, row, expected in ((0, 12, .5), (0, 24, 1.0), (0, 36, 2.0), (1, 12, 4.0)):
+                with self.subTest(order=order, row=row):
+                    note = st.add_note(dict(order=order, row=row, text='timing fixture'))
+                    self.assertEqual(note['time'], expected)
+            saved = json.loads(path.with_suffix('.notes.json').read_text(encoding='utf-8'))['notes']
+            self.assertEqual([note['time'] for note in saved], [.5, 1.0, 2.0, 4.0])
+            self.assertIn('at 0:01.0, row 24', path.with_suffix('.notes.md').read_text(encoding='utf-8'))
+            self.assertEqual(path.read_bytes(), before)
+        finally:
+            st.close()
 
     def test_notes_file_and_report(self):
         st = self.state()
@@ -1150,14 +1274,21 @@ class TestGui(unittest.TestCase):
     @staticmethod
     def fetch(port, path, data=None, **headers):
         """(status, headers, body) of a request to the local server, with its token unless `headers` names one."""
-        import urllib.error
-        import urllib.request
-        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers={"X-VT-Token": TOKENS.get(port, ""), **headers})
-        try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status, r.headers, r.read()
-        except urllib.error.HTTPError as e:
-            return e.code, e.headers, e.read()
+        import http.client
+        import socket
+        # A rejected header closes the connection without reading its body.
+        # Sending these small fixtures together avoids a Windows reset when
+        # urllib sends the body after that rejection; status assertions stay strict.
+        fields = {"Host": f"127.0.0.1:{port}", "Connection": "close", "X-VT-Token": TOKENS.get(port, ""), **headers}
+        if data is not None:
+            fields["Content-Length"] = str(len(data))
+        request = f"{'POST' if data is not None else 'GET'} {path} HTTP/1.1\r\n"
+        request += ''.join(f'{key}: {value}\r\n' for key, value in fields.items()) + '\r\n'
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as connection:
+            connection.sendall(request.encode('latin-1') + (data or b''))
+            with http.client.HTTPResponse(connection) as response:
+                response.begin()
+                return response.status, response.headers, response.read()
 
     def test_undo_brings_the_tryout_settings_back(self):
         # F3: removing a channel moves the mutes and faders of the channels after it; undo puts them back on the channel
@@ -2014,7 +2145,7 @@ class TestGui(unittest.TestCase):
         port, stop = self.serve(st)
         none = {"X-VT-Token": ""}
         try:
-            for path in ("/", "/api/state", "/api/start", "/api/it", "/api/pattern/0", "/api/tools", "/wav/x", "/raw/0",
+            for path in ("/", "/score-print", "/api/score", "/api/state", "/api/start", "/api/it", "/api/pattern/0", "/api/tools", "/wav/x", "/raw/0",
                          "/spec/x", "/refspec/x", "/take/x.wav", "/libwav?path=x", "/api/state?token=wrong"):
                 self.assertEqual(self.fetch(port, path, **none)[0], 401, path)
             slot = st.meta.get("slot")
@@ -2028,6 +2159,14 @@ class TestGui(unittest.TestCase):
             code, _, page = self.fetch(port, f"/?token={TOKENS[port]}", **none)
             self.assertEqual(code, 200)
             self.assertIn(f'<meta name="vt-token" content="{TOKENS[port]}">'.encode(), page)
+            code, _, preview = self.fetch(port, f"/score-print?token={TOKENS[port]}", **none)
+            self.assertEqual(code, 200)
+            self.assertIn(b'VultureTab.mountPrint(root,snapshot,', preview)
+            code, _, score = self.fetch(port, "/api/score")
+            self.assertEqual(code, 200)
+            snapshot = json.loads(score)
+            self.assertEqual((snapshot['song'], snapshot['title'], snapshot['revision']),
+                             (str(st.song_path), st.mod.title, st.text_sha()))
             self.assertEqual(st.meta.get("slot"), slot)  # nothing the refused requests named happened
             self.assertFalse((Path(self.dir) / "x.wav").exists())
             # the MCP bridge sends it: from VT_TOKEN, else running.json (announce writes it there)
@@ -2153,7 +2292,8 @@ class TestGui(unittest.TestCase):
                   "/libwav?path=x", "/api/effects", "/api/tools", "/api/start", "/api/rec", "/take/x.wav",
                   "/api/autoloop/1", "/api/pattern/0", "/api/slices/1", "/api/wave/1", "/api/sounding/0", "/wav/KEY",
                   "/spec/KEY", "/api/meters/KEY", "/refspec/KEY", "/api/refdiff/KEY", "/raw/0", "/api/diff/0",
-                  "/api/mixdiff", "/api/it"]
+                  "/api/mixdiff", "/api/it", "/api/playback?sample_rate=48000", "/api/score", "/api/chord_library",
+                  "/score-print"]
 
     def test_no_get_route_writes(self):
         # S6: every GET route answered with the song open, a candidate rendered and a finished recording not yet kept:
@@ -2341,6 +2481,185 @@ class TestNoWebView2(unittest.TestCase):
         op.assert_called_once_with("http://127.0.0.1:8799/?token=tok")
         windll.user32.MessageBoxW.assert_called_once()
         fake_webview.create_window.assert_not_called()
+
+
+class TestScoreRequestLogging(unittest.TestCase):
+    def state(self):
+        import threading
+        from types import SimpleNamespace
+        st = SimpleNamespace(lock=threading.RLock(), song_path=Path('test-song.yaml'), revision='before')
+        st.text_sha = lambda: st.revision
+        st.song = dict(orders=['A'], score=dict(order_ids=['oa'], patterns={'A': {'beats': [
+            dict(id=f'b{i}', at=[i, 4], voice=0, written=dict(value=16, dots=0, tuplet=[1, 1]),
+                 notes=[] if i % 2 else [{'text': 'secret note content'}], text='secret annotation')
+            for i in range(40)]}}))
+        return st
+
+    def event(self, captured):
+        self.assertEqual(len(captured.records), 1)
+        message = captured.records[0].getMessage()
+        self.assertTrue(message.startswith('TAB edit '))
+        return json.loads(message[len('TAB edit '):])
+
+    def test_refusal_keeps_response_and_logs_bounded_before_context(self):
+        st = self.state()
+        request = dict(action='set_duration', revision='before', track='guitar', voice=0,
+            written=dict(value=8, dots=0, tuplet=[1, 1], text='secret written content'),
+            selection=[dict(occurrence='oa', beats=[f'b{i}' for i in range(40)])],
+            token='secret API token', text='secret request content',
+            ui_context=dict(action='shorter', occurrence='oa', beat='b0', fit=False, free=True, voice=0,
+                            written=dict(value=4, dots=0, tuplet=[1, 1]), text='secret UI text'))
+        def refuse(body):
+            self.assertNotIn('ui_context', body)
+            self.assertEqual(body['selection'], request['selection'])
+            raise ValueError('place interval or affected rest crosses a pattern boundary')
+        st.score_command = refuse
+        with self.assertLogs(gui._log, level='INFO') as captured:
+            with self.assertRaisesRegex(ValueError, 'crosses a pattern boundary'):
+                server._score_request(st, request, 'score_command')
+        event = self.event(captured)
+        self.assertEqual(event['outcome'], 'refused')
+        self.assertEqual((event['selected_total'], event['selected_truncated'], len(event['selected'])), (40, 8, 32))
+        self.assertEqual(event['selected'][1]['at'], [1, 4])
+        self.assertTrue(event['selected'][1]['rest'])
+        self.assertEqual(event['request']['written']['value'], 8)
+        self.assertEqual(event['ui_context']['written']['value'], 4)
+        self.assertTrue(event['ui_context']['free'])
+        self.assertEqual(event['before_revision'], event['after_revision'])
+        self.assertNotIn('secret', json.dumps(event))
+        self.assertIn('ui_context', request)
+
+    def test_success_noop_and_malformed_ui_metadata_do_not_change_commands(self):
+        for endpoint, changed, metadata in [('score_command', True, {'action': ['secret'], 'written': 'secret'}),
+                                          ('score_command', False, 'secret'), ('score', True, None)]:
+            with self.subTest(endpoint=endpoint, changed=changed):
+                st = self.state()
+                request = dict(op='beat_set', pattern='A', beat=dict(id='b1', at=[1, 4],
+                    written=dict(value=8, dots=1, tuplet=[1, 1]), notes=[{'text': 'secret'}]), ui_context=metadata)
+                result = dict(ok=True, selection={'beats': ['b1']})
+                def apply(body):
+                    self.assertEqual(body, {k: v for k, v in request.items() if k != 'ui_context'})
+                    if changed:
+                        st.revision = 'after'
+                    return result
+                st.score_command = st.score_edit = apply
+                with self.assertLogs(gui._log, level='INFO') as captured:
+                    actual = server._score_request(st, request, endpoint)
+                event = self.event(captured)
+                self.assertEqual(event['outcome'], 'changed' if changed else 'noop')
+                self.assertEqual(event['request']['placed']['written']['value'], 8)
+                self.assertEqual(event['selected'][0]['written']['value'], 16)
+                self.assertNotIn('secret', json.dumps(event))
+                self.assertEqual(actual, result)  # Paste selection results pass through the score endpoint too.
+
+    def test_duration_noop_logs_bounded_kept_reasons_and_consumed_rest_count(self):
+        st = self.state()
+        result = dict(kept_durations=[dict(occurrence='oa', beat=f'b{i}', written=dict(value=16),
+                                         reason='bar_end', text='secret') for i in range(40)],
+                      consumed_rests=[{'text': 'secret'}], removed_ties=[])
+        st.score_command = lambda body: result
+        with self.assertLogs(gui._log, level='INFO') as captured:
+            self.assertIs(server._score_request(st, dict(action='set_duration'), 'score_command'), result)
+        event = self.event(captured)
+        self.assertEqual(event['outcome'], 'noop')
+        summary = event['duration_result']
+        self.assertEqual((summary['kept_total'], len(summary['kept']), summary['consumed_rests']), (40, 32, 1))
+        self.assertEqual(summary['kept'][0]['reason'], 'bar_end')
+        self.assertNotIn('secret', json.dumps(event))
+
+    def test_http_score_endpoints_log_and_keep_expected_responses(self):
+        import threading
+        import urllib.error
+        import urllib.request
+        st = self.state()
+        def refuse(body):
+            self.assertNotIn('ui_context', body)
+            raise ValueError('duration refuses here')
+        st.score_command = refuse
+        st.score_edit = lambda body: setattr(st, 'revision', 'after')
+        with mock.patch.object(server.Handler, 'state', st):
+            srv = server._Server(('127.0.0.1', 0), server.Handler)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            try:
+                for endpoint, expected in [('score_command', 400), ('score', 200)]:
+                    request = urllib.request.Request(f'http://127.0.0.1:{srv.server_address[1]}/api/{endpoint}',
+                        data=json.dumps(dict(action='set_duration', ui_context={'action': 'shorter'})).encode(),
+                        headers={'X-VT-Token': srv.token})
+                    with self.assertLogs(gui._log, level='INFO') as captured:
+                        try:
+                            response = urllib.request.urlopen(request, timeout=5)
+                        except urllib.error.HTTPError as e:
+                            response = e
+                        with response:
+                            self.assertEqual(response.status, expected)
+                            body = json.loads(response.read())
+                    self.assertEqual(self.event(captured)['endpoint'], endpoint)
+                    self.assertEqual(body, {'error': 'ValueError: duration refuses here'} if expected == 400
+                                     else {'ok': True, 'revision': 'after'})
+            finally:
+                srv.shutdown()
+                srv.server_close()
+
+
+class TestSongDeliveryServer(unittest.TestCase):
+    def test_pending_browser_burst_survives_busy_accept_loop(self):
+        import socket
+        from vulturetracker import server
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
+        clients = []
+        try:
+            # Compilation can briefly delay accepts while score/WAV/image requests arrive together.
+            for _ in range(24):
+                clients.append(socket.create_connection(srv.server_address, timeout=.2))
+        finally:
+            for client in clients:
+                client.close()
+            srv.server_close()
+
+    def test_score_image_save_cancel_and_stale_dialog(self):
+        import base64
+        import sys
+        import threading
+        from types import SimpleNamespace
+        from vulturetracker import server
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            source, target = folder / 'song.yaml', folder / 'part.svg'
+            source.write_text('original song', encoding='utf-8')
+            state = SimpleNamespace(song_path=source, base_dir=folder, lock=threading.RLock(),
+                text_sha=lambda: 'current', dirty=lambda: False, song={'samples': {}})
+            data = b'<svg xmlns="http://www.w3.org/2000/svg" width="30" height="20"><path d="M0 0L20 10"/></svg>'
+            body = dict(song=str(source), revision='current', format='svg', name='part.svg',
+                data=base64.b64encode(data).decode('ascii'))
+            window = mock.Mock()
+            with mock.patch.dict(sys.modules, {'webview': SimpleNamespace(SAVE_DIALOG=30)}), \
+                 mock.patch.object(server.Handler, 'state', state), mock.patch.object(server.Handler, 'window', window):
+                window.create_file_dialog.return_value = (str(target),)
+                self.assertEqual(server.Handler.save_score_export(body), {'path': str(target)})
+                self.assertEqual(target.read_bytes(), data)
+                window.create_file_dialog.return_value = None
+                self.assertEqual(server.Handler.save_score_export(body), {'path': None})
+                def changed(*args, **kwargs):
+                    state.text_sha = lambda: 'changed'
+                    return (str(target),)
+                window.create_file_dialog.side_effect = changed
+                with self.assertRaisesRegex(ValueError, 'song changed'):
+                    server.Handler.save_score_export(body)
+                self.assertEqual(target.read_bytes(), data)
+                self.assertEqual(source.read_text(encoding='utf-8'), 'original song')
+
+    def test_score_image_validation_precedes_dialog(self):
+        import threading
+        from types import SimpleNamespace
+        from vulturetracker import server
+        state = SimpleNamespace(song_path=Path('song.yaml'), lock=threading.RLock(),
+            text_sha=lambda: 'current', dirty=lambda: False)
+        window = mock.Mock()
+        with mock.patch.object(server.Handler, 'state', state), mock.patch.object(server.Handler, 'window', window):
+            for fmt, data in [('png', 'AAAA'), ('jpg', 'AAAA'), ('bmp', 'AAAA'), ('svg', 'AAAA'), ('exe', 'AAAA'), ('svg', '!bad')]:
+                with self.subTest(fmt=fmt, data=data), self.assertRaises(ValueError):
+                    server.Handler.save_score_export(dict(song='song.yaml', revision='current', format=fmt, data=data))
+            window.create_file_dialog.assert_not_called()
 
 
 if __name__ == "__main__":

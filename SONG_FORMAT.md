@@ -496,7 +496,348 @@ at A = 440 Hz: slides, arpeggios, pitch envelopes, an instrument's tuning and pi
 - misnumbered row labels
 - patterns with too many rows or cells
 
-## 10. Compatibility
+## 10. Native score (in development)
+
+The optional root `score` mapping preserves notation alongside residual tracker commands. `version: 1` has
+`tracks`, `patterns`, `order_ids`, and optional `ties`, `measures` and `metadata`. Songs without it compile as before.
+`metadata` holds optional text fields `title`, `artist`, `album`, `author`, `date`, `copyright`, `writer`,
+`transcriber` (up to200 characters each), and `comments` (up to8000); NUL is rejected. This is saved notation
+and credit information, separate from the short IT `module.title` and `module.message`. It does not change
+playback. TG and supported GP credit fields round-trip; unsupported output fields are reported.
+Native playback pairs the residual tracker module with an exact score-event schedule; score notes are never
+duplicated into saved `patterns.data`. Conflicting raw fields are an error. Unrelated raw effects remain in `patterns`.
+The standalone IT compiler retains its strict row projection and refuses unrepresentable score timing.
+
+```yaml
+score:
+  version: 1
+  tracks:
+    guitar: {tuning: [64, 59, 55, 50, 45, 40], channels: [0, 1, 2, 3, 4, 5], capo: 0, instrument: 1}
+  order_ids: [verse-first]    # one unique identity per order occurrence
+  patterns:
+    verse:
+      row_step: [1, 4]      # quarter notes per row: module.speed / 24
+      beats:
+        - id: opening
+          track: guitar
+          voice: 0         # 0 or 1
+          at: [0, 1]       # exact quarter-note numerator/denominator
+          written: {value: 4, dots: 0, tuplet: [1, 1]}
+          notes: [{id: high-e, pitch: 64, string: 1, fret: 0}]
+  ties: []
+  measures: []
+```
+
+This fragment requires a `verse` pattern, six module channels, instrument/sample 1, and enough rows for its release.
+Pitches use the compiler's 0–119 numbering. Strings are one-based; channels are zero-based. Track tuning is ordered
+top string first, with 1–25 strings, signed `capo` offsets from -24 through 24, and optional `max_fret` (default 29,
+range 0–36) and `name`. Optional notation fields are `color: '#rrggbb'`, `clef` (treble, bass, alto, tenor or percussion),
+`key: {fifths: -7..7, mode: major|minor}` and `stem` (auto, up or down). A beat's `stem` overrides its track default.
+These fields do not transpose or retune playback. Optional `midi: {program: 0..127, bank: 0..16383}`
+records a file-interchange sound assignment; `program` is required when the mapping exists and omitted `bank`
+means zero. It does not change the native sample instrument. Each channel belongs to at most one score track. Notes optionally override `instrument`,
+`volume`, `spelling` and zero-based `channel`; the channel override preserves existing Pattern routing when its
+fingering moves to another string. Instrument zero on adopted notes retains tracker instrument inheritance.
+An unplayable pitch has null `string`/`fret`. An empty notes list is a written rest. Beat and note IDs are unique
+within a pattern and survive edits. Explicit adoption of a raw note uses `duration_source: tracker_boundary`
+on its beat to identify inferred written duration; adoption must preserve playback semantics.
+
+Bank 128 identifies a percussion track independently of its displayed clef. It requires 1–25 zero-tuned
+lanes and capo zero. Its note `pitch` and `fret` both hold the authored drum key, 1–100; `string` remains the
+stable one-based lane. `max_fret` retains its metadata range but does not limit drum keys. Pitch edits preserve
+the lane, and the chosen native instrument may map different keys to distinct samples at the same playback
+pitch. That sample mapping does not change the authored drum key. Plain notes, rests, both voices, velocities,
+ties, repeats and lyrics share the existing score model. Ghost, accent, heavy accent, staccato, dead and palm
+mute use the qualified shared velocity/gate rules. Drum let-ring uses the existing voice/lane-aware sustain scan
+and independent held identities, including across supported ties/repeats; it cannot combine with staccato or
+palm mute. Other drum techniques and populated pitched/drum conversion
+refuse explicitly. Clipboard `track_kinds` prevents interpreting guitar frets as drum keys.
+Strict native TG import supports keys 1–100; GP3–5 supports 1–99 because TuxGuitar normalizes GP key 100 to zero.
+TG preserves these techniques including let-ring. Native GP3 import retains ghost/dead/let-ring, GP4 adds accent/staccato/
+palm mute, and GP5 adds heavy accent. Unsupported version flags and conflicting dynamics refuse before
+publication; absent GP velocity becomes the source default 95, never the performed accent/ghost value.
+GP4/5 let-ring combined with palm mute or staccato follows the installed reader's normalization with an
+explicit notice; unsupported dynamic combinations and gapped ties still refuse.
+For neutral 0/major key,
+TG export maps the native percussion clef alias to stored treble with an explicit warning; bank 128 still selects
+the neutral drum glyph on reimport. Non-neutral-key alias conversion refuses.
+Native MIDI export preserves drum keys on MIDI channel 10 (zero-based channel 9). Participating drum parents
+must share fixed program, volume, pan and expression. Overlapping gates on the same drum key, changing parent
+controls, pitch/fade techniques and raw drum attacks refuse before publication; different keys may overlap.
+
+Optional track `lyrics: {from_measure: 1, text: "raw lyric stream"}` stores one stream starting at a
+one-based authored measure number. Both keys are required: `from_measure` is an exact integer from 1 through
+2147483647, and `text` is a string of at most 65536 characters. Spaces, tabs, CR/LF line endings and punctuation
+are stored exactly. Empty text retains the starting measure; omit `lyrics` to remove it (`null` is invalid).
+The agent's existing `track_set` replaces the complete track, so unrelated edits must retain this field.
+Lyrics share the song's save and undo history and do not change notes, gates, samples or playback timing.
+
+Placement uses the complete written arrangement and requires authored measures covering it without gaps.
+Absent or incomplete measures produce a lyric-placement diagnostic; the raw stream and playback remain available.
+CR and LF each become one space for placement only; tokens split on literal spaces, retaining internal empty
+slots and discarding trailing empty slots. Tabs and nonbreaking spaces remain inside a token. One token attaches
+to each non-rest onset on that track: voice 0 takes precedence when both voices sound together, and a chord
+consumes one token. Tied continuations count; grace and repeated technique attacks add no slots. Playback repeats
+do not consume the stream again. Start measures past the arrangement and excess text stay stored without anchors.
+Structural edits retain the raw starting number and text; they do not rewrite either to follow moved bars.
+Native TG interchange retains the stream and starting measure. GP4/5 import accepts the first lyric line and
+refuses additional nonempty lines. Native MIDI export reports lyrics and starting measures as omitted; standalone
+IT conversion reports an explicit notation-loss warning for nonempty lyrics. Neither export nor native playback
+synthesizes vocals. Chord diagrams likewise produce a notation-loss warning in IT; diagrams never generate notes,
+and any existing chord notes remain unchanged. Both annotations stay in the source and engraving.
+
+Imported MIDI pan may retain `midi.source_pan: {value: 0..127, mixer_pan: 0..64}` (exact integers).
+`value` is the source CC10; `mixer_pan` is its original VT channel-pan value. The audio mixer keeps its existing
+0..64 scale. Native MIDI preserves the exact source value only while all track channels match that anchor and
+no current pan override targets the track. Even an explicit override equal to the saved pan disables the binding;
+volume and mute changes do not. WRITE MIX clears it atomically with any pan write on the track, and undo restores
+both. Raw Pattern X commands override the initial value, including commands before an exported range. Channel
+reassignment clears the binding; unrelated track name/program/bank edits retain it. Removing the whole `midi`
+mapping also removes it. A manually changed channel pan that differs from the anchor uses the ordinary mixer
+conversion. Native GP import preserves TuxGuitar's exact `max(8*balance_byte-1, 0)` values. Native TG retains the
+all 0..127 source values, including neutral 64 and source-center 63 distinctly.
+Volume has the parallel binding `midi.source_volume: {value: 0..127, mixer_volume: 0..64}` for CC7.
+PTB and TEF imports use the same bindings after TuxGuitar's source-controller conversion; no separate import mix is saved.
+It follows the same anchor, explicit override, channel reassignment and Undo rules; raw Pattern M commands
+override it. Pan-only edits retain volume and volume-only edits retain pan. GP1–5 source volume is retained;
+TG import maps each controller to the nearest native 0..64 mixer value and reports that audio quantization.
+TG export accepts uniform volume/pan across each part's strings. GP3–5 additionally require native mixer
+steps divisible by four and exact GP source bindings (`max(step*8-1,0)`); incompatible values refuse.
+Unequal string mixes, string mute, non-neutral global mix, source effects and shared TG MIDI channels still
+refuse. These bounds preserve musical intent; source-controller retention does not reproduce a synth timbre.
+
+Optional note booleans `tapping`, `slapping` and `popping` are a mutually exclusive notation group, separate
+from the tapped harmonic subtype. Enabling one through `note_set` clears the other two; setting one false
+clears only itself. Multiple true flags in one edit or native YAML refuse. Other techniques remain unchanged.
+Each flag stays on its authored note, including a tied continuation. They do not change the native event
+schedule, audio backing or MIDI messages, matching the inspected and measured TuxGuitar parser paths. Uniform
+voice-beats use the renderer's T/S/P glyph; sparse or mixed chords use string-qualified text so a marking is
+not incorrectly applied to every string. Standalone IT conversion preserves the native sound and emits an
+explicit notation-loss warning: IT cannot retain these semantic markings. The source score/history remains
+unchanged; cleared/false flags emit no warning. Existing timing, instrument and cell-ownership limits still apply. Native
+TG preserves per-note flags; conflicting source tags follow TG's tap, slap, pop setter order with a warning.
+GP3/4/5 import expands its single voice-beat technique onto that record's notes; flagged rests/empty beats
+refuse because they have no note recipients. No mixed-note GP export is implied.
+
+Optional note booleans `staccato`, `palm_mute` and `dead` shorten the performed gate without changing written
+duration, fingering, instrument or volume. The initiating note controls a tied chain; continuation flags remain
+authored but do not independently shorten it. Dead takes precedence over palm mute, then staccato. Enabling
+staccato through `note_set` clears palm mute and let-ring; each of those three clears the other two. Gate lengths follow TuxGuitar 2.1.0's truncated
+960-tick quarter units: half the expanded duration for staccato, or the smaller of that duration and
+`floor(tempo * 30 / 60)` ticks for dead / `tempo` ticks for palm mute. Tie expansion includes differences between
+rounded absolute beat starts. Playback SPEED scales time after this calculation. These gates send note-off;
+sample and instrument release tails still play. Pattern displays a generated release where it aligns to a row;
+editing that release requires the score duration/technique control. Standalone IT conversion of these techniques
+currently refuses explicitly.
+
+Optional boolean `let_ring` extends performed duration using TuxGuitar 2.1.0's ordered same-voice scan,
+without changing written duration or requiring velocity. Empty voices are skipped and explicit rests stop the
+scan. While ringing, the first unmarked following note adds that beat's written duration and stops, before
+checking its string; a marked replacement on the same string stops without adding it. Marked tied continuations
+can enable ringing on an initially unmarked head. Chord order matters. Gaps alone do not extend the release:
+a ringing quarter at 0 followed by an unmarked quarter at 3 releases at 2, not 3 or 4. The initiating head's
+shortening gate applies after this scan; curves, harmonic layers and repetition use the resulting duration.
+Written positions retain `end`, with `sounding_end` reporting the performed release separately. Ordinary
+single-pitch notes may overlap a ringing note on the same channel: the earlier voice keeps its identity,
+phase and release through the later attack. Harmonics, repeated attacks and grace/main pairs use independent
+head contexts when their performed gates overlap. Every played attack on an affected parent must use an explicit
+instrument, and all its backing cells must be empty or global T/V commands. Contexts retain same-head NNA/DCT;
+other heads do not cut them. Envelope carry, random volume/pan and mapped random auto-vibrato refuse. The
+runtime admits at most 64 active heads and 64 attack groups per frame; exhaustion refuses atomically. Written
+voice overlap and raw local conflicts still refuse; the planner never clips a ring to hide a collision.
+With repeats, crossing a measure boundary retains the initiating source measure's close flag, including its
+final pass. Conflicting let-ring/palm-mute/staccato flags in native YAML refuse.
+
+Optional `grace` is null or `{fret, value: 16|32|64, velocity: 0..127, transition: none|slide|bend|hammer,
+on_beat: false, dead: false}`. Fret, value and velocity are required; the other fields default as shown.
+The grace has independent velocity on the same string; authored tracker volume applies to both attacks.
+On-beat grace delays the main attack by its duration while retaining the main release. Before-beat grace
+precedes the written onset, falling back to on-beat when there is insufficient time since song start.
+Dead grace shortens only its own gate. Transition labels affect notation only. Written anchors and ties
+remain unchanged; positions expose `sounding_start`, `sounding_start_frame`, `grace_start` and `grace_end`.
+The main tie head owns grace; continuation grace does not create an attack. Explicit source instrument is
+required. A before-beat grace may overlap the preceding head in the qualified independent-context domain above.
+Exhausted main duration, raw local conflicts, and slide controls
+before the delayed main attack refuse. Standalone IT projection cannot preserve grace and refuses.
+
+Optional note `velocity` is an authored MIDI integer 0..127, separate from nullable tracker `volume`.
+Omission leaves inherited instrument/sample gain unchanged. An explicit value uses a linear `velocity / 127`
+native voice gain; MIDI synthesizers can have other response curves. `note_set` with `velocity: null` removes
+the authored override. Positive authored values survive MIDI export exactly, with sample/instrument gain carried
+by rounded expression controllers. MIDI export refuses zero-velocity gates because MIDI interprets them as note-off.
+Standalone IT projection refuses authored velocity rather than quantizing it into the 0..64 volume column.
+Optional note booleans `ghost`, `accent`, `heavy_accent` and `hammer` preserve the written technique separately
+from authored velocity. Playback subtracts 25 (floor 15) when the nearest preceding written note in the same
+track/voice/string has hammer, then applies ghost -16, accent +16 or heavy accent +32 (in that precedence order,
+floor 15, ceiling 127). The intermediate clamp matters. The predecessor search crosses rests and includes tied
+continuations; continuations do not create new attacks. A modified attack requires explicit authored velocity;
+missing velocity or ambiguous string/raw-note ownership refuses rather than guessing. Explicit zero can become
+audible under these source-derived formulas. Enabling one accent flag clears the other two; hammer excludes
+bend/bar/slide/dead and those techniques clear hammer. This changes the following attack's dynamics, without
+suppressing its attack. MIDI exports performed velocity; the authored value remains unchanged in the score.
+
+Optional `vibrato` is boolean. `bend` and `tremolo_bar` are null or
+`{points: [{position: 0, value: 0}, {position: 6, value: 4}, {position: 12, value: 0}]}`.
+Positions are integers 0..12 in nondecreasing order (coincident points are retained); values are 0..12 for bend
+and -12..12 for tremolo bar, with at most 129 points. The initiating tied note owns its pitch curve. Bend takes
+precedence over tremolo bar, then vibrato. The note editor clears competing bend/bar/dead flags when enabling
+one; vibrato may remain authored alongside a curve. Pitch controls use TuxGuitar 2.1.0's integer interpolation
+and 960-tick durations, including gate shortening, while native note onsets retain exact authored fractions.
+The native receiver establishes a 12-semitone pitch-wheel range: a 7-bit controller step above neutral 64 is
+3/16 semitone. This is an explicit receiver choice; external TuxGuitar synthesizer configuration can differ.
+Controls address the original voice identity, including its live release tail, and never a replacement note.
+MIDI export routes pitch-controlled notes and harmonic layers to independent melodic channels, keeping ownership
+through the final in-range control. It sets a 12-semitone pitch-bend range and reports 14-bit wheel rounding.
+Channel exhaustion and unsupported percussion/program ownership refuse before publication. IT export still refuses.
+
+Optional note `harmonic: {type: natural|artificial|tapped|pinch|semi, data: 0..5}` retains harmonic notation;
+omitted `data` means zero. Non-natural types index TuxGuitar's touch/interval table: 12/+12, 9/+28, 5/+24,
+7/+19, 4/+28, 3/+31. Natural harmonics match the written fret modulo 12 against that table; unmatched frets
+retain their primary pitch. Playback uses separate ordered layers under one logical attack, sharing its gate
+and pitch controls. Semi adds the original pitch at performed velocity minus 48 (minimum 15); all types add
+a lower octave when its pitch is positive, at velocity minus 64 (minimum 15), then the primary at performed
+velocity. Explicit authored velocity is required; output pitches above the native engine's 119 limit refuse.
+The initiating note owns harmonic layers across a tie. The grouped native runtime is required; MIDI export
+assigns their independent melodic channels, refusing capacity or routing conflicts. `note_set` with `harmonic: null` clears it.
+GP5 export stores tapped data0..5 as the written fret plus the touch interval, and natural/artificial/pinch/semi
+data0 as the corresponding GP5 type. Nonzero data on those other types cannot survive GP5 and still refuses;
+GP4 additionally preserves tapped/pinch/semi data0 and artificial data0/2/3 using their exact reader codes;
+GP3 keeps natural/artificial data0 only. These format limits do not constrain native editing.
+
+Optional note `trill: {fret: 7, value: 16}` alternates the written pitch with an absolute fret on the same resolved
+string. Rates are 4, 8, 16, 32 or 64. `tremolo_picking: {value: 16}` repeats the written pitch at rate 8, 16 or 32.
+Both require explicit velocity and retain one written note; generated attacks have separate playback identities
+and a logical `source_id`. The tie head owns the effect and performed velocity through its continuations.
+Repetition overrides harmonic playback, while preserving harmonic notation. Authoring either effect clears
+bend, tremolo bar, slide, hammer, dead, vibrato and the other repetition effect; setting a conflicting technique
+clears repetition. Invalid combinations in YAML refuse. Null clears either field through `note_set`.
+
+Pulse timing follows TuxGuitar's 960-tick duration offsets from the exact native onset. Tied duration uses the
+difference of truncated start ticks plus the final written duration, retaining compensating ticks across tuplets.
+Gate effects shorten the whole chain before repetition. Full pulses touch at their release/next attack; the final
+clipped pulse ends one tick early, and a remaining span of at most ten ticks produces no pulse. Tempo changes
+do not restart the sequence. Native onsets remain rational rather than being rounded to TuxGuitar's tick grid.
+`slide: true` selects the next authored beat in the same track/voice and its note on the same resolved string;
+a rest or a chord without that string stops the lookup. It retains both attacks and uses TG's integer tick stride
+and float32 pitch steps, with bend/bar taking precedence and slide suppressing vibrato. A slide may control its
+original voice after its gate release; its final reset never retunes the next attack. Enabling slide clears bend,
+tremolo bar and dead, and enabling any of those clears slide.
+
+Written values are 1, 2, 4, 8, 16, 32 or 64, with zero, one or two dots. `tuplet: [3, 2]` means three notes in the
+time of two. Exact source fractions are retained and native playback rounds each absolute boundary once to the
+nearest sample frame, half up. A tie is `{from: {occurrence: verse-first, note: high-e}, to: {occurrence: next, note: next-e}}`.
+A measure is `{id, from: {occurrence, at}, to: {occurrence, at}, meter: [numerator, denominator]}`; its exact bounds
+and meter must agree. Repeated patterns share their notes, while occurrence IDs distinguish their order entries.
+Optional measure `swing: none|eighth|sixteenth` changes performed timing of qualifying ordinary eighths or
+sixteenths, while written positions stay unchanged. It follows TuxGuitar's source-measure/voice neighbor checks
+on floored 960-tick quarters: an eighth pair becomes 640/320 ticks, a sixteenth pair 320/160. Dotted and tupleted
+durations do not qualify. Exact authored onsets retain their fractional part; only the measured swing offset is
+added. Swing precedes tie/let-ring extension, gates, grace and repetition. A first swung eighth tied to the next
+lasts 1120 ticks. Beats crossing swing measure boundaries require splitting with an explicit tie. Ambiguous
+source inheritance, raw local conflicts and unsupported performed overlaps refuse. This is a note transform,
+so tempo commands and raw tracker rows keep their original times.
+
+Optional beat `stroke: {direction: up|down, value: 4|8|16|32|64}` spreads its untied string attacks;
+`pick_stroke: up|down` is a notation mark only. Null clears either field. Both belong to the shared track/onset
+across its two voices. Optional beat `cohort: 0..127` distinguishes separate TG beat groups at the same
+track/onset; absent means 0. The number is local to that pattern/track/onset and records stable group order.
+Free edits assign it only when previously separate groups coincide; save/history and TG interchange preserve
+the distinction. Sparse metadata is resolved without changing the source; conflicting non-null values
+refuse, and a beat edit applies or clears the value across that cohort. Stroke uses the shortest written voice
+duration, including an explicit rest, capped at one quarter. At 960 ticks per quarter its per-string increment
+is that duration divided by twice `value`, rounded half up. Up visits increasing string numbers, down decreasing;
+absent strings and tied continuations consume no step. Written anchors remain unchanged. Delay shifts the
+performed attack and subtracts from the gate only when the gate is longer than the delay; a short gate retains
+its duration. Stroke follows swing/gates and precedes grace, repetition and harmonic playback. Source ordering,
+raw-conflict and shared-channel overlap guards still apply. Strict IT projection refuses performed stroke.
+
+Optional note `fade_in: boolean` preserves an independent marking, including on tied continuations; omission
+means false. Native live/audio and MIDI export share TuxGuitar's mixer-mode expression schedule; this intentionally
+makes the marking audible beyond TuxGuitar's default live parser. An untied marked head starts a track-wide staircase after
+stroke/gate timing and before grace timing. For gate duration D in 960-per-quarter ticks, values 31..126 occur
+at S + i*floor(D/96), i=0..95, followed by 127 at S+D. A positive D below 96 keeps all 96 controls at S.
+Tied continuation flags create no extra ramp; repeated heads create their own ramps. All strings, voices and
+layers of the logical score track share the ordered expression stream, including unmarked notes.
+
+MIDI composes this logical value with the existing static expression using round-half-up(base*value/127),
+without rewriting authored velocity. New channels inherit preceding expression and apply ordered same-time
+controls before their attack; a reused channel follows its new track. Existing release-before-attack ordering
+remains. Source ramp ordering is retained, but physical controller values with non-neutral gain are a volume
+conversion, not a claim of identical synthesizer response. Controllers are routed while a channel owns its gate
+or pitch controls; unmeasured release tails are omitted. MIDI refuses more than 200000 logical or routed fade
+events before publication. Native audio composes expression with each owned note/layer's original gain, including
+released tails; raw attacks without score identities on an affected track refuse. Strict standalone IT projects
+volume-column controls to the nearest row (at most half a row), retaining authored velocity/sample volume and
+requiring a maximum normalized gain-trajectory error of 6.25 percentage points. CLI and UI report the measured
+bound; this is not an instantaneous waveform bound. Unsafe inherited state, volume/effect collisions, delayed
+SDx expression rows, off-row affected attacks and inadequately represented final tails refuse before writing.
+Native TG preserves per-note flags; GP3–5
+import copies each serialized voice-beat flag to its notes and refuses flagged rests or unsupported shared routing.
+
+Optional beat `chord: {name, first_fret, frets}` is a shared onset/track annotation; null clears the cohort and
+omission preserves it. `name` is at most 4096 characters and may be empty. `frets` has one integer per track string,
+string 1 first: -1 muted, 0 open, positive absolute fret up to `max_fret`. `first_fret` is 0..max_fret; 0 preserves
+automatic placement, resolved for display to the lowest positive fret or 1. Positive frets must fit the five-fret
+window starting there. Validation never clips or reverses them. An all-muted array is a literal diagram, not a
+portable symbol-only mode. Sparse voice metadata inherits the same diagram; conflicting non-null values refuse.
+The diagram need not match played notes and does not alter audio or MIDI. Strict IT projection refuses it.
+Whole-beat copy preserves it, note-only clipboard does not. Moving the unique sounding voice transfers it;
+another sounding voice keeps it at the source, and conflicting destinations refuse. Final sounding-note removal
+clears the source diagram; attaching one explicitly to a rest is allowed. Splits do not repeat it on tie continuations,
+and transposing notes does not rewrite its frets. Native TG retains it; GP import refuses richer unsupported chord
+fields and representations that would discard a name or fret.
+
+The separate `chord_notes` edit applies a complete diagram and replaces the selected voice's notes in one
+transaction. It uses fresh IDs, `tuning[string-1] + capo + fret`, chosen velocity (default 95), and the track
+instrument; old per-note effects and overrides are not inherited. The selected beat's onset, duration and shared
+fields remain. Played strings also replace same-onset other-voice notes on those strings. Muted strings leave
+that other voice alone. Incident ties across all pattern uses refuse unless `remove_ties: true` explicitly
+removes them. Reused patterns remain shared. All-muted clears the selected voice and attaches the diagram when
+either voice originally sounded; when the whole beat was already a rest it makes no change. This command does
+not generate a voicing from a chord name: its input is the literal fret array.
+
+Measures accept `double_bar: boolean` for an ending double barline (display only, no repeat or timing change).
+It survives native editing and GP3/4/5 export; TG export refuses because TG has no corresponding field.
+Per-track `staff` key/clef changes remain effective through following measures until changed again.
+Measures also accept `repeat_open: boolean`, `repeat_close: 0..100` (extra passes), and `endings: [1..8]`
+(unique pass numbers). The native controller follows TuxGuitar's single repeat-start register and inherited
+ending mask, including multi-measure endings; it is not a nested repeat stack. Authored orders, occurrence IDs,
+patterns and print remain unchanged. A disposable performed visit list drives both backing rows and score events,
+restoring each source entry's effective tempo. Source swing phase is retained; ties and let-ring resolve along
+each played path. Unmatched tie continuations refuse. The current implementation requires explicit measures
+covering the entire arrangement with boundaries aligned to tracker rows, at most 255 played fragments and
+254 backing patterns. Measures may split a pattern or span adjacent patterns. A sounding gate can cross a
+fragment boundary without another attack; a written beat crossing a measure boundary must be split and tied.
+Tempo restoration needs a free entry-row effect slot if no T command already exists. Fractional-row boundaries
+and capacity overflow refuse without truncation. Standalone IT export
+still refuses repeats. Selecting source bars for a loop or export includes their played visits only when those
+visits form a continuous span; disjoint or unreachable selections refuse. Listening notes retain the played
+pass, fragment and local row alongside their original authored order and row.
+
+An optional measure `marker: {title: Verse, color: '#ff4040'}` is anchored to its start; title is 1..4096 characters
+and color is optional. An optional beat `text` is plain text of at most 4096 characters, anchored to its onset,
+including on rests. These annotations never change playback. Beat copy/move preserves text, and split continuations
+do not repeat it. MIDI retains marker titles and beat text at exact anchors, with named text tracks; marker color,
+voice and engraving placement are explicit conversion losses.
+
+Native playback requires constant tracker speed and `row_step == module.speed / 24`. Different written voices
+of one track can share a parent channel during overlapping notes. Each head keeps its own source identity,
+gate and playback context; every head on that parent needs an explicit resolved instrument. Envelope carry,
+random source settings and raw backing other than empty/T/V cells remain unsupported on those parents.
+Same-voice overlapping beats remain invalid, and standalone IT projection refuses overlapping ownership.
+Pattern collisions expose every owner separately; bare cell edits refuse, source-ID edits affect one note,
+and explicit all-head ranges affect all selected voices. Occurrence-qualified ties retain their own release boundaries. The strict IT projection
+also requires identical generated cells in every occurrence of a reused pattern. Native backing supports raw
+X00..FF pan, D00..FF volume slide, M00..40 channel volume, V00..80 global volume and v00..64 volume columns.
+Absolute T20..FF commands produce one resolved tempo map across pattern occurrences. Their row boundaries, score
+attacks, pitch controls, seek positions and rendered lengths use the same piecewise quarter-to-second clock,
+rounded only at absolute frame boundaries. Multiple T commands on one row refuse; T00..1F slides/recall and speed
+or flow changes remain unsupported. Palm/dead gates use the attack tempo in musical ticks, then map their endpoints;
+a raw volume cannot override a score-owned attack volume. Unsupported raw effects, flow
+commands, cross-boundary operations and unrepresentable written durations fail before persistence. Full rhythm, technique and interchange parity
+remains in development; these limits are not silent rounding or permission to discard notation.
+
+## 11. Compatibility
 
 The format has no version number: it grows only by new optional keys, and a key keeps its meaning.
 

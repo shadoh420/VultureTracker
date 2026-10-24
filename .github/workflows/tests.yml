@@ -1,7 +1,7 @@
-# The tests in three environments. `tests` is Linux the way .claude/hooks/session-start.sh installs it for cloud
-# sessions (libopenmpt from Ubuntu, 0.7.x; the Python packages from requirements-test.txt, pinned with their SHA-256
-# digests for every Python from 3.10 on; node for the live engine and the Faust compiler; Playwright's Chromium for
-# the page) and is the only job that runs the page tests. Every job installs the pinned file with --require-hashes,
+# The tests in three environments. Both Linux jobs build patched libopenmpt 0.8.9 below. Their Python package setup
+# matches .claude/hooks/session-start.sh: requirements-test.txt pins packages and SHA-256 digests for Python 3.10 on.
+# Node runs the live engine and the Faust compiler. `tests` also installs Playwright's Chromium and is the only job
+# that runs the page tests. Every job installs the pinned file with --require-hashes,
 # then the package itself without dependencies or build isolation (setuptools is pinned there too), so nothing
 # unpinned comes from PyPI. Regenerate the file after a
 # change to pyproject.toml's test extra with the command in its header (uv: one file with markers covers 3.10's
@@ -32,6 +32,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  VT_REQUIRE_NATIVE_SCORE: "1"
+  VT_REQUIRE_PITCH: "1"
+  VT_REQUIRE_GAIN: "1"
+  VT_REQUIRE_GROUPS: "1"
   # the portable tests, one list for every job (test_engine needs node)
   PORTABLE: >-
     tests.test_gui tests.test_pipeline tests.test_resample tests.test_engine
@@ -40,12 +44,15 @@ env:
     tests.test_release070 tests.test_release080 tests.test_release080_import tests.test_release080_dsp
     tests.test_import tests.test_synth tests.test_sources tests.test_release100 tests.test_stems_to_song
     tests.test_plugins tests.test_measure tests.test_agent tests.test_agent_projects
-    tests.test_agent_sessions tests.test_malformed tests.test_docs tests.test_vendor
+    tests.test_agent_sessions tests.test_malformed tests.test_docs tests.test_vendor tests.test_tg_format tests.test_gplegacy tests.test_gpexport_legacy tests.test_gpx tests.test_notation_export
+    tests.test_tablature tests.test_tablature_sync
+    tests.test_band_imports tests.test_band_expression tests.test_band_instruments tests.test_band_delivery
+    tests.test_rehearsal_setup tests.test_rehearsal_edit tests.test_score_collection tests.test_real_arrangement
 
 jobs:
   tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -59,18 +66,49 @@ jobs:
       - name: Install
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libopenmpt0t64
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential pkg-config libmpg123-dev libogg-dev libvorbis-dev zlib1g-dev
+          native_source="$RUNNER_TEMP/native-score-engine"
+          curl --fail --location --retry 3 https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.9+release.makefile.tar.gz -o "$RUNNER_TEMP/libopenmpt-source.tar.gz"
+          mkdir -p "$native_source"
+          tar -xzf "$RUNNER_TEMP/libopenmpt-source.tar.gz" -C "$native_source" --strip-components=1
+          patch -d "$native_source" -p1 < "$GITHUB_WORKSPACE/tools/native-score-engine.patch"
+          make -C "$native_source" CONFIG=gcc SHARED_LIB=1 STATIC_LIB=0 OPENMPT123=0 EXAMPLES=0 TEST=0 -j2
+          export LIBOPENMPT="$native_source/bin/libopenmpt.so"
+          echo "LIBOPENMPT=$LIBOPENMPT" >> "$GITHUB_ENV"
           python -m pip install -q --require-hashes -r requirements-test.txt
           python -m pip install -q --no-deps --no-build-isolation .
           python -m playwright install --with-deps chromium
           python -c "from vulturetracker import faust; faust.have() or faust.fetch()" || true
-      - name: Portable tests
-        run: python -m unittest $PORTABLE
+      - name: Allow the pinned browser sandbox
+        # Ubuntu's AppArmor policy blocks downloaded Chromium's user namespaces.
+        # Allow only this executable; keep the production PDF sandbox enabled.
+        # https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md
+        run: |
+          chromium_path=$(python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()")
+          test -x "$chromium_path"
+          printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile vt-ci-chromium "%s" flags=(unconfined) { userns, }\n' "$chromium_path" | sudo tee /etc/apparmor.d/vt-ci-chromium
+          sudo apparmor_parser -r /etc/apparmor.d/vt-ci-chromium
+          echo "VT_CHROMIUM=$chromium_path" >> "$GITHUB_ENV"
       - name: Page tests
         run: >-
-          python -m unittest tests.test_page tests.test_workflow_page tests.test_release070_page
+          python -u -m unittest -v tests.test_page tests.test_workflow_page tests.test_release070_page
           tests.test_release080_page tests.test_features080_page tests.test_release100_page
           tests.test_features_page
+          tests.test_tablature_page
+          tests.test_band_expression_page tests.test_band_instruments_page tests.test_band_delivery_page
+          tests.test_score_collection_page tests.test_rehearsal_setup_page tests.test_real_workspace_page
+          tests.test_rehearsal_arrangement_page tests.test_sounding_refresh_page tests.test_rehearsal_edit_page
+          tests.test_real_arrangement_page
+          tests.test_complex_rhythm tests.test_complex_rhythm_page
+          tests.test_complex_interchange tests.test_complex_engraving_page
+          tests.test_complex_routing tests.test_complex_routing_page
+          tests.test_expressive_gp5
+          tests.test_advanced_rhythm tests.test_advanced_rhythm_page tests.test_advanced_timing
+          tests.test_repeat_rehearsal tests.test_repeat_rehearsal_page tests.test_performance_parts_page
+          tests.test_part_adaptation tests.test_part_adaptation_page
+          tests.test_rehearsal_delivery tests.test_real_interchange tests.test_rehearsal_playback
+      - name: Portable tests
+        run: python -m unittest $PORTABLE
 
   floor:
     runs-on: ubuntu-24.04
@@ -88,7 +126,15 @@ jobs:
       - name: Install
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libopenmpt0t64
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential pkg-config libmpg123-dev libogg-dev libvorbis-dev zlib1g-dev
+          native_source="$RUNNER_TEMP/native-score-engine"
+          curl --fail --location --retry 3 https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.9+release.makefile.tar.gz -o "$RUNNER_TEMP/libopenmpt-source.tar.gz"
+          mkdir -p "$native_source"
+          tar -xzf "$RUNNER_TEMP/libopenmpt-source.tar.gz" -C "$native_source" --strip-components=1
+          patch -d "$native_source" -p1 < "$GITHUB_WORKSPACE/tools/native-score-engine.patch"
+          make -C "$native_source" CONFIG=gcc SHARED_LIB=1 STATIC_LIB=0 OPENMPT123=0 EXAMPLES=0 TEST=0 -j2
+          export LIBOPENMPT="$native_source/bin/libopenmpt.so"
+          echo "LIBOPENMPT=$LIBOPENMPT" >> "$GITHUB_ENV"
           python -m pip install -q --require-hashes -r requirements-test.txt
           python -m pip install -q --no-deps --no-build-isolation .
           python -c "from vulturetracker import faust; faust.have() or faust.fetch()" || true

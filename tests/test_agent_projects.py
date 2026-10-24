@@ -129,6 +129,19 @@ class ProjectToolsTests(unittest.TestCase):
             self.assertTrue(Path(created['path']).is_file())
             self.assertIn('error', agent.run(None, 'write_cells', {}))
 
+    def test_native_midi_import_options_preserve_current_project(self):
+        from tests.test_real_interchange import midi_workflow_bytes
+        from vulturetracker import midiimport
+        source=self.dir/'options.mid';source.write_bytes(midi_workflow_bytes())
+        before=self.path.read_bytes()
+        settings=dict(transpose=12,quantize=True,max_duration=32,max_division=3)
+        result=self.call('import_project',file=str(source),native_tab=True,midi_options=settings)
+        expected,_=midiimport.read_midi_score(source.read_bytes(),**settings)
+        self.assertEqual(api.from_yaml(Path(result['path']).read_text(encoding='utf-8'))['score'],expected['score'])
+        self.assertIs(server.Handler.state,self.st)
+        self.assertEqual(self.path.read_bytes(),before)
+        self.assertEqual(self.st.history,[])
+
     def test_import_and_collect_preserve_original_and_phrase(self):
         ident = self.capture()
         frozen = self.call('render_phrase', phrase_id=ident, variant=0)

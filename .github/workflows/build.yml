@@ -43,7 +43,7 @@ jobs:
         run: sha256sum dist/vulturetracker.exe dist/ffmpeg.exe dist/vulturetracker-win64.zip
       - uses: actions/upload-artifact@v7
         with:
-          name: vulturetracker-${{ github.ref_name }}
+          name: vulturetracker-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
           path: |
             dist/vulturetracker.exe
             dist/ffmpeg.exe

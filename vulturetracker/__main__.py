@@ -212,6 +212,17 @@ def _song_command(args, st):
     return 0
 
 
+def _lilypond_settings(items):
+    """--lilypond KEY=VALUE pairs as settings: true/false, integers, else text (notation_export checks them)."""
+    out = {}
+    for item in items:
+        key, sep, value = item.partition("=")
+        if not sep or not key:
+            raise ValueError(f"--lilypond expects KEY=VALUE, not {item!r}")
+        out[key] = {"true": True, "false": False}.get(value.lower(), int(value) if value.lstrip("-").isdigit() else value)
+    return out
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="vulturetracker", description="Compile YAML song files to Impulse Tracker modules.")
     ap.add_argument("--version", action="version", version=f"VultureTracker {__version__}")
@@ -242,7 +253,7 @@ def main(argv=None):
     p.add_argument("module")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("import", help="convert an existing .it, .xm, .s3m or .mod into a song file (samples extracted as "
-                                      "WAVs), or a Guitar Pro tab (.gp3, .gp4, .gp5; needs pyguitarpro) or a MIDI file "
+                                      "WAVs), a native TuxGuitar/PowerTab/TablEdit tab (.tg/.ptb/.tef), a Guitar Pro tab (.gtp for GP1/GP2, .gp3, .gp4, .gp5, .gpx for GP6, .gp for GP7; needs pyguitarpro) or a MIDI file "
                                       "(.mid, .midi; needs mido) with placeholder sounds, or one preset of a SoundFont "
                                       "(.sf2) or a GUS patch (.pat) as an instrument")
     p.add_argument("module")
@@ -250,6 +261,12 @@ def main(argv=None):
     p.add_argument("--preset", type=int, help=".sf2: the preset number (without it the presets are listed)")
     p.add_argument("--bank", type=int, default=0, help=".sf2: the bank (default 0; 128 holds the drum kits)")
     p.add_argument("--samples-dir", help="where to write WAVs (default: <output stem>_samples next to the song)")
+    p.add_argument("--native-tab", action="store_true", help="Guitar Pro/MIDI: preserve an editable native score; TG/PTB/TEF always import natively; unsupported musical features refuse before writing")
+    p.add_argument('--midi-transpose',type=int,help='Native MIDI import: semitones, -24..24')
+    p.add_argument('--midi-quantize',action=argparse.BooleanOptionalAction,default=None,help='Native MIDI import: approximate written durations (default on)')
+    p.add_argument('--midi-shortest',type=int,choices=(4,8,16,32,64),help='Native MIDI import: shortest duration denominator (default16)')
+    p.add_argument('--midi-tuplet',type=int,choices=(1,3,5,6,7,9,10,11,12,13),help='Native MIDI import: maximum tuplet division (default1, none)')
+    p.add_argument('--gp-encoding',help='Guitar Pro 1-5 text encoding, e.g. cp1252 (default), utf-8, cp1251 or shift_jis; GP6/7 use XML encoding')
     p = sub.add_parser("synth", help="render the samples in a sample recipe: Surge XT, Dexed and OB-Xd patches, recordings, Faust code, resynthesis (see SAMPLING.md)")
     p.add_argument("recipe")
     p.add_argument("--only", help="render only samples whose name matches this glob")
@@ -279,9 +296,20 @@ def main(argv=None):
     p.add_argument("song")
     p.add_argument("-o", "--destination", help="output folder (default: beside the song)")
     p.add_argument("--name", help="output file name without extension (default: the song's)")
-    p.add_argument("-f", "--format", default="wav", choices=["it", "wav", "mp3", "ogg", "flac", "mid"],
-                   help="mid: the notes as a standard MIDI file, a track per instrument (as OpenMPT exports one)")
+    p.add_argument("-f", "--format", default="wav",
+                   choices=["it", "wav", "mp3", "ogg", "flac", "mid", "tg", "gp3", "gp4", "gp5", "tab", "ly", "musicxml"],
+                   help="mid: standard MIDI; the native score as notation, with explicit track programs: tg (TuxGuitar), "
+                        "gp3/gp4/gp5 (Guitar Pro), tab (TuxGuitar's ASCII tablature), ly (LilyPond), musicxml; "
+                        "what a format cannot hold is refused or listed as a loss")
+    p.add_argument("--tg-version", choices=["2.0", "1.0", "1.1", "1.2", "1.3", "1.5"], default=None,
+                   help="TuxGuitar file format for -f tg (default 2.0); the legacy ones list their losses")
+    p.add_argument("--lilypond", action="append", default=[], metavar="KEY=VALUE",
+                   help="a TuxGuitar LilyPond setting for -f ly, repeatable: track, measureFrom, measureTo (numbers), "
+                        "score, tablature, text, lyrics, chordDiagram, trackName, trackGroup (true/false), version")
     p.add_argument("--section", default="", help="a named section instead of the whole song")
+    p.add_argument('--midi-transpose',type=int,help='Native MIDI export: semitones -24..24; grace and alternate trill keys stay fixed, as in TuxGuitar')
+    p.add_argument('--midi-strip',action='store_true',default=None,help='Native MIDI export: strip CC/PC and add the TuxGuitar one-quarter lead-in')
+    p.add_argument('--gp-encoding',help='GP3/4/5 export text encoding, e.g. cp1252 (default), utf-8, cp1251 or shift_jis')
     p.add_argument("--tail", type=float, default=2.0, help="seconds of ring-out after the end, 0-10 (0: cut at the end)")
     p.add_argument("--stems", action="store_true", help="also a file per channel in use, all the same length")
     p.add_argument("--no-song", action="store_true", help="the stems only")
@@ -508,7 +536,10 @@ def main(argv=None):
                 "include_it": args.with_it, "loop": args.loop, "mix": args.mix, "replace": args.replace,
                 "rate": args.rate, "depth": args.depth if args.depth == "float" else int(args.depth), "bitrate": args.bitrate,
                 "quality": args.quality, "repeat": args.repeat, "master_lufs": args.normalize, "master_ceiling": args.ceiling,
-                "mutes": "respect" if args.respect_mutes else "ignore"}), _encode)
+                "mutes": "respect" if args.respect_mutes else "ignore", "tg_version": args.tg_version,
+                "lilypond": _lilypond_settings(args.lilypond),"gp_encoding":args.gp_encoding,
+                **({'midi_export':{k:v for k,v in dict(transpose=args.midi_transpose,strip=args.midi_strip).items() if v is not None}}
+                   if args.midi_transpose is not None or args.midi_strip is not None else {})}), _encode)
             for w in res["warnings"]:
                 print(w)
             for f in res["files"]:
@@ -543,6 +574,13 @@ def main(argv=None):
                 print("error: -o/--output is required", file=sys.stderr)
                 return 1
             out = Path(args.output)
+            midi_options={k:v for k,v in dict(transpose=args.midi_transpose,quantize=args.midi_quantize,max_duration=args.midi_shortest,max_division=args.midi_tuplet).items() if v is not None}
+            if midi_options and (not args.native_tab or Path(args.module).suffix.lower() not in ('.mid','.midi')):
+                raise ValueError('MIDI score options require --native-tab and a MIDI file')
+            if args.gp_encoding is not None and Path(args.module).suffix.lower() not in ('.gtp','.gp3','.gp4','.gp5','.gpx','.gp'):
+                raise ValueError('Guitar Pro encoding requires a Guitar Pro file')
+            if args.native_tab and Path(args.module).suffix.lower() not in ('.gtp', '.gp3', '.gp4', '.gp5', '.gpx', '.gp', '.tg', '.ptb', '.tef', '.mid', '.midi'):
+                raise ValueError('--native-tab requires a Guitar Pro, TuxGuitar, PowerTab, TablEdit or MIDI file')
             sdir = Path(args.samples_dir) if args.samples_dir else out.with_name(out.stem + "_samples")
             if is_sf2:
                 from .sf2 import import_sf2
@@ -551,12 +589,21 @@ def main(argv=None):
                     print(w)
                 print(f"wrote {out} and {len(song['samples'])} WAVs in {sdir}")
                 return 0
-            if Path(args.module).suffix.lower() in (".gp3", ".gp4", ".gp5"):
+            if Path(args.module).suffix.lower() == '.tg':
+                from .tgimport import import_tg
+                song, warnings = import_tg(args.module, out, sdir)
+            elif Path(args.module).suffix.lower() == '.ptb':
+                from .ptb import import_ptb
+                song, warnings = import_ptb(args.module, out, sdir)
+            elif Path(args.module).suffix.lower() == '.tef':
+                from .tef import import_tef
+                song, warnings = import_tef(args.module, out, sdir)
+            elif Path(args.module).suffix.lower() in (".gtp", ".gp3", ".gp4", ".gp5", ".gpx", ".gp"):
                 from .gpimport import import_gp
-                song, warnings = import_gp(args.module, out, sdir)
+                song, warnings = import_gp(args.module, out, sdir, native=args.native_tab,encoding=args.gp_encoding)
             elif Path(args.module).suffix.lower() in (".mid", ".midi"):
-                from .midiimport import import_midi
-                song, warnings = import_midi(args.module, out, sdir)
+                from .midiimport import import_midi, import_midi_score, score_import_options
+                song, warnings = (import_midi_score(args.module,out,sdir,**score_import_options(midi_options)) if args.native_tab else import_midi(args.module,out,sdir))
             else:
                 song, warnings = import_it(args.module, out, sdir)
             for w in warnings:

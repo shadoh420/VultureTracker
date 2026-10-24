@@ -1,0 +1,31 @@
+TuxGuitar scale reference and spelling
+
+Copyright (C) 2005-2022 Julián Casadesús
+              2023-2025 guiv42, helge17
+
+Source project: https://github.com/helge17/tuxguitar
+Pinned commit: 2c46e2a1cccdfdfa6e6f2692f241bd60bf418129
+Upstream license: GNU Lesser General Public License, version 2.1.
+The full license and project authors are distributed in
+vulturetracker/licenses/TuxGuitar-LGPL-2.1.txt and TuxGuitar-AUTHORS.txt.
+
+vulturetracker/web/tablature.js contains the 275 scale names and interval sets
+from desktop/TuxGuitar/share/scales/scales.xml, preserving order and aliases.
+Modification: XML one-based semitone lists converted to zero-based bit masks
+and embedded as the scaleCatalogue JavaScript array (2026-10-20).
+
+scaleFifths is a JavaScript adaptation of getKeySignature/getNbAccidentals in
+common/TuxGuitar-lib/src/main/java/app/tuxguitar/util/TGMusicKeyUtils.java.
+It reuses keySpelling, represents key signatures as signed fifth counts and
+keeps the original candidate order, root spelling constraint and tie break.
+
+vulturetracker/gui.html's DRUM_NAMES holds the 61 percussion key names
+midi.percussion-key-27 to -87 from common/resources/lang/messages.properties,
+in order and unchanged, joined into one string (2026-10-20). The piano roll
+labels keys 1-26 and 88-100 "Drum key N" instead.
+These source-derived portions remain under LGPL-2.1.
+
+The complete editable JavaScript source is distributed with VultureTracker.
+The fretboard uses concert pitch including capo and the native track's full
+maximum fret; these differ from the source fretboard's unshifted labels and
+fixed fret range. UI preferences do not alter the song.

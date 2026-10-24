@@ -26,6 +26,30 @@ def _control(cell):
     return fx if fx[0] in 'ABCTVWXY' or fx[:2] in ('S6', 'SB', 'SE') else '...'
 
 
+def _clone_occurrence(state, text, order, name):
+    """Clone the residual pattern and its score, keeping this occurrence's identity."""
+    from .tablature import apply_structure_edit
+    doc = api.from_yaml(text)
+    orders = list(doc['orders'])
+    operation = {'op': 'pattern_clone', 'src': orders[order], 'name': name}
+    mapped = apply_structure_edit(doc, operation)
+    lines = text.splitlines(keepends=True)
+    state._song_op(lines, orders, operation, [])
+    text = ''.join(lines)
+    if 'score' in doc:
+        text = replace_values(text, [(('score',), mapped['score'])])
+    orders[order] = name
+    mapped = apply_structure_edit(api.from_yaml(text),
+                                  {'op': 'orders', 'orders': orders, 'origins': list(range(len(orders)))})
+    lines = text.splitlines(keepends=True)
+    state._write_orders(lines, orders)
+    text = ''.join(lines)
+    if 'score' in doc:
+        text = replace_values(text, [(('score',), mapped['score'])])
+    load_song_text(text, state.base_dir, native_score_rate=44100)  # validate before capture writes assets
+    return text
+
+
 def capture(state, body):
     state._writable()
     state._need_compiled()
@@ -42,9 +66,11 @@ def capture(state, body):
         raise ValueError('Choose 2-4 alternatives, valid rows, and at least one channel')
     ident = uuid.uuid4().hex
     folder = state.base_dir / (state.song_path.stem + '.phrases') / 'assets'
-    folder.mkdir(parents=True, exist_ok=True)
     text = state.patched_text(state.want)[0] if state.want else state.text
     doc = api.from_yaml(text)
+    name = next(n for n in (pat.name + '_tryout' + str(i) for i in itertools.count(1)) if n not in doc['patterns'])
+    text = _clone_occurrence(state, text, order, name)
+    folder.mkdir(parents=True, exist_ok=True)
     frozen, assets = {}, {}
     for num, entry in doc['samples'].items():
         if not isinstance(entry, dict) or not entry.get('file'):
@@ -62,22 +88,26 @@ def capture(state, body):
         assets[rel] = sha
         frozen[num] = rel
     text = replace_values(text, file_updates(doc, frozen))
-    # Only this order occurrence changes, even when earlier orders use the same pattern.
-    lines = text.splitlines(keepends=True)
-    name = next(n for n in (pat.name + '_tryout' + str(i) for i in itertools.count(1)) if n not in doc['patterns'])
-    orders = list(doc['orders'])
-    state._song_op(lines, orders, {'op': 'pattern_clone', 'src': pat.name, 'name': name}, [])
-    orders[order] = name
-    state._write_orders(lines, orders)
-    grid = [[format_cell(pat.rows[r][c]) for c in chans] for r in range(a, b+1)]
+    preview = None
+    if state.mod.native_score is not None:
+        from .tablature import pattern_authoring_view
+        preview = pattern_authoring_view(state.song, state.mod.patterns, state.mod.orders[order],
+                                         state.song['score']['order_ids'][order], view=state.mod.native_score['view'])
+    grid = [[preview['display_rows'][r][c] if preview else format_cell(pat.rows[r][c])
+             for c in chans] for r in range(a, b+1)]
     data = '\n'.join(' | '.join(row) for row in grid)
     phrase = {'id': ident, 'base_hash': state.text_sha(), 'version': state.version(), 'order': order,
               'pattern': pat.name, 'snapshot_pattern': name, 'r0': a, 'r1': b, 'chans': chans, 'original': grid,
-              'snapshot': ''.join(lines), 'assets': assets,
+              'snapshot': text, 'assets': assets,
               'source_assets': state._assets(state.text, {'selected_candidate': state.want}),
               'mix': copy.deepcopy(state.mix()), 'muted': state.silenced(), 'want': state.want,
               'absent': {'name': 'Line absent', 'stars': 0, 'note': ''},
               'variants': [{'name': chr(65+i), 'data': data, 'stars': 0, 'note': ''} for i in range(count)]}
+    if preview is not None:
+        from fractions import Fraction
+        phrase['score_positions'] = [copy.deepcopy(p) for p in preview['positions']
+                                     if p['kind'] == 'note' and p['ch'] in chans
+                                     and a <= Fraction(*p['row']) < b + 1]
     previous = state.meta.get('phrase')
     if previous:
         atomic_write(folder.parent / (previous['id'] + '.json'), json_bytes(previous))
@@ -108,28 +138,61 @@ def edited_text(state, phrase, variant, accepting=False):
         if state.dirty() or state.text_sha() != phrase['base_hash'] or state.mix() != phrase['mix'] or state.silenced() != phrase['muted'] or state.want != phrase.get('want'):
             raise ValueError('The song or audition settings changed since capture; start a new comparison before accepting')
         state._check_assets({'assets': phrase['source_assets']})
-        lines = state.text.splitlines(keepends=True)
+        text = state.text
         names = state.song['patterns']
         name = phrase['pattern']
         orders = list(state.song['orders'])
         if orders.count(name) > 1:
             unique = next(n for n in (name+'_phrase'+str(i) for i in itertools.count(1)) if n not in names)
-            state._song_op(lines, orders, {'op': 'pattern_clone', 'src': name, 'name': unique}, [])
-            orders[phrase['order']] = unique
-            state._write_orders(lines, orders)
+            text = _clone_occurrence(state, text, phrase['order'], unique)
             name = unique
-        mod, _ = load_song_text(''.join(lines), state.base_dir)
     else:
-        lines = phrase['snapshot'].splitlines(keepends=True)
+        text = phrase['snapshot']
         name = phrase['snapshot_pattern']
         for path, sha in phrase['assets'].items():
             p = state.base_dir / path
             if not p.is_file() or digest(p.read_bytes()) != sha:
                 raise ValueError(f'Frozen phrase sample changed or missing: {path}; capture a new comparison')
-        mod, _ = load_song_text(phrase['snapshot'], state.base_dir)
-    pat = next(p for p in mod.patterns if p.name == name)
-    state._edit_block(lines, 0, cells(phrase, variant), nch=len(mod.channels), pat=pat)
-    return ''.join(lines)
+        doc = api.from_yaml(text)
+        if (phrase['pattern'] in doc.get('score', {}).get('patterns', {})
+                and name not in doc['score']['patterns']):
+            raise ValueError('This phrase predates score-aware capture; capture a new comparison')
+    mod, _ = load_song_text(text, state.base_dir, native_score_rate=44100)
+    doc = api.from_yaml(text)
+    index = next(i for i, p in enumerate(mod.patterns) if p.name == name)
+    groups = [(index, cells(phrase, variant))]
+    score = None
+    if mod.native_score is not None:
+        from .tablature import translate_native_pattern_edits, transform_native_selections
+        if variant == -1:
+            if accepting:
+                raise ValueError('Accepting Line absent for a score requires an explicit score rest/duration edit')
+            score, _ = transform_native_selections(doc, mod.patterns, {'action': 'clear', 'selections': [{
+                'pattern': index, 'r0': phrase['r0'], 'r1': phrase['r1'],
+                'cols': [[ch, ['note', 'instrument', 'volume']] for ch in phrase['chans']]}]})
+            # Clear the selected authored attacks in the audition, then write the existing raw cut/control cells.
+            doc['score'] = score
+        else:
+            score, groups = translate_native_pattern_edits(doc, mod.patterns, groups,
+                occurrences={index: doc['score']['order_ids'][phrase['order']]}, view=mod.native_score['view'])
+    elif mod.score_projection is not None:
+        if variant == -1:
+            if accepting:
+                raise ValueError('Accepting Line absent for a score requires an explicit score rest/duration edit')
+            # Auditions are disposable playback documents; authored acceptance never flattens the score.
+            text = api.to_yaml(api.playback_document(doc, mod))
+        else:
+            from .tablature import translate_pattern_edits
+            score, groups = translate_pattern_edits(doc, mod.score_projection, groups)
+    lines = text.splitlines(keepends=True)
+    for pi, changes in groups:
+        pat = (mod.score_projection.raw_patterns if mod.score_projection is not None and score is not None else mod.patterns)[pi]
+        state._edit_block(lines, pi, changes, nch=len(mod.channels), pat=pat)
+    text = ''.join(lines)
+    if score is not None:
+        text = replace_values(text, [(('score',), score)])
+    load_song_text(text, state.base_dir, native_score_rate=44100)
+    return text
 
 
 def variant_wav(state, phrase, text):
@@ -165,7 +228,7 @@ def action(state, body):
                 if not 0 <= variant['stars'] <= 5:
                     raise ValueError('Rate an alternative 0 to 5 stars')
             new = edited_text(state, phrase, index)
-            load_song_text(new, state.base_dir)  # including sample/instrument references, before saving the draft
+            load_song_text(new, state.base_dir, native_score_rate=44100)  # validate before saving the draft
             _store(state, phrase)
             return {}
         if kind in ('diff', 'accept'):

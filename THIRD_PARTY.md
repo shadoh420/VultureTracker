@@ -1,46 +1,166 @@
 # Third-party components
 
-VultureTracker itself is MIT licensed ([LICENSE](LICENSE)). This lists everything else that ships in the
+VultureTracker's original code is MIT licensed ([LICENSE](LICENSE)); the source ports listed below retain their
+upstream licenses. This lists everything else that ships in the
 repository or inside `vulturetracker.exe`, with its license and where the license text lives, followed by
 the tools and libraries that are only ever installed and run separately.
 
 `vulturetracker.exe` packs pedalboard (GPL-3.0), so the exe as a whole is distributed under the GPL-3.0
 (https://www.gnu.org/licenses/gpl-3.0.html); its corresponding source is this repository at the release's tag plus the
-upstream sources linked below. The source code in the repository stays MIT.
+upstream sources linked below. This does not relicense separately licensed source ports or bundled libraries.
 
 ## In the repository (`vendor/`) and inside the exe
 
 | Component | Version | License | License text |
 |---|---|---|---|
-| [libopenmpt](https://lib.openmpt.org) by the OpenMPT Project Developers and Contributors, Olivier Lapicque | 0.8.9 (the DLL 0.8.9+r25651, the WebAssembly build 0.8.9+r25652) | BSD-3-Clause; parts under the Boost Software License 1.0 | `vendor/LICENSE.txt`, `vendor/Licenses/License.mpt.BSD-3-Clause.txt`, `vendor/Licenses/License.mpt.BSL-1.0.txt` |
+| [libopenmpt](https://lib.openmpt.org) by the OpenMPT Project Developers and Contributors, Olivier Lapicque | 0.8.9 + this repository's native-score patch (DLL and WebAssembly) | BSD-3-Clause; parts under the Boost Software License 1.0 | `vendor/LICENSE.txt`, `vendor/Licenses/License.mpt.BSD-3-Clause.txt`, `vendor/Licenses/License.mpt.BSL-1.0.txt` |
 | mpg123 (`openmpt-mpg123.dll`, as shipped with libopenmpt) | with libopenmpt | LGPL-2.1 (a separate DLL, so it can be replaced; source at https://www.mpg123.de) | `vendor/Licenses/License.mpg123.txt`, authors in `vendor/Licenses/License.mpg123.Authors.txt` |
 | libogg (`openmpt-ogg.dll`) by Xiph.Org | with libopenmpt | BSD-3-Clause | `vendor/Licenses/License.ogg.txt` |
 | libvorbis (`openmpt-vorbis.dll`) by Xiph.Org | with libopenmpt | BSD-3-Clause | `vendor/Licenses/License.Vorbis.txt` |
 | zlib (`openmpt-zlib.dll`) by Jean-loup Gailly and Mark Adler | with libopenmpt | zlib License | `vendor/Licenses/License.zlib.txt` |
-| libopenmpt compiled to WebAssembly (`vulturetracker/web/libopenmpt.js` + `.wasm`, the official 0.8.9+release dev.js build, for the live engine) | 0.8.9 | BSD-3-Clause and BSL-1.0, with minimp3 (CC0), miniz (MIT) and stb_vorbis (MIT / public domain) compiled in | `vulturetracker/web/licenses/` |
+| libopenmpt compiled to WebAssembly (`vulturetracker/web/libopenmpt.js` + `.wasm`, built locally for the live engine) | 0.8.9 + native-score patch; Emscripten 4.0.13 | BSD-3-Clause and BSL-1.0, with minimp3 (CC0), miniz (MIT) and stb_vorbis (MIT / public domain) compiled in | `vulturetracker/web/licenses/` |
+| alphaTab (`vulturetracker/web/alphaTab.min.js`), local TAB/score engraving; its audio player is disabled | 1.8.4 | MPL-2.0; bundled component notices remain in the unmodified runtime header | `vulturetracker/web/licenses/alphatab-MPL-2.0.txt` |
+| Bravura music font, from alphaTab 1.8.4 | bundled | SIL Open Font License 1.1 | `vulturetracker/web/licenses/Bravura-OFL.txt` |
+| Chord theory, recognition and voicing algorithms in `vulturetracker/chord_tools.py`, ported from TuxGuitar by Julian Casadesus, guiv42, helge17 and chord creator Nikola Kolarovic | TuxGuitar `2c46e2a1cccdfdfa6e6f2692f241bd60bf418129`; Python port 2026-10-20 | LGPL-2.1 | `vulturetracker/licenses/TuxGuitar-LGPL-2.1.txt`, `TuxGuitar-AUTHORS.txt`, `TuxGuitar-chord-NOTICE.txt` |
+| LilyPond and MusicXML writers in `vulturetracker/notation_export.py` (MusicXML lyrics by Menno Vossen) and the ASCII tablature writer in `vulturetracker/asciitab.py`, ported from TuxGuitar by Julian Casadesus, guiv42 and helge17 | TuxGuitar `2c46e2a1cccdfdfa6e6f2692f241bd60bf418129`; Python ports 2026-10-20 | LGPL-2.1 | `vulturetracker/licenses/TuxGuitar-LGPL-2.1.txt`, `TuxGuitar-AUTHORS.txt`, `TuxGuitar-notation-NOTICE.txt` |
+| Scale catalogue and key-signature spelling portions of `vulturetracker/web/tablature.js`, from TuxGuitar by Julian Casadesus, guiv42 and helge17 | TuxGuitar `2c46e2a1cccdfdfa6e6f2692f241bd60bf418129`; JavaScript adaptation 2026-10-20 | LGPL-2.1 for these source-derived portions | `vulturetracker/web/licenses/TuxGuitar-scales-NOTICE.txt`; full LGPL and authors in `vulturetracker/licenses/` |
+| Generic priority sorting in `vulturetracker/_java_priority_sort.py`, adapted from OpenJDK TimSort by Josh Bloch, copyright Oracle and Google | OpenJDK `jdk-24+36`; Python adaptation 2026-10-20 | GPL-2.0-only WITH Classpath-exception-2.0; exception retained for this modified sorting library | `vulturetracker/licenses/OpenJDK-TimSort-GPL-2.0-with-classpath.txt`, `OpenJDK-TimSort-NOTICE.txt` |
+
+The chord algorithms' source is the pinned TuxGuitar
+[`desktop/TuxGuitar/src/app/tuxguitar/app/view/dialog/chord/`](https://github.com/helge17/tuxguitar/tree/2c46e2a1cccdfdfa6e6f2692f241bd60bf418129/desktop/TuxGuitar/src/app/tuxguitar/app/view/dialog/chord).
+The sorting source is OpenJDK's
+[`java.util.TimSort`](https://github.com/openjdk/jdk/blob/jdk-24%2B36/src/java.base/share/classes/java/util/TimSort.java).
+The sorting library accepts a caller-provided comparator and contains no chord logic or application imports.
+It retains its own GPL-2.0-only license and Classpath exception; the independent callers retain their licenses.
+The exception's linking permission is used for the combined application, not to relicense the sorting source
+under GPL-3.0. The modified Python sources and full notices accompany this repository and are included in the
+local package's `source/chord-tools/` folder.
+
+The scale names and interval sets come from the pinned TuxGuitar
+`desktop/TuxGuitar/share/scales/scales.xml`; key-signature selection adapts
+`common/TuxGuitar-lib/src/main/java/app/tuxguitar/util/TGMusicKeyUtils.java`.
+Their source-derived portions retain LGPL-2.1. Editable `tablature.js`, the scale notice, full license and authors
+accompany the local package under `source/vulturetracker/`. The remaining original editor code retains MIT.
 
 ## Vendored files: digests and sources
 
 The SHA-256 of every third-party file in `vendor/` and `vulturetracker/web/` (a text file hashed with LF line endings, as
 git keeps it; a checkout with CRLF endings hashes the same once they are turned back), checked by `tests/test_vendor.py`;
 a file added to either folder must be added here. `vulturetracker/web/engine-core.js`, `engine-worklet.js` and
-`faust-render.mjs` are this project's own code (MIT) and are not listed.
+`faust-render.mjs`, `tablature.css` and `score-print.html` are this project's own code (MIT) and are not listed.
+The actively maintained `tablature.js` is also outside this digest table; its source-derived scale portions
+are attributed above rather than treated as an unmodified vendor bundle.
 
-- **The libopenmpt 0.8.9 dev.js archive:** https://lib.openmpt.org/files/libopenmpt/dev/libopenmpt-0.8.9+release.dev.js.tar.gz
+The unmodified alphaTab browser runtime and Bravura WOFF2 are from the pinned npm package
+[`@coderline/alphatab@1.8.4`](https://www.npmjs.com/package/@coderline/alphatab/v/1.8.4), files
+`dist/alphaTab.min.js` and `dist/font/Bravura.woff2`. Its matching source is available at
+https://github.com/CoderLine/alphaTab/tree/v1.8.4. The font's license comes from that tag's
+`packages/alphatab/font/bravura/Bravura-OFL.txt`. These files are served locally; no CDN or renderer soundfont is
+used at runtime. The checksums below pin the newly added dependency files for the existing vendor integrity test.
+
+- **Original WebAssembly license source:** https://lib.openmpt.org/files/libopenmpt/dev/libopenmpt-0.8.9+release.dev.js.tar.gz
   (SHA-256 `b2c31cd9c99830997b7a337706509556fd1f5dd27da4b7db62e5a24ec95a2758` for the copy kept in the ignored
-  `tools/libopenmpt-js/`; lib.openmpt.org publishes no digests). `libopenmpt.js` and `libopenmpt.wasm` are its
-  `bin/wasm/` files, `licenses/libopenmpt-license.txt` its `license.txt`, the other licenses its `licenses/`; checked
-  byte for byte against that copy on 2026-10-14.
-- **The libopenmpt 0.8.9 Windows build:** the amd64 DLLs of libopenmpt 0.8.9+r25651 (`libopenmpt.dll` and the
-  `openmpt-*.dll` it loads) and their license texts, from lib.openmpt.org's 0.8.9 Windows downloads
+  `tools/libopenmpt-js/`; lib.openmpt.org publishes no digests). `licenses/libopenmpt-license.txt` is its
+  `license.txt`, the other licenses its `licenses/`; checked byte for byte against that copy on 2026-10-14.
+  The runtime files were replaced by the patched build below on 2026-10-20.
+- **Original Windows license source:** the license texts accompanying the amd64 DLLs of libopenmpt
+  0.8.9+r25651, from lib.openmpt.org's 0.8.9 Windows downloads
   (https://lib.openmpt.org/libopenmpt/download/: `libopenmpt-0.8.9+release.dev.windows.vs2022.zip` and
   `libopenmpt-0.8.9+release.bin.windows.zip` both carry amd64 builds). Which of the two archives the files were taken
-  from was not recorded when they were added, so they have not been checked against either; the digests below pin the
-  files as committed.
+  from was not recorded when they were added, so they have not been checked against either; the license digests below
+  pin the files as committed. The five DLLs were replaced by the full patched build below on 2026-10-20.
+
+### Patched engine source and reproduction
+
+The corresponding engine source is the official **0.8.9+release** source plus
+[`tools/native-score-engine.patch`](tools/native-score-engine.patch). The patch adds frame-boundary parent notes,
+identity-checked release, same-frame release/attack batches, opt-in exact Classic timing, explicit tail continuation,
+same-module playback checkpoints, harmonic voice groups and identity-owned absolute pitch offsets and gain,
+shared by native and WASM. Batch attacks at a new row enter the ordinary note-before-effects path; off-grid attacks
+inherit the ongoing tick state. The batch interface accepts up to 64 unique attack parents and 256 release identities.
+Legacy playback remains the default. The host must cap tail duration; looping voices can otherwise continue indefinitely.
+Each module holds one checkpoint of immutable PCM IT playback. Restore assigns fresh voice identities and returns
+their mapping to the host; mixer/settings changes invalidate the checkpoint. The host retains its matching event
+index, frame and original voice map. Checkpoints cannot be shared between modules or serialized to disk.
+The pitch interface accepts finite offsets within +/-12 semitones on a live identity, including released tails.
+It preserves sample phase and tracker modulation; zero removes the offset. Hosts dispatch the note batch before
+same-frame pitch controls. Note identities are unique across modules within one loaded engine.
+The gain interface accepts finite 0..1 on live owned PCM voices, including released tails; 1 is neutral and
+0 remains live. It multiplies each final filtered/panned/ramped voice contribution without changing tracker
+volume, phase, envelopes or ramp state. Authored MIDI velocity uses velocity/127 after its attack batch and
+before pitch controls. Neutral PCM is unchanged. Retired click-suppression offsets retain upstream integer
+decay rounding; measured scaling error stayed below 7.85e-7 (bound 258*2^-27), with native/WASM PCM identical.
+
+The group interface accepts up to three ordered layers per parent attack, with the last layer committing the
+parent state. Layers share the preceding parent state but keep independent identities, gain and pitch controls.
+The next parent attack applies each layer's NNA once; siblings do not trigger duplicate-note actions against
+one another. Capacity, partial sample-map and backing conflicts refuse atomically. Hosts initialize the stereo
+mixer with a zero-frame read, then make an empty group dispatch to prepare private rollback storage. Eligibility
+is cached per configuration epoch and subsequent transactions reuse that storage. The user's checkpoint remains
+independent. This still copies playback state and visited-row bits per transaction; live timing is not yet measured.
+
+The exact-clock checkpoint/group domain also admits absolute row tempo commands T20..FF (32..255 BPM).
+The `vt_held_score` extension adds per-attack hold flags to the same atomic group transaction. A held ordinary
+voice survives later attacks on its parent, including its release tail, without NNA/DCT or pool stealing cutting
+it. Saved voices retain phase, envelopes, filter and identity controls; parent fader/pan/mute apply to them.
+Held parents require explicit single-pitch sources and backing containing only empty/T/V cells. Inherited
+sources remain outside this bounded capability. The separate `vt_score_contexts` extension keeps independent
+note heads on the same parent, including harmonic layers, repeated attacks and grace/main pairs. The host
+opens and closes explicit head identities in the atomic frame transaction; same-head NNA/DCT remains unchanged.
+Context parents require explicit sources and empty/T/V backing. Carry envelopes, random instrument volume/pan
+and random sample auto-vibrato refuse. Checkpoints preserve head bindings and remap their sounding voice IDs.
+Speed remains constant; tempo slides, recall and flow commands refuse. The host sums rational seconds across
+tempo segments and rounds each absolute event frame once. Exact-clock seeks carry the same fractional-frame
+residual through every tick as continuous playback; legacy seek timing is unchanged. Recreating score voices
+still requires checkpoint restore and event replay, since raw module seeking cannot reconstruct host-authored groups.
+
+- [MSVC source archive](https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.9+release.msvc.zip):
+  used for the full Windows target and its bundled mpg123/ogg/vorbis/zlib sources.
+- [Makefile source archive](https://lib.openmpt.org/files/libopenmpt/src/libopenmpt-0.8.9+release.makefile.tar.gz):
+  used for the WASM build files and Linux CI. The thirteen patched C++ files are identical between the archives after
+  newline normalization. The retained patch applies to the unmodified makefile archive; for MSVC's CRLF sources use
+  `git apply --ignore-space-change /absolute/path/to/VultureTracker/tools/native-score-engine.patch`.
+
+Windows was built with Visual Studio 2022, MSVC **14.43.34808** and Windows SDK **10.0.22621.0**. From the patched
+MSVC source root, in that toolchain's developer command prompt:
+
+```bat
+MSBuild.exe build\vs2022win10\libopenmpt.vcxproj /m:1 /p:Configuration=ReleaseShared /p:Platform=x64 /p:SpectreMitigation=false /p:CL_MPCount=1 /v:minimal /nologo
+```
+
+The local `Directory.Build.props` also set `ClCompile/MultiProcessorCompilation` to `false` to serialize compilation;
+that machine-only setting is excluded from the portable patch. Spectre libraries were unavailable locally. Outputs
+are `bin/release/vs2022-win10-shared/amd64/{libopenmpt,openmpt-mpg123,openmpt-ogg,openmpt-vorbis,openmpt-zlib}.dll`.
+Use the full `libopenmpt.vcxproj`, not `libopenmpt-small.vcxproj`, to preserve this decoder family.
+
+WASM used Emscripten **4.0.13** (release `32b8ae819674cb42b8ac2191afeb9571e33ad5e2`), GNU make **4.4.1**, Node **24.11.0**
+and Python **3.14**, with scratch-local SDK configuration/cache and no global PATH change. The pinned Windows SDK bundle
+is [wasm-binaries.zip](https://storage.googleapis.com/webassembly/emscripten-releases-builds/win/32b8ae819674cb42b8ac2191afeb9571e33ad5e2/wasm-binaries.zip).
+From the patched makefile source root, with that SDK on the current shell's PATH:
+
+```sh
+EMCC_CORES=1 EMCC_BATCH_BUILD=0 BINARYEN_CORES=1 make CONFIG=emscripten EMSCRIPTEN_TARGET=wasm TEST=0 EXAMPLES=0 -j1
+```
+
+`EMCC_BATCH_BUILD=0` avoids the Windows command-length failure while building Emscripten's libc. Promote
+`bin/libopenmpt.js` and `bin/libopenmpt.wasm` together. Native/WASM score, release-tail and default-ramping PCM comparisons
+passed locally; this does not claim byte-reproducible compiler output.
+
+The `tests` and `floor` CI jobs download the pinned makefile archive, apply the retained patch with `patch -p1`, and
+build a shared library with `make CONFIG=gcc SHARED_LIB=1 STATIC_LIB=0 OPENMPT123=0 EXAMPLES=0 TEST=0 -j2`.
+They set `LIBOPENMPT` to its absolute `bin/libopenmpt.so` path. All three CI jobs set `VT_REQUIRE_NATIVE_SCORE=1`
+and `VT_REQUIRE_PITCH=1`, `VT_REQUIRE_GAIN=1`, `VT_REQUIRE_GROUPS=1`;
+Windows uses the vendored full DLL. These Linux options were checked against the upstream Makefile, but the Linux
+build was not run on the Windows development PC.
 
 | File | SHA-256 | From |
 |---|---|---|
-| `vendor/libopenmpt.dll` | `9fa3131204f44a3b157f22f9f0ae11c5cccb5befa37e91a2476567aa0f4b0d94` | the libopenmpt 0.8.9 Windows build |
+| `vulturetracker/web/alphaTab.min.js` | `2d0335501b875453d52359de23cd9cebfcf71aed3d5739f1cf95117acfd52bec` | alphaTab 1.8.4 npm package |
+| `vulturetracker/web/Bravura.woff2` | `181e0e7c4889f9ad57dde0a11988fa61b941617aa499ecdb9dfd4713896c2b19` | alphaTab 1.8.4 npm package |
+| `vulturetracker/web/licenses/alphatab-MPL-2.0.txt` | `de981130586154b6ce2cf91528b9291789192d62234d0d7e6e41d085b8e1d351` | alphaTab 1.8.4 npm package |
+| `vulturetracker/web/licenses/Bravura-OFL.txt` | `c24929be7028026a65ee8894da1e3c36d2a4ccce0548d9ba8ba64509f46319ee` | alphaTab v1.8.4 source tag |
+| `vulturetracker/web/licenses/TuxGuitar-scales-NOTICE.txt` | `295f496f612276b3a0a772ce94bf3e82efaebd8d23e8fd48e71230652d42aa9d` | TuxGuitar pinned scale catalogue, spelling adaptation and percussion names notice |
+| `vendor/libopenmpt.dll` | `ad1e2457876073efe26069e2371d90c113ac22b6ee9b77d1b648547c810ef994` | patched libopenmpt 0.8.9 full MSVC build above |
 | `vendor/LICENSE.txt` | `ceabc562c8cfb3af0d51e94182947c23bde6c18274e2b21585bdde22d2031e9d` | the libopenmpt 0.8.9 Windows build |
 | `vendor/Licenses/License.mpg123.Authors.txt` | `fb18c9abae864a20f691e949e4c7871c79f5f0861b3a3dcaf5881c3c02cf5cc2` | the libopenmpt 0.8.9 Windows build |
 | `vendor/Licenses/License.mpg123.txt` | `c22482728a634a8dfdb4ff72a96d4c1ed64cd8f3e79335c401751ac591609366` | the libopenmpt 0.8.9 Windows build |
@@ -49,12 +169,12 @@ a file added to either folder must be added here. `vulturetracker/web/engine-cor
 | `vendor/Licenses/License.ogg.txt` | `d2ab5758336489da61c12cc5bb757da5339c4ae9001f9bb0562b4370249af814` | the libopenmpt 0.8.9 Windows build |
 | `vendor/Licenses/License.Vorbis.txt` | `ec1815db59fcd302846df949d7424876cb2e2dc5ed1606c5fb0b36787b1cf43a` | the libopenmpt 0.8.9 Windows build |
 | `vendor/Licenses/License.zlib.txt` | `4026d921213bb2e311d8d42b44ef53361c102d5d45ae32f93f8e52eaee8d068f` | the libopenmpt 0.8.9 Windows build |
-| `vendor/openmpt-mpg123.dll` | `f15edd24576d88fa08a153c4a7f9d9d7956449e4fc67758d660ad35d9e1696df` | the libopenmpt 0.8.9 Windows build |
-| `vendor/openmpt-ogg.dll` | `bbeea26588404a00ae964f1c4aceb6d6474e5885f8337491a4c69e29e8516eb6` | the libopenmpt 0.8.9 Windows build |
-| `vendor/openmpt-vorbis.dll` | `7393d017e2930d57c12c016de21c6fa658f862481758ba394823f6ac5e013df2` | the libopenmpt 0.8.9 Windows build |
-| `vendor/openmpt-zlib.dll` | `966d96e9aaf5cbd9e1b600435af1180a3a643ace17a0e782a5becf378b25445b` | the libopenmpt 0.8.9 Windows build |
-| `vulturetracker/web/libopenmpt.js` | `c5327c1a3acbcc49d034ebe55fb84a0a824e50bc7d7a1a171a9b8dfc79cc4afb` | the libopenmpt 0.8.9 dev.js archive |
-| `vulturetracker/web/libopenmpt.wasm` | `f7e9f2fa9eb5536456dad7df4c72f6cc8fbf245271cd9cf185d891040a085cbf` | the libopenmpt 0.8.9 dev.js archive |
+| `vendor/openmpt-mpg123.dll` | `716626602bb13d14ec3fbe1fb25ade956dc2a22187a6817861c16c98688c54d1` | full MSVC build's bundled mpg123 |
+| `vendor/openmpt-ogg.dll` | `746df5e04e8549ee9d7a7d740669640a1b4774daff72a7f6da5870530c14b36a` | full MSVC build's bundled libogg |
+| `vendor/openmpt-vorbis.dll` | `bed7ba8ebcc6c4ffc14c1f83d8a72a6530330ca4ac0ca34ffeb3a008834cdd79` | full MSVC build's bundled libvorbis |
+| `vendor/openmpt-zlib.dll` | `de42c664d7aba4f9874ed07e3c279e2ab79998dc50dc8a056b4489c2da601070` | full MSVC build's bundled zlib |
+| `vulturetracker/web/libopenmpt.js` | `31c9de637c0e2cfde3cfdf0bd680fe5c294abceb7040ef0b26aec9b8bcaf3c65` | patched libopenmpt 0.8.9 / Emscripten 4.0.13 build above |
+| `vulturetracker/web/libopenmpt.wasm` | `48ed8ccdae0cc654c5ba2231d075779d25caa3e95ecfd5929222ac2d7da75349` | patched libopenmpt 0.8.9 / Emscripten 4.0.13 build above |
 | `vulturetracker/web/licenses/libopenmpt-license.txt` | `ceabc562c8cfb3af0d51e94182947c23bde6c18274e2b21585bdde22d2031e9d` | the libopenmpt 0.8.9 dev.js archive |
 | `vulturetracker/web/licenses/license.minimp3.txt` | `6a1ee543e5282cd9061881edf462e6fdab181f328da71fc2c9a6950a80e94d01` | the libopenmpt 0.8.9 dev.js archive |
 | `vulturetracker/web/licenses/license.miniz.txt` | `e2c1aeb66eef9191d8c3feb164db2def2335a61d039bf04ed849f6b042433b30` | the libopenmpt 0.8.9 dev.js archive |
@@ -104,6 +224,13 @@ RECORD tab's audio input.
 In a source checkout the same binary comes from the `imageio-ffmpeg` package (BSD-2-Clause), or any ffmpeg on PATH.
 
 ## Installed and run separately, never redistributed here
+
+The native PowerTab/TablEdit readers (`ptb.py`, `tef.py`, `tab_binary.py`) port the
+TuxGuitar 2.1.0 providers under LGPL-2.1-or-later. Their exact pinned source paths
+and changes are recorded in `vulturetracker/licenses/TuxGuitar-tab-import-NOTICE.txt`;
+the local ZIP includes these Python sources and the existing TuxGuitar license/authors.
+Batch PDF delivery invokes an installed Edge/Chrome/Chromium in headless mode;
+no browser binary or browser automation package is redistributed for that feature.
 
 | Component | License | Role |
 |---|---|---|

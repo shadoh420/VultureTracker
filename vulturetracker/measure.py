@@ -180,7 +180,7 @@ def scale_pcm(pcm, factor):
     return np.clip(np.round(np.frombuffer(pcm, "<i2") * factor), -32768, 32767).astype("<i2").tobytes()
 
 
-def channel_levels(data, nch, cancel=None):
+def channel_levels(data, nch, cancel=None, *, plan=None, snapshot=None):
     """Each channel soloed (every other channel disabled so volume commands cannot unmute it): RMS in dB over the whole render and over its active half-seconds, plus those seconds. Needs numpy.
     `cancel()` true between channels abandons the pass (returns None)."""
     import numpy as np
@@ -188,9 +188,15 @@ def channel_levels(data, nch, cancel=None):
     for ch in range(nch):
         if cancel is not None and cancel():
             return None
-        d = patch_it(data, [other for other in range(nch) if other != ch])
-        with LoadedModule(d) as lm:
-            x = np.frombuffer(lm.render(RATE, oversample=1), dtype="<i2").astype(np.float32).reshape(-1, 2) / 32768
+        muted = [other for other in range(nch) if other != ch]
+        if snapshot is not None:
+            from .export import render
+            pcm = render(snapshot, silenced=muted, cancel=cancel)
+        else:
+            d = patch_it(data, muted)
+            with LoadedModule(d, rate=RATE, oversample=1, plan=plan) as lm:
+                pcm = lm.render(RATE, oversample=1)
+        x = np.frombuffer(pcm, dtype="<i2").astype(np.float32).reshape(-1, 2) / 32768
         e = np.mean(x ** 2, axis=1)
         w = RATE // 2
         seg = e[: len(e) // w * w].reshape(-1, w).mean(axis=1)

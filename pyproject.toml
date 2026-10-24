@@ -42,4 +42,4 @@ packages = ["vulturetracker"]
 version = {attr = "vulturetracker.__version__"}
 
 [tool.setuptools.package-data]
-vulturetracker = ["gui.html", "icon.png", "web/*", "web/licenses/*", "faust_examples/*.dsp"]
+vulturetracker = ["gui.html", "icon.png", "web/*", "web/licenses/*", "licenses/*.txt", "faust_examples/*.dsp"]

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Score print preview — VultureTracker</title>
+<link rel="stylesheet" href="/web/tablature.css">
+<script src="/web/alphaTab.min.js" defer></script><script src="/web/engine-core.js" defer></script><script src="/web/tablature.js" defer></script>
+</head><body><main id="score-print" aria-live="polite">Loading score print preview…</main>
+<script>
+document.addEventListener('DOMContentLoaded',async()=>{
+  const root=document.getElementById('score-print'),q=new URLSearchParams(location.search);
+  try{
+    if(!q.get('song')||!q.get('revision'))throw new Error('Open print preview from the TAB editor.');
+    const response=await fetch('/api/score',{headers:{'X-VT-Token':q.get('token')||''},cache:'no-store'});
+    const snapshot=await response.json();
+    if(!response.ok||snapshot.error)throw new Error(snapshot.error||'Could not load the score.');
+    if(snapshot.song!==q.get('song')||snapshot.revision!==q.get('revision'))
+      throw new Error('The song changed before this preview opened. Open a new print preview from TAB.');
+    if(!snapshot.score)throw new Error('This song has no authored score to print.');
+    document.title=(snapshot.title||'Untitled')+' — Score print preview';
+    VultureTab.mountPrint(root,snapshot,{saveImage:async payload=>{
+      const response=await fetch('/api/score_export',{method:'POST',
+        headers:{'Content-Type':'application/json','X-VT-Token':q.get('token')||''},body:JSON.stringify(payload)});
+      const result=await response.json();
+      if(!response.ok||result.error)throw new Error(result.error||'Could not save the score image.');
+      return result;
+    }});
+  }catch(error){root.textContent=String(error.message||error);root.setAttribute('role','alert')}
+});
+</script></body></html>

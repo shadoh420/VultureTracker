@@ -199,11 +199,33 @@ def summarize(mod) -> dict:
     }
 
 
-def compile_song(song_or_path, base_dir=None):
-    """Returns (it_bytes, module, warnings). Raises SongError."""
+def compile_song(song_or_path, base_dir=None, *, render_timing=False):
+    """Returns (it_bytes, module, warnings). Raises SongError.
+
+    render_timing enables export-only sampled passages for bounded sub-tick
+    performance. Strict editing/validation callers retain the default refusal.
+    """
     text, bdir, name = _load(song_or_path, base_dir)
-    mod, warnings = load_song_text(text, bdir, name)
+    mod, warnings = load_song_text(text, bdir, name, render_timing=render_timing)
     return write_it(mod), mod, warnings
+
+
+def prepare_playback(song_or_path, base_dir=None, sample_rate=44100):
+    """Prepare, but do not play, {backing_it, plan, view, module, warnings}.
+
+    sample_rate is the actual mixer rate (including offline oversampling).
+    Native score bytes and their exact plan are one playback input, never a
+    standalone IT export. Unsupported native planning raises SongError without
+    falling back to strict projection. Legacy songs return their unchanged IT
+    with plan/view None. Existing loaders and compile_song remain strict.
+    """
+    if type(sample_rate) is not int or not 8000 <= sample_rate <= 384000:
+        raise ValueError('sample_rate must be an integer mixer rate in 8000..384000')
+    text, bdir, name = _load(song_or_path, base_dir)
+    mod, warnings = load_song_text(text, bdir, name, native_score_rate=sample_rate)
+    native = mod.native_score or {}
+    return {'backing_it': write_it(mod, _native_backing=True), 'plan': native.get('plan'),
+            'view': native.get('view'), 'module': mod, 'warnings': warnings}
 
 
 def output_sources(song_or_path, base_dir=None):
@@ -219,7 +241,7 @@ def output_sources(song_or_path, base_dir=None):
 def build(song_or_path, out_path, base_dir=None) -> dict:
     """Compile to .it, then load it back with libopenmpt and compare structure to the song."""
     from .openmpt import LoadedModule
-    data, mod, warnings = compile_song(song_or_path, base_dir)
+    data, mod, warnings = compile_song(song_or_path, base_dir, render_timing=True)
     protect_outputs([out_path], output_sources(song_or_path, base_dir))
     expected = summarize(mod)
     with LoadedModule(data) as lm:
@@ -246,17 +268,18 @@ def build(song_or_path, out_path, base_dir=None) -> dict:
 def render(it_or_song, wav_path, repeat=0, rate=44100, base_dir=None, oversample=2, sources=()) -> float:
     """Render an .it file (or a song file, compiled in memory) to a WAV, mixed at `oversample` times `rate` and
     band-limited down (see LoadedModule.render). Returns seconds rendered."""
-    from .openmpt import LoadedModule
-    import wave
+    from .openmpt import LoadedModule, mix_rate
+    plan = None
     p = Path(str(it_or_song))
     if isinstance(it_or_song, (str, Path)) and p.suffix.lower() in (".it", ".mod", ".xm", ".s3m", ".mptm"):
         protected = [p, *sources]
         data = p.read_bytes()
     else:
         protected = [*output_sources(it_or_song, base_dir), *sources]
-        data = compile_song(it_or_song, base_dir)[0]
+        prepared = prepare_playback(it_or_song, base_dir, mix_rate(rate, oversample))
+        data, plan = prepared['backing_it'], prepared['plan']
     protect_outputs([wav_path], protected)
-    with LoadedModule(data) as lm:
+    with LoadedModule(data, rate, oversample, plan=plan) as lm:
         pcm = lm.render(rate, repeat, oversample=oversample)
     protect_outputs([wav_path], protected)
     atomic_write(wav_path, wav_bytes(pcm, rate))
@@ -269,7 +292,8 @@ def measure(source, channels=None, orders=None, rate=44100, base_dir=None) -> di
     with IT's channel-disable bit; `orders`: an order slice (start, stop) of a song."""
     import numpy as np
     from . import dsp
-    from .openmpt import LoadedModule
+    from .openmpt import LoadedModule, mix_rate
+    plan = None
     p = Path(str(source))
     if isinstance(source, (str, Path)) and p.suffix.lower() == ".wav":
         from .wavload import read_wav
@@ -279,24 +303,63 @@ def measure(source, channels=None, orders=None, rate=44100, base_dir=None) -> di
     if isinstance(source, (str, Path)) and p.suffix.lower() in (".it", ".mod", ".xm", ".s3m", ".mptm"):
         data = p.read_bytes()
     else:
-        data = compile_song(tryout_song(source, orders) if orders else source, base_dir)[0]
+        if orders:
+            text, _, _ = _load(source, base_dir)
+            if from_yaml(text).get('score') is None:
+                source = tryout_song(source, orders, base_dir=base_dir)
+        prepared = prepare_playback(source, base_dir, mix_rate(rate, 2))
+        data, plan = prepared['backing_it'], prepared['plan']
     if channels is not None:
         d = bytearray(data)
         for ch in range(64):
             if ch not in channels:
                 d[0x40 + ch] |= 0x80
         data = bytes(d)
-    with LoadedModule(data) as lm:
-        pcm = lm.render(rate, oversample=2)
+    with LoadedModule(data, rate, 2, plan=plan) as lm:
+        end = None
+        if plan is not None and orders is not None:
+            a, b = orders
+            source = plan.get('source_occurrences', plan['occurrences'])
+            if any(type(x) is not int for x in orders) or not 0 <= a < b <= len(source):
+                raise ValueError('Invalid native score order range')
+            from fractions import Fraction
+            from .tablature import resolve_source_region
+            last_row = int(Fraction(*source[b - 1]['duration']) / Fraction(*plan['row_step'])) - 1
+            a, r0, b, r1 = resolve_source_region(plan, (a, 0, b - 1, last_row))
+            lm.order_start(a, r0)
+            end = (b + 1, 0)
+        pcm = lm.render(rate, oversample=2, end=end)
     x = np.frombuffer(pcm, "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
     return dsp.measure_mix(x, rate)
 
 
-def tryout_song(song_or_path, orders=None) -> dict:
+def playback_document(song, mod):
+    """A disposable tracker projection for playback transforms; never save it as the authored score."""
+    import copy
+    from .notation import format_cell
+    if mod.native_score is not None:
+        raise ValueError('Native score playback requires its paired event plan; it cannot be flattened into residual tracker cells')
+    base = copy.deepcopy(song)
+    if 'score' in base:
+        base.pop('score')
+        base['patterns'] = {p.name: {'rows': len(p.rows), 'data': ''.join(
+            f"{r:02d}: {' | '.join(format_cell(c) for c in row)}\n" for r, row in enumerate(p.rows))}
+                            for p in mod.patterns}
+    return base
+
+
+def tryout_song(song_or_path, orders=None, base_dir=None, compiled=None) -> dict:
     """The song (a path, or a dict that is copied) cut to an order slice `(start, stop)`, or whole when `orders` is None."""
     import copy
     base = copy.deepcopy(song_or_path) if isinstance(song_or_path, dict) else load(song_or_path)
     if orders:
+        if 'score' in base:
+            if compiled is None:
+                folder = base_dir or (Path(song_or_path).resolve().parent if not isinstance(song_or_path, dict) else None)
+                if folder is None:
+                    raise ValueError('A score playback slice requires its base_dir or compiled module')
+                _, compiled, _ = compile_song(base, folder)
+            base = playback_document(base, compiled)
         base.pop('sections', None)  # editor annotations do not affect playback of a slice
         start = orders[0]
         base["orders"] = base["orders"][orders[0]:orders[1]]

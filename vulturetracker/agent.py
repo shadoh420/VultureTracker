@@ -154,7 +154,9 @@ def edit_channel(st, a):
             affected = set(range(min(c, dest), max(c, dest) + 1))
             order.insert(dest, order.pop(c))
         elif action == "remove":
-            if any(not r[c].is_empty() for p in st.mod.patterns for r in p.rows) and a.get("remove_notes") is not True:
+            from .gui import score_channel_content
+            if (any(not r[c].is_empty() for p in st.mod.patterns for r in p.rows) or
+                    score_channel_content(st.song, c)[0]) and a.get("remove_notes") is not True:
                 raise ValueError("channel contains notes/effects; remove_notes:true is required to delete its contents")
             affected = set(range(c, len(order)))
             order.pop(c)
@@ -240,15 +242,16 @@ def _slot(st, kind, value):
 
 
 def _protected_voices(st):
+    from .gui import voice_references
     locked = _approved_channels(st)
     # A note can carry from an earlier order into an approved pattern. Conservatively protect every played voice
     # when any pattern is approved, including references in unused patterns; unused new slots remain editable.
     any_pattern = any(st.pattern_entry(p.name).get("approved") for p in st.mod.patterns)
-    refs = {cell.instrument for p in st.mod.patterns for row in p.rows for c, cell in enumerate(row)
-            if cell.instrument and (any_pattern or c in locked)}
+    refs = voice_references(st.song, st.mod, channels=None if any_pattern else locked)
     if st.mod.instruments is None:
         return {"samples": refs, "instruments": set()}
-    return {"instruments": refs, "samples": {s for n in refs for _, s in st.mod.instruments[n - 1].keymap if s}}
+    return {"instruments": refs, "samples": {s for n in refs if 0 < n <= len(st.mod.instruments)
+                                            for _, s in st.mod.instruments[n - 1].keymap if s}}
 
 
 def _voice_guard(st, kind, n):
@@ -261,6 +264,7 @@ def _voice_guard(st, kind, n):
 
 
 def _voice_usage(st, kind, n):
+    from .gui import score_notes, voice_references
     instruments = []
     if kind == "samples" and st.mod.instruments is not None:
         names = {}
@@ -276,6 +280,12 @@ def _voice_usage(st, kind, n):
     cells = [{"pattern": p.name, "row": r, "channel": c + 1}
              for p in st.mod.patterns for r, row in enumerate(p.rows) for c, cell in enumerate(row)
              if cell.instrument in numbers]
+    for name, beat, track, note in score_notes(st.song):
+        source = note.get('instrument', track['instrument'])
+        refs = {source} if source else voice_references(st.song, st.mod, channels={note['channel']})
+        if refs & numbers:
+            cells.append({"pattern": name, "beat": beat['id'], "note": note['id'],
+                          "at": beat['at'], "channel": note['channel'] + 1, "score": True})
     return {"instruments": instruments, "reference_count": len(cells), "references": cells[:100],
             "references_truncated": len(cells) > 100}
 
@@ -605,6 +615,10 @@ def set_audition(st, a):
                 if lp["from"] > lp["to"]:
                     raise ValueError("loop end must follow its start")
                 meta["orders"] = [lp["from"][0], lp["to"][0] + 1]
+                if st.facts.get('playback_orders'):
+                    orders = st.facts['orders']
+                    st._resolved_playback_span((orders[lp['from'][0]]['order'], lp['from'][1],
+                                                orders[lp['to'][0]]['order'], lp['to'][1]))
             meta["loop"] = copy.deepcopy(lp)
         old, st.meta = st.meta, meta
         try:
@@ -632,8 +646,9 @@ def _pattern_index(st, ref):
     raise ValueError(f"no pattern {ref!r}")
 
 
-def _rows_text(st, index, r0=0, r1=None, chans=None):
-    rows = st.pattern_rows(index)["rows"]
+def _rows_text(st, index, r0=0, r1=None, chans=None, occurrence=None):
+    view = st.pattern_rows(index, occurrence)
+    rows = view.get("display_rows", view["rows"])
     r1 = len(rows) - 1 if r1 is None else min(int(r1), len(rows) - 1)
     pick = (lambda row: [row[c] for c in chans if c < len(row)]) if chans else (lambda row: row)
     return [f"{r:02d}: " + " | ".join(pick(rows[r])) for r in range(max(0, int(r0)), r1 + 1)]
@@ -659,8 +674,9 @@ def song_overview(st, a):
         "channels": [{"channel": i + 1, "name": n, "effects": [f["plugins"][k]["effect"] for k in _chain(f, i)],
                       "approved": bool(i < len(chans) and isinstance(chans[i], dict) and chans[i].get("approved"))}
                      for i, n in enumerate(f["channels"])],
-        "orders": [{"order": i, "pattern": o["pattern"], "rows": o["rows"], "start_s": round(o["start"], 2)}
+        "orders": [{"order": i, "pattern": o["pattern"], "rows": o["rows"], "start_s": round(o["start"], 2) if o['start'] is not None else None}
                    for i, o in enumerate(f["orders"])],
+        **({'playback_orders': copy.deepcopy(f['playback_orders']), 'playback_revision': st.text_sha()} if f.get('playback_orders') else {}),
         "duration_s": round(f["duration"], 2), "sections": song.get("sections"), "patterns": pats,
         "samples": samples, "instruments": f["instruments"], "warnings": f["warnings"][:30],
         "listening_notes": len(st.notes or []), "undo_steps": len(st.history),
@@ -669,39 +685,57 @@ def song_overview(st, a):
 
 
 @tool("read_pattern", "A pattern's rows as text, one line per row: 'RR: cell | cell | ...', each cell 'note instrument "
-      "volume effect' as in OpenMPT ('C-5 01 v64 A06', '...' empty, '===' note off, '^^^' cut). Rows count from 0.",
+      "volume effect' as in OpenMPT ('C-5 01 v64 A06', '...' empty, '===' note off, '^^^' cut). Rows count from 0. "
+      "Native collisions list distinct source owners; blank collided cells must not be interpreted as missing notes.",
       {"pattern": {"type": ["string", "integer"], "description": "a pattern name, or a play-order position"},
        "from_row": {"type": "integer"}, "to_row": {"type": "integer"},
+       "occurrence": {"type": "string", "description": "required score occurrence ID from read_score"},
        "channels": {"type": "array", "items": {"type": "integer"}, "description": "1-based channel numbers (default all)"}},
       ["pattern"])
 def read_pattern(st, a):
     i = _pattern_index(st, a["pattern"])
     chans = [c - 1 for c in a["channels"]] if a.get("channels") else None
-    rows = _rows_text(st, i, a.get("from_row", 0), a.get("to_row"), chans)
+    occurrence = a.get("occurrence")
+    if occurrence is None and st.mod.native_score and type(a['pattern']) is int:
+        occurrence = st.mod.native_score['view']['occurrences'][a['pattern']]['id']
+    rows = _rows_text(st, i, a.get("from_row", 0), a.get("to_row"), chans, occurrence)
+    exact = st.pattern_rows(i, occurrence) if st.mod.native_score else {}
     return {"pattern": st.mod.patterns[i].name, "channels": [c + 1 for c in chans] if chans else "all", "rows": rows,
+            **({"positions": exact["positions"], "ownership": exact["ownership"], "occurrence": occurrence,
+                "collisions": exact.get("collisions", []),
+                "raw_rows": exact["rows"], "revision": exact["revision"]} if exact else {}),
             "summary": f"{len(rows)} rows of {st.mod.patterns[i].name}"}
 
 
 @tool("get_selection", "What the owner has selected in the app's pattern view (or where the cursor is): the pattern, "
       "rows and channels, their cells, and the channels sounding at its first row. Start here when the owner says "
-      "'this', 'here' or 'these bars'.")
+      "'this', 'here' or 'these bars'. Native source_note identifies a single selected written note; use its beat/note "
+      "IDs with edit_score. all_heads marks an explicit range. Release markers are read-only navigation targets.")
 def get_selection(st, a):
     sel = st.selection
     if not sel:
         return {"selection": None, "summary": "nothing selected in the app"}
-    from .gui import sounding_table
     i = _pattern_index(st, sel["pattern"])
     r0, r1 = sel["rows"]
     c0, c1 = sel["channels"]
     chans = list(range(c0, c1 + 1))
+    occurrence = sel.get("occurrence")
+    if st.mod.native_score and occurrence is None and type(sel.get("order")) is int:
+        occurrence = st.mod.native_score['view']['occurrences'][sel['order']]['id']
     sounding = []
     try:
-        sounding = sounding_table(st.mod, st.facts)[sel["order"]][r0]
-    except (IndexError, KeyError, TypeError):
+        sounding = st.sounding(sel['order'], r0, play_id=sel.get('play_id'), revision=sel.get('revision'))
+    except (IndexError, KeyError, TypeError, ValueError):
         pass
+    exact = st.pattern_rows(i, occurrence) if st.mod.native_score else {}
     return {"pattern": sel["pattern"], "order": sel.get("order"), "rows": [r0, r1], "channels": [c + 1 for c in chans],
             "channel_names": [st.facts["channels"][c] for c in chans if c < len(st.facts["channels"])],
-            "cells": _rows_text(st, i, r0, r1, chans),
+            "cells": _rows_text(st, i, r0, r1, chans, occurrence),
+            **({"score_positions": exact['positions'], "occurrence": occurrence,
+                "collisions": [c for c in exact.get('collisions', []) if r0 <= c['row'] <= r1 and c0 <= c['ch'] <= c1],
+                "source_note": copy.deepcopy(sel.get('source_note')), "all_heads": sel.get('all_heads', False),
+                "revision": exact['revision']}
+               if exact else {}),
             "summary": f"{sel['pattern']} rows {r0}-{r1}, channels {c0 + 1}-{c1 + 1}",
             "sounding_at_first_row": [{"channel": s["ch"] + 1, "name": s["name"], "sample": s["sample"], "note": s["note"]}
                                       for s in sounding]}
@@ -711,6 +745,8 @@ def get_selection(st, a):
       "approved pattern or channel. A cell is 'note instrument volume effect', e.g. 'C-5 01 v48 ...', '... .. ... SF1' "
       "or '=== .. ... ...'; parts left out stay as they are only when you write them as '..'/'...'.",
       {"pattern": {"type": ["string", "integer"]},
+       "revision": {"type": "string", "description": "required current revision for a native score"},
+       "occurrence": {"type": "string", "description": "score occurrence ID; required for a reused pattern"},
        "cells": {"type": "array", "items": {"type": "object", "properties": {
            "row": {"type": "integer"}, "channel": {"type": "integer", "description": "1-based"},
            "cell": {"type": "string"}}, "required": ["row", "channel", "cell"]}}},
@@ -725,14 +761,147 @@ def write_cells(st, a):
     bad = sorted({c["ch"] + 1 for c in cells if c["ch"] in locked})
     if bad:
         raise ValueError(f"channel{'s' if len(bad) > 1 else ''} {', '.join(map(str, bad))} approved by the owner: not written")
-    st.edit_patterns([(i, cells)], who="agent")
-    return {"ok": True, "summary": f"wrote {len(cells)} cells in {name} (one undo step)"}
+    with st.lock:
+        st.edit_patterns([(i, cells)], who="agent", guard=_edit_guard(st) if st.mod.native_score else None,
+                         revision=a.get('revision'), occurrences={i: a['occurrence']} if 'occurrence' in a else None)
+        revision = st.text_sha()
+    return {"ok": True, "revision": revision, "summary": f"wrote {len(cells)} cells in {name} (one undo step)"}
 
 
-@tool("set_orders", "The play order: a list of pattern names ('+++' skip, '---' end). One undo step.",
-      {"orders": {"type": "array", "items": {"type": "string"}}}, ["orders"])
+@tool("read_score", "Read the native TAB/score document, stable note IDs, exact written fractions, Pattern links, "
+      "raw-note previews and revision required by edit_score. Optional pattern name filters events. Reading never adopts notes.",
+      {"pattern": {"type": "string"}})
+def read_score(st, a):
+    with st.lock:
+        view = copy.deepcopy(st.score_view())
+        if 'pattern' in a:
+            name = str(a['pattern'])
+            if name not in view['pattern_names']:
+                raise ValueError('unknown pattern')
+            if view['score'] is not None:
+                view['score']['patterns'] = {k: v for k, v in view['score']['patterns'].items() if k == name}
+            for key in ('positions', 'raw_positions'):
+                view[key] = [p for p in view[key] if p.get('pattern_name', p.get('pattern')) == name]
+            if 'lyrics' in view:
+                view['lyrics']['anchors'] = [p for p in view['lyrics']['anchors'] if p['pattern'] == name]
+        return view
+
+
+@tool("recognize_chord", "Suggest ordered chord names for a literal diagram on an existing TAB track. Read_score "
+      "first for revision and track ID. Chord is {name,first_fret,frets}, string 1 first. Names use tuning without "
+      "capo, matching TuxGuitar's shape naming. Scores are heuristics, not probabilities. This never changes the "
+      "song, diagram, authored name, library or undo history; apply a chosen name separately with edit_score.",
+      {"revision": {"type": "string"}, "track": {"type": "string"}, "chord": {"type": "object"},
+       "sharp": {"type": "boolean"}, "incomplete": {"type": "integer"}}, ["revision", "track", "chord"])
+def recognize_chord(st, a):
+    return st.chord_suggestions(a)
+
+
+@tool("generate_chords", "Suggest ordered fret shapes on an existing TAB track without changing the song or history. "
+      "Read_score first for revision and track ID. Spec requires root 0..11 (C..B); optional quality defaults M "
+      "(M,7,maj7,6,m,m7,m/maj7,m6,sus2,sus4,7sus2,7sus4,dim,dim7,aug,5), bass defaults root, extension is "
+      "0/9/11/13, add is boolean, sharp is boolean; extension_shift/fifth_shift/ninth_shift/eleventh_shift are "
+      "-1/0/1 where applicable. Profile: normal, inversions, close-voiced, open-voiced. Min_fret 0..15, "
+      "max_fret 0..25 within track maximum; open_strings defaults false, count 1..100 defaults 30. Names use "
+      "tuning without capo. Excessive searches refuse; narrow the fret range. Apply a chosen shape separately "
+      "with edit_score beat_set or chord_notes; generated results are never applied automatically.",
+      {"revision": {"type": "string"}, "track": {"type": "string"}, "spec": {"type": "object"},
+       "profile": {"type": "string"}, "min_fret": {"type": "integer"}, "max_fret": {"type": ["integer", "null"]},
+       "open_strings": {"type": "boolean"}, "count": {"type": "integer"}}, ["revision", "track", "spec"])
+def generate_chords(st, a):
+    return st.chord_suggestions(a, generate=True)
+
+
+@tool("edit_score", "Apply one native TAB operation as one shared undo step; use read_score first. edit contains op "
+      "and its fields: track_set(track,value), track_delete(track,remove_notes optional), "
+      "measure_set(measure), measure_delete(measure id), beat_set(pattern,beat), note_set(pattern,beat,note), "
+      "tempo_set(occurrence,at quarter pair,bpm integer 32..255 or null to clear,scope occurrence or pattern): "
+      "edits an exact-row Pattern T command; pattern scope affects all uses, occurrence scope refuses reused patterns. "
+      "Tempo persists until the next change; automation-owned commands and occupied effect columns refuse. "
+      "notes_set(pattern,notes:[{beat,note}]) for an atomic chord patch, "
+      "chord_notes(pattern,beat ID,chord,velocity optional default95,remove_ties optional false) replaces that "
+      "voice with fresh notes from the diagram, removes same-onset other-voice notes on played strings, and "
+      "keeps duration/shared beat fields. New notes use the track instrument without old effects. Incident ties "
+      "refuse unless remove_ties is explicit; reused patterns change every occurrence. All-muted clears the "
+      "selected voice if the beat sounded, or does nothing if both voices already rest. "
+      "note_delete(pattern,beat,note), beat_delete(pattern,beat), beat_resize(pattern index,beat,end_row), "
+      "note_move(pattern index,note,to_row,pitch optional), beat_move(pattern index,beat,to_row), "
+      "tie_set/tie_delete(from,to endpoints), or "
+      "promote_pattern(pattern,track,cells optional row/ch list,occurrence required for reused patterns). Native "
+      "adoption currently requires an explicit raw note-off ending. Pitch is 0..119; string is 1-based; channel/ch is "
+      "zero-based. note_set accepts boolean staccato, palm_mute, dead and let_ring; these change sounding gates while "
+      "preserving written duration. Enabling staccato, palm_mute or let_ring clears the other two. Let-ring follows "
+      "the same voice's ordered notes/rests. Held same-channel overlap requires explicit ordinary sources and empty/T/V backing; "
+      "qualified harmonic/repetition/grace overlaps use independent head contexts; carry/random sources refuse. vibrato/slide are boolean; "
+      "velocity is optional MIDI 0..127, separate from tracker volume (null clears velocity). Beat text is plain text; "
+      "ghost/accent/heavy_accent/hammer are boolean; modified attacks require authored velocity. Hammer changes "
+      "the next same-string/voice attack's dynamics, across rests. Enabling one accent clears the other two. "
+      "harmonic is null to clear or {type:natural|artificial|tapped|pinch|semi,data:0..5 optional}; explicit velocity "
+      "is required for its grouped layers. Track midi is optional {program:0..127,bank:0..16383 optional}, for file interchange only. "
+      "Track lyrics is optional {from_measure:integer 1..2147483647,text:string up to 65536 characters}. "
+      "Use track_set with the complete track value; preserve raw lyric spaces, tabs and line endings. "
+      "Omit lyrics from that complete value to clear it; null refuses. Lyrics do not change playback. "
+      "Preserve imported midi.source_pan {value:0..127,mixer_pan:0..64} on unrelated track edits; it keeps exact "
+      "initial MIDI pan while the audio mixer stays unchanged. Channel reassignment or explicit pan WRITE MIX clears it. "
+      "Also preserve midi.source_volume {value:0..127,mixer_volume:0..64}; it follows the same rules for CC7 and volume writes. "
+      "trill is null or {fret:absolute alternate fret,value:4|8|16|32|64}; tremolo_picking is null or {value:8|16|32}. "
+      "Grace is null or {fret,value:16|32|64,velocity:0..127,transition:none|slide|bend|hammer optional,on_beat:boolean optional,dead:boolean optional}; "
+      "it preserves written anchors and uses independent velocity. Before-beat grace falls back at song start; unsupported overlaps refuse. "
+      "Repetition requires explicit velocity, follows the tie head, and overrides harmonic playback. Enabling it clears "
+      "bend/bar/slide/hammer/dead/vibrato and the other repetition; enabling those techniques clears repetition. "
+      "measure marker is {title,color optional #rrggbb}, anchored at its start; measure swing is none|eighth|sixteenth, "
+      "changing qualifying performed notes while preserving written Pattern positions. "
+      "Beat stroke is null or {direction:up|down,value:4|8|16|32|64}; pick_stroke is null|up|down (notation only). "
+      "Both are shared by the two voices at one track/onset; beat_set applies or clears the cohort atomically. "
+      "Beat chord is null or {name,first_fret,frets}, shared at that onset; string-1-first frets are -1 muted, 0 open "
+      "or absolute frets, in a five-fret window. first_fret0 preserves automatic placement. This is annotation-only, "
+      "independent of played notes; deleting the last sounding note clears it. "
+      "note fade_in is an independent boolean: native audio and MIDI apply the TG track-wide expression staircase, "
+      "composed with existing gain. Standalone IT admits bounded row/volume approximation. Tied continuation flags remain authored. "
+      "note tapping/slapping/popping are mutually exclusive boolean annotations: true clears the other two, "
+      "false clears only itself. They leave native audio/MIDI unchanged and are distinct from tapped harmonics. "
+      "Measures accept repeat_open, repeat_close (0..100 extra passes), endings (unique 1..8); repeats need complete "
+      "row-aligned measure coverage. Source orders stay authored; disjoint played selections refuse. "
+      "bend/tremolo_bar are null or {points:[{position:0..12,value:0..12 for bend or -12..12 for bar}]}. "
+      "Points are sorted by position; enabling bend/bar/slide/dead/hammer clears competing flags in that set. Fractions are "
+      "[numerator,denominator]. Approved material, levels, stale revisions and invalid "
+      "projections are refused. Authored patterns are marked by agent. No separate tab playback.",
+      {"revision": {"type": "string"}, "edit": {"type": "object"}}, ["revision", "edit"])
+def edit_score(st, a):
+    with st.lock:
+        st._writable()
+        if not isinstance(a['edit'], dict):
+            raise ValueError('edit must be an operation object')
+        st.score_edit({**a['edit'], 'revision': a['revision']}, who='agent', guard=_edit_guard(st))
+        return {'ok': True, 'revision': st.text_sha(), 'summary': 'native score edited (one shared undo step)'}
+
+
+@tool("score_command", "Cut or repeat a native TAB selection as one shared undo step. Read_score first. "
+      "command contains action (cut or repeat), occurrence ID, track ID, voice, selected beat IDs in beats, "
+      "and optional selected note IDs in notes. Cut keeps rests for deleted notes; deleting existing rests "
+      "shifts the voice within its measure. Repeat pastes the selected span at the next beat. The response "
+      "contains the captured clipboard, resulting selection and revision. Approved material, raw ownership "
+      "conflicts, invalid ties and stale revisions refuse atomically.",
+      {"revision": {"type": "string"}, "command": {"type": "object"}}, ["revision", "command"])
+def score_command(st, a):
+    with st.lock:
+        st._writable()
+        if not isinstance(a['command'], dict):
+            raise ValueError('command must be an object')
+        return st.score_command({**a['command'], 'revision': a['revision']},
+                                who='agent', guard=_edit_guard(st))
+
+
+@tool("set_orders", "The play order: a list of pattern names ('+++' skip, '---' end). One undo step. "
+      "Scored songs require origins: one old zero-based order index per retained occurrence, null per new occurrence; "
+      "each old index used at most once. Read_score gives current orders and occurrence IDs.",
+      {"orders": {"type": "array", "items": {"type": "string"}},
+       "origins": {"type": "array", "items": {"type": ["integer", "null"]}}}, ["orders"])
 def set_orders(st, a):
-    st.song_edit([{"op": "orders", "orders": [str(o) for o in a["orders"]]}])
+    op = {"op": "orders", "orders": [str(o) for o in a["orders"]]}
+    if 'origins' in a:
+        op['origins'] = a['origins']
+    st.song_edit([op])
     return {"ok": True, "summary": f"{len(a['orders'])} orders"}
 
 
@@ -747,8 +916,10 @@ def new_pattern(st, a):
         ops.append({"op": "mark", "what": "pattern", "key": a["name"], "by": "agent"})
     if a.get("insert_at") is not None:
         orders = [str(o) for o in st.song.get("orders") or []]
+        origins = list(range(len(orders)))
         orders.insert(int(a["insert_at"]), a["name"])
-        ops.append({"op": "orders", "orders": orders})
+        origins.insert(int(a["insert_at"]), None)
+        ops.append({"op": "orders", "orders": orders, "origins": origins})
     st.song_edit(ops)
     return {"ok": True, "summary": f"pattern {a['name']}"}
 
@@ -859,7 +1030,12 @@ def edit_pattern(st, a):
                 op = {"op": "pattern_delete", "name": p.name}
             elif action == "resize":
                 rows = _integer(a.get("rows"), 1, 200, "rows")
-                if any(not c.is_empty() for row in p.rows[rows:] for c in row) and not _boolean(a, "discard_rows"):
+                from .gui import score_notes
+                from .tablature import duration_quarters
+                from fractions import Fraction
+                score_cut = any(name == p.name and Fraction(*beat['at']) + duration_quarters(beat['written']) >
+                                rows * Fraction(st.mod.speed, 24) for name, beat, _, _ in score_notes(st.song))
+                if (any(not c.is_empty() for row in p.rows[rows:] for c in row) or score_cut) and not _boolean(a, "discard_rows"):
                     raise ValueError("shortening removes nonempty rows; request discard_rows=true deliberately")
                 op = {"op": "pattern_rows", "name": p.name, "rows": rows}
             elif action == "split":
@@ -891,6 +1067,7 @@ _EMPTY_FIELDS = ("...", "..", "...", "...")
 
 
 def _scope(st, a):
+    st._need_tracker_operation('Pattern selections and transforms')
     if not isinstance(a.get("pattern"), str):
         raise ValueError("pattern must be a name (string)")
     i = _pattern_index(st, a["pattern"])
@@ -904,6 +1081,7 @@ def _scope(st, a):
 
 
 def _write_groups(st, groups):
+    st._need_tracker_operation('Pattern cell editing')
     from .notation import format_cell, parse_cell
     seen, checked, count = set(), [], 0
     locked = _approved_channels(st)
@@ -951,7 +1129,11 @@ COMPOSE_ACTIONS = ("accent", "interpolate", "automate", "grow", "shrink", "arp",
 
 
 @tool("transform_patterns", "Transform named pattern selections atomically (one undo step), each pattern once even "
-      "if repeated in orders. Inclusive row bounds; channels are 1-based. transpose clamps real notes to C-0..B-9, "
+      "if repeated in orders. Native scores require revision from read_score/read_pattern; transpose, clear, volume "
+      "(0-64), amplify (percent), humanize (amount 1-32, seed) include fractional attacks in the selected row spans. "
+      "Named ranges include every written voice in those cells; use edit_score with note IDs for one source head. "
+      "Select complete tied chains; transpose preserves the current string or refuses an unplayable fret. "
+      "Other native transforms still refuse. Inclusive row bounds; channels are 1-based. transpose clamps real notes to C-0..B-9, "
       "preserving off/cut/fade. replace matches exact field text with * and ? wildcards (case sensitive). clear uses "
       "fields (default all). euclid's cycles layer more [hits, steps] cycles (louder where more of them hit); phrase "
       "(rows) restarts them at each phrase from the pattern's row 0, and rules (one per phrase, repeating: '-', 'rev', "
@@ -967,7 +1149,10 @@ COMPOSE_ACTIONS = ("accent", "interpolate", "automate", "grow", "shrink", "arp",
       "(length rows), cut_here (a note-off at from_row) and glue. A lane-owned column (a pattern's automation:) "
       "refuses other values. Inline/flow YAML patterns may need materializing first.",
       {"action": {"type": "string", "enum": ["transpose", "clear", "replace", "groove", "euclid", "chord", "layers",
+                                             "volume", "amplify", "humanize",
                                              *COMPOSE_ACTIONS]},
+       "revision": {"type": "string"}, "volume": {"type": "integer"},
+       "percent": {"type": "number"}, "amount": {"type": "integer"},
        "selections": {"type": "array", "items": _SCOPE}, "semitones": {"type": "integer"},
        "fields": {"type": "array", "items": {"type": "string", "enum": list(_FIELDS)}},
        "match": {"type": "object", "properties": {k: {"type": "string"} for k in _FIELDS}},
@@ -992,6 +1177,20 @@ def transform_patterns(st, a):
     from .notation import format_cell, format_note
     with st.lock:
         st._writable()
+        st._need_compiled()
+        if st.mod.native_score is not None:
+            selections = []
+            for selection in a["selections"]:
+                pi = _pattern_index(st, selection["pattern"])
+                selections.append(dict(pattern=pi, all_heads=True, r0=selection.get("from_row", 0),
+                    r1=selection.get("to_row", len(st.mod.patterns[pi].rows)-1),
+                    cols=[[_channel(st, ch), a.get("fields", list(_FIELDS))]
+                          for ch in selection.get("channels", range(1, len(st.mod.channels)+1))]))
+            before = st.text_sha()
+            st.edit_patterns([], who="agent", guard=_edit_guard(st), revision=a.get("revision"),
+                             transform=dict(a, selections=selections))
+            return {"ok": True, "revision": st.text_sha(), "changed": before != st.text_sha(),
+                    "summary": "Transformed exact source selections in one undo step"}
         action, groups, seen, skipped = a["action"], [], set(), 0
         if action not in ("transpose", "clear", "replace", "groove", "euclid", "chord", "layers", *COMPOSE_ACTIONS):
             raise ValueError("unknown transform")
@@ -1269,7 +1468,9 @@ def edit_effect(st, a):
 
 
 @tool("export_song", "Start an export using RENDER & EXPORT's immutable snapshot. Formats: IT, WAV, MP3, OGG, FLAC, MID "
-      "(the notes as a type 1 MIDI file, as OpenMPT exports one). rate 22050-96000 Hz, depth 16, 24 (WAV/FLAC) or "
+      "(type 1 MIDI), or native notation as TuxGuitar writes it: TG (tg_version 2.0 or a legacy 1.x), GP3, GP4, GP5, "
+      "TAB (ASCII), LY (LilyPond, lilypond settings) or MUSICXML (complete measures and explicit track MIDI programs; "
+      "whole song, saved neutral mix, no residual tracker cells, stems or repeat; warnings list what a format loses). rate 22050-96000 Hz, depth 16, 24 (WAV/FLAC) or "
       "'float' (WAV), bitrate (MP3 32-320 kbit/s), quality (OGG -1 to 10), repeat (0-16 more passes of the whole song), "
       "master_lufs (-40 to -5: one gain on the song and its stems, never past master_ceiling dBTP, -1 by default; the "
       "owner's choice, so only when asked). "
@@ -1280,7 +1481,12 @@ def edit_effect(st, a):
       "asked to replace previous outputs, and then only after they press ALLOW REPLACE in the AGENT panel (one export, two minutes); "
       "source assets stay protected. Returns job_id and planned paths; use "
       "export_status until done/failed/cancelled. Warnings are not export failures.",
-      {"format": {"type": "string", "enum": ["it", "wav", "mp3", "ogg", "flac", "mid"]},
+      {"format": {"type": "string", "enum": ["it", "wav", "mp3", "ogg", "flac", "mid", "tg", "gp3", "gp4", "gp5", "tab", "ly", "musicxml"]},
+       "tg_version": {"type": "string", "enum": ["2.0", "1.0", "1.1", "1.2", "1.3", "1.5"],
+                      "description": "TuxGuitar file format for format tg (default 2.0)"},
+       "lilypond": {"type": "object", "description": "TuxGuitar LilyPond settings for format ly: track, measureFrom, measureTo, score, tablature, text, lyrics, chordDiagram, trackName, trackGroup, version"},
+       "midi_export": {"type": "object", "description": "Native score MIDI only: transpose integer -24..24 (default0), strip boolean (defaultfalse). Strip removes CC/PC and adds one-quarter lead-in; grace/alternate trill keys are not transposed, following TuxGuitar."},
+       "gp_encoding": {"type":"string","description":"Text encoding for GP3/4/5 export, e.g. cp1252 (compatibility default), utf-8, cp1251 or shift_jis. Unrepresentable or oversized text refuses."},
        "rate": {"type": "integer"}, "depth": {"type": ["integer", "string"]}, "bitrate": {"type": "integer"},
        "quality": {"type": "number"}, "repeat": {"type": "integer"}, "master_lufs": {"type": "number"},
        "master_ceiling": {"type": "number"},
@@ -1294,11 +1500,14 @@ def export_song(st, a):
     with st.lock:
         if set(a) - set(TOOLS["export_song"][1]["properties"]):
             raise ValueError("unknown export option; use the tool's documented options")
-        if a.get("format") not in ("it", "wav", "mp3", "ogg", "flac", "mid"):
-            raise ValueError("format must be it, wav, mp3, ogg, flac or mid")
+        from .export import FORMATS
+        if a.get("format") not in FORMATS:
+            raise ValueError("format must be " + ", ".join(FORMATS[:-1]) + " or " + FORMATS[-1])
         for k in ("game_loop", "song", "stems", "include_it", "replace"):
             if k in a and type(a[k]) is not bool:
                 raise ValueError(f"{k} must be true or false")
+        if "lilypond" in a and type(a["lilypond"]) is not dict:
+            raise ValueError("lilypond must be an object of TuxGuitar LilyPond settings")
         if "destination" in a:
             reach(st, a["destination"], "destination folder", roots=False)
         if a.get("replace") and st.agent_allow.pop("replace", 0) < time.monotonic():
@@ -1352,18 +1561,41 @@ def measure(st, a):
     from .measure import RATE, patch_it
     from .openmpt import LoadedModule
     st._need_compiled()
-    nch = len(st.facts["channels"])
-    chans = [c - 1 for c in a["channels"]] if a.get("channels") else None
-    silenced = [c for c in range(nch) if c not in chans] if chans else st.silenced()
-    with LoadedModule(patch_it(st.compiled_it(whole=True), silenced, st.mix())) as lm:
-        x = np.frombuffer(lm.render(RATE), "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
     o = st.facts["orders"]
     s, e = (int(a["orders"][0]), int(a["orders"][1])) if a.get("orders") else (0, len(o))
     if not 0 <= s < e <= len(o):
         raise ValueError(f"orders: a span within 0..{len(o)}")
+    nch = len(st.facts["channels"])
+    chans = [c - 1 for c in a["channels"]] if a.get("channels") else None
+    silenced = [c for c in range(nch) if c not in chans] if chans else st.silenced()
+    selected_native = bool(st.mod.native_score and a.get('orders'))
+    if selected_native:
+        from .export import snapshot, render
+        with st.lock:
+            base, mix, region = copy.deepcopy(st.song), copy.deepcopy(st.mix()), st._order_region((s, e))
+        snap = snapshot(base, st.base_dir, region=region, mix=mix, muted=silenced, tail=0)
+        pcm = render(snap, cancel=lambda: st.closed)
+    elif st.mod.native_score:
+        bundle = st.prepared_playback(RATE * 2, whole=True)
+        data, plan = patch_it(bundle['backing_it'], silenced), bundle['plan']
+    else:
+        data, plan = patch_it(st.compiled_it(whole=True), silenced, st.mix()), None
+    if not selected_native:
+        with LoadedModule(data, rate=RATE, oversample=2, plan=plan) as lm:
+            pcm = lm.render(RATE)
+    x = np.frombuffer(pcm, "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
     series = dsp.meter_series(x, RATE)
-    per_order = [{"order": i, **dsp.span_numbers(series, o[i]["start"], o[i]["start"] + o[i]["seconds"])} for i in range(s, e)]
-    if a.get("orders"):
+    if st.facts.get('playback_orders'):
+        visits = st.facts['playback_orders']
+        offset = st._resolved_playback_span(st._order_region((s, e)))['start'] if selected_native else 0
+        per_order = [{'order': v['source_order'], 'play_id': v['id'], 'pass': v['pass'],
+                      **dsp.span_numbers(series, v['start'] - offset, v['start'] - offset + v['seconds'])}
+                     for v in visits if o[s]['order'] <= v['source_order'] <= o[e - 1]['order']]
+    else:
+        offset = o[s]['start'] if selected_native else 0
+        per_order = [{"order": i, **dsp.span_numbers(series, o[i]["start"]-offset,
+                      o[i]["start"]-offset + o[i]["seconds"])} for i in range(s, e)]
+    if a.get("orders") and not selected_native:
         x = x[:, int(o[s]["start"] * RATE): int((o[e - 1]["start"] + o[e - 1]["seconds"]) * RATE)]
     m = dsp.measure_mix(x, RATE)
     scope = json.dumps({"channels": a.get("channels"), "orders": a.get("orders")}, sort_keys=True)
@@ -1430,7 +1662,7 @@ def read_notes(st, a):
       "pitched channels (Krumhansl-Kessler).", {"key": {"type": "string"}})
 def key_check(st, a):
     from .compose import key_report
-    st._need_compiled()
+    st._need_tracker_operation('Tracker key analysis')
     r = key_report(st.mod, a.get("key"))
     share = f"{round(r['in_key'] * 100)}% in {r['key']}, " if r["key"] and r["in_key"] is not None else ""
     r["summary"] = f"{share}estimate {r['estimate']}"
@@ -1449,14 +1681,16 @@ def undo(st, a):
         return {"ok": True, "summary": "undone"}
 
 
-def _same_channel_levels_after_move(old, target, oldmix, newmix):
+def _same_channel_levels_after_move(old, target, oldmix, newmix, old_song=None, target_song=None):
     """Recognize an exact channel permutation/addition/removal, including its faders.
     Matching the column's cells and settings prevents treating an ordinary level edit as a move.
     """
     if [p.name for p in old.patterns] != [p.name for p in target.patterns]:
         return False
     def column(m, c):
-        return [[r[c] for r in p.rows] for p in m.patterns]
+        from .gui import score_channel_content
+        song = old_song if m is old else target_song
+        return [[r[c] for r in p.rows] for p in m.patterns], score_channel_content(song or {}, c)
     a, b = oldmix or {}, newmix or {}
     remaining, pairs = set(range(len(target.channels))), []
     for i, ch in enumerate(old.channels):
@@ -1474,9 +1708,9 @@ def _same_channel_levels_after_move(old, target, oldmix, newmix):
 
 def _guard_restore(st, step, compiled=None):
     from .api import from_yaml
-    from .song import load_song_text
+    from .gui import load_for_state, score_context, score_channel_content
     target = from_yaml(step["text"])
-    mod = compiled if compiled is not None else load_song_text(step["text"], st.base_dir, str(st.song_path))[0]
+    mod = compiled if compiled is not None else load_for_state(step["text"], st.base_dir, str(st.song_path))[0]
     old = st.mod
     newmix = (step.get("meta") or {}).get("mix", st.meta.get("mix"))
     channel_levels_changed = (any((a.volume, a.pan) != (b.volume, b.pan) for a, b in zip(old.channels, mod.channels))
@@ -1485,7 +1719,8 @@ def _guard_restore(st, step, compiled=None):
         return m.mix_volume, m.global_volume
     common = {k: set(st.song.get(k) or {}) & set(target.get(k) or {}) for k in ("samples", "instruments")}
     if (levels(mod) != levels(old)
-            or (channel_levels_changed and not _same_channel_levels_after_move(old, mod, st.meta.get("mix"), newmix))
+            or (channel_levels_changed and not _same_channel_levels_after_move(old, mod, st.meta.get("mix"), newmix,
+                                                                               st.song, target))
             or any((old.samples[n-1].volume, old.samples[n-1].global_volume, old.samples[n-1].pan) !=
                    (mod.samples[n-1].volume, mod.samples[n-1].global_volume, mod.samples[n-1].pan) for n in common["samples"])
             or any((old.instruments[n-1].global_volume, old.instruments[n-1].pan) !=
@@ -1506,9 +1741,23 @@ def _guard_restore(st, step, compiled=None):
             q = pats.get(p.name)
             if q is None or [r[c] for r in p.rows] != [r[c] for r in q.rows]:
                 raise ValueError(f"restoring would change notes in approved channel {c + 1}")
+        if score_channel_content(st.song, c) != score_channel_content(target, c):
+            raise ValueError(f"restoring would change score notes in approved channel {c + 1}")
     protected_patterns = {p.name for p in old.patterns if st.pattern_entry(p.name).get("approved")}
     if any(p.name in protected_patterns and (p.name not in pats or pats[p.name].rows != p.rows) for p in old.patterns):
         raise ValueError("edit would change compiled notes in an approved pattern")
+    if any(score_context(st.song, name) != score_context(target, name) for name in protected_patterns):
+        raise ValueError("edit would change score content in an approved pattern")
+    if locked or protected_patterns:
+        def performed_controls(module):
+            # A slide target or hammer predecessor can live on another channel
+            # or pattern. Source equality alone does not protect its dependent voice.
+            plan = (module.native_score or {}).get('plan', {})
+            return [{k: v for k, v in event.items() if k not in ('frame', 'seconds')}
+                    for event in plan.get('events', [])
+                    if event.get('ch') in locked or event.get('pattern') in protected_patterns]
+        if performed_controls(old) != performed_controls(mod):
+            raise ValueError('edit would change performed score controls in approved material')
     if locked or protected_patterns:
         if (mod.instruments is None) != (old.instruments is None):
             raise ValueError("restoring would change instrument mode for approved material")

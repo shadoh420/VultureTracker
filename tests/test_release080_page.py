@@ -64,7 +64,7 @@ class TestRelease080Page(unittest.TestCase):
                     # an edit still queued when NEW SONG is pressed lands in the song it was made in
                     fresh = folder / 'fresh.yaml'
                     page.evaluate("""(p)=>{setEdit(true);EDQ.chain=EDQ.chain.then(()=>new Promise(r=>setTimeout(r,800)));
-                        patEdit([{row:1,ch:0,cell:'G-5 01 ... ...'}]);$('newpath').value=p;newSong()}""", str(fresh))
+                        patEdit([{row:1,ch:0,cell:'G-5 01 ... ...'}]);$('newpath').value=p;$('newtemplate').value='';newSong()}""", str(fresh))
                     for _ in range(200):
                         if Handler.state is not first and page.evaluate('!EDQ.n'):
                             break
@@ -119,9 +119,16 @@ class TestRelease080Page(unittest.TestCase):
                     page.on('pageerror', lambda e: errors.append(str(e)))
                     page.goto(f'http://127.0.0.1:{server.server_address[1]}/?token={server.token}')
                     page.wait_for_function('S?.song?.facts && PAT.rows')
-                    # every tab label on one line, all inside the bar
-                    self.assertTrue(page.evaluate("""(()=>{const t=document.querySelector('.tabs');
-                        return t.scrollWidth<=t.clientWidth&&[...t.querySelectorAll('.tab')].every(x=>x.getBoundingClientRect().height<=28)})()"""))
+                    # Every tab label remains readable and inside the navigation bar.
+                    navigation = page.evaluate("""(()=>{const t=document.querySelector('.tabs'),r=t.getBoundingClientRect();
+                        return {width:t.clientWidth,scrollWidth:t.scrollWidth,height:r.height,
+                            tabs:[...t.querySelectorAll('.tab')].map(x=>{const b=x.getBoundingClientRect();
+                                return {text:x.textContent,left:b.left-r.left,right:b.right-r.left,
+                                    top:b.top-r.top,bottom:b.bottom-r.top,height:b.height}})}})()""")
+                    print('navigation bounds', navigation)
+                    self.assertLessEqual(navigation['scrollWidth'], navigation['width'], navigation)
+                    self.assertTrue(all(t['height'] <= 28 and 0 <= t['top'] < t['bottom'] <= navigation['height']
+                                        for t in navigation['tabs']), navigation)
                     # A long status may wrap, but stays inside the transport and above the loop strip.
                     self.assertTrue(page.evaluate("""(()=>{$('nowmode').textContent+=' · re-rendering, the old mix plays until it lands';
                         const r=$('nowmode').parentElement.getBoundingClientRect();

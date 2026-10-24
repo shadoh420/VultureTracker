@@ -579,6 +579,8 @@ class TestFeaturesPage(unittest.TestCase):
             self.assertIn('    - {name: B, pan: 40, color: "#a3803a"}\n', (d / 'song.yaml').read_text())
             page.evaluate("tab('pattern'); setFocus('all'); showPattern(0); renderPat()")
             page.wait_for_function("PAT.rows")
+            if os.environ.get('VT_CHANNEL_COLOR_SCREENSHOT'):
+                page.screenshot(path=os.environ['VT_CHANNEL_COLOR_SCREENSHOT'])
             self.assertIn('163, 128, 58', page.evaluate("getComputedStyle(document.querySelectorAll('.pathead span')[2]).boxShadow"))
             page.evaluate("CUR.ch=0; rollToggle()")
             page.wait_for_function("document.querySelector('#roll .rnote.ghost')")

@@ -2,7 +2,7 @@
 
     pip install --require-hashes -r requirements-build.txt
     pip install --no-deps -e .
-    python tools/build_exe.py [--unpinned]
+    python tools/build_exe.py [--unpinned] [--output-dir scratch/package-candidate]
 
 requirements-build.txt pins every package the exe packs, with their SHA-256 digests; the build stops when an installed
 version differs from its pin, unless --unpinned (a trial build; never one to publish).
@@ -17,6 +17,7 @@ ffmpeg (for the MP3/OGG/FLAC export) is copied beside the exe as dist/ffmpeg.exe
 a packed file is unpacked to %TEMP% on every launch. Ship both files; its build is GPL-3 (THIRD_PARTY.md).
 dist/vulturetracker-win64.zip is the one-download release: the exe, ffmpeg, LICENSE, THIRD_PARTY.md and the demos whose
 samples are all in git (demo/, demo2/, samples/ and samples/surge/); the app finds them beside the exe."""
+import argparse
 import importlib.util
 import re
 import subprocess
@@ -25,6 +26,12 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument('--unpinned', action='store_true', help='Allow a trial build with packages differing from the release pins')
+parser.add_argument('--output-dir', type=Path, help='Write a local candidate here instead of replacing dist; keep its build cache inside this folder')
+args = parser.parse_args()
+DIST = args.output_dir.resolve() if args.output_dir else ROOT / 'dist'
+BUILD = DIST / '.build' if args.output_dir else ROOT / 'build'
 
 
 def unpinned():
@@ -40,7 +47,7 @@ def unpinned():
     return out
 
 
-if "--unpinned" not in sys.argv[1:] and unpinned():
+if not args.unpinned and unpinned():
     sys.exit("the build environment differs from requirements-build.txt:\n" + "\n".join(unpinned()) +
              "\ninstall the pins (pip install --require-hashes -r requirements-build.txt) or pass --unpinned for a trial build")
 sep = ";" if sys.platform == "win32" else ":"
@@ -52,11 +59,12 @@ except ImportError:
     pass
 cmd = [
     sys.executable, "-m", "PyInstaller", "--noconfirm", "--onefile", "--windowed", "--name", "vulturetracker",
-    "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build"), "--specpath", str(ROOT / "build"),
+    "--distpath", str(DIST), "--workpath", str(BUILD), "--specpath", str(BUILD),
     "--add-data", f"{ROOT / 'vulturetracker' / 'gui.html'}{sep}vulturetracker",
     "--add-data", f"{ROOT / 'vulturetracker' / 'icon.png'}{sep}vulturetracker",
     "--add-data", f"{ROOT / 'SONG_FORMAT.md'}{sep}vulturetracker",  # the Pattern tab's effect help reads its tables
     "--add-data", f"{ROOT / 'vulturetracker' / 'web'}{sep}vulturetracker/web",  # the live engine (libopenmpt wasm, worklet)
+    "--add-data", f"{ROOT / 'vulturetracker' / 'licenses'}{sep}vulturetracker/licenses",  # Python chord/sorting ports
     "--add-data", f"{ROOT / 'vulturetracker' / 'faust_examples'}{sep}vulturetracker/faust_examples",  # faust: name.dsp
     "--icon", str(ICO),
     "--collect-submodules", "vulturetracker",
@@ -83,19 +91,29 @@ code = subprocess.call(cmd, cwd=ROOT)
 try:
     import shutil
     import imageio_ffmpeg
-    shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(), ROOT / "dist" / "ffmpeg.exe")
-    print("copied ffmpeg beside the exe: dist/ffmpeg.exe")
+    if code == 0:
+        shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(), DIST / "ffmpeg.exe")
+        print(f"copied ffmpeg beside the exe: {DIST / 'ffmpeg.exe'}")
 except (ImportError, RuntimeError, OSError) as e:
     print(f"no ffmpeg beside the exe ({e}): the exe exports MP3/OGG/FLAC only with ffmpeg on PATH")
 if code == 0:
     import zipfile
     files = subprocess.run(["git", "ls-files", "demo", "demo2", ":(glob)samples/*.*", "samples/surge", "LICENSE", "THIRD_PARTY.md"],
                            cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
-    with zipfile.ZipFile(ROOT / "dist" / "vulturetracker-win64.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(DIST / "vulturetracker-win64.zip", "w", zipfile.ZIP_DEFLATED) as z:
         for name in ("vulturetracker.exe", "ffmpeg.exe"):
-            if (ROOT / "dist" / name).exists():
-                z.write(ROOT / "dist" / name, f"VultureTracker/{name}")
+            if (DIST / name).exists():
+                z.write(DIST / name, f"VultureTracker/{name}")
         for f in files:
             z.write(ROOT / f, f"VultureTracker/{f}")
-    print(f"dist/vulturetracker-win64.zip: the exe, ffmpeg and {len(files)} demo, sample and licence files")
+        for f in (ROOT / "vulturetracker" / "licenses").glob("*.txt"):
+            z.write(f, f"VultureTracker/source/chord-tools/licenses/{f.name}")
+        for name in ("chord_tools.py", "_java_priority_sort.py"):
+            z.write(ROOT / "vulturetracker" / name, f"VultureTracker/source/chord-tools/{name}")
+        for name in ("ptb.py", "tef.py", "tab_binary.py"):
+            z.write(ROOT / "vulturetracker" / name, f"VultureTracker/source/vulturetracker/{name}")
+        for name in ("web/tablature.js", "web/licenses/TuxGuitar-scales-NOTICE.txt",
+                     "licenses/TuxGuitar-LGPL-2.1.txt", "licenses/TuxGuitar-AUTHORS.txt"):
+            z.write(ROOT / "vulturetracker" / name, f"VultureTracker/source/vulturetracker/{name}")
+    print(f"{DIST / 'vulturetracker-win64.zip'}: the exe, ffmpeg and {len(files)} demo, sample and licence files")
 sys.exit(code)

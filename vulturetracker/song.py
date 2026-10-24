@@ -1,5 +1,6 @@
 """Song file (YAML) -> Module, with line-referenced validation errors."""
 import math
+import copy
 import re
 import threading
 import unicodedata
@@ -1060,6 +1061,21 @@ def _pattern(ctx, name, spec, line, num_channels, channels=()):
     return Pattern(str(name), rows, lanes), lines
 
 
+def _check_note_pitch(ctx, mod, note, instrument, line, at, lowest, highest):
+    """Collect mapped sample pitches for both tracker cells and exact score attacks."""
+    play, smp = note, instrument
+    if mod.instruments is not None:
+        ins = mod.instruments[instrument - 1]
+        play, smp = ins.keymap[note] if ins else (play, 0)
+        if ins and smp == 0:
+            ctx.warn(line, f"{at}: {notation.format_note(note)} has no sample in instrument "
+                           f"{instrument:02d} '{ins.name}' keymap (plays silence)")
+    if smp and (smp not in lowest or play < lowest[smp][0]):
+        lowest[smp] = (play, line, at)
+    if smp and (smp not in highest or play > highest[smp][0]):
+        highest[smp] = (play, line, at)
+
+
 def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest, highest):
     """Cross-reference checks that need the whole module. `declared`: instrument (or, in sample
     mode, sample) numbers defined in the song. `lowest` and `highest` collect sample number -> (the lowest or highest
@@ -1077,17 +1093,7 @@ def _check_pattern_refs(ctx, mod, pat, lines, where, declared, lowest, highest):
                     continue
                 last_ins[ch] = cell.instrument
             if cell.note is not None and cell.note < 120 and last_ins[ch]:
-                play, smp = cell.note, last_ins[ch]
-                if insmode:
-                    ins = mod.instruments[last_ins[ch] - 1]
-                    play, smp = ins.keymap[cell.note] if ins else (play, 0)
-                    if ins and smp == 0:
-                        ctx.warn(line, f"{at}: {notation.format_note(cell.note)} has no sample in instrument "
-                                       f"{last_ins[ch]:02d} '{ins.name}' keymap (plays silence)")
-                if smp and (smp not in lowest or play < lowest[smp][0]):
-                    lowest[smp] = (play, line, at)
-                if smp and (smp not in highest or play > highest[smp][0]):
-                    highest[smp] = (play, line, at)
+                _check_note_pitch(ctx, mod, cell.note, last_ins[ch], line, at, lowest, highest)
             letter = chr(ord("A") + cell.effect - 1) if cell.effect else ""
             if letter == "B" and cell.param >= len(mod.orders):
                 ctx.error(line, f"{at}: B{cell.param:02X} jumps to order {cell.param} but the order list has {len(mod.orders)} entries")
@@ -1120,14 +1126,14 @@ def _requires(ctx, tree):
     return True
 
 
-def compile_tree(tree, ctx, base_dir) -> Module:
+def compile_tree(tree, ctx, base_dir, *, native_score_rate=None, render_timing=False) -> Module:
     mod = Module()
     if not isinstance(tree, LMap):
         ctx.error(1, "the song file must be a mapping with module, samples, instruments, patterns, orders")
         return mod
     if not _requires(ctx, tree):
         return mod
-    _check_keys(ctx, tree, ["module", "samples", "instruments", "patterns", "orders", "sections", "requires"], "the song file")
+    _check_keys(ctx, tree, ["module", "samples", "instruments", "patterns", "orders", "sections", "requires", "score"], "the song file")
     try:
         _module(ctx, _map(ctx, tree.get("module"), _line(tree, "module"), "module"), mod)
     except _Bad:
@@ -1230,15 +1236,86 @@ def compile_tree(tree, ctx, base_dir) -> Module:
     except ValueError as e:
         ctx.error(_line(tree, 'sections'), str(e))
 
+    if "score" in tree:
+        from .tablature import project_score, playback_plan, authoring_view, repeat_projection
+        try:
+            if native_score_rate is None:
+                def default_volume(instrument, pitch, *, require_sample=False, require_pitch=False, require_harmonic=False, require_fade=False):
+                    require_pitch |= require_harmonic or require_fade
+                    if require_pitch:
+                        require_sample = True
+                        if mod.instruments is not None and 1 <= instrument <= len(mod.instruments):
+                            ins = mod.instruments[instrument - 1]
+                            if ins is None:
+                                raise ValueError('standalone techniques need an explicit valid instrument')
+                            if require_fade and ins.random_volume:
+                                raise ValueError('IT fade_in: randomized instrument volume cannot be projected')
+                            if ins.nna or ins.dct or any(e and e.enabled and e.carry for e in
+                                    (ins.volume_envelope, ins.panning_envelope, ins.pitch_envelope)):
+                                raise ValueError('IT pitch techniques require cut NNA, no duplicate-check action and no carried envelopes')
+                            if require_harmonic and (ins.pan is not None or ins.pitch_pan_separation or
+                                    ins.filter_cutoff is not None or ins.filter_resonance is not None or ins.filter_mode is not None):
+                                raise ValueError('IT harmonic lanes cannot inherit instrument pan/filter state')
+                    if require_harmonic and mod.instruments and any(i.random_volume or i.random_pan for i in mod.instruments if i is not None):
+                        raise ValueError('IT harmonic lane ordering cannot preserve randomized instrument state')
+                    label = 'pitch note' if require_pitch else 'percussion key'
+                    if require_sample and (instrument == 0 or mod.instruments is not None and not 1 <= instrument <= len(mod.instruments)):
+                        raise ValueError(f'{label} {pitch}: standalone IT needs an explicit valid instrument')
+                    number = (instrument if mod.instruments is None or not 1 <= instrument <= len(mod.instruments)
+                              else mod.instruments[instrument - 1].keymap[pitch][1])
+                    if require_sample and not 1 <= number <= len(mod.samples):
+                        raise ValueError(f'{label} {pitch}: instrument {instrument} has no mapped sample for standalone IT')
+                    if require_harmonic and (mod.samples[number - 1].pan is not None or mod.samples[number - 1].vibrato_depth):
+                        raise ValueError('IT harmonic lanes cannot inherit sample pan/auto-vibrato state')
+                    return mod.samples[number - 1].volume if 1 <= number <= len(mod.samples) else 64
+                try:
+                    mod.score_projection = project_score(tree, mod.patterns, default_volume)
+                except ValueError as error:
+                    if not render_timing or ctx.errors or not any(s in str(error) for s in (
+                            'attacks share an IT cell', 'not representable on the IT tick grid',
+                            'row quantization loses a pitch', 'row-quantized pitch exceeds')):
+                        raise
+                    from .tablature import sampled_timing_projection
+                    old_samples, old_instruments = len(mod.samples), len(mod.instruments or [])
+                    try:
+                        mod.score_projection = sampled_timing_projection(tree, mod, default_volume)
+                    except ValueError as fallback_error:
+                        raise ValueError(f'{error}; sampled export also refused: {fallback_error}') from fallback_error
+                    sample_numbers.update(range(old_samples + 1, len(mod.samples) + 1))
+                    instrument_numbers.update(range(old_instruments + 1, len(mod.instruments or []) + 1))
+                mod.patterns = mod.score_projection.patterns
+                for channel, parent in mod.score_projection.channel_parents.items():
+                    assert channel == len(mod.channels)
+                    mod.channels.append(copy.deepcopy(mod.channels[parent]))
+                    mod.channels[-1].name = f'{mod.channels[parent].name or "Channel " + str(parent + 1)} harmonic {channel + 1}'
+                for message in mod.score_projection.diagnostics:
+                    if message.startswith(('IT pitch:', 'IT repetition:', 'IT fade_in:', 'IT notation:', 'IT timing:')):
+                        ctx.warn(_line(tree, 'score'), message)
+                if mod.score_projection.orders is not None:
+                    mod.orders = mod.score_projection.orders
+            else:
+                repeated = repeat_projection(tree, mod.patterns, native_score_rate)
+                mod.native_score = ({'plan': repeated.plan, 'view': repeated.source_view, 'backing': repeated} if repeated else
+                                    {'plan': playback_plan(tree, mod.patterns, native_score_rate),
+                                     'view': authoring_view(tree, mod.patterns)})
+        except ValueError as e:
+            ctx.error(_line(tree, "score"), str(e))
+
     lowest, highest = {}, {}
     from .itwriter import PATTERN_BYTES, packed_size
-    for pat, lines in zip(mod.patterns, pat_lines):
+    for index, pat in enumerate(mod.patterns):
+        lines = (pat_lines[index] if index < len(pat_lines) else [0] * len(pat.rows))
         _check_pattern_refs(ctx, mod, pat, lines, f"pattern '{pat.name}'",
                             instrument_numbers if mod.instruments is not None else sample_numbers, lowest, highest)
         size = packed_size(pat, len(mod.channels))
         if size > PATTERN_BYTES:
             ctx.error(_line(pats, pat.name), f"pattern '{pat.name}': {size} bytes of cell data; IT holds at most "
                                              f"{PATTERN_BYTES} per pattern (fewer rows, channels or filled cells)")
+    if mod.native_score is not None and not ctx.errors:
+        for event in mod.native_score['plan']['events']:
+            if event['type'] == 'note_on':
+                _check_note_pitch(ctx, mod, event['pitch'], event['instrument'], _line(tree, 'score'),
+                                  f"score {event['id']}, channel {event['ch'] + 1}", lowest, highest)
     _check_images(ctx, mod, lowest, highest)
     _check_rings(ctx, mod, lowest, highest)
     return mod
@@ -1375,8 +1452,13 @@ class _LOADER(BoundedLoader):
 _LOADER.add_implicit_resolver('tag:yaml.org,2002:int', re.compile(r'[-+]?0[0-9]+$'), list('-+0123456789'))
 
 
-def load_song_text(text, base_dir=".", filename="<song>"):
-    """Parse and validate song YAML. Returns (Module, warnings); raises SongError listing every problem found."""
+def load_song_text(text, base_dir=".", filename="<song>", *, native_score_rate=None, render_timing=False):
+    """Parse/validate YAML; return (Module, warnings) or raise SongError.
+
+    Default score loading strictly projects to IT. Preparation may explicitly
+    supply native_score_rate (actual mixer Hz) to retain residual patterns and
+    attach a validated plan/view; write_it guards that incomplete backing module.
+    """
     ctx = Ctx(filename)
     try:
         node = yaml.compose(text, Loader=_LOADER)
@@ -1395,7 +1477,7 @@ def load_song_text(text, base_dir=".", filename="<song>"):
         raise SongError([f"{filename}:1: error: the YAML nests too deeply, or an alias refers to its own anchor"])
     if node is None:
         raise SongError([f"{filename}:1: error: the song file is empty"])
-    mod = compile_tree(tree, ctx, Path(base_dir))
+    mod = compile_tree(tree, ctx, Path(base_dir), native_score_rate=native_score_rate, render_timing=render_timing)
     if ctx.errors:
         raise SongError(ctx.errors, ctx.warnings)
     return mod, ctx.warnings
