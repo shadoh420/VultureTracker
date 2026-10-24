@@ -637,6 +637,9 @@
             // Public springs only: alphaTab's cached on-time positions would
             // otherwise retain Gourlay positions at an unchanged stretch force.
             info.buildOnTimePositions = function(force) {
+              // Page justification can request slightly less than the minimum
+              // stretch force. Keep the compact glyph collision floor intact.
+              force = Math.max(info.minStretchForce, force);
               const sorted = springs(), positions = new Map();
               let x = sorted[0]?.preSpringWidth || 0;
               for (const spring of sorted) {

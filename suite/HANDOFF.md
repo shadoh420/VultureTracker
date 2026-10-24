@@ -55,7 +55,15 @@ PDF startup failure now includes bounded/redacted Chromium stderr (focused atomi
 so Linux's exit-6 cause can be diagnosed without disabling its sandbox. The PDF diagnostic changes source
 after the EXE above; rebuild once remaining CI defects are resolved. One read-only PDF worker finished
 and was stopped; no other workers or automations were started/resumed.
-Next: CI diagnostics/fixes, final package smoke, then authorized merge/tag/build-CI/publish.
+Run40115777909 is qualifying6246aa9; do not cancel it before collecting the PDF diagnostic.
+Compact font cause is now reproduced locally: Georgia fallback to Times/serif compressed43.656px of
+label space to43.553px. Compact positions now clamp to their declared minimum stretch force. Same-view
+`compact-font-fallback-before.png`/`compact-font-fallback.png` show hidden/rendered score; headless only.
+`compact-font-fixed.log` records the measured floor; `compact-font-regression-final.log` passes ordinary
+and25-string real editing/history cases with the fallback font. The initial regression measured a grace
+beat instead of the chord; `compact-font-regression.log` preserves that test error. No overlap guard relaxed.
+Next: collect PDF stderr from CI, repair its actual cause, qualify compact fix in CI, final package smoke,
+then authorized merge/tag/build-CI/publish.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
 selected rollback remains `scratch/tab-package-range-expression`. Older candidate records below are history.

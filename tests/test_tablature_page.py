@@ -7980,13 +7980,23 @@ class TestTablaturePage(unittest.TestCase):
         # width guard. Follow its instruction before testing edit hit targets.
         page.set_viewport_size(dict(width=1920,height=1080))
         change('scale',80);change('scale',100)
-        self.assertNotIn('need more width',page.locator('.vt-tab-status').inner_text(), page.evaluate("""() => ({
-            width:document.querySelector('.vt-tab-score').clientWidth,
-            font:tabRenderApi.settings.display.resources.elementFonts.get(alphaTab.NotationElement.EffectChordNames)?.toCssString(),
-            chords:tabRendered.tracks[0].staves[0].bars.flatMap(bar=>bar.voices.flatMap(v=>v.beats
-                .filter(b=>b.hasChord&&b.chord.showName).map(b=>({bar:bar.index,name:b.chord.name,
-                    bounds:tabRenderApi.boundsLookup.findBeat(b)?.barBounds.realBounds,
-                    x:tabRenderApi.boundsLookup.findBeat(b)?.onNotesX}))))})"""))
+        self.assertNotIn('need more width',page.locator('.vt-tab-status').inner_text())
+        # Georgia is absent on Linux. Its serif fallback exposed page justification
+        # shrinking compact label spacing below the glyph collision minimum.
+        page.evaluate("""() => new Promise(resolve=>{
+            const api=tabRenderApi;
+            api.settings.display.resources.elementFonts.get(alphaTab.NotationElement.EffectChordNames).families=['Times New Roman','serif'];
+            api.postRenderFinished.on(()=>resolve());api.updateSettings();api.render();
+        })""")
+        self.assertFalse(page.locator('.vt-tab-score .at-surface').evaluate('e=>e.hidden'))
+        gap, floor = page.evaluate("""() => {
+            const bar=tabRendered.tracks[0].staves[0].bars[1],beats=bar.voices[0].beats.filter(b=>b.hasChord),
+                info=tabRenderApi.renderer.instance.layout.getRendererForBar('tab',bar).layoutingInfo,
+                springs=[...info.springs.values()].sort((a,b)=>a.timePosition-b.timePosition);
+            return [tabRenderApi.boundsLookup.findBeat(beats[1]).onNotesX-tabRenderApi.boundsLookup.findBeat(beats[0]).onNotesX,
+                springs[0].postSpringWidth+springs[1].preSpringWidth];
+        }""")
+        self.assertGreaterEqual(gap+1e-6,floor)
         # Hit targets, selection and playback markers use the compact geometry.
         self.click_tab_lane(page,0,1,2)
         self.settled(page,"CUR.score?.note==='compact-note1'")
