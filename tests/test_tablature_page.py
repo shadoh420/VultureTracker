@@ -5950,7 +5950,9 @@ class TestTablaturePage(unittest.TestCase):
             before = (folder / 'song.yaml').read_bytes()
             initial_history = len(state.history)
             page.evaluate("tab('tab');setEdit(true)")
-            page.wait_for_selector('[data-ui=voice]')
+            # The controls mount before the initial score request restores the
+            # tracker caret (voice 2 here). Choose voice 1 after that restore.
+            page.wait_for_function('SCORE.view && !SCORE.fetching')
             page.select_option('[data-ui=voice]', index=0)
             page.click('.vt-tab-grid [data-note=old]')
             page.click('[data-action=chord-diagram]')

@@ -23,7 +23,7 @@ Channel deletion now filters stale preview columns while loading; adjacent bars 
 `ci-page-fixes.log` retains reproduction; `ci-page-qualified.log`:all3 affected real-control cases pass,
 including native SVG/PNG/JPEG/BMP/PDF export. Same-view `channel-color-before.png`/`channel-color-after.png`
 show the corrected preview header. Captures are headless, not foreground performance measurements.
-CI browser budget is60 minutes with named, fail-fast reporting; every module remains in the run.
+CI browser budget is60 minutes with named reporting; every module remains in the run.
 `pattern-source.log`:32 syntax/docs checks. Final EXE SHA256:
 `c5fdb06bfcd31694e9149a926a7be9518940ca656332fb094dbdf7f2b1f93805`.
 `package-pattern.log` and `package-real-pattern.log` pass the final EXE, including actual Boys232-bar
@@ -33,6 +33,9 @@ Its chord-label overlap guard was correctly active. The test now follows the wid
 testing hit targets/Undo, without changing the guard; `compact-width-final.log` passes. The first local
 repair incorrectly waited for renderScore on a resize; `compact-width.log` retains that harness timeout.
 Browser CI now runs first, then the unchanged portable command, to expose browser failures sooner.
+Run40112793146 exposed a chord-test load race: selecting a voice before the initial score response
+allowed tracker-caret restoration to override it. The test now waits for that response before selecting.
+`chord-ci.log` passes locally; CI now collects all browser failures rather than stopping at the first.
 Next: final CI, then authorized merge/tag/build-CI/publish. No further application changes since the EXE above.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
