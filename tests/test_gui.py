@@ -1274,14 +1274,21 @@ class TestGui(unittest.TestCase):
     @staticmethod
     def fetch(port, path, data=None, **headers):
         """(status, headers, body) of a request to the local server, with its token unless `headers` names one."""
-        import urllib.error
-        import urllib.request
-        req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, headers={"X-VT-Token": TOKENS.get(port, ""), **headers})
-        try:
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status, r.headers, r.read()
-        except urllib.error.HTTPError as e:
-            return e.code, e.headers, e.read()
+        import http.client
+        import socket
+        # A rejected header closes the connection without reading its body.
+        # Sending these small fixtures together avoids a Windows reset when
+        # urllib sends the body after that rejection; status assertions stay strict.
+        fields = {"Host": f"127.0.0.1:{port}", "Connection": "close", "X-VT-Token": TOKENS.get(port, ""), **headers}
+        if data is not None:
+            fields["Content-Length"] = str(len(data))
+        request = f"{'POST' if data is not None else 'GET'} {path} HTTP/1.1\r\n"
+        request += ''.join(f'{key}: {value}\r\n' for key, value in fields.items()) + '\r\n'
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as connection:
+            connection.sendall(request.encode('latin-1') + (data or b''))
+            with http.client.HTTPResponse(connection) as response:
+                response.begin()
+                return response.status, response.headers, response.read()
 
     def test_undo_brings_the_tryout_settings_back(self):
         # F3: removing a channel moves the mutes and faders of the channels after it; undo puts them back on the channel

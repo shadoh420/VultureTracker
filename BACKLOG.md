@@ -29,8 +29,9 @@ Undo. Edits that TuxGuitar also has are compared with TuxGuitar 2.1.0 by `tools/
 ### Current state: continuous Pattern follow-up (2026-10-24)
 
 Release1.9.0 is now authorized. The owner requested the clean TuxGuitar layout as the default first;
-fresh-view defaults and preserved explicit preferences pass4 focused control tests. Versioned package and
-PR CI are pending; current handoff records publication state. Exhaustive parity is not claimed.
+fresh-view defaults and preserved explicit preferences pass4 focused control tests. The versioned package
+passes native/IT/control smoke checks; PR CI is pending. Current handoff records publication state.
+Exhaustive parity is not claimed.
 
 The owner clarified that one bar with previous/next controls was insufficient. Pattern now defaults to a
 continuous order-list view: several bars visible together, wheel/scrollbar access through the whole song,
@@ -39,7 +40,8 @@ Native/repeated-pattern edits share the existing history. Source checks cover ac
 last-bar playback, resize, raw/native byte-exact Undo/Redo and atomic failed Cut/Paste. Final package qualification
 passes in `scratch/tab-test-fixtures/continuous-pattern`, including dragging the actual scrollbar to bar232,
 retained marker/edit/native/IT/selfchecks and ZIP/shortcut finalization; see the handoff for current digests.
-The prior score preset remains opt-in; cleaner score defaults and owner visual/feel acceptance remain open.
+The clean score preset is now the fresh-view default; explicit saved preferences remain intact.
+Owner visual/feel acceptance is not inferred from the automated checks.
 
 ### Previous delivered state: owner GP5 import/export and navigation fixes (2026-10-24)
 

@@ -36,6 +36,15 @@ Browser CI now runs first, then the unchanged portable command, to expose browse
 Run40112793146 exposed a chord-test load race: selecting a voice before the initial score response
 allowed tracker-caret restoration to override it. The test now waits for that response before selecting.
 `chord-ci.log` passes locally; CI now collects all browser failures rather than stopping at the first.
+Current CI run40113391924 is on02b828d. Windows finished1698 cases with one early-rejection transport
+error; Linux results are still pending and GitHub's combined jobs endpoint repeatedly returns502.
+The Windows failure is reproduced deterministically by delaying urllib's separate body send in
+`probe_refusal_transport.py`: both token/Origin tests abort (`refusal-transport-before.log`). The test
+client now sends each fixture in one write, still requiring401/403 and unchanged state; both pass
+with the diagnostic delay (`refusal-transport-final.log`). Routes/ranges, upload-size guards and score
+HTTP responses also pass (`http-fixture-final.log`). An initial command used the wrong test class;
+`http-fixture-invocation.log` retains that invocation error. These are test-only changes, awaiting the
+current browser result before pushing so it is not cancelled mid-qualification.
 Next: final CI, then authorized merge/tag/build-CI/publish. No further application changes since the EXE above.
 Current local launch is `dist/vulturetracker.exe` (1.9.0); the five existing preview/GP5/edit shortcuts now
 target it with original song arguments. Private songs/notes remain in their existing scratch locations;
