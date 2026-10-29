@@ -2,7 +2,7 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.10.0 (2026-10-29)
 
 - Score shortcuts ignore hidden panels, and refreshing an order preserves typed positions and range selections.
 - Shorter README with refreshed Pattern, Score, Tryout and Spectrum screenshots from the project demo.
