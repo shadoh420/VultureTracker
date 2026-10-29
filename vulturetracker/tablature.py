@@ -8413,12 +8413,49 @@ def score_view(song, projection):
             'raw_positions': raw_note_view(song, projection), 'diagnostics': list(projection.diagnostics)}
 
 
+def tracker_staff_groups(mod):
+    """Conservative display groups: one known sound slot per channel over the written order.
+
+    Track instrument memory across pattern boundaries, including instrument-only cells.
+    Mixed/unknown channels stay separate. Names and shared sample data alone do not prove
+    that two instruments have the same envelopes, tuning or other sound settings.
+    """
+    slots = [0] * len(mod.channels)
+    used = [set() for _ in mod.channels]
+    sounds = mod.instruments if mod.instruments is not None else mod.samples
+    kind = 'Instrument' if mod.instruments is not None else 'Sample'
+    for order in mod.orders:
+        if order == 255:
+            break
+        if order == 254:
+            continue
+        for cells in mod.patterns[order].rows:
+            for ch, cell in enumerate(cells):
+                if cell.instrument:
+                    slots[ch] = cell.instrument
+                if cell.note is not None and 0 <= cell.note < 120:
+                    used[ch].add(slots[ch])
+    groups = {}
+    for ch, ids in enumerate(used):
+        if not ids:
+            continue
+        slot = next(iter(ids)) if len(ids) == 1 else 0
+        known = 0 < slot <= len(sounds)
+        key = ('sound', slot) if known else ('channel', ch)
+        group = groups.setdefault(key, {'name': f'{kind} {slot:02d}' if known else mod.channels[ch].name,
+                                       'slot': slot if known else None, 'channels': []})
+        group['channels'].append(ch)
+    return list(groups.values())
+
+
 def raw_note_view(song, projection):
     """Read-only previews of residual attacks, with no fabricated score identities.
 
 Each record has pattern/index/name, row, ch, pitch, source='raw', editable=False,
 track/string/fret when assignable, at/duration/written when inferable, and reason.
 Use {pattern,row,ch} to select explicit promotion; never send these to note_set.
+boundary_row records the next tracker note/cut/release even when timing is unknown;
+it is a row-grid preview hint, not permission for adoption or an audible note length.
 These are notation hints, not inferred audible note lengths. No state is changed.
 """
     tracks = song.get('score', {}).get('tracks', {})
@@ -8437,6 +8474,7 @@ These are notation hints, not inferred audible note lengths. No state is changed
                             if projection.patterns[pi].rows[r][ch].note is not None), None)
                 entry = dict(pattern=pi, pattern_name=pattern.name, row=row, ch=ch, pitch=cell.note,
                              source='raw', editable=False, track=track_id, string=string, fret=fret,
+                             boundary_row=end,
                              at=_pair(row * step) if timing_known else None, duration=None, written=None)
                 if not timing_known:
                     entry['reason'] = 'raw timing/flow commands require an exact timing map'

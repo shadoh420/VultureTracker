@@ -93,8 +93,13 @@ class TestRealWorkspacePage(unittest.TestCase):
         page.evaluate("tab('pattern')")
         page.keyboard.press('Alt+n')
         self.assertEqual(page.evaluate('SCORE.view.order'), 1)
+        self.assertEqual(page.evaluate('CUR.o'), 1, 'Hidden score must not consume its navigation shortcut')
         page.evaluate("tab('tab')")
         page.locator('#tab-editor').focus()
+        # All Pattern channels are shown now, including the empty first string.
+        # Select the fixture's note on string 2 before opening its grace controls.
+        page.keyboard.press('ArrowDown')
+        self.assertTrue(page.locator('[data-ui=grace-kind]').is_enabled())
         page.keyboard.press('g')
         self.assertEqual(page.evaluate('document.activeElement.dataset.ui'), 'grace-kind')
         self.assertEqual(song_path.read_bytes(), original)

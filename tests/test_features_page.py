@@ -46,6 +46,8 @@ class TestFeaturesPage(unittest.TestCase):
                     page.goto(f'http://127.0.0.1:{srv.server_address[1]}/')
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("localStorage.removeItem('uiscale'); localStorage.removeItem('agent')")
+                    # These feature cases exercise the optional pattern tools.
+                    page.locator('#pat-advanced').evaluate('(e)=>e.open=true')
                     yield page, d
                     browser.close()
                 self.assertEqual(errors, [])

@@ -146,7 +146,12 @@ the repository). Nothing is written until WRITE MIX → SONG, which shows the YA
 change first (`module.channels` volume/pan, `mix_volume`, the sample's `global_volume`, edited in place).
 EXPORT STEMS and EXPORT SONG AS open the unified RENDER & EXPORT panel: choose destination, format, region, mix,
 audition mute/solo behavior and tail before starting. The tab also has the arrangement grid and the slot table. The Pattern tab is the
-pattern view and editor, the whole window wide. **Continuous song** is on by default: the bars/patterns in the order
+pattern view and editor, the whole window wide. All channels are shown by default, including empty ones;
+scroll horizontally to reach more channels, or choose **ACTIVE** to filter them. The cursor scrolls horizontally
+as you move between channels. Larger text, channel dividers and distinct beat, measure, cursor and playback
+highlights keep the grid readable. **Advanced** expands the selection, automation and composition controls;
+it starts collapsed, and the editing shortcuts still work while it is closed.
+**Continuous song** is on by default: the bars/patterns in the order
 list stack vertically, with one scrollbar through the entire song. Several short bars fit together in the pane.
 Click any visible row to edit that pattern occurrence; Up/Down and Page Up/Down continue into adjacent patterns.
 Manual scrolling pauses **Follow playback**; re-enable it to follow the playing row. The song-position selector
@@ -990,6 +995,31 @@ open-a-song screen; dropping a song file onto it opens that song. Synth renderin
 still needs the plugins and packs from `tools/` next to a checkout, as described in SAMPLING.md.
 
 ### Native TAB / SCORE (in development)
+
+Imported tracker songs without authored score tracks automatically show a **read-only staff preview of the entire song order**.
+Pattern occurrences appear consecutively, with labels at their boundaries; repeated patterns appear for each use.
+Stored patterns outside the song order are excluded, just as in playback. The full score stays in place as playback advances.
+**All parts (by sound)** is the default: channels that use one identical instrument/sample slot throughout the
+song share a staff. Mixed or unknown sounds stay separate; matching names alone do not merge different slots.
+Interleaved lines share a voice, equal-length simultaneous notes form chords, and overlapping rhythms use
+separate voices (at most two per staff). Exact unison duplicates share a notehead; selecting one identifies its
+source channels. This combines notation only: tracker channels, effects and playback remain unchanged.
+Choose **All channels (separate)** or one channel in the Track selector to inspect the original parts.
+Staff pitches use Pattern's octave labels (IT's C-0 numbering is converted for notation), not inferred sample tuning.
+Previous/Next Pattern browses the order list. Click a staff note to select its original Pattern row/channel.
+The shared playback marker moves through notes, rests and pattern boundaries; Follow playback keeps it visible as the score scrolls.
+Browsing or selecting a note pauses automatic scrolling until Follow is checked again; the marker still shows the playing location.
+In horizontal tracker view, vertical wheel scrolling only browses channels and keeps horizontal playback follow on;
+horizontal or Shift-wheel scrolling browses time and pauses follow.
+The note list below the controls belongs to the selected pattern. Edit those notes in Pattern.
+Preview rhythm uses the song's rows-per-beat grid, with note lengths bounded by the next note/cut/release or
+pattern end. It does not transcribe effects, sample tuning, decay or playback flow, and viewing it never converts
+or saves the song. Guitar TAB still requires an explicitly configured track and fingering.
+To export this preview as a PDF, click **Print preview**, choose the parts, paper size, scale and bar range,
+then **Update preview** and **Print / Save PDF**. In the system print dialog, choose **Save as PDF** or
+**Microsoft Print to PDF**, then choose a filename. Printing follows the current grouped/separate/channel view
+and includes the full song order by default. The PDF identifies tracker rhythm as a row-grid preview;
+it does not create an authored score or change the song. Native scores retain staff/TAB printing options.
 
 Pattern displays one tracker pattern at a time; imported GP bars can be as short as12 rows.
 Use **Song position**, **Previous** and **Next** to reach the entire arrangement, or scroll past the first/last

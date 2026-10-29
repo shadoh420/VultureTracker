@@ -2207,7 +2207,7 @@ class State:
 
     def score_view(self):
         """The saved score and its compiled links; the renderer owns no song or playback state."""
-        from .tablature import Projection, raw_note_view, native_raw_note_view, measure_errors
+        from .tablature import Projection, raw_note_view, native_raw_note_view, measure_errors, tracker_staff_groups
         with self.lock:
             self._need_compiled()
             if self.mod.native_score is not None:
@@ -2232,6 +2232,8 @@ class State:
                     "rows": [len(p.rows) for p in self.mod.patterns],
                     "channels": [c.name for c in self.mod.channels],
                     "row_step": [self.mod.speed, 24], "tempo": self.mod.tempo,
+                    "rows_per_beat": self.mod.row_highlight[0] or 4,
+                    "staff_groups": tracker_staff_groups(self.mod),
                     "editable": not bool(self.read_only or self.dirty())}
 
     def score_clipboard(self, body):

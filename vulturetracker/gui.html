@@ -109,18 +109,23 @@ input[type=range]{-webkit-appearance:none;flex:1;min-width:30px;height:4px;margi
 .stem .smp{width:78px;flex:none;text-align:right;font-size:9px;color:#5c6569;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .state{padding:2px 6px;font-size:8.5px;letter-spacing:.12em;font-weight:700;color:var(--dim);background:#1b2124}.state.on{color:#0d1a11;background:var(--acc)}
 .badge{flex:none;padding:3px 7px;white-space:nowrap;font:10px/1.3 var(--mono);color:var(--acc);background:#16201a}
+#t-pattern{--pat-channel:132px;--pat-row:22px;--pat-gutter:38px}
 #patscroll{position:relative}
+#pat-advanced{margin-top:6px;border:1px solid #34414a;border-radius:3px;padding:0 8px}
+#pat-advanced summary{cursor:pointer;padding:6px 0;color:var(--ink);font-size:12px}
+#pat-advanced summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#pat-advanced[open]{padding-bottom:8px}
 .pat-song-title{height:24px;box-sizing:border-box;padding:5px 8px;font:10px/14px var(--mono);color:var(--acc);background:#202a2f;border-top:1px solid #46555d;white-space:nowrap}
-.pat-preview-row{display:flex;font:10px/15px var(--mono);white-space:pre;cursor:text}.pat-preview-row:nth-child(4n){background:rgba(255,255,255,.022)}
-.pat-preview-cell{display:inline-block;width:86px;flex:none}.pat-preview-row .rn{width:26px;flex:none}
+.pat-preview-row{cursor:text}
+.pat-preview-cell{display:inline-block}
 #patscroll::-webkit-scrollbar-thumb{background:#59676e;min-height:28px;min-width:28px}
-.pathead{display:flex;position:sticky;top:0;z-index:2;background:var(--panel);padding:4px 0 3px;box-shadow:inset 0 -1px 0 #0a0c0d;font:8.5px/1 var(--mono);color:var(--dim);white-space:nowrap}.pathead span{width:86px;flex:none;overflow:hidden}.pathead span:first-child{width:26px;position:sticky;left:0;z-index:1;background:var(--panel)}.pathead span.off{color:#4a5255}
-.pt{display:flex;font:10px/15px var(--mono);white-space:pre}.pt.b4{background:rgba(255,255,255,.022)}.pt.b16{background:rgba(143,176,196,.055)}.pt.now{background:rgba(126,231,135,.13)}
-.rn{width:26px;flex:none;position:sticky;left:0;z-index:1;background:var(--panel);color:#4a5255;font-variant-numeric:tabular-nums}.pt.b4 .rn{background:#161a1c;color:#6d777c}.pt.b16 .rn{background:#171c20;color:#8fb0c4}.pt.now .rn{background:#1b2c20;color:var(--acc)}
-.pt.cur .rn{box-shadow:inset 3px 0 0 var(--amber);color:var(--amber)}.pt.cur{background:rgba(217,164,65,.07)}
-.sl{background:rgba(95,125,148,.38)}.cc{box-shadow:inset 0 0 0 1px var(--amber)}#pat.editing .cc{background:var(--amber);color:#1a1508!important}#pat.editing .pt.cur{background:rgba(217,164,65,.14)}
-.pathead span{position:relative}.lvu{position:absolute;left:0;bottom:-3px;height:2px;background:var(--acc);width:0}
-.pc{width:86px;flex:none}.pc .n{color:#c3cbcf}.pc .i{color:#8fb0c4}.pc .v{color:#79a08a}.pc .e{color:var(--amber)}.pc .z{color:#2e3538}.pc .ln{opacity:.5;text-decoration:underline dotted}.pt.now .pc .n{color:#eaf6ec}.pt.now .pc .n.z{color:#3d4a42}
+.pathead{display:flex;position:sticky;top:0;z-index:2;height:28px;background:#29343d;border-bottom:1px solid #657582;font:12px/27px var(--mono);color:#d7e2eb;white-space:nowrap}.pathead span{position:relative;width:var(--pat-channel);padding:0 8px;border-right:1px solid #657582;flex:none;overflow:hidden}.pathead span:first-child{width:var(--pat-gutter);position:sticky;left:0;z-index:1;background:#29343d}.pathead span.off{color:#8d979c}
+.pt,.pat-preview-row{display:flex;height:var(--pat-row);font:14px/var(--pat-row) var(--mono);white-space:pre;background:#14191e}.pt.b4,.pat-preview-row.b4{background:#202c35}.pt.b16,.pat-preview-row.b16{background:#2b3c49}.pt.now{background:#354f2b;box-shadow:inset 0 1px #8cb764,inset 0 -1px #8cb764}
+.rn{width:var(--pat-gutter);padding-right:7px;border-right:1px solid #657582;text-align:right;flex:none;position:sticky;left:0;z-index:1;background:#202830;color:#a0adb7;font-variant-numeric:tabular-nums}.b4 .rn{background:#293944;color:#d2dce4}.b16 .rn{background:#354c5d;color:#edf4fa}.pt.now .rn{background:#354f2b;color:#d9f5b8}
+.pt.cur .rn{box-shadow:inset 3px 0 0 var(--amber);color:#ffe1a0}.pt.cur{background:#30485e}
+.sl{background:#466789}.cc{background:#101820;box-shadow:inset 0 0 0 2px #ffe1a0;color:#fff!important}#pat.editing .cc{background:#ffe1a0;color:#1a1508!important}#pat.editing .pt.cur{background:#3b4a57}
+.lvu{position:absolute;left:0;bottom:0;height:2px;background:var(--acc);width:0}
+.pc{width:var(--pat-channel);padding:0 8px;border-right:1px solid #52616d;flex:none}.pc .n{color:#e3eaf0}.pc .i{color:#9fcaf1}.pc .v{color:#9dd5b0}.pc .e{color:#f0c36e}.pc .z{color:#63717d}.pc .ln{opacity:.7;text-decoration:underline dotted}.pt.now .pc .n{color:#f0ffe5}.pt.now .pc .n.z{color:#91a583}
 /* listening notes: the tag bar under the player, channel chips, the notes tab */
 .notesbar{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 12px 6px;background:var(--panel2);box-shadow:inset 0 1px 0 #2a3135}
 .tagb{padding:5px 9px;cursor:pointer;font-size:10px;letter-spacing:.1em;font-weight:700;color:#c3cbcf;background:#1b2124;box-shadow:inset 1px 1px 0 #2a3135,inset -1px -1px 0 #0a0c0d;user-select:none;white-space:nowrap}.tagb:hover{color:var(--hi);background:#232a2e}
@@ -290,6 +295,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <select id="lv-lat" style="font:10px var(--mono);padding:1px 3px;margin-left:8px" onchange="lvSetLatency(this.value)" title="output latency: LOW measured 8 ms in WebView2, SAFE 40 ms; take SAFE if playback crackles"><option value="0">LATENCY LOW</option><option value="interactive">LATENCY SAFE</option></select>
         <span class="mono" id="lv-status" style="flex:1;min-width:0;font-size:10px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right"></span>
       </div>
+      <details id="pat-advanced"><summary>Advanced · selection, automation &amp; composition</summary>
       <div id="selbar" style="display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap">
         <span class="k" title="drag over cells, or Shift with the arrows; Ctrl+5 the pattern, Ctrl+L the channel; without a selection the commands work on the cursor's cell">SELECTION</span><span class="mono" id="selinfo" style="font-size:10px;color:#c3cbcf;min-width:130px"></span>
         <span class="btn sm" onclick="selCopy(false)" title="Ctrl+C (also to the system clipboard, in OpenMPT's format)">COPY</span><span class="btn sm" onclick="selCopy(true)" title="Ctrl+X">CUT</span><span class="btn sm" id="sel-paste" onclick="selPaste(false)" title="paste at the cursor, overwriting (Ctrl+V)">PASTE</span><span class="btn sm" id="sel-mix" onclick="selPaste(true)" title="paste only into empty fields (Ctrl+Shift+V)">MIX</span><span class="btn sm" id="sel-flood" onclick="selPaste(false,true)" title="paste again and again from the cursor to the end of the pattern (Shift+V outside the note column)">FLOOD</span><span class="btn sm" id="sel-push" onclick="selPaste(false,false,true)" title="OpenMPT's Push Forward Paste (Ctrl+Alt+V): the pasted rows are inserted, the channels' rows below moved down (the last ones drop off)">PUSH</span><label style="display:flex;align-items:center;gap:3px;font-size:9.5px;color:var(--dim)" title="OpenMPT's Overflow Paste: a paste that runs past the pattern's end goes on in the next order's pattern (PASTE and MIX; one undo step)"><input type="checkbox" id="sel-over" style="margin:0" onchange="try{localStorage.overpaste=this.checked?'1':''}catch(e){}">OVERFLOW</label><span class="btn sm" onclick="selClear()" title="clear the selected fields (Delete)">CLEAR</span>
@@ -300,6 +306,7 @@ option.hascand{color:var(--acc);font-weight:700}
         <span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;margin-left:8px"><span class="btn sm" onclick="selRender()" title="the selected rows and channels (with no selection: the whole pattern, the channels the mixer lets through) rendered as they play in the song, with the unwritten mix, then ringing out for up to TAIL seconds with nothing new struck; saved as a WAV beside the song and added as a new sample slot (resampling). One undo step">RENDER → SLOT</span><span class="k">TAIL</span><input id="rs-tail" type="number" min="0" max="10" step="0.5" value="2" style="width:38px;font:10px var(--mono);padding:1px 3px" title="seconds the notes may ring on after the last row (the render stops at the first silence)"><span class="k">S</span></span>
         <span class="btn sm" style="margin-left:8px" onclick="toggleFind()" title="find and replace (Ctrl+F; F3 finds the next)">FIND…</span><span class="mono" id="sel-msg" style="flex:1;min-width:0;font-size:10px;color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>
       </div>
+      </details>
       <div id="findbar" style="display:none;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap;font:9.5px var(--mono);color:var(--dim)" onkeydown="if(event.key==='Enter'){event.preventDefault();findNext()}else if(event.key==='Escape')toggleFind(false)" title="* matches any characters, ? one; an empty field matches anything">
         <span class="k">FIND</span>note<input id="f-n" style="width:40px;font:10px var(--mono);padding:1px 3px" placeholder="C-*">ins<input id="f-i" style="width:30px;font:10px var(--mono);padding:1px 3px">vol<input id="f-v" style="width:40px;font:10px var(--mono);padding:1px 3px">fx<input id="f-e" style="width:40px;font:10px var(--mono);padding:1px 3px">
         <span class="k" style="margin-left:6px">REPLACE WITH</span>note<input id="r-n" style="width:40px;font:10px var(--mono);padding:1px 3px">ins<input id="r-i" style="width:30px;font:10px var(--mono);padding:1px 3px">vol<input id="r-v" style="width:40px;font:10px var(--mono);padding:1px 3px">fx<input id="r-e" style="width:40px;font:10px var(--mono);padding:1px 3px">
@@ -1134,9 +1141,10 @@ $('patscroll').addEventListener('wheel',e=>{const sc=$('patscroll');
 },{passive:false});
 // Only visible neighbouring patterns are projected into DOM. The existing #pat
 // remains the one editor, so clipboard, ownership and Undo keep their pattern context.
+const patStyle=getComputedStyle($('t-pattern')),PAT_GRID={channel:parseFloat(patStyle.getPropertyValue('--pat-channel')),row:parseFloat(patStyle.getPropertyValue('--pat-row')),gutter:parseFloat(patStyle.getPropertyValue('--pat-gutter'))};
 const PAT_SONG={key:null,cache:new Map(),heights:[],offsets:[],programTop:0,frame:0,select:0};
 function patContinuous(){return $('pat-continuous').checked&&S?.song?.facts?.orders?.length>1}
-function patSongReset(){const key=S.song.path+'|'+S.version.hash;if(PAT_SONG.key!==key){PAT_SONG.key=key;PAT_SONG.cache.clear();PAT_SONG.heights=S.song.facts.orders.map(o=>48+15*o.rows);PAT_SONG.offsets=[]}}
+function patSongReset(){const key=S.song.path+'|'+S.version.hash;if(PAT_SONG.key!==key){PAT_SONG.key=key;PAT_SONG.cache.clear();PAT_SONG.heights=S.song.facts.orders.map(o=>60+PAT_GRID.row*o.rows);PAT_SONG.offsets=[]}}
 function patData(oi){patSongReset();const state=PAT_SONG,key=state.key,o=S.song.facts.orders[oi];
   if(state.cache.has(oi))return state.cache.get(oi).promise;
   const entry={data:null,promise:null};entry.promise=fetch('/api/pattern/'+o.index+(o.occurrence?'?occurrence='+encodeURIComponent(o.occurrence):''))
@@ -1149,7 +1157,7 @@ function patSongLayout(){const canvas=$('pat-song-canvas'),active=$('pat'),conte
   if(!patContinuous()){canvas.style.cssText='';active.style.cssText='';context.replaceChildren();return}
   patSongReset();const sc=$('patscroll'),old=PAT_SONG.heights[PAT.order],top=PAT_SONG.offsets[PAT.order]||0;
   active.style.position='absolute';active.style.left='0';active.style.minWidth='100%';
-  if(PAT.rows&&$('t-pattern').classList.contains('on')){active.style.minHeight='';PAT_SONG.heights[PAT.order]=Math.max(48,active.offsetHeight)}
+  if(PAT.rows&&$('t-pattern').classList.contains('on')){active.style.minHeight='';PAT_SONG.heights[PAT.order]=Math.max(60,active.offsetHeight)}
   else active.style.minHeight=old+'px';
   let height=0;PAT_SONG.offsets=PAT_SONG.heights.map(h=>{const at=height;height+=h;return at});
   canvas.style.cssText=`position:relative;min-width:100%;height:${height}px`;
@@ -1157,15 +1165,15 @@ function patSongLayout(){const canvas=$('pat-song-canvas'),active=$('pat'),conte
   if(old!==PAT_SONG.heights[PAT.order]&&sc.scrollTop>top+old)patScrollTo(sc.scrollTop+PAT_SONG.heights[PAT.order]-old);
   patSongContext();}
 function patSongContext(){if(!patContinuous()||!PAT_SONG.offsets.length||!$('t-pattern').classList.contains('on'))return;
-  const sc=$('patscroll'),f=S.song.facts,cols=(PAT.fo||[]).filter(c=>c<f.channels.length),key=PAT_SONG.key;
+  const sc=$('patscroll'),f=S.song.facts,HL=f.highlight||[4,16],cols=(PAT.fo||[]).filter(c=>c<f.channels.length),key=PAT_SONG.key;
   if(!cols.length)cols.push(...f.channels.keys());
-  const width=26+cols.length*86+16,low=Math.max(0,sc.scrollTop-sc.clientHeight),high=sc.scrollTop+2*sc.clientHeight;
+  const width=PAT_GRID.gutter+cols.length*PAT_GRID.channel+16,low=Math.max(0,sc.scrollTop-sc.clientHeight),high=sc.scrollTop+2*sc.clientHeight;
   const visible=f.orders.map((o,i)=>i).filter(i=>i!==PAT.order&&PAT_SONG.offsets[i]<high&&PAT_SONG.offsets[i]+PAT_SONG.heights[i]>low);
   $('pat-context').innerHTML=visible.map(i=>{const o=f.orders[i],j=PAT_SONG.cache.get(i)?.data,rows=j?.display_rows||j?.rows;
     return `<div class="pat-preview" data-order="${i}" style="position:absolute;top:${PAT_SONG.offsets[i]}px;height:${PAT_SONG.heights[i]}px;min-width:100%;width:${width}px;overflow:hidden">
       <div class="pat-song-title">${i+1} / ${f.orders.length} · ${esc(o.pattern)} · ${o.rows} rows</div>
       <div style="padding:0 8px 8px"><div class="pathead"><span></span>${cols.map(c=>`<span class="${audible(c)?'':'off'}"${ownCol(c)?` style="box-shadow:inset 0 -2px 0 ${ownCol(c)}"`:''}>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}</span>`).join('')}</div>
-      ${rows?rows.map((r,n)=>`<div class="pat-preview-row" data-row="${n}"><span class="rn">${rowNum(n)}</span>${cols.map(c=>{const [a,b,v,e]=r[c].split(' ');return `<span class="pat-preview-cell pc" data-ch="${c}">${[a,b,v,e[0],e.slice(1)].map((s,col)=>`<span data-col="${col}" class="${['n','i','v','e','e'][col]}${s[0]==='.'?' z':''}">${esc(s)}</span>${col<3?' ':''}`).join('')}</span>`}).join('')}</div>`).join(''):`<div>${esc(j?.error||'Loading pattern…')}</div>`}</div></div>`}).join('');
+      ${rows?rows.map((r,n)=>`<div class="pat-preview-row ${n%HL[1]?n%HL[0]?'':'b4':'b16'}" data-row="${n}"><span class="rn">${rowNum(n)}</span>${cols.map(c=>{const [a,b,v,e]=r[c].split(' ');return `<span class="pat-preview-cell pc" data-ch="${c}">${[a,b,v,e[0],e.slice(1)].map((s,col)=>`<span data-col="${col}" class="${['n','i','v','e','e'][col]}${s[0]==='.'?' z':''}">${esc(s)}</span>${col<3?' ':''}`).join('')}</span>`}).join('')}</div>`).join(''):`<div>${esc(j?.error||'Loading pattern…')}</div>`}</div></div>`}).join('');
   for(const i of visible)if(!PAT_SONG.cache.has(i))patData(i).then(()=>{if(PAT_SONG.key===key)patSongContext()}).catch(e=>{EDQ.err=e.message;renderLiveBar()});}
 $('patscroll').addEventListener('scroll',()=>{if(!patContinuous())return;
   if(Math.abs($('patscroll').scrollTop-PAT_SONG.programTop)>1)pausePatternFollow();
@@ -1173,7 +1181,7 @@ $('patscroll').addEventListener('scroll',()=>{if(!patContinuous())return;
 new ResizeObserver(()=>{if(patContinuous()&&PAT.rows&&$('t-pattern').classList.contains('on')){
   patSongLayout();followPlayhead();}}).observe($('patscroll'));
 $('pat-context').addEventListener('mousedown',async e=>{const row=e.target.closest('.pat-preview-row'),box=e.target.closest('.pat-preview');
-  if(!row||!box||e.button!==0)return;e.preventDefault();pausePatternFollow();SEL=null;
+  if(!row||!box||e.button!==0)return;e.preventDefault();if(document.activeElement?.tagName==='SUMMARY')document.activeElement.blur();pausePatternFollow();SEL=null;
   const order=+box.dataset.order,r=+row.dataset.row,ch=+(e.target.closest('[data-ch]')?.dataset.ch??CUR.ch),col=+(e.target.closest('[data-col]')?.dataset.col??0),ticket=++PAT_SONG.select;
   CUR.o=order;CUR.row=r;CUR.ch=ch;CUR.col=col;CUR.score=null;
   await showPattern(order);if(ticket===PAT_SONG.select&&PAT.order===order&&PAT.rows)setCursor(order,r,ch,col);});
@@ -1183,7 +1191,7 @@ function showPattern(oi){const f=S.song.facts,o=f.orders[oi];if(!o)return;const 
   PAT.order=oi;renderPat();return PAT.loading}
 function drumChannels(){return S.song.facts.channels.map((c,i)=>fam(c)===0?i:-1).filter(i=>i>=0)}
 function setHex(v){hexRows=v;try{localStorage.hexrows=v?'1':'0'}catch(e){}renderPat()}
-function setFocus(x){const n=S.song.facts.channels.length;if(x===null)focus=null;else if(x==='all')focus=[...Array(n).keys()];else if(x==='drums')focus=drumChannels();else{const f=(focus||PAT.active).slice(),k=f.indexOf(x);if(k>=0){if(f.length>1)f.splice(k,1)}else f.push(x);focus=f.sort((a,b)=>a-b)}renderPat()}
+function setFocus(x){if(x===null||x==='all')focus=null;else if(x==='active')focus='active';else if(x==='drums')focus=drumChannels();else{const f=PAT.fo.slice(),k=f.indexOf(x);if(k>=0){if(f.length>1)f.splice(k,1)}else f.push(x);focus=f.sort((a,b)=>a-b)}renderPat()}
 // ---- ROLL: a piano roll of the cursor's channel over the pattern (rows across, pitches up): the same cells as the
 // tracker grid, edited through patEdit (EDIT mode, one undo step each). Not in OpenMPT (GUIDE: a deliberate difference)
 const ROLL={on:false,RW:14,PH:12,pitchHeight:12,scopeVersion:0,drag:null};
@@ -1371,7 +1379,7 @@ function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL
   const options=f.orders.map((order,i)=>`<option value="${i}">${i+1} / ${f.orders.length} · ${esc(order.pattern)} · ${order.rows} rows</option>`).join('');
   if($('pat-order').innerHTML!==options)$('pat-order').innerHTML=options;
   $('pat-order').value=PAT.order;$('pat-prev').disabled=PAT.order===0;$('pat-next').disabled=PAT.order===f.orders.length-1;
-  if(focus){focus=focus.filter(c=>c<f.channels.length);if(!focus.length)focus=null}
+  if(Array.isArray(focus)){focus=focus.filter(c=>c<f.channels.length);if(!focus.length)focus=null}
   CUR.ch=Math.min(CUR.ch,f.channels.length-1);
   if(SEL&&(SEL.a.ch>=f.channels.length||(SEL.b&&SEL.b.ch>=f.channels.length)))SEL=null;
   agSyncSel();if(ROLL.on)setTimeout(renderRoll);
@@ -1380,14 +1388,14 @@ function renderPat(){const f=S.song.facts,o=f.orders[PAT.order],rows=PAT.rows,HL
   if(!rows){put('pat','<div style="padding:30px;text-align:center;color:var(--dim)">loading…</div>');put('patctl','');$('patrow').textContent='';patSongLayout();return}
   const n=f.channels.length,empty='... .. ... ...';PAT.active=f.channels.map((_,c)=>rows.some(r=>r[c]!==empty)||(PAT.score_positions||[]).some(p=>p.kind==='note'&&p.ch===c)?c:-1).filter(c=>c>=0);
   if(patContinuous())PAT.active=f.channels.map((_,c)=>PAT.active.includes(c)||f.use.some(u=>u[c]?.length)?c:-1).filter(c=>c>=0);
-  const drums=drumChannels(),fo=focus||(EDIT||!PAT.active.length?f.channels.map((_,c)=>c):PAT.active),fits=Math.max(1,Math.floor(($('patscroll').clientWidth-26-18)/86));
-  put('patctl',`<div style="display:flex;align-items:center;gap:6px"><span class="btn sm ${focus?'':'on'}" onclick="setFocus(null)">ACTIVE ${PAT.active.length}</span>${drums.length?`<span class="btn sm ${focus&&focus.join()===drums.join()?'on':''}" onclick="setFocus('drums')">DRUMS</span>`:''}<span class="btn sm ${focus&&focus.length===n?'on':''}" onclick="setFocus('all')">ALL ${n}</span><span class="btn sm ${hexRows?'on':''}" onclick="setHex(!hexRows)" title="hex row numbers">HEX</span><span style="flex:1;min-width:0;text-align:right;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${fo.length<=fits?'#6d777c':'var(--amber)'}">${fo.length<=fits?`all ${fo.length} fit`:`${fo.length} picked · ${fits} fit, scroll for ${fo.length-fits}`}</span></div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:6px">${f.channels.map((_,c)=>`<span class="btn sm ${fo.includes(c)?'on':PAT.active.includes(c)?'':'dimb'}" onclick="setFocus(${c})">${pad(c+1)}</span>`).join('')}</div>`);
+  const drums=drumChannels(),fo=Array.isArray(focus)?focus:focus==='active'&&!EDIT&&PAT.active.length?PAT.active:f.channels.map((_,c)=>c),fits=Math.max(1,Math.floor(($('patscroll').clientWidth-PAT_GRID.gutter-18)/PAT_GRID.channel));
+  put('patctl',`<div style="display:flex;align-items:center;gap:6px"><span class="btn sm ${focus==='active'?'on':''}" onclick="setFocus('active')">ACTIVE ${PAT.active.length}</span>${drums.length?`<span class="btn sm ${Array.isArray(focus)&&focus.join()===drums.join()?'on':''}" onclick="setFocus('drums')">DRUMS</span>`:''}<span class="btn sm ${fo.length===n?'on':''}" onclick="setFocus('all')">ALL ${n}</span><span class="btn sm ${hexRows?'on':''}" onclick="setHex(!hexRows)" title="hex row numbers">HEX</span><span style="flex:1;min-width:0;text-align:right;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${fo.length<=fits?'#6d777c':'var(--amber)'}">${fo.length<=fits?`all ${fo.length} fit`:`${fo.length} picked · ${fits} fit, scroll for ${fo.length-fits}`}</span></div><div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:6px">${f.channels.map((_,c)=>`<span class="btn sm ${fo.includes(c)?'on':PAT.active.includes(c)?'':'dimb'}" onclick="setFocus(${c})">${pad(c+1)}</span>`).join('')}</div>`);
   PAT.fo=fo;if(!fo.includes(CUR.ch))CUR.ch=fo[0];
   if(PAT.order===CUR.o&&CUR.row>=rows.length)CUR.row=rows.length-1;  // the pattern got shorter under the cursor
   if(SEL&&SEL.o===PAT.order&&Math.max(SEL.a.row,(SEL.b||SEL.a).row)>=rows.length)SEL=null;
   const N=selNorm();renderSelBar();
   const cell=(s,cur,row,vi,ch)=>{const [a,b,c,d]=s.split(' '),z=x=>x[0]==='.'?' z':'',q=n=>(cur===n?' cc':'')+(N&&inSel(N,row,vi,n)?' sl':''),ln=(PAT.lanes||{})[row+','+ch],lv=ln&&ln[0]==='v'?' ln':'',le=ln&&ln[0]==='e'?' ln':'',t=ln?` title="automation lane ${ln[1]} writes this ${ln[0]==='v'?'volume':'effect'} column (the pattern's automation: in the song file)"`:'';return `<span class="pc"${t}><span class="n${z(a)}${q(0)}">${a}</span> <span class="i${z(b)}${q(1)}">${b}</span> <span class="v${z(c)}${q(2)}${lv}">${c}</span> <span class="e${z(d)}${q(3)}${le}">${d[0]}</span><span class="e${z(d)}${q(4)}${le}">${d.slice(1)}</span></span>`};
-  const was=shown.pat;put('pat',`<div style="min-width:${26+fo.length*86+10}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}"${ownCol(c)?` style="box-shadow:inset 0 -2px 0 ${ownCol(c)}"`:''}>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}<i class="lvu" id="lvu${c}"></i></span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%HL[1]?i%HL[0]?'':'b4':'b16'}${PAT.order===CUR.o&&i===CUR.row?' cur':''}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map((c,vi)=>cell(r[c],PAT.order===CUR.o&&i===CUR.row&&c===CUR.ch?CUR.col:-1,i,vi,c)).join('')}</div>`).join('')}</div>`);
+  const was=shown.pat;put('pat',`<div style="min-width:${PAT_GRID.gutter+fo.length*PAT_GRID.channel+16}px;padding:0 8px 8px"><div class="pathead"><span></span>${fo.map(c=>`<span class="${audible(c)?'':'off'}"${ownCol(c)?` style="box-shadow:inset 0 -2px 0 ${ownCol(c)}"`:''}>${pad(c+1)} ${esc(f.channels[c].toUpperCase().slice(0,9))}<i class="lvu" id="lvu${c}"></i></span>`).join('')}</div>${rows.map((r,i)=>`<div class="pt ${i%HL[1]?i%HL[0]?'':'b4':'b16'}${PAT.order===CUR.o&&i===CUR.row?' cur':''}" data-r="${i}"><span class="rn">${rowNum(i)}</span>${fo.map((c,vi)=>cell(r[c],PAT.order===CUR.o&&i===CUR.row&&c===CUR.ch?CUR.col:-1,i,vi,c)).join('')}</div>`).join('')}</div>`);
   $('pat').querySelector('.pat-song-title')?.remove();
   if(patContinuous())$('pat').insertAdjacentHTML('afterbegin',`<div class="pat-song-title">${PAT.order+1} / ${f.orders.length} · ${esc(o.pattern)} · ${o.rows} rows</div>`);
   renderScoreMarkers();patSongLayout();if(shown.pat!==was)PAT.row=-2;followPlayhead();patHelp()}
@@ -1427,7 +1435,7 @@ function renderScoreMarkers(){const host=$('pat');host.querySelectorAll('.score-
 function followPlayhead(){let p=$('pat-follow').checked?playPos():null;if(p&&p.o!==PAT.order){if(!EDIT){showPattern(p.o);return}p=null}const r=p?p.row:-1;
   $('patrow').textContent=PAT.rows?(r>=0?`row ${rowNum(r)} / ${PAT.rows.length}`:`${PAT.rows.length} rows`):'';
   if(PAT.row===r)return;PAT.row=r;const el=$('pat');el.querySelectorAll('.pt.now').forEach(e=>e.classList.remove('now'));
-  if(r>=0){const e=el.querySelector(`.pt[data-r="${r}"]`),sc=$('patscroll');if(!e)return;e.classList.add('now');const top=patRowTop(e);if(top<sc.scrollTop+20||top+15>sc.scrollTop+sc.clientHeight)patScrollTo(top-sc.clientHeight/3)}}
+  if(r>=0){const e=el.querySelector(`.pt[data-r="${r}"]`),sc=$('patscroll');if(!e)return;e.classList.add('now');const top=patRowTop(e);if(top<sc.scrollTop+28||top+e.offsetHeight>sc.scrollTop+sc.clientHeight)patScrollTo(top-sc.clientHeight/3)}}
 function drag(e,v,sign,min,max){e.preventDefault();const x0=e.clientX,w0=parseInt(getComputedStyle(document.documentElement).getPropertyValue(v));
   const mv=ev=>document.documentElement.style.setProperty(v,Math.max(min,Math.min(max,w0+sign*(ev.clientX-x0)/zf()))+'px'),up=()=>{removeEventListener('mousemove',mv);removeEventListener('mouseup',up);document.body.style.cursor='';if(PAT.order>=0)renderPat()};
   addEventListener('mousemove',mv);addEventListener('mouseup',up);document.body.style.cursor='col-resize'}
@@ -1629,10 +1637,12 @@ function renderLiveBar(){if(!S||!S.song||!S.song.facts)return;const f=S.song.fac
 function setCursor(oi,row,ch,col,score=null){SCORE.editor?.pauseFollow(oi);CUR.o=oi;CUR.row=Math.max(0,Math.floor(Array.isArray(row)?row[0]/row[1]:row));CUR.score=score;if(ch!=null)CUR.ch=ch;if(col!=null)CUR.col=col;if(PAT.rows)renderPat();
   if(SCORE.editor)SCORE.editor.setSelection({...CUR.score,order:oi,row:CUR.score?.row??CUR.row,ch:CUR.ch,pattern:S?.song?.facts?.orders[oi]?.pattern});
   const e=PAT.order===oi&&$('pat').querySelector(`.pt[data-r="${CUR.row}"]`),sc=$('patscroll');
-  if(e&&(!LV.playing||EDIT)){const top=patRowTop(e);if(top<sc.scrollTop+20||top+15>sc.scrollTop+sc.clientHeight)patScrollTo(top-sc.clientHeight/3)}}
+  if(e&&(!LV.playing||EDIT)){const top=patRowTop(e);if(top<sc.scrollTop+28||top+e.offsetHeight>sc.scrollTop+sc.clientHeight)patScrollTo(top-sc.clientHeight/3);
+    const cell=e.querySelectorAll('.pc')[PAT.fo.indexOf(CUR.ch)];if(cell){const left=cell.offsetLeft,right=left+cell.offsetWidth;if(left<sc.scrollLeft+PAT_GRID.gutter+8)sc.scrollLeft=Math.max(0,left-PAT_GRID.gutter-8);else if(right>sc.scrollLeft+sc.clientWidth)sc.scrollLeft=right-sc.clientWidth;}}}
 function cellAt(t){const r=t.closest&&t.closest('#pat .pt');if(!r)return null;const pc=t.closest('.pc');if(!pc)return {row:+r.dataset.r,ch:CUR.ch,col:CUR.col};
   const sp=t.closest('.pc>span');return {row:+r.dataset.r,ch:PAT.fo[[...r.querySelectorAll('.pc')].indexOf(pc)],col:sp?Math.max(0,[...pc.children].indexOf(sp)):0}}
 $('pat').addEventListener('mousedown',e=>{const c=cellAt(e.target);if(!c||e.button!==0)return;e.preventDefault();
+  if(document.activeElement?.tagName==='SUMMARY')document.activeElement.blur();
   if(e.shiftKey){if(!SEL||SEL.o!==PAT.order)SEL={o:PAT.order,a:{row:CUR.row,ch:CUR.ch,col:CUR.col}};SEL.b=c}else SEL={o:PAT.order,a:c};
   setCursor(PAT.order,c.row,c.ch,c.col);
   const mv=ev=>{const d=cellAt(ev.target);if(!d)return;if(d.row!==CUR.row||d.ch!==CUR.ch||d.col!==CUR.col){SEL.b=d;setCursor(PAT.order,d.row,d.ch,d.col)}},
@@ -1702,10 +1712,10 @@ function scoreRefresh(){if(SCORE.pending)return SCORE.pending.then(()=>scoreRefr
         trackChanged:id=>{if($('part-sound-track').value!==id)partSoundSelected()},
         followAllowed:()=>!EDIT&&!EDQ.n&&!document.querySelector('dialog[open]'),
         isPlaying:()=>LV.playing||!audio.paused,
-        printPreview:()=>{const view=SCORE.view;if(!view)throw new Error('Load the score before printing');
+        printPreview:({previewChannel=-1}={})=>{const view=SCORE.view;if(!view)throw new Error('Load the score before printing');
           const frame=$('score-print-frame'),dialog=$('score-print-dialog');
           frame.onload=()=>frame.contentDocument.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();dialog.close()}});
-          frame.src=tok('/score-print?'+new URLSearchParams({song:view.song,revision:view.revision}));dialog.showModal()},
+          frame.src=tok('/score-print?'+new URLSearchParams({song:view.song,revision:view.revision,preview_channel:previewChannel}));dialog.showModal()},
         copy:async p=>{await EDQ.chain;const r=await fetch('/api/score_copy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...p,revision:SCORE.view?.revision})}),j=await r.json();if(j.error)throw new Error(j.error);return j.clipboard},
         copyMeasures:async p=>{await EDQ.chain;const r=await fetch('/api/measure_copy',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...p,revision:SCORE.view?.revision})}),j=await r.json();if(j.error)throw new Error(j.error);return j.segment},
         select:p=>{const o=p.order??CUR.o;setCursor(o,p.row??CUR.row,p.ch??CUR.ch,0,p)},
@@ -2587,7 +2597,7 @@ document.addEventListener('keydown',e=>{if($('score-print-dialog').open)return;i
   if($('t-ins').classList.contains('on')&&INS_SEL!=null&&!e.ctrlKey&&!e.altKey&&!e.metaKey&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){
     const k=pianoKey(e);if(k.length===1&&PIANO.includes(k)){e.preventDefault();e.stopImmediatePropagation();if(!e.repeat)lvNoteOn(k,+INS_SEL-1)}return}
   if(!$('t-pattern').classList.contains('on')||!S||!S.song||!S.song.facts)return;
-  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||document.querySelector('.modal.on'))return;
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.target.tagName==='SUMMARY'||document.querySelector('.modal.on'))return;
   const k=e.key.toLowerCase(),pk=pianoKey(e),rows=PAT.rows?PAT.rows.length:64;let done=true;
   if(e.ctrlKey||e.metaKey){if(k==='z'&&!e.shiftKey)patUndo(false);else if(k==='y'||(k==='z'&&e.shiftKey))patUndo(true);
     else if(k==='c')selCopy(false);else if(k==='x')selCopy(true);else if(k==='v'||e.code==='KeyV'&&e.altKey)return pasteKey(e);else if(k==='5')selectAll(false);else if(k==='l')selectAll(true);
@@ -2744,7 +2754,7 @@ async function showDiff(url,title,apply){diffApply=apply;const d=await (await fe
 function useSel(){const id=sel;if(id!=null)showDiff('/api/diff/'+id,`APPLY TO SLOT ${pad(S.slot)}`,()=>act('apply',{id}).then(()=>tab('export')))}
 async function applySel(){toggle('diff',false);if(diffApply)await diffApply()}
 // ---- keys
-document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT')return;
+document.addEventListener('keydown',e=>{if(!S||!S.song)return;if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.target.tagName==='SUMMARY')return;
   if((e.ctrlKey||e.altKey||e.metaKey)&&e.key!=='?')return;  // no key here takes a modifier: Ctrl+U or Alt+X must not apply or reject
   const cs=visible(),i=cs.findIndex(c=>c.id===sel);
   if(e.key==='Escape'){toggle('diff',false);toggle('keys',false);if(S.song)toggle('start',false)}

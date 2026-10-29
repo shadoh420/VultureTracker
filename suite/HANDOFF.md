@@ -1,5 +1,154 @@
 # VultureTracker handoff
 
+## Release 1.10.0 preparation (2026-10-28)
+
+The owner authorized merge, publication, a shorter README and refreshed screenshots. Changes are on
+`codex/pattern-score-release`; no unrelated untracked files are included. README now focuses on install,
+features and documentation links. All four screenshots were captured in the foreground from a disposable
+excerpt of the committed Iron Relay demo; no private imported song appears in public assets.
+Documentation checks passed (`release-docs-final.log`), and captures were inspected (`release-screenshots-final.log`).
+The screenshot harness initially used a non-ASCII demo title, which the song format rejects; corrected before capture.
+
+PR #5 is open. Initial CI passed 1,700 portable cases on Windows and Linux/Python 3.10, but its
+419-case browser run found two failures. The workspace test depended on auto-hiding the empty first
+channel; it now selects the fixture's actual note. Hidden score panels also no longer consume shortcuts.
+A forced refresh reproduced the paste failure: it overwrote the position being typed. Controls now
+preserve that focused field. Both strengthened cases pass in a visible browser with exact paste timing
+and Undo/Redo checks (`release-ci-visible-final.log`). Failure logs are `release-ci-failure.log`,
+`release-ci-repro.log` and `release-paste-repro.log`; final CI and publication are pending.
+The second CI run passed those fixes but exposed another delayed-refresh case: clipboard paste lost
+the range start after its selection collapsed to the caret. A forced-refresh test reproduces it
+(`release-selection-forced.log`), and range selection now records its host echo. Forward, backward
+and cross-bar paste, exact history, position entry and keyboard focus pass together in a visible browser
+(`release-selection-visible-final.log`). `release-ci-failure-2.log` retains the CI failure.
+
+The implementation was requested after the owner viewed `Downloads/go love.yaml`.
+Pattern now uses 14px text / 22px rows / 132px channels, visible dividers and stronger beat,
+measure, cursor and playback highlights. All channels are shown by default; keyboard navigation
+scrolls horizontally. Native Details collapses selection/composition tools. Enter/Space on its
+summary and returning keyboard focus to Pattern are handled without intercepting the toggle.
+
+TAB / SCORE now gives tracker imports without authored score tracks a read-only staff preview.
+The owner's first preview was rejected: it defaulted to just channel 1, rendered IT note numbers
+as MIDI (an octave below Pattern labels), and had no playback marker. Corrected in the current
+candidate: all note-bearing channels are represented by default (now grouped by sound), IT note numbers
+are converted to notation octave labels, and the shared playhead moves through notes/rests and
+follows pattern changes. Stop hides it. The selector can isolate a channel.
+Notes select the original tracker cell, and Previous/Next Pattern navigates orders. Preview lengths use the next tracker boundary
+or pattern end on the rows-per-beat grid. Effects, sample tuning/decay, playback flow and guitar
+fingering are not transcribed. No authored score or converted notes are saved. Existing adoption
+guards remain in effect; print/PDF and page images now also accept this generated preview.
+
+The owner reported a visual cutoff near 7.5 seconds in `Downloads/go love.it`.
+TAB / SCORE now engraves the entire written playback order once, with pattern boundary labels and
+unique note identities for repeated occurrences. Selection/navigation and playback move within that
+score instead of replacing it. All 90 attacks in this original IT file's p00/p01 order match the
+engraving (channel, pitch label, row and boundary length): 8 bars covering about 13.6 seconds.
+The file stores 71 patterns but only plays these two; unused patterns are not silently sequenced.
+The marker stays visible through the last bar, including when selection is elsewhere. In horizontal
+tracker view, vertical wheel scrolling inspects channels without turning off horizontal follow;
+horizontal/Shift-wheel browsing and note selection pause follow. The native score behavior is unchanged.
+
+Latest request explicitly approved combining TAB / SCORE staves only. The default now groups channels
+that use one identical instrument/sample slot over the written song order, accounting for instrument-only
+events and memory across patterns. Mixed/unknown sounds remain separate. Interleaved lines share a voice;
+equal spans form chords, exact unisons retain all source cells under one notehead, and overlapping rhythms
+use up to two voices per staff. Both voices have full contrast. Separate-channel and individual-channel
+views remain available. No tracker channel, audio, or song data is rewritten.
+For `go love.it`, channels 1/3/5/7 combine and 11/12 combine: eight staves become four, retaining all
+90 source attacks as 85 noteheads across eight bars. Foreground before/after and final-bar captures:
+`grouped-staves-before.png`, `grouped-staves-after-fast.png`, `grouped-staves-final-bar.png` in
+`scratch/pattern-openmpt/`. `grouped-visible-final.log` independently compares original IT pitches,
+onsets, lengths and source channels, including unisons, and verifies the live marker at 7.55/13.30 seconds.
+Five focused browser cases passed (`grouped-staves-final-tests.log`), plus 11 targeted unit/docs/clock
+checks. A merged-chord click initially produced no alphaTab hit; explicit notehead lookup across voices
+now selects the correct source channel (`grouped-chord-lookup.log`, `grouped-notehead-selection.log`).
+Visual inspection caught alphaTab's dim secondary voice; the final capture confirms full contrast.
+The native-score follow regression passed again after that contrast change (`grouped-native-final.log`).
+Final candidate build and packaged checks passed (`grouped-build-final.log`, `grouped-package-final.log`):
+four grouped staves / 85 noteheads / 90 source attacks, eight separate-channel staves on request,
+correct isolated pitches, final-bar marker, unchanged YAML, clean page errors and packed selfchecks.
+Owner visual/listening acceptance remains open; no GPU/frame timing was measured.
+
+Print/PDF follow-up: the owner hit "This song has no authored score to print." The print page's
+authored-only guard was still excluding generated tracker notation. Editor and print now share one
+tracker timeline builder; Print preview carries the grouped/separate/individual-channel selection.
+Paper settings, part selection and bar excerpts use the existing print renderer. Tracker output is
+staff-only and labeled as row-grid notation; unsupported dynamics/tempo marks are not fabricated.
+Print / Save PDF opens the system print dialog (choose Save as PDF / Microsoft Print to PDF).
+No authored score is created and no song data is saved. Native printing retains its existing options.
+Five focused browser checks passed, including native printing, stale snapshots, grouping/click mapping,
+tracker printing/excerpts and original-cell navigation. All 32 syntax/docs checks passed. Logs:
+`tracker-print-regressions.log`, `tracker-print-final-focused.log`, `tracker-print-static.log`.
+The real import prints four staves / 85 noteheads representing 90 source notes across all eight bars.
+`tracker-pdf-final.log` verifies the resulting two-page `go-love-score.pdf`; both rasterized PDF pages
+were inspected. Foreground captures `tracker-print-before.png` / `tracker-print-after.png` reproduce
+the old rejection and show the rendered score. All are under `scratch/pattern-openmpt/`.
+Verification failures were harness issues (wrong captured-score variable, an evaluated function
+invoked the print stub early, a comparison-expression typo, and expecting "Page" instead of the
+existing "1 / 2" footer); initial logs are retained. Visual PDF inspection also caught default
+forte symbols with no tracker source, now disabled for this read-only print view.
+The final package passed tracker printing (four parts, eight bars, two pages and print-button dispatch),
+existing Pattern/playback checks, clean page errors, unchanged song data and packed selfchecks:
+`tracker-print-build-final.log` / `tracker-print-package-final.log`. The tracker path is scoped to
+the editor/print preview; native timeline consumers such as ROLL keep their original contract.
+
+Local preview: `scratch/pattern-package/vulturetracker.exe` (ffmpeg and ZIP beside it).
+Published `dist/` and the selected rollback remain unchanged. No commit, push or publication.
+
+Verification: earlier Pattern checks remain applicable. Correction checks include the tracker
+preview's actual engraved pitches/rows/lengths, rest/empty-channel marker movement, stop and follow;
+native playback marker, order-follow and repeated-occurrence regression checks passed. All 32
+syntax/docs checks passed after updating an isolated native marker test's missing rawPreview stub
+(31 reused passes plus the failed case rerun). Existing CI owns the full suite; no full local suite
+or release qualification was repeated. Compared all 44 rendered attacks in the actual p00 to
+compiled Pattern cells: channel order, displayed pitches, start rows and boundary lengths match.
+The earlier package passed 35-channel Pattern checks, correct F#4/C#4/G#4 on channel 1, all 44 default
+attacks, moving live marker, follow to p01, stop, unchanged YAML, clean console and packed selfchecks.
+
+Full-song verification: 4 targeted browser cases cover repeated/partial patterns, unused patterns,
+exact note-to-occurrence clicks, immutable song data, rest/empty-channel markers, long-score scrolling,
+native follow and repeat regressions. The two scroll-sensitive cases were rerun after the wheel fix.
+The package check then exposed empty-row selection using speed/24 instead of the preview row grid:
+Previous Pattern could stay put and the channel selector could go blank. Raw selections now stay
+in the row grid, including rests; the speed-8 regression passes (`whole-score-selection-test.log`).
+The failed package check is retained in `whole-score-package.log`.
+10 targeted docs/native-clock checks passed. The real import's continuous playback reached 7.55 and
+13.30 seconds without replacing the score; final visible checks sought those same positions in the
+live engine and verified a focused foreground marker inside the score pane. The final package passed
+the full-score UI check (90 attacks / 2 occurrences / 8 bars, correct pitches, final-bar marker within
+the viewport, no score replacement, stop and Previous/Next navigation, clean console, unchanged YAML)
+and the existing packed selfchecks: `whole-score-package-final.log`.
+
+Latest evidence in `scratch/pattern-openmpt/`: `whole-score-tests.log`, `whole-score-axis-tests.log`,
+`whole-score-static.log`, `whole-score-complete.log`, `whole-score-visible-final.log`, and
+`whole-score-build-delivery.log`. `whole-score-before.png` / `whole-score-after-fast.png` use the same
+foreground viewport; `whole-score-7seconds.png` and `whole-score-final-bar.png` show live playback.
+Real failures: comparison against the outer panel let the marker leave the narrower score pane;
+vertical wheel input disabled follow. Logs `whole-score-scroll-isolated.log` and
+`whole-score-visible.log` preserve these, with final passes above. No GPU/frame performance claim.
+
+Earlier evidence in `scratch/pattern-openmpt/`: `controls-final.log`, `score-final.log`, `source-final.log`,
+`correction-tests.log`, `correction-syntax.log` /
+`correction-syntax-final.log`, `correction-view-before.log` / `correction-view-final.log`,
+`correction-build.log`, `correction-package.log`. `corrected-score-before.png` /
+`corrected-score-after.png` are same-viewport, loaded, focused foreground captures; the before
+reproduced zero live markers. `corrected-score-playing.png` shows the current moving marker,
+and `corrected-score-channel1.png` isolates the corrected octave. `before.png` / `after.png`
+remain the Pattern comparison. Correction failures retained: native entry handler accessed
+score.tracks for a raw preview (now bypassed); the exact real comparison caught channels ordered
+by first attack instead of channel number (now sorted). Logs: `correction-first.log`,
+`correction-second.log`, `correction-view-after.log`, then the final logs above.
+Initial failures: summary Enter was intercepted (fixed); score test fixture had sparse row labels,
+then premature/replaced alphaTab instrumentation and an expression typo (corrected); the package
+runner's native-only browser option rejected the tracker fixture (reused its HTML-load hook instead).
+`score-first.log` through `score-fifth.log` and `package-views.log` retain those test failures and recovery.
+The baseline Pattern snapshot lacked its favicon; the final source/package checks were clean.
+
+Owner acceptance of the corrected candidate is pending; no performance measurement or listening acceptance claimed.
+Next: finish the authorized merge and 1.10.0 release after CI and final package checks.
+Unrelated `Listen to current preview.lnk` and `suite/rift/variants/build.log` were preserved.
+
 ## Current release: 1.9.0 published (2026-10-24)
 
 [Release and downloads](https://github.com/shadoh420/VultureTracker/releases/tag/v1.9.0).

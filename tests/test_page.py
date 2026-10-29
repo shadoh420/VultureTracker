@@ -248,6 +248,7 @@ class TestPage(unittest.TestCase):
                     settle()
                     self.assertIn("      00: C#5 01 v58 ... |", text())
                     # ECHO: the cursor's channel into a new channel on the right, one row later at half the volume
+                    page.click('#pat-advanced summary')
                     page.evaluate("SEL = null; setCursor(0, 0, 0, 0)")
                     page.select_option("#echo-to", "new:48")
                     page.fill("#echo-rows", "1")

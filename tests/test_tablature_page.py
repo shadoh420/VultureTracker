@@ -505,7 +505,7 @@ const marker=js.slice(js.indexOf('    function markPlayhead()'),js.indexOf('    
 const plan={tempo:120,tempos:[{at:[0,1],bpm:120},{at:[4,1],bpm:60}],row_step:[1,12]};
 let view={order:0,tempo:120,row_step:[1,12],orders:['p'],score:{order_ids:['A']},occurrences:[{id:'A',at:[0,1]}]},clock=nativeScoreClock(view),
  playbackClockPlan=null,playbackClock=null,voice=0,renderedBeats=[],api=null,track='g',board={open:false},piano={open:false};
-const occurrence=()=>'A',rowStep=()=>[1,12],beats=()=>[
+const rawPreview=()=>false,occurrence=()=>'A',rowStep=()=>[1,12],beats=()=>[
  {id:'first',at:[0,1],written:{value:4}},{id:'second',at:[1,1],written:{value:4}}];
 const resolvedBeats=()=>beats().map(b=>({...b,track:'g',voice:0}));
 const buttons=beats().map(b=>({dataset:{beat:b.id},classList:{toggle(k,on){this.on=on}}}));
@@ -1031,6 +1031,229 @@ class TestTablaturePage(unittest.TestCase):
         with mock.patch.object(BrowserType, 'launch', muted):
             with self.page(*args, **kwargs) as result:
                 yield result
+
+    def test_tracker_import_staff_preview_is_read_only_and_maps_to_pattern(self):
+        song = api.from_yaml(RAW_SONG)
+        song.pop('score')
+        song['module']['speed'] = 8  # Playback tick timing differs from the four-row notation grid.
+        song['module']['channels'].append({'name': 'Empty'})
+        cells = {0: 'C-5 01 ... A06', 4: '=== .. ... ... | E-5 01 ... ...',
+                 6: '... .. ... ... | ^^^ .. ... ...', 8: 'D-5 01 ... ...'}
+        song['patterns'] = {
+            'verse': {'rows': 16, 'data': '\n'.join(f'{i:02}: {cells.get(i, "... .. ... ...")}' for i in range(16))},
+            'next': {'rows': 8, 'data': '00: ... .. ... ...\n01: ... .. ... ...\n02: F-5 01 ... ...\n'},
+            'unused': {'rows': 16, 'data': '00: C-8 01 ... ...\n'},
+        }
+        song['orders'] = ['verse', 'next', 'verse']
+        with self.muted_page(api.to_yaml(song), compact=True, score_view=None) as (page, state, folder):
+            original = (folder/'song.yaml').read_bytes()
+            page.evaluate("tab('tab')")
+            page.wait_for_selector('.vt-tab-score[data-preview-notes="7"][data-preview-orders="3"][data-bars="3"] svg')
+            self.assertEqual(page.input_value('[data-ui=track]'), '-1')
+            page.evaluate("""() => {
+                const render = alphaTab.AlphaTabApi.prototype.renderScore;
+                alphaTab.AlphaTabApi.prototype.renderScore = function(score, ...args) {
+                    window.previewApi=this; window.previewScore=score; window.previewRenders=(window.previewRenders||0)+1; return render.call(this,score,...args);
+                };
+            }""")
+            page.select_option('[data-ui=track]', '1')
+            page.select_option('[data-ui=track]', '0')
+            page.wait_for_selector('.vt-tab-score[data-preview-notes="5"][data-bars] svg')
+            self.assertIsNone(state.score_view()['score'])
+            self.assertEqual(state.score_view()['rows_per_beat'], 4)
+            raw = state.score_view()['raw_positions']
+            self.assertEqual([p['boundary_row'] for p in raw[:3]], [4, 6, None])
+            self.assertTrue(all(p['at'] is None for p in raw))  # Flow guard still prevents unsafe adoption.
+            self.assertIn('read only', page.inner_text('.vt-tab-raw'))
+            self.assertNotIn('undefined', page.inner_text('[data-ui=order-context]'))
+            pitches = """()=>{const result=[];for(const t of previewScore.tracks)for(const s of t.staves)for(const b of s.bars)
+                for(const v of b.voices)for(const beat of v.beats)for(const n of beat.notes)if(!n.isTieDestination)result.push(n.octave*12+n.tone);return result;}"""
+            self.assertEqual(page.evaluate(pitches), [72, 74, 77, 72, 74])  # All ordered occurrences, with matching Pattern octave labels.
+            page.select_option('[data-ui=track]', '-1')
+            page.wait_for_selector('.vt-tab-score[data-preview-notes="7"][data-bars] svg')
+            self.assertEqual(sorted(page.evaluate(pitches)), [72, 72, 74, 74, 76, 76, 77])
+            self.assertEqual(page.evaluate('previewScore.tracks.length'), 1)  # one sound, interleaved channels
+            page.select_option('[data-ui=track]', '-2')
+            page.wait_for_selector('.vt-tab-score[data-preview-staves="2"][data-bars] svg')
+            attacks = page.evaluate("""()=>previewScore.tracks.flatMap((t,ch)=>{let offset=0;return t.staves[0].bars.flatMap(bar=>{
+                const out=bar.voices[0].beats.flatMap(b=>b.notes.filter(n=>!n.isTieDestination).map(n=>
+                    [ch,offset+b.displayStart/240,b.displayDuration/240,n.realValue]));
+                offset+=bar.voices[0].beats.reduce((s,b)=>s+b.displayDuration/240,0);return out;})})""")
+            self.assertEqual(attacks, [[0, 0, 4, 72], [0, 8, 8, 74], [0, 18, 6, 77],
+                                      [0, 24, 4, 72], [0, 32, 8, 74], [1, 4, 2, 76], [1, 28, 2, 76]])
+            # Shared tracker transport: the marker must move through rests too.
+            marker = """row=>{SCORE.editor.setPlayhead({o:0,row});const e=document.querySelector('.vt-tab-playhead');
+                return [e.hidden,e.dataset.row,parseFloat(e.style.left),parseFloat(e.style.height)];}"""
+            page.evaluate('document.activeElement.blur()')
+            first, second = [page.evaluate(marker, row) for row in (6, 7)]
+            self.assertEqual(first[:2], [False, '6'])
+            self.assertEqual(second[:2], [False, '7'])
+            self.assertGreater(second[2], first[2])
+            self.assertGreater(first[3], 60)  # spans both displayed channels
+            page.evaluate('SCORE.editor.setPlayhead(null)')
+            self.assertTrue(page.locator('.vt-tab-playhead').is_hidden())
+            page.select_option('[data-ui=track]', '2')
+            page.wait_for_selector('.vt-tab-score[data-preview-notes="0"][data-bars] svg')
+            self.assertEqual(page.evaluate(pitches), [])
+            self.assertEqual(page.evaluate(marker, 12)[:2], [False, '12'])
+            page.evaluate('SCORE.editor.setPlayhead(null)')
+            page.select_option('[data-ui=track]', '0')
+            page.wait_for_selector('.vt-tab-score[data-preview-notes="5"][data-bars] svg')
+            renders = page.evaluate('previewRenders')
+            # Click the repeated pattern's attack: it must select its third occurrence, not the first.
+            point = page.evaluate("""()=>{const beat=previewScore.tracks[0].staves[0].bars.flatMap(b=>b.voices[0].beats).findLast(b=>b.notes.some(n=>n.realValue===74));
+                const bounds=previewApi.boundsLookup.findBeat(beat).notes[0].noteHeadBounds;
+                const r=document.querySelector('.vt-tab-score .at-surface').getBoundingClientRect();
+                return {x:r.x+bounds.x+bounds.w/2,y:r.y+bounds.y+bounds.h/2};}""")
+            page.mouse.click(**point)
+            page.wait_for_function('CUR.o===2&&CUR.row===8&&CUR.ch===0')
+            page.keyboard.press('Delete')
+            self.assertEqual((folder/'song.yaml').read_bytes(), original)
+            page.wait_for_function('SCORE.view.order===2')
+            page.evaluate("SCORE.editor.setSelection({order:2,pattern:'verse',row:15,ch:0})")
+            self.assertEqual(page.input_value('[data-ui=track]'), '0')  # rests preserve the channel filter
+            page.click('[data-action=quick-previous]')
+            page.wait_for_function('CUR.o===1')
+            self.assertEqual(page.evaluate(pitches), [72, 74, 77, 72, 74])
+            self.assertEqual(page.evaluate('CUR.o'), 1)
+            # Browsing pauses scrolling, but the full-score marker remains visible at the sounding occurrence.
+            self.assertFalse(page.is_checked('[data-ui=follow]'))
+            self.assertEqual(page.evaluate(marker, 2)[:2], [False, '2'])
+            page.check('[data-ui=follow]')
+            last = page.evaluate("""()=>{document.activeElement.blur();SCORE.editor.setPlayhead({o:2,row:15});
+                const e=document.querySelector('.vt-tab-playhead');return [e.hidden,e.dataset.order,e.dataset.row,e.dataset.bar];}""")
+            self.assertEqual(last, [False, '2', '15', '2'])
+            self.assertEqual(page.evaluate('previewRenders'), renders)  # no score replacement at order boundaries
+            page.evaluate('SCORE.editor.setPlayhead({o:3,row:0})')
+            self.assertTrue(page.locator('.vt-tab-playhead').is_hidden())
+            page.evaluate('SCORE.editor.setPlayhead(null)')
+            self.assertEqual((folder/'song.yaml').read_bytes(), original)
+
+    def test_tracker_grouped_staves_preserve_chords_voices_and_source_selection(self):
+        song = api.from_yaml(RAW_SONG)
+        song.pop('score')
+        song['module']['channels'] = [{'name': f'Ch {i + 1}'} for i in range(6)]
+        blank = '... .. ... ...'
+        cells = {0: ['C-5 01 ... ...', 'E-5 01 ... ...', 'C-5 01 ... ...', blank, blank, blank],
+                 4: [blank, blank, blank, 'G-5 01 ... ...', blank, blank],
+                 6: [blank, blank, blank, blank, 'A-5 01 ... ...', 'C-6 01 ... ...'],
+                 8: [blank, blank, blank, '=== .. ... ...', blank, blank],
+                 12: [blank, blank, blank, blank, '=== .. ... ...', '=== .. ... ...']}
+        song['patterns'] = {'verse': {'rows': 16, 'data': '\n'.join(f'{r:02}: ' + ' | '.join(cells.get(r, [blank]*6)) for r in range(16))}}
+        song['orders'] = ['verse', 'verse']
+        with self.muted_page(api.to_yaml(song), compact=True, score_view=None) as (page, state, folder):
+            original = (folder/'song.yaml').read_bytes()
+            errors = []
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.evaluate("tab('tab')")
+            page.wait_for_selector('.vt-tab-score[data-preview-notes="12"][data-preview-heads="10"][data-preview-staves="2"][data-bars] svg')
+            page.evaluate("""() => {
+                const render=alphaTab.AlphaTabApi.prototype.renderScore;
+                alphaTab.AlphaTabApi.prototype.renderScore=function(score,...args){window.previewApi=this;window.previewScore=score;return render.call(this,score,...args)};
+            }""")
+            page.select_option('[data-ui=track]', '-2')
+            page.wait_for_selector('.vt-tab-score[data-preview-staves="6"][data-preview-heads="12"][data-bars] svg')
+            page.select_option('[data-ui=track]', '-1')
+            page.wait_for_selector('.vt-tab-score[data-preview-staves="2"][data-bars] svg')
+            attacks = page.evaluate("""()=>previewScore.tracks.flatMap((t,ti)=>t.staves[0].bars.flatMap(bar=>bar.voices.flatMap((v,vi)=>v.beats.flatMap(b=>b.notes.filter(n=>!n.isTieDestination).map(n=>[ti,vi,bar.index*16+b.displayStart/240,b.displayDuration/240,n.realValue])))))""")
+            expected = [[0, 0, 0, 16, 72], [0, 0, 0, 16, 76], [0, 1, 4, 4, 79],
+                        [1, 0, 6, 6, 81], [1, 0, 6, 6, 84]]
+            self.assertEqual(sorted(attacks), sorted(expected + [[t,v,r+16,d,n] for t,v,r,d,n in expected]))
+            # A chord's second pitch must select its own channel; shared unisons name all sources.
+            page.locator('.vt-tab-score').scroll_into_view_if_needed()
+            for pitch, ch in [(76, 1), (72, 0)]:
+                point = page.evaluate("""pitch=>{const beat=previewScore.tracks[0].staves[0].bars[0].voices[0].beats.find(b=>b.notes.some(n=>n.realValue===pitch));
+                    const n=previewApi.boundsLookup.findBeat(beat).notes.find(n=>n.note.realValue===pitch).noteHeadBounds;
+                    const r=document.querySelector('.vt-tab-score .at-surface').getBoundingClientRect();return {x:r.x+n.x+n.w/2,y:r.y+n.y+n.h/2};}""", pitch)
+                page.mouse.click(**point)
+                page.wait_for_function(f'CUR.o===0&&CUR.row===0&&CUR.ch==={ch}')
+            self.assertIn('channels 1, 3', page.inner_text('.vt-tab-status'))
+            page.evaluate('SCORE.editor.setPlayhead({o:1,row:14})')
+            page.wait_for_selector('.vt-tab-playhead[data-order="1"][data-row="14"]:not([hidden])')
+            page.evaluate('SCORE.editor.setPlayhead(null)')
+            self.assertEqual((folder/'song.yaml').read_bytes(), original)
+            self.assertEqual(errors, [])
+
+    def test_tracker_whole_score_marker_scrolls_inside_score_pane(self):
+        song = api.from_yaml(RAW_SONG)
+        song.pop('score')
+        song['orders'] = ['verse'] * 12
+        with self.muted_page(api.to_yaml(song), width=900, height=800, compact=True, score_view=None) as (page, state, folder):
+            original = (folder/'song.yaml').read_bytes()
+            page.evaluate("tab('tab')")
+            page.wait_for_selector('.vt-tab-score[data-preview-orders="12"][data-bars] svg')
+            notes = len([p for p in state.score_view()['raw_positions'] if p['pattern_name'] == 'verse'])
+            self.assertEqual(page.locator('.vt-tab-score').get_attribute('data-preview-notes'), str(notes * 12))
+            page.evaluate("followScorePlayhead=()=>{};window.initialScoreSvg=document.querySelector('.vt-tab-score svg');document.activeElement.blur()")
+            page.locator('#tab-editor').dispatch_event('wheel', dict(deltaY=100, deltaX=0))
+            self.assertTrue(page.is_checked('[data-ui=follow]'))  # inspecting channels keeps horizontal follow
+            vertical = page.evaluate("()=>{const e=document.querySelector('#tab-editor').closest('.main');e.scrollTop=100;return e.scrollTop;}")
+            positions = []
+            for order in (11, 0, 11):
+                position = page.evaluate("""order=>{SCORE.editor.setPlayhead({o:order,row:24});
+                    const m=document.querySelector('.vt-tab-playhead'),h=document.querySelector('.vt-tab-score'),
+                        r=m.getBoundingClientRect(),v=h.getBoundingClientRect();
+                    return [m.hidden,m.dataset.order,r.left>=v.left&&r.right<=v.right,h.scrollLeft,
+                        initialScoreSvg===h.querySelector('svg')];}""", order)
+                self.assertEqual(position[:3], [False, str(order), True])
+                self.assertTrue(position[4])
+                positions.append(position[3])
+            self.assertGreater(positions[0], positions[1])
+            self.assertEqual(page.evaluate("document.querySelector('#tab-editor').closest('.main').scrollTop"), vertical)
+            page.locator('#tab-editor').dispatch_event('wheel', dict(deltaX=-100, deltaY=0))
+            self.assertFalse(page.is_checked('[data-ui=follow]'))  # browsing time deliberately pauses follow
+            page.evaluate('SCORE.editor.setPlayhead(null)')
+            self.assertTrue(page.locator('.vt-tab-playhead').is_hidden())
+            self.assertEqual((folder/'song.yaml').read_bytes(), original)
+
+    def test_pattern_readable_all_channels_and_collapsible_tools(self):
+        song = api.from_yaml(RAW_SONG)
+        song['module']['channels'].extend({'name': f'Channel {i+1}'} for i in range(2, 35))
+        song['orders'] = ['verse'] * 3
+        song['score']['order_ids'] = ['first', 'second', 'third']
+        with self.muted_page(api.to_yaml(song), compact=True) as (page, state, folder):
+            original = (folder/'song.yaml').read_bytes()
+            page.evaluate("tab('pattern')")
+            page.wait_for_function('PAT.rows?.length===25')
+            self.assertEqual(page.evaluate('PAT.fo'), list(range(35)))
+            self.assertFalse(page.locator('#pat-advanced').evaluate('(e)=>e.open'))
+            self.assertFalse(page.is_visible('#au-from'))
+            geometry = page.evaluate("""()=>{const r=document.querySelector('#pat .pt'),c=r.querySelector('.pc');
+                return [getComputedStyle(r).fontSize,r.offsetHeight,c.offsetWidth,getComputedStyle(c).borderRightWidth]}""")
+            self.assertEqual(geometry, ['14px', 22, 132, '1px'])
+            # Native details is keyboard accessible; rerendering must not collapse it or lose field values.
+            page.focus('#pat-advanced summary')
+            page.keyboard.press('Enter')
+            self.assertTrue(page.is_visible('#au-from'))
+            page.fill('#au-from', '12')
+            page.evaluate('renderPat()')
+            self.assertEqual(page.input_value('#au-from'), '12')
+            page.click('#pat-advanced summary')
+            self.assertFalse(page.is_visible('#au-from'))
+            page.click('#pat .pt[data-r="0"] .n >> nth=0')
+            page.keyboard.press('ArrowDown')
+            self.assertEqual(page.evaluate('CUR.row'), 1)
+            # Filter is opt-in; selecting an individual channel starts from the visible set.
+            page.click("#patctl [onclick=\"setFocus('active')\"]")
+            self.assertLess(page.evaluate('PAT.fo.length'), 35)
+            page.click("#patctl [onclick=\"setFocus('all')\"]")
+            page.evaluate('setFocus(1)')
+            self.assertEqual(page.evaluate('PAT.fo.length'), 34)
+            self.assertNotIn(1, page.evaluate('PAT.fo'))
+            page.evaluate("setFocus('all');setCursor(0,0,33,0)")
+            page.keyboard.press('Tab')
+            self.assertEqual(page.evaluate('CUR.ch'), 34)
+            self.assertTrue(page.evaluate("""()=>{const a=document.querySelector('#pat .cc').getBoundingClientRect(),
+                b=$('patscroll').getBoundingClientRect();return a.left>=b.left+38&&a.right<=b.right}"""))
+            page.evaluate('setCursor(0,0,0,0)')
+            self.assertEqual(page.evaluate("$('patscroll').scrollLeft"), 0)
+            # Adjacent patterns share exact column geometry and musical row highlights.
+            page.locator('#patscroll').evaluate('(e)=>e.scrollTop=550')
+            page.wait_for_selector('.pat-preview[data-order="1"] .pat-preview-row')
+            self.assertEqual(page.locator('.pat-preview[data-order="1"] .pat-preview-cell').first.evaluate('(e)=>e.offsetWidth'), 132)
+            self.assertTrue(page.locator('.pat-preview[data-order="1"] [data-row="0"]').evaluate('(e)=>e.classList.contains("b16")'))
+            self.assertEqual(page.evaluate('PAT_SONG.heights[0]'), 60+25*22)
+            self.assertEqual((folder/'song.yaml').read_bytes(), original)
 
     def test_pattern_order_controls_browse_short_bars_without_editing(self):
         song = api.from_yaml(SONG)
@@ -5216,6 +5439,7 @@ class TestTablaturePage(unittest.TestCase):
                 if not compact:
                     # Existing feature tests exercise the optional controls.
                     # Direct-score tests use compact=True to test collapsed editing panels.
+                    result[0].locator('#pat-advanced').evaluate('(e)=>e.open=true')
                     result[0].evaluate("""() => {
                         const expand=()=>{const inspector=document.querySelector('.vt-tab-inspector');
                             if(!inspector)return false;
@@ -8739,6 +8963,7 @@ class TestTablaturePage(unittest.TestCase):
         for first,last,pattern,onset in (([1,1],[1,3],'B',1),([1,3],[1,1],'B',1),([0,3],[1,1],'A',3)):
             self.click_tab_lane(page,*first,1)
             page.keyboard.down('Shift');self.click_tab_lane(page,*last,1);page.keyboard.up('Shift')
+            page.evaluate('SCORE.key=null;scoreRefresh()')  # Delayed host echo must preserve the entire selection.
             posts.clear();key('Control+v')
             self.settled(page,'S.undo===1&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
             request=next(p for p in posts if p.get('op')=='beats_paste')
@@ -11562,6 +11787,49 @@ class TestTablaturePage(unittest.TestCase):
         query = dict(token=page.url.split('token=')[1], song=str(state.song_path), revision=state.text_sha())
         query.update(overrides)
         return f'{urlsplit(page.url).scheme}://{urlsplit(page.url).netloc}/score-print?{urlencode(query)}'
+
+    def test_tracker_print_uses_grouped_full_song_and_selected_channel_without_writes(self):
+        song = api.from_yaml(RAW_SONG)
+        song.pop('score')
+        song['orders'] = ['verse', 'verse']
+        with self.muted_page(api.to_yaml(song), score_view=None) as (page, state, folder):
+            before = (folder/'song.yaml').read_bytes()
+            history = (list(state.history), list(state.future))
+            errors = []
+            page.on('pageerror', lambda e: errors.append(str(e)))
+            page.evaluate("tab('tab')")
+            page.wait_for_selector('.vt-tab-score[data-preview-notes][data-bars] svg')
+            source_count = page.locator('.vt-tab-score').get_attribute('data-preview-notes')
+            staves = int(page.locator('.vt-tab-score').get_attribute('data-preview-staves'))
+            bars = page.locator('.vt-tab-score').get_attribute('data-bars')
+            page.click('[data-action=print]')
+            frame = page.locator('#score-print-frame').element_handle().content_frame()
+            self.print_ready(frame)
+            self.assertEqual(frame.locator('input[name=track]').count(), staves)
+            self.assertIn(f'{source_count} source notes', frame.inner_text('[data-print=summary]'))
+            self.assertEqual(frame.input_value('[name=last]'), bars)
+            self.assertEqual(frame.input_value('[name=notation]'), 'staff')
+            self.assertTrue(frame.is_disabled('[name=notation]'))
+            self.capture_engraving(frame)
+            frame.locator('form button[type=submit]').click(); self.print_ready(frame)
+            self.assertEqual(frame.evaluate('tabRendered.masterBars.length'), int(bars))
+            frame.evaluate('()=>{window.printCalls=0;window.print=()=>window.printCalls++}')
+            frame.click('[data-print=print]')
+            self.assertEqual(frame.evaluate('printCalls'), 1)
+            page.click('button:text("Close preview")')
+            page.select_option('[data-ui=track]', '0')
+            page.click('[data-action=print]')
+            frame = page.locator('#score-print-frame').element_handle().content_frame()
+            self.print_ready(frame)
+            self.assertEqual(frame.locator('input[name=track]').count(), 1)
+            self.assertEqual(frame.input_value('[name=last]'), bars)
+            frame.fill('[name=first]', '2')
+            frame.fill('[name=last]', '2')
+            frame.locator('form button[type=submit]').click(); self.print_ready(frame)
+            self.assertIn('Bars 2–2', frame.inner_text('.vt-print-status'))
+            self.assertEqual((folder/'song.yaml').read_bytes(), before)
+            self.assertEqual((state.history, state.future), history)
+            self.assertEqual(errors, [])
 
     def test_full_song_print_occurrences_ties_layout_and_no_writes(self):
         with self.page(PRINT_SONG) as (page, state, folder):
