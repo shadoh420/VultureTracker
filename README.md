@@ -16,10 +16,10 @@ The app is unsigned; Windows SmartScreen may show an unknown-publisher warning.
 <summary>Verify your download</summary>
 
 Run `Get-FileHash vulturetracker.exe` in PowerShell and compare it with the release notes.
-The SHA-256 for **1.9.0** is:
+The SHA-256 for **1.10.0** is:
 
 ```text
-5905b37a14baed379411a0711f90ba9ef2f8b94d5f1e30d256a35fd6f0560eb4
+ec0711e7141b3a47b33f4e986739b019bfbdbe62f690723253f74ba5340e0932
 ```
 
 </details>
