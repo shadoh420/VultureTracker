@@ -84,6 +84,10 @@ class TestComplexRhythmPage(unittest.TestCase):
         page.wait_for_function("document.querySelector('.vt-tab-status').textContent.startsWith('Copied ')")
         self.click_tab_lane(page, 2, 0, 1)
         page.fill('[data-ui=at]', '3')
+        # The host can finish refreshing the selected order while its position
+        # field is being edited. That refresh must not discard the pending value.
+        page.evaluate('SCORE.key=null;scoreRefresh()')
+        self.assertEqual(page.input_value('[data-ui=at]'), '3')
         page.click('[data-action=go]')
         page.click('[data-action=select-none]')
         result = command('[data-action=paste-span]', 'score')

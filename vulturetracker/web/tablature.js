@@ -1591,7 +1591,7 @@
       ui('range-duration').textContent = `Duration changes selected voice ${voice + 1}, original beats only; onsets stay unless Fit moves them.`;
       ui('tuple-n').value = (written.tuplet || [1, 1])[0]; ui('tuple-d').value = (written.tuplet || [1, 1])[1];
       ui('fit').disabled = busy || boardPending || !view?.native || !view?.editable || !!rawSelected || !current();
-      ui('at').value = at[1] === 1 ? at[0] : at.join('/');
+      if (focused !== ui('at')) ui('at').value = at[1] === 1 ? at[0] : at.join('/');
       const n = rawSelected || current()?.notes?.find(n => n.string === string);
       ui('spelling-step').value = n?.spelling?.step || (n ? keySpelling(n.pitch, spec()?.key?.fifths).step : 'C');
       ui('spelling-alter').value = n?.spelling ? String(n.spelling.alter || 0) : 'auto';
@@ -3639,6 +3639,7 @@
       } catch (err) { status(err.message || String(err)); }
     });
     listen(root, 'keydown', e => {
+      if (!root.getClientRects().length) return; // Hidden tabs can retain keyboard focus until the next frame.
       if (e.key === 'Escape') {
         const open = e.target.closest?.('form.vt-tab-panel:not([hidden])') || root.querySelector('form.vt-tab-panel:not([hidden])');
         if (open) {

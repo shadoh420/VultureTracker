@@ -9,6 +9,14 @@ excerpt of the committed Iron Relay demo; no private imported song appears in pu
 Documentation checks passed (`release-docs-final.log`), and captures were inspected (`release-screenshots-final.log`).
 The screenshot harness initially used a non-ASCII demo title, which the song format rejects; corrected before capture.
 
+PR #5 is open. Initial CI passed 1,700 portable cases on Windows and Linux/Python 3.10, but its
+419-case browser run found two failures. The workspace test depended on auto-hiding the empty first
+channel; it now selects the fixture's actual note. Hidden score panels also no longer consume shortcuts.
+A forced refresh reproduced the paste failure: it overwrote the position being typed. Controls now
+preserve that focused field. Both strengthened cases pass in a visible browser with exact paste timing
+and Undo/Redo checks (`release-ci-visible-final.log`). Failure logs are `release-ci-failure.log`,
+`release-ci-repro.log` and `release-paste-repro.log`; final CI and publication are pending.
+
 The implementation was requested after the owner viewed `Downloads/go love.yaml`.
 Pattern now uses 14px text / 22px rows / 132px channels, visible dividers and stronger beat,
 measure, cursor and playback highlights. All channels are shown by default; keyboard navigation
@@ -133,7 +141,7 @@ runner's native-only browser option rejected the tracker fixture (reused its HTM
 The baseline Pattern snapshot lacked its favicon; the final source/package checks were clean.
 
 Owner acceptance of the corrected candidate is pending; no performance measurement or listening acceptance claimed.
-Next: owner tries the preview with the same song, then decides on commit/release.
+Next: finish the authorized merge and 1.10.0 release after CI and final package checks.
 Unrelated `Listen to current preview.lnk` and `suite/rift/variants/build.log` were preserved.
 
 ## Current release: 1.9.0 published (2026-10-24)
