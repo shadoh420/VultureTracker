@@ -2,6 +2,24 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- Print preview and Print / Save PDF now accept generated tracker staff previews, using the same full-song
+  grouping as TAB / SCORE. Parts, paper settings and bar excerpts work without authoring or converting a score.
+- Pattern uses larger text, clear channel boundaries and stronger beat, measure, cursor and playback highlights.
+  All channels are visible by default, with horizontal scrolling that follows keyboard navigation. Selection,
+  automation and composition tools are grouped under a collapsed Advanced control; shortcuts remain available.
+- Imported tracker songs without authored score tracks now show a read-only staff preview of the entire song order
+  in TAB / SCORE, with repeated pattern occurrences and labeled boundaries; stored unsequenced patterns are excluded.
+  All active channels are represented with matching octave labels; clicking a note selects its
+  original Pattern cell and occurrence. The shared playback marker follows notes, rests and pattern changes without
+  replacing the score, scrolling within the score pane to stay visible. Rhythms and lengths
+  are row-grid hints, not a transcription of tracker effects or sample playback. The song is not converted or saved.
+- Tracker staff previews group channels using the same single sound slot into readable parts by default.
+  Chords and independent voices preserve overlapping rhythms; exact unisons share a notehead with source-channel
+  selection. Mixed/unknown sounds stay separate. The Track selector also offers separate channels and individual
+  channel inspection. Grouping only changes notation, leaving song data and playback intact.
+
 ## 1.9.0 (2026-10-24)
 
 - Standalone IT export handles the sub-tick gates, strums, grace notes and pitch controls in Boys In The Band

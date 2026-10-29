@@ -6702,6 +6702,28 @@ class TestTablature(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'unknown note'):
             tab.apply_score_edit(removed, {'op': 'tie_set', **bad})
 
+    def test_tracker_staff_groups_follow_sound_memory_and_keep_ambiguous_parts(self):
+        from vulturetracker.model import Channel, Sample, Instrument
+        rows = [[Cell() for _ in range(6)] for _ in range(2)]
+        for ch, slot in enumerate([1, 0, 2, 0, 1, 0]):
+            rows[0][ch] = Cell(note=60 + ch, instrument=slot)
+        rows[0][1] = Cell(instrument=1)  # Instrument-only event, then a remembered note.
+        rows[1][1] = Cell(note=67)
+        rows[1][4] = Cell(note=68, instrument=2)  # Mixed sounds must not merge.
+        next_rows = [[Cell(note=70), Cell(note=72), Cell(), Cell(note=72, instrument=1), Cell(), Cell()]]
+        mod = Module(channels=[Channel(name=str(i)) for i in range(6)], samples=[Sample(), Sample()],
+                     patterns=[Pattern('first', rows), Pattern('next', next_rows), Pattern('unused', [[Cell(note=60, instrument=2)]])],
+                     orders=[0, 254, 1, 1, 255, 2])
+        for instruments in (None, [Instrument(name='same'), Instrument(name='same')]):
+            with self.subTest(instruments=instruments is not None):
+                mod.instruments = instruments
+                before = copy.deepcopy(mod)
+                groups = tab.tracker_staff_groups(mod)
+                self.assertEqual([g['channels'] for g in groups], [[0, 1], [2], [3], [4], [5]])
+                self.assertEqual([g['slot'] for g in groups], [1, 2, None, None, None])
+                self.assertEqual(groups[0]['name'], 'Sample 01' if instruments is None else 'Instrument 01')
+                self.assertEqual(mod, before)
+
     def test_raw_preview_is_visible_without_adoption_or_fake_note_identity(self):
         song, raw = fixture()
         raw[1].rows[12][0] = parse_cell('C-5 01 v37 X40')

@@ -1504,6 +1504,8 @@
     const rawHost = root.querySelector('.vt-tab-raw');
     const status = message => { root.querySelector('.vt-tab-status').textContent = message; };
     const spec = () => view?.score?.tracks?.[track];
+    const rawPreview = () => !!view && !view.native && !Object.keys(view.score?.tracks || {}).length;
+    let previewChannel = -1, previewOccurrences = [];
     const TECHNIQUE_KEYS = {x: 'dead', o: 'ghost', h: 'hammer', p: 'palm-mute', s: 'slide', v: 'vibrato', f: 'fade-in'};
     const drumActions = new Set(['chord-diagram', 'remove-chord-diagram', 'chord-notes', 'chord-recognize',
       'recognition-apply', 'chord-generate', 'library-load', 'pitch-down', 'pitch-up', 'spelling', 'enharmonic',
@@ -1601,7 +1603,7 @@
       ui('fret').setAttribute('aria-label', drums ? 'Drum key' : 'Fret');
       ui('entry-label').textContent = drums ? 'Drum key' : 'Fret';
       entryButton.textContent = drums ? 'Enter key' : 'Enter fret';
-      entryHelp.textContent = drums ? 'Select a staff note or rest, choose a lane, then enter a drum key. ↑↓ lanes · ←→ beats · Ctrl+Z undo. Percussion prints on the staff in every print mode.' :
+      entryHelp.textContent = rawPreview() ? 'Choose a channel above. Click a staff note to locate its original Pattern cell; edit the music in Pattern.' : drums ? 'Select a staff note or rest, choose a lane, then enter a drum key. ↑↓ lanes · ←→ beats · Ctrl+Z undo. Percussion prints on the staff in every print mode.' :
         'Click a TAB string and type a fret. Arrow keys move the caret · +/− duration · Delete note · Ctrl+Z undo.';
       const destination = drums ? drumEntry : entryHome;
       if (entryLabel.parentElement !== destination) destination.prepend(entryLabel, entryButton);
@@ -2777,6 +2779,8 @@
       navigateTo(order, delta > 0 ? 'first' : 'last');
     }
     function navigationMeasures() {
+      if (rawPreview()) return view.orders.map((name, order) => ({from: {order, at: [0, 1]},
+        to: {order, at: rat(view.rows[view.pattern_names.indexOf(String(name))], view.rows_per_beat || 4)}}));
       const ids = view?.score?.order_ids || [], spans = [];
       for (let order = 0; order < ids.length; order++) {
         const pattern = String(view.orders[order]), step = view.score.patterns[pattern]?.row_step || view.row_step;
@@ -2870,6 +2874,19 @@
     }
     function navigateTo(order, position) {
       if (!view || busy || order < 0 || order >= view.orders.length) return;
+      if (rawPreview()) {
+        update({...view, order, pattern: String(view.orders[order])});
+        host.select({order, pattern: view.pattern, row: 0, ch: Math.max(0, previewChannel), source: 'raw'});
+        const first = renderedBeats.find(b => b.order === order), bounds = first && api?.boundsLookup.findBeats(first.beat)?.[0];
+        if (bounds) {
+          if (viewPrefs.layout === 'horizontal') scoreHost.scrollLeft = Math.max(0, bounds.onNotesX - 40);
+          else {
+            const container = root.closest('.main'), surface = scoreHost.querySelector('.at-surface');
+            if (container && surface) container.scrollTop += surface.getBoundingClientRect().top + bounds.barBounds.visualBounds.y - container.getBoundingClientRect().top;
+          }
+        }
+        return;
+      }
       const changingOrder = order !== view.order, keepEcho = changingOrder || navigationEcho;
       if (changingOrder) update({...view, order, pattern: String(view.orders[order])});
       if (typeof position === 'string') position = (position === 'last' ? caretBeats().at(-1) : caretBeats()[0]) || [0, 1];
@@ -2905,6 +2922,8 @@
       chooseContext(at); markPlayhead();
     }
     function selectTrack(id, accepted = false) {
+      if (rawPreview()) { const ch = Number(id); if (!Number.isInteger(ch) || ch < -2 || ch >= view.channels.length) return;
+        previewChannel = ch; rawSelected = null; controls(); drawRaw(); engrave(); return; }
       if (!view?.score?.tracks[id] || busy && !accepted) return;
       const position = {order: view.order, at}, measure = navigationMeasures().find(m => comparePosition(m.from, position) <= 0 && comparePosition(position, m.to) < 0);
       track = id; ui('track').value = track; renderKey = '';
@@ -3389,7 +3408,12 @@
     });
     listen(root, 'input', e => { if (![ui('follow'), ui('track'), ui('voice')].includes(e.target)) pauseFollow(); });
     const scrollHost = root.closest('.main') || root;
-    listen(scrollHost, 'wheel', () => pauseFollow(), {passive: true});
+    listen(scrollHost, 'wheel', e => {
+      // In a horizontal tracker score, vertical scrolling inspects channels,
+      // not another point in the song. Keep following time on the other axis.
+      if (rawPreview() && viewPrefs.layout === 'horizontal' && !e.shiftKey && Math.abs(e.deltaY) > Math.abs(e.deltaX)) return;
+      pauseFollow();
+    }, {passive: true});
     listen(scrollHost, 'touchstart', () => pauseFollow(), {passive: true});
     listen(scrollHost, 'pointerdown', e => { if (e.target === root || e.target === scrollHost) pauseFollow(); });
     listen(ui('voice'), 'change', () => selectVoice(+ui('voice').value));
@@ -3525,7 +3549,7 @@
       },
       'remove-curve': () => applyCurve(true), 'close-curve': () => closePanel('curve'),
       cut: () => commandBeats('cut'), repeat: () => commandBeats('repeat'),
-      print: () => { if (host.printPreview) return host.printPreview(); status('Print preview is unavailable in this host.'); },
+      print: () => { if (host.printPreview) return host.printPreview({previewChannel}); status('Print preview is unavailable in this host.'); },
       'track-first': () => navigateTrack('first'), 'track-previous': () => navigateTrack('previous'),
       'track-next': () => navigateTrack('next'), 'track-last': () => navigateTrack('last'),
       'measure-first': () => navigateMeasure('first'), 'measure-previous': () => navigateMeasure('previous'),
@@ -3736,6 +3760,7 @@
       const surface = scoreHost.querySelector('.at-surface'); if (!surface) return;
       const rect = surface.getBoundingClientRect(), scale = rect.width / surface.offsetWidth;
       const x = (e.clientX - rect.left) / scale, y = (e.clientY - rect.top) / scale;
+      if (rawPreview()) return; // Tracker staff hits select source cells; they never enter notes.
       const items = renderedBeats.filter(r => !isPercussion(view.score.tracks[r.track]) && cmp(r.at, r.end) < 0).flatMap(rendered => {
         const renderer = api.renderer.instance.layout?.getRendererForBar('score', rendered.beat.voice.bar);
         const bounds = api.boundsLookup.findBeats(rendered.beat)?.[0];
@@ -3770,6 +3795,19 @@
     }, {capture: true});
     listen(scoreHost, 'mousedown', e => {
       if (e.button !== 0 || busy) return;
+      if (rawPreview()) {
+        const surface = scoreHost.querySelector('.at-surface'); if (!surface) return;
+        const rect = surface.getBoundingClientRect(), scale = rect.width / surface.offsetWidth;
+        const x = (e.clientX - rect.left) / scale, y = (e.clientY - rect.top) / scale;
+        // Resolve the actual notehead across every voice; a beat hit alone cannot
+        // distinguish a chord's source channels or overlapping rhythmic voices.
+        const hit = renderedBeats.flatMap(r => api.boundsLookup.findBeats(r.beat) || []).flatMap(b => b.notes || []).find(n => {
+          const b = n.noteHeadBounds; return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
+        });
+        const ref = hit && refs.get(hit.note.id);
+        if (ref) { e.preventDefault(); e.stopImmediatePropagation(); selectRaw(ref.raw, true, ref.sources); root.focus({preventScroll: true}); }
+        return;
+      }
       const found = scoreHit(e); if (!found) return;
       const {ref, noteHit, hit, y} = found;
       e.preventDefault(); e.stopImmediatePropagation(); pauseFollow();
@@ -3794,13 +3832,17 @@
       if (record) selectRaw(record);
       root.focus();
     });
-    function selectRaw(record, notify = true) {
+    function selectRaw(record, notify = true, sources = []) {
+      if (rawPreview() && record.order != null && record.order !== view.order)
+        update({...view, order: record.order, pattern: String(view.orders[record.order])});
       if (notify) navigationEcho = null;
       rawSelected = record; lastDigit = null; selectedBeats.clear(); selectedNotes.clear(); rangeSelection = []; selectionAnchor = null;
       if (record.track && view.score?.tracks[record.track]) { track = record.track; ui('track').value = track; }
-      if (record.at) at = [...record.at];
+      if (rawPreview()) at = rat(record.row, view.rows_per_beat || 4);
+      else if (record.at) at = [...record.at];
       if (record.string) string = record.string;
       controls(); drawRaw(); markEditCaret();
+      status(sources.length > 1 ? `Shared note · channels ${sources.map(p => p.ch + 1).join(', ')}. Select an individual channel to inspect its tracker cell.` : '');
       if (notify) {
         notifying = true;
         try { host.select({order: view.order, occurrence: occurrence(), pattern: view.pattern, row: record.row, ch: record.ch, source: 'raw'}); }
@@ -3811,18 +3853,23 @@
       rawHost.replaceChildren();
       const records = rawRecords();
       if (!records.length) return;
-      rawHost.append(text('p', 'Existing Pattern notes — read only until explicitly adopted. Durations are notation hints from tracker boundaries.'));
+      rawHost.append(text('p', rawPreview() ?
+        'Tracker staff preview — read only. Pitches match Pattern octave labels. Rhythm follows the row grid; lengths end at the next note/cut/release or pattern boundary. Effects, sample tuning and decay are not transcribed. Guitar TAB needs a configured track.' :
+        'Existing Pattern notes — read only until explicitly adopted. Durations are notation hints from tracker boundaries.'));
       const table = document.createElement('table');
       for (const p of records) {
         const row = document.createElement('tr'), cell = document.createElement('td');
         const end = p.end_row == null ? '' : ` → ${Array.isArray(p.end_row) ? p.end_row[1] === 1 ? p.end_row[0] : p.end_row.join('/') : p.end_row}`;
-        const button = text('button', `Row ${p.row}${end} · ch ${p.ch + 1} · ${pitchName(p.pitch)}${p.string ? ` · string ${p.string} fret ${p.fret}` : ' · unassigned'}`);
+        const button = text('button', `Row ${p.row}${end} · ch ${p.ch + 1} · ${pitchName(p.pitch + (rawPreview() ? 12 : 0))}${p.string ? ` · string ${p.string} fret ${p.fret}` : ' · unassigned'}`);
         button.type = 'button'; button.dataset.rawRow = p.row; button.dataset.rawCh = p.ch;
         if (p.occurrence != null) button.dataset.occurrence = p.occurrence;
         button.setAttribute('aria-pressed', String(rawSelected?.row === p.row && rawSelected?.ch === p.ch));
         cell.append(button); row.append(cell, text('td', p.reason)); table.append(row);
       }
-      rawHost.append(table);
+      if (rawPreview()) {
+        const details = document.createElement('details');
+        details.append(text('summary', `Selected pattern ${view.pattern} · note list (${records.length})`), table); rawHost.append(details);
+      } else rawHost.append(table);
     }
 
     function drawGrid() {
@@ -3875,8 +3922,10 @@
     }
     function engrave() {
       showViewPreferences();
-      if (!spec() || !view?.pattern) { api?.destroy(); api = null; renderKey = ''; renderedBeats = []; tabHits = []; staffHits = []; scoreHost.replaceChildren(); root.querySelector('.vt-tab-meter').textContent = ''; return; }
-      const key = JSON.stringify([view.score, view.orders, view.rows, view.pattern_names, view.tempo, view.tempos, view.lyrics, track, viewPrefs]); if (key === renderKey) return;
+      const preview = rawPreview();
+      if ((!spec() && !preview) || !view?.pattern) { api?.destroy(); api = null; renderKey = ''; renderedBeats = []; tabHits = []; staffHits = []; scoreHost.replaceChildren(); root.querySelector('.vt-tab-meter').textContent = ''; return; }
+      const key = JSON.stringify([view.score, view.orders, view.rows, view.pattern_names, view.tempo, view.tempos, view.lyrics, track, viewPrefs,
+        preview ? [view.raw_positions, view.rows_per_beat, view.staff_groups, previewChannel] : null]); if (key === renderKey) return;
       renderKey = key;
       if (!window.alphaTab) { scoreHost.textContent = 'Score renderer unavailable. Local alphaTab assets must be loaded.'; return; }
       try {
@@ -3888,6 +3937,8 @@
           // These hit events fire with player interaction disabled; alphaTab handles its own canvas offsets.
           const hit = (ref, chord) => {
             if (!ref || busy) return;
+            if (ref.raw) { selectRaw(ref.raw, true, ref.sources);
+              root.focus({preventScroll: true}); return; }
             pauseFollow();
             focusRenderedTrack(ref.track);
             const selectedVoice = chord && isPercussion(spec()) ? voice : ref.voice;
@@ -3917,8 +3968,13 @@
         api.settings.display.layoutMode = viewPrefs.layout === 'horizontal' ? alphaTab.LayoutMode.Horizontal : alphaTab.LayoutMode.Page;
         api.settings.display.scale = viewPrefs.scale / 100;
         api.settings.notation.elements.set(alphaTab.NotationElement.EffectDynamics, viewPrefs.dynamics);
+        // Every rhythm is equally important in a read-only merged staff.
+        api.settings.display.resources.secondaryGlyphColor = preview ? api.settings.display.resources.mainGlyphColor :
+          new alphaTab.Settings().display.resources.secondaryGlyphColor;
         api.updateSettings();
         Object.assign(scoreHost.dataset, {layout: viewPrefs.layout, scale: viewPrefs.scale, notation: viewPrefs.notation});
+        if (preview) { engraveRaw(); return; }
+        delete scoreHost.dataset.previewNotes;
         const score = notationScore();
         const timeline = printTimeline(view), ranges = timeline.ranges;
         // TuxGuitar's measure errors for this track (gaps and voices that end early), counted here, listed on hover.
@@ -3961,7 +4017,28 @@
         delete scoreHost.dataset.bars; api.renderScore(score, score.tracks.map(t => t.index));
       } catch (e) { status(`Score rendering failed: ${e.message || e}`); }
     }
+    function engraveRaw() {
+      const score = notationScore(), timeline = trackerTimeline(view, previewChannel);
+      previewOccurrences = timeline.occurrences;
+      refs = new Map(); beatRefs = new Map(); renderedBeats = []; tabHits = []; staffHits = [];
+      scoreCursor.hidden = editCaret.hidden = true;
+      for (const [id, spec] of Object.entries(timeline.tracks)) {
+        const t = notationTrack(score, id, spec, timeline.ranges, timeline.source.filter(b => b.track === id), timeline.tieTargets,
+          (b, original, start, end, v) => {
+            const occurrence = previewOccurrences.find(o => cmp(o.from, start) <= 0 && cmp(start, o.to) < 0);
+            renderedBeats.push({track: id, beat: b, at: start, end, voice: v, order: occurrence?.order});
+            if (original) beatRefs.set(b.id, {raw: original.raw});
+          }, (n, note) => refs.set(n.id, {raw: note.raw, sources: note.sources}));
+        t.staves[0].showStandardNotation = true; t.staves[0].showTablature = false;
+      }
+      Object.assign(scoreHost.dataset, {notation: 'staff', tracks: timeline.channels.join(','), previewNotes: timeline.attacks,
+        previewHeads: timeline.heads, previewStaves: score.tracks.length, previewOrders: previewOccurrences.length});
+      root.querySelector('.vt-tab-meter').textContent = `Full tracker song · ${previewOccurrences.length} order occurrences · ${timeline.ranges.length} bars · ${timeline.attacks} source attacks · ${timeline.heads} noteheads · ${score.tracks.length} staves · ${timeline.perBeat} rows per quarter`;
+      ui('tempo-warning').hidden = true;
+      score.finish(api.settings); delete scoreHost.dataset.bars; api.renderScore(score, score.tracks.map(t => t.index));
+    }
     function buildTabHits() {
+      if (rawPreview()) { tabHits = []; staffHits = []; return; }
       // Pinned alphaTab 1.8.4: findBeats returns score then TAB bounds (the
       // default renderer order). getLineY is also used to paint each TAB line.
       // Workers are disabled above, so the renderer instance owns this layout.
@@ -4039,6 +4116,14 @@
       if (navigationEcho && (navigationEcho.song !== view.song || navigationEcho.revision !== view.revision || navigationEcho.order !== view.order)) navigationEcho = null;
       const names = Object.keys(view.score?.tracks || {}); if (!names.includes(track)) track = names[0] || '';
       ui('track').replaceChildren(...names.map(name => { const o = text('option', view.score.tracks[name].name || name); o.value = name; return o; })); ui('track').value = track;
+      if (rawPreview()) {
+        if (changedSong || previewChannel >= view.channels.length) previewChannel = -1;
+        ui('track').replaceChildren(...[-1, -2, ...view.channels.keys()].map(ch => {
+          const option = text('option', ch === -1 ? 'All parts (by sound)' : ch === -2 ? 'All channels (separate)' : `${ch + 1} · ${view.channels[ch]}`); option.value = ch; return option;
+        })); ui('track').value = previewChannel;
+      }
+      root.querySelector('[data-action="quick-previous"]').textContent = rawPreview() ? '◀ Pattern' : '◀ Bar';
+      root.querySelector('[data-action="quick-next"]').textContent = rawPreview() ? 'Pattern ▶' : 'Bar ▶';
       if (changedPattern || changedSong || cmp(at, end()) >= 0) { at = [0, 1]; pending = ''; chosen = null; lastDigit = null; rawSelected = null; selectedBeats.clear(); selectedNotes.clear(); }
       selectedBeats = new Set([...selectedBeats].filter(id => allBeats().some(b => b.track === track && b.id === id)));
       if (changedSong && !clipboard?.track_specs) { clipboard = null; clipboardSong = null; }
@@ -4053,6 +4138,15 @@
       if (s.order != null && s.order !== view.order) return;
       if (s.occurrence != null && s.occurrence !== occurrence()) return;
       const ch = s.channel ?? s.ch;
+      if (rawPreview()) {
+        if (s.row != null) {
+          const [n, d] = rowPair(s.row);
+          at = rat(n, d * (view.rows_per_beat || 4));
+          rawSelected = rawRecords().find(p => sameRow(p.row, s.row) && p.ch === ch) || null;
+          controls(); drawRaw(); markEditCaret();
+        }
+        return; // A tracker rest has no native track/beat selection to synchronize.
+      }
       // The host refreshes a changed order asynchronously and echoes only its
       // tracker row/channel. Preserve the exact TAB voice/string on that echo,
       // including blank beats above a raw note; navigation must not select it.
@@ -4091,19 +4185,22 @@
       ui('track').value = track; ui('voice').value = voice; choose(p, ns, s.chord, false); engrave();
     }
     function markPlayhead() {
-      const playedOrder = playhead?.order ?? playhead?.o, playedOccurrence = view?.score?.order_ids?.[playedOrder];
+      const preview = rawPreview(), playedOrder = playhead?.order ?? playhead?.o;
+      const previewOccurrence = preview ? previewOccurrences.find(o => o.order === playedOrder) : null;
+      const playedOccurrence = preview ? (previewOccurrence ? `tracker-${playedOrder}` : null) : view?.score?.order_ids?.[playedOrder];
       const matches = playedOccurrence && (playhead.occurrence == null || playhead.occurrence === playedOccurrence);
       const playedPattern = matches ? String(view.orders[playedOrder]) : null;
-      const playedBeats = matches ? resolvedBeats(view, playedPattern, playedOccurrence).filter(b => b.track === track) : [];
+      const playedBeats = matches && !preview ? resolvedBeats(view, playedPattern, playedOccurrence).filter(b => b.track === track) : [];
       const playedStep = view?.score?.patterns?.[playedPattern]?.row_step || view?.row_step || [1, 1];
       const visit = playhead?.visit, plan = playhead?.playbackPlan;
       if (plan !== playbackClockPlan) { playbackClockPlan = plan; playbackClock = plan ? nativeScoreClock(plan) : null; }
       const row = playhead?.exactRow ?? playhead?.row;
-      const p = matches ? playhead.at || (row != null ? rat(rowPair(row)[0] * playedStep[0], rowPair(row)[1] * playedStep[1]) : null) : null;
-      const writtenOrigin = (view?.occurrences || []).find(o => o.id === playedOccurrence)?.at;
+      const p = matches ? preview ? (row != null ? rat(rowPair(row)[0], rowPair(row)[1] * (view.rows_per_beat || 4)) : null) :
+        playhead.at || (row != null ? rat(rowPair(row)[0] * playedStep[0], rowPair(row)[1] * playedStep[1]) : null) : null;
+      const writtenOrigin = preview ? previewOccurrence?.from : (view?.occurrences || []).find(o => o.id === playedOccurrence)?.at;
       const origin = visit ? sub(visit.at, visit.source_from) : writtenOrigin;
       const factorQ = playhead?.factorQ ?? 65536;
-      const framed = matches && origin && (!visit || playbackClock) && Number.isSafeInteger(playhead.scoreFrame) &&
+      const framed = !preview && matches && origin && (!visit || playbackClock) && Number.isSafeInteger(playhead.scoreFrame) &&
         Number.isSafeInteger(playhead.sampleRate) && playhead.sampleRate > 0 && Number.isSafeInteger(view.tempo) && view.tempo > 0 &&
         Number.isSafeInteger(factorQ) && factorQ > 0;
       const frameAt = at => {
@@ -4143,19 +4240,34 @@
           (beat?.stroke && note ? strokeContains(beat, note) : active.includes(button.dataset.beat)));
       }
       scoreCursor.hidden = true;
-      const candidates = writtenOrigin ? renderedBeats.filter(b => b.track === track && cmp(b.at, b.end) < 0 &&
+      const candidates = writtenOrigin ? renderedBeats.filter(b => (preview || b.track === track) && cmp(b.at, b.end) < 0 &&
         (b.occurrence === playedOccurrence && playedBeats.find(source => source.id === b.sourceBeat)?.stroke ?
           active.includes(b.sourceBeat) : contains(sub(b.at, writtenOrigin), sub(b.end, writtenOrigin)))) : [];
       // An empty editing voice must not hide the whole part's playback cursor.
-      const rendered = candidates.find(b => b.voice === voice) || candidates[0];
+      const rendered = preview ? candidates.sort((a, b) => cmp(b.at, a.at))[0] : candidates.find(b => b.voice === voice) || candidates[0];
       const staves = rendered && api?.boundsLookup?.findBeats(rendered.beat), bounds = staves?.[0], surface = scoreHost.querySelector('.at-surface');
       if (bounds && surface) {
         // Bounds are relative to alphaTab's rendering surface, including rests.
         // The shared tracker playhead drives this beat-aligned marker; no second player.
         surface.append(scoreCursor);
         scoreCursor.style.left = bounds.onNotesX + 'px';
+        if (preview) {
+          // Move on each tracker row, including long notes and empty measures.
+          const bar = rendered.beat.voice.bar.index;
+          const absolute = add(writtenOrigin, p);
+          const next = renderedBeats.filter(b => b.beat.voice.bar.index === bar && cmp(b.at, absolute) > 0)
+            .sort((a, b) => cmp(a.at, b.at))[0];
+          const to = next?.at || rendered.end, nextBounds = next && api.boundsLookup.findBeats(next.beat)?.[0];
+          const right = nextBounds?.onNotesX ?? bounds.barBounds.visualBounds.x + bounds.barBounds.visualBounds.w;
+          const fraction = num(sub(absolute, rendered.at)) / num(sub(to, rendered.at));
+          scoreCursor.style.left = bounds.onNotesX + Math.max(0, Math.min(1, fraction)) * (right - bounds.onNotesX) + 'px';
+          scoreCursor.dataset.row = num(p) * (view.rows_per_beat || 4);
+          scoreCursor.dataset.order = playedOrder;
+          scoreCursor.dataset.pattern = playedPattern;
+        }
         // Standard notation and TAB: from the top of the first staff to the bottom of the last.
-        const boxes = staves.map(b => b.barBounds?.visualBounds).filter(v => v && Number.isFinite(v.y) && Number.isFinite(v.h));
+        const visibleStaves = preview ? candidates.flatMap(b => api.boundsLookup.findBeats(b.beat) || []) : staves;
+        const boxes = visibleStaves.map(b => b.barBounds?.visualBounds).filter(v => v && Number.isFinite(v.y) && Number.isFinite(v.h));
         if (!boxes.length) boxes.push(bounds.barBounds.visualBounds);
         const top = Math.min(...boxes.map(v => v.y)), bottom = Math.max(...boxes.map(v => v.y + v.h));
         scoreCursor.style.top = top + 'px';
@@ -4163,18 +4275,27 @@
         scoreCursor.dataset.at = sub(rendered.at, writtenOrigin).join('/');
         scoreCursor.dataset.scoreAt = rendered.at.join('/'); scoreCursor.hidden = false;
         scoreCursor.dataset.occurrence = playedOccurrence;
-        scoreCursor.dataset.track = track;
+        scoreCursor.dataset.track = rendered.track;
         scoreCursor.dataset.bar = rendered.beat.voice.bar.index;
         if (canFollowPlayback()) {
           const rect = scoreCursor.getBoundingClientRect(), container = root.closest('.main')?.getBoundingClientRect();
-          if (container && (rect.top < container.top || rect.bottom > container.bottom || rect.left < container.left || rect.right > container.right))
-            scoreCursor.scrollIntoView({block: 'center', inline: 'nearest'});
+          const clip = scoreHost.getBoundingClientRect();
+          const left = container && (preview ? Math.max(clip.left, container.left) + 8 : container.left);
+          const right = container && (preview ? Math.min(clip.right, container.right) - 8 : container.right);
+          if (container && preview && viewPrefs.layout === 'horizontal') {
+            if (rect.left < left || rect.right > right) scoreHost.scrollLeft += rect.left - (left + right) / 2;
+            // Preserve the user's vertical channel position while any of the marker is visible.
+            if (rect.bottom < container.top || rect.top > container.bottom)
+              scoreCursor.scrollIntoView({block: 'nearest', inline: 'nearest'});
+          } else if (container && (rect.top < container.top || (preview ? rect.top : rect.bottom) > container.bottom || rect.left < left || rect.right > right))
+            scoreCursor.scrollIntoView({block: preview ? 'start' : 'center', inline: preview ? 'center' : 'nearest'});
         }
       }
     }
     function setPlayhead(p) {
-      playhead = p; markPlayhead(); commandControls(); lyricsControls();
-      const label = view ? `Editing ${view.order + 1}/${view.orders.length} · ${view.pattern} · ${occurrence()}` +
+      playhead = p;
+      markPlayhead(); commandControls(); lyricsControls();
+      const label = view ? `${rawPreview() ? 'Selected' : 'Editing'} ${view.order + 1}/${view.orders.length} · ${view.pattern}${occurrence() ? ' · ' + occurrence() : ''}` +
         (p ? ` · Playing ${p.o + 1}/${view.orders.length}${p.pass ? ` · pass ${p.pass}` : ''}` : '') : '';
       if (ui('order-context').textContent !== label) ui('order-context').textContent = label;
     }
@@ -4190,6 +4311,69 @@
     function destroy() { destroyed = true; abort.abort(); api?.destroy(); root.replaceChildren(); root.classList.remove('vt-tab'); }
     return {update, setSelection, setPlayhead, pauseFollow, enterPitch, enterMatrix, selectTrack, get track() { return track; }, destroy};
   }
+  function trackerTimeline(view, previewChannel = -1) {
+    const ranges = [], perBeat = view.rows_per_beat || 4;
+    const records = [], occurrences = []; let end = [0, 1];
+    // Expand the written order, including repeated patterns, exactly once per occurrence.
+    // Unsequenced patterns are not part of the song; playback loops reuse their written location.
+    view.orders.forEach((name, order) => {
+      const pattern = String(name), rows = view.rows[view.pattern_names.indexOf(pattern)];
+      if (!rows) return;
+      const from = end, firstBar = ranges.length; end = add(from, rat(rows, perBeat));
+      occurrences.push({order, pattern, from, to: end});
+      displayGroups(ranges, from, end);
+      ranges[firstBar].marker = {title: `${order + 1} · ${pattern}`};
+      for (const p of (view.raw_positions || []).filter(p => p.pattern_name === pattern))
+        records.push({...p, order, offset: from, rows});
+    });
+    const channels = previewChannel < 0 ? [...new Set(records.map(p => p.ch))].sort((a, b) => a - b) : [previewChannel];
+    const tracks = {}, allSource = [], tieTargets = new Set();
+    const separate = (channels.length ? channels : [0]).map(ch => ({name: `${ch + 1} · ${view.channels[ch]}`, channels: [ch]}));
+    const groups = previewChannel === -1 && view.staff_groups?.length ? view.staff_groups : separate;
+    let heads = 0;
+    for (const group of groups) {
+      // Identical spans share a chord. Exact unisons share a notehead, retaining
+      // every source cell. Independent rhythms use interval-packed voices.
+      const spans = new Map(), ends = [], parts = [];
+      for (const p of records.filter(p => group.channels.includes(p.ch))) {
+        const key = `${p.order}:${p.row}:${p.boundary_row ?? p.rows}`;
+        if (!spans.has(key)) spans.set(key, {at: add(p.offset, rat(p.row, perBeat)), length: rat((p.boundary_row ?? p.rows) - p.row, perBeat), records: []});
+        spans.get(key).records.push(p);
+      }
+      for (const span of [...spans.values()].sort((a, b) => cmp(a.at, b.at))) {
+        let v = ends.findIndex(end => cmp(end, span.at) <= 0); if (v < 0) v = ends.length;
+        ends[v] = add(span.at, span.length);
+        // Keep busy groups readable: at most two independent rhythms per staff.
+        const part = Math.floor(v / 2); parts[part] ||= {source: [], ties: new Set()};
+        const pitches = new Map();
+        for (const p of span.records) { if (!pitches.has(p.pitch)) pitches.set(p.pitch, []); pitches.get(p.pitch).push(p); }
+        heads += pitches.size;
+        let at = span.at;
+        spellSpan(span.length).forEach((written, i) => {
+          const notes = [...pitches.values()].map(sources => {
+            const p = sources[0], id = `preview-${p.order}-${p.ch}-${p.row}-${i}`;
+            if (i) parts[part].ties.add(id);
+            // Match Pattern's IT octave labels, not a sample's concert tuning.
+            return {id, pitch: p.pitch + 12, raw: p, sources};
+          });
+          parts[part].source.push({id: notes[0].id, raw: span.records[0], at, written, voice: v % 2, notes});
+          at = add(at, duration(written));
+        });
+      }
+      if (!parts.length) parts.push({source: [], ties: new Set()});
+      for (const [part, {source, ties}] of parts.entries()) {
+        const id = `channel-${group.channels[0]}${part ? ':' + part : ''}`;
+        const name = group.name + (group.channels.length > 1 ? ` · Ch ${group.channels.map(ch => ch + 1).join(', ')}` : '') + (parts.length > 1 ? ` · part ${part + 1}` : '');
+        const pitches = source.flatMap(b => b.notes.map(n => n.pitch)), average = pitches.reduce((a, b) => a + b, 0) / pitches.length;
+        tracks[id] = {name, tuning: [], clef: average < 60 ? 'bass' : 'treble'};
+        for (const beat of source) allSource.push({...beat, track: id});
+        for (const target of ties) tieTargets.add(target);
+      }
+    }
+    return {raw: true, ranges, channels, occurrences, heads, tracks, source: allSource, tieTargets,
+      attacks: records.filter(p => channels.includes(p.ch)).length, perBeat};
+  }
+
   function printTimeline(view) {
     if (!view.score || !Object.keys(view.score.tracks).length) throw new Error('Set up and author a score before printing.');
     const offsets = new Map(), source = []; let end = [0, 1];
@@ -4221,7 +4405,7 @@
     return {source, ranges, offsets, tieTargets: new Set((view.score.ties || []).map(t => identity(t.to.occurrence, t.to.note)))};
   }
 
-  function mountPrint(root, snapshot, {saveImage} = {}) {
+  function mountPrint(root, snapshot, {saveImage, previewChannel = -1} = {}) {
     registerLyricsEngraving();
     const view = clone(snapshot), abort = new AbortController();
     let api = null, generation = 0, destroyed = false;
@@ -4264,15 +4448,19 @@
     field('title').value = credits.title ?? view.title ?? '';
     field('subtitle').value = [credits.artist, credits.album, credits.date, credits.transcriber && `Transcribed by ${credits.transcriber}`].filter(Boolean).join(' · ');
     field('composer').value = credits.author || '';
-    for (const [id, spec] of Object.entries(view.score?.tracks || {})) {
-      const label = text('label', ''), input = document.createElement('input');
-      input.type = 'checkbox'; input.name = 'track'; input.value = id; input.checked = true; label.append(input, document.createTextNode(spec.name || id));
-      root.querySelector('[data-print=tracks]').append(label);
-    }
-    let timeline;
+    let timeline, tracks;
     function failed(error) { printButton.disabled = true; imagesReady(false); pages.replaceChildren(); status.textContent = `Cannot print: ${error.message || error}`; }
     try {
-      timeline = printTimeline(view);
+      if (!Number.isInteger(previewChannel) || previewChannel < -2 || previewChannel >= view.channels.length) throw new Error('Invalid preview channel.');
+      timeline = !view.native && !Object.keys(view.score?.tracks || {}).length ? trackerTimeline(view, previewChannel) : printTimeline(view);
+      if (!timeline.ranges.length) throw new Error('This song has no ordered patterns to print.');
+      tracks = timeline.tracks || view.score.tracks;
+      for (const [id, spec] of Object.entries(tracks)) {
+        const label = text('label', ''), input = document.createElement('input');
+        input.type = 'checkbox'; input.name = 'track'; input.value = id; input.checked = true; label.append(input, document.createTextNode(spec.name || id));
+        root.querySelector('[data-print=tracks]').append(label);
+      }
+      if (timeline.raw) { field('notation').value = 'staff'; field('notation').disabled = true; }
       field('first').max = field('last').max = field('last').value = timeline.ranges.length;
       timeline.ranges.forEach((r, i) => {
         if (!i) return;
@@ -4280,7 +4468,9 @@
         option.value = i; field('breaks').append(option);
       });
       const raw = (view.raw_positions || []).length;
-      root.querySelector('[data-print=summary]').textContent = `${view.orders.length} order occurrences · ${timeline.ranges.filter(r => r.authored).length} authored measures · ${timeline.ranges.length} displayed bars` +
+      root.querySelector('[data-print=summary]').textContent = timeline.raw ?
+        `Tracker staff preview · ${timeline.occurrences.length} order occurrences · ${timeline.ranges.length} displayed bars · ${timeline.attacks} source notes · ${timeline.heads} noteheads. Row-grid rhythm; effects and sample tuning are not transcribed. The song is unchanged.` :
+        `${view.orders.length} order occurrences · ${timeline.ranges.filter(r => r.authored).length} authored measures · ${timeline.ranges.length} displayed bars` +
         (timeline.ranges.some(r => !r.authored) ? ' · includes unmetered display groups' : '') +
         (raw ? ` · ${raw} unadopted Pattern note entries are not included` : '');
     } catch (error) { failed(error); }
@@ -4314,13 +4504,18 @@
         const score = notationScore(); score.title = field('title').value; score.subTitle = field('subtitle').value; score.music = field('composer').value;
         score.words = credits.writer || '';
         score.subTitle = [score.subTitle, credits.copyright].filter(Boolean).join(' · ');
-        if (selected.length === 1) score.subTitle = [score.subTitle, view.score.tracks[selected[0]].name || selected[0]].filter(Boolean).join(' · ');
+        if (timeline.raw) {
+          current.settings.display.resources.secondaryGlyphColor = current.settings.display.resources.mainGlyphColor;
+          current.settings.notation.elements.set(alphaTab.NotationElement.EffectDynamics, false);
+          score.subTitle = [score.subTitle, 'Tracker preview · row-grid rhythm; effects and sample tuning omitted'].filter(Boolean).join(' · ');
+        }
+        if (selected.length === 1) score.subTitle = [score.subTitle, tracks[selected[0]].name || selected[0]].filter(Boolean).join(' · ');
         if (first || last !== timeline.ranges.length)
           score.subTitle = [score.subTitle, `Source bars ${first + 1}–${last} (excerpt numbered from 1)`].filter(Boolean).join(' · ');
         document.title = score.title ? score.title + ' — Score print preview' : 'Score print preview';
         for (const id of selected) {
-          const t = notationTrack(score, id, view.score.tracks[id], ranges, timeline.source.filter(b => b.track === id), timeline.tieTargets);
-          const drums = isPercussion(view.score.tracks[id]);
+          const t = notationTrack(score, id, tracks[id], ranges, timeline.source.filter(b => b.track === id), timeline.tieTargets);
+          const drums = isPercussion(tracks[id]);
           t.staves[0].showStandardNotation = drums || field('notation').value !== 'tab';
           t.staves[0].showTablature = !drums && field('notation').value !== 'staff';
           // alphaTab 1.8.4 uses the next bar's zero-based index as a system break.
@@ -4329,9 +4524,10 @@
         root.querySelector('[data-print=lyrics]').textContent = (view.lyrics?.errors || [])
           .filter(e => selected.includes(e.track)).map(e => e.message).join(' · ');
         if (!Number.isFinite(view.tempo) || view.tempo <= 0) throw new Error('The snapshot has no valid initial tempo.');
-        notationTempos(score, ranges, view);
+        if (timeline.raw) score.tempoUnitWarnings = []; // The preview does not transcribe tracker timing effects.
+        else notationTempos(score, ranges, view);
         ranges.forEach((range, i) => {
-          if (!range.authored && (i === 0 || ranges[i - 1].authored)) {
+          if (!timeline.raw && !range.authored && (i === 0 || ranges[i - 1].authored)) {
             const section = new alphaTab.model.Section(); section.text = 'Unmetered'; score.masterBars[i].section = section;
           }
         });
@@ -4380,7 +4576,7 @@
               const label = document.createElementNS(footer.namespaceURI, 'text');
               label.setAttribute('x', '300'); label.setAttribute('y', '11'); label.setAttribute('text-anchor', 'middle');
               label.setAttribute('font-size', '10'); label.setAttribute('fill', '#333');
-              const partName = selected.length === 1 ? view.score.tracks[selected[0]].name || selected[0] : 'Full score';
+              const partName = selected.length === 1 ? tracks[selected[0]].name || selected[0] : 'Full score';
               label.textContent = `${score.title.slice(0, 65)} · ${partName.slice(0, 55)}`;
               const location = label.cloneNode(false), systems = [...page.querySelectorAll('.vt-print-part')].filter(el => +el.dataset.firstBar >= 0);
               const from = systems.length ? +systems[0].dataset.firstBar + first + 1 : null;

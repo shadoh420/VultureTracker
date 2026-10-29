@@ -14,9 +14,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
     if(!response.ok||snapshot.error)throw new Error(snapshot.error||'Could not load the score.');
     if(snapshot.song!==q.get('song')||snapshot.revision!==q.get('revision'))
       throw new Error('The song changed before this preview opened. Open a new print preview from TAB.');
-    if(!snapshot.score)throw new Error('This song has no authored score to print.');
     document.title=(snapshot.title||'Untitled')+' — Score print preview';
-    VultureTab.mountPrint(root,snapshot,{saveImage:async payload=>{
+    VultureTab.mountPrint(root,snapshot,{previewChannel:Number(q.get('preview_channel')??-1),saveImage:async payload=>{
       const response=await fetch('/api/score_export',{method:'POST',
         headers:{'Content-Type':'application/json','X-VT-Token':q.get('token')||''},body:JSON.stringify(payload)});
       const result=await response.json();
