@@ -2841,6 +2841,7 @@
       rangeSelection = [...groups].map(([occurrence, beats]) => ({occurrence, beats}));
       selectedBeats = new Set(groups.get(occurrence()) || []);
       selectedNotes = new Map(beats().filter(x => selectedBeats.has(x.id)).map(x => [x.id, new Set(x.notes.map(n => n.id))]));
+      navigationEcho = {...selection(), song: view.song, revision: view.revision};
       controls(); drawGrid(); markEditCaret();
       status(`Selected ${range.length} beat${range.length === 1 ? '' : 's'}.`);
     }

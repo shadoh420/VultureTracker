@@ -16,6 +16,11 @@ A forced refresh reproduced the paste failure: it overwrote the position being t
 preserve that focused field. Both strengthened cases pass in a visible browser with exact paste timing
 and Undo/Redo checks (`release-ci-visible-final.log`). Failure logs are `release-ci-failure.log`,
 `release-ci-repro.log` and `release-paste-repro.log`; final CI and publication are pending.
+The second CI run passed those fixes but exposed another delayed-refresh case: clipboard paste lost
+the range start after its selection collapsed to the caret. A forced-refresh test reproduces it
+(`release-selection-forced.log`), and range selection now records its host echo. Forward, backward
+and cross-bar paste, exact history, position entry and keyboard focus pass together in a visible browser
+(`release-selection-visible-final.log`). `release-ci-failure-2.log` retains the CI failure.
 
 The implementation was requested after the owner viewed `Downloads/go love.yaml`.
 Pattern now uses 14px text / 22px rows / 132px channels, visible dividers and stronger beat,

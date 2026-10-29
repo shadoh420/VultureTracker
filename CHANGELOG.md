@@ -4,7 +4,7 @@ What changed in each VultureTracker release (the GitHub release notes, without t
 
 ## Unreleased
 
-- Score shortcuts ignore hidden panels, and refreshing an order preserves a position being typed.
+- Score shortcuts ignore hidden panels, and refreshing an order preserves typed positions and range selections.
 - Shorter README with refreshed Pattern, Score, Tryout and Spectrum screenshots from the project demo.
 - Print preview and Print / Save PDF now accept generated tracker staff previews, using the same full-song
   grouping as TAB / SCORE. Parts, paper settings and bar excerpts work without authoring or converting a score.

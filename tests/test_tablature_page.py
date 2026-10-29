@@ -8963,6 +8963,7 @@ class TestTablaturePage(unittest.TestCase):
         for first,last,pattern,onset in (([1,1],[1,3],'B',1),([1,3],[1,1],'B',1),([0,3],[1,1],'A',3)):
             self.click_tab_lane(page,*first,1)
             page.keyboard.down('Shift');self.click_tab_lane(page,*last,1);page.keyboard.up('Shift')
+            page.evaluate('SCORE.key=null;scoreRefresh()')  # Delayed host echo must preserve the entire selection.
             posts.clear();key('Control+v')
             self.settled(page,'S.undo===1&&tabRenderedRevision===SCORE.view.revision&&tabRenderApi.boundsLookup?.isFinished')
             request=next(p for p in posts if p.get('op')=='beats_paste')
