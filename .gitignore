@@ -46,3 +46,6 @@ tools/bin/
 *.history.json*
 *.recovery.json*
 *.phrases/
+
+# Claude Code per-user permissions (may hold approved commands)
+**/.claude/settings.local.json
