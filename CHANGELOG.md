@@ -2,7 +2,7 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
-## Unreleased
+## 1.11.0 (2026-11-22)
 
 - Audio transcription dialog on the start screen (**Transcribe audio…**): runs Dettato on the full mix by default,
   preserving the raw performance MIDI in `mix/original.mid` beside the editable tracker song and WAV preview, with
