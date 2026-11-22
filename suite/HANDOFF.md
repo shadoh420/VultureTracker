@@ -1,6 +1,52 @@
 # VultureTracker handoff
 
-## Current release: 1.10.0 published (2026-10-29)
+## Current release: 1.11.0 published (2026-11-22)
+
+[Release and downloads](https://github.com/shadoh420/VultureTracker/releases/tag/v1.11.0).
+Tag `v1.11.0` points to `f696a3c`. The owner authorized writing the transcription guide, committing, pushing and cutting
+the release.
+
+What shipped in 1.11.0:
+- Start-screen **Transcribe audio…** dialog (`vulturetracker/transcription.py`, `vulturetracker/server.py`,
+  `vulturetracker/gui.html`) running Dettato on the full mix by default, preserving raw `mix/original.mid` beside the
+  editable tracker song and preview WAV, with explicit optional alternates (**Prepare separated drums**, **Prepare full
+  stem take**), live stage/elapsed reporting, and synchronized A/B auditioning across **Original recording**,
+  **Dettato MIDI · GM SoundFont** (FluidSynth + TimGM6mb with per-track **Solo** or **All instruments**) and tracker
+  takes.
+- Loading indicator dialog during startup, song open and import.
+- Updated `tools/transcribe_audio.py`, `tools/dettato_takes.py`, `tools/render_gm.py`, `tools/transcribe.cmd` and
+  `tools/transcribe_setup.cmd` for the Dettato workflow alongside the legacy `--notes basic-pitch|yourmt3` pipeline.
+- Added [TRANSCRIPTION.md](../TRANSCRIPTION.md), documenting the verified audio-to-editable-tracker workflow developed
+  across two private test recordings in `scratch/` (short dark percussion/drone cue and full 3:20 multi-section
+  breakbeat/wah-guitar/lead theme — both approved by ear by the owner): separating playback bugs from note-prediction
+  errors via controlled 4-clip LUFS-matched tests, building phase-aligned multisampled loops and single-beat articulated
+  samples on round-robin channels (instead of faking band-pass wah sweeps with IT's low-pass filter or coarse DMO
+  `param_eq` steps), calibrating macro section dynamics, and checking 2D log-spectrogram + A-weighted envelope metrics
+  alongside `api.check()` (0 errors, 0 warnings).
+
+Current delivery: `dist/vulturetracker.exe`, `dist/ffmpeg.exe` and `dist/vulturetracker-win64.zip`.
+All three uploaded asset digests match local `dist/` and the published release body (`tools/release.py 1.11.0 --check`
+passed). `README.md` contains the current EXE digest.
+
+- EXE: `acf5587e3e5b8b70f953c04a1beaab1310b5fa04184328f610e37fc882ff0e17`
+- ffmpeg: `2ce797a0f88d7f067180338fb227f7b1928ea727bd9a4d7a1d022f7c52af71a3`
+- ZIP: `37291f01af896a1f373b1e2f283e0ba025e926d52f57368cf1abc3544b498aee`
+
+Verified:
+- Local Windows/Python 3.14: `tests.test_docs`, `tests.test_midiimport`, `tests.test_stems_to_song` and `tests.test_gui`
+  (141 tests OK, after adding `/api/transcription-status` and `/api/transcription-preview/x/mix` to `GET_ROUTES`).
+- Real browser (Playwright Edge): `tests.test_page` (13 OK), `tests.test_workflow_page` (3 OK), and packaged start-screen
+  / transcribe-dialog smoke check on `dist/vulturetracker.exe` (0 page errors).
+- Packaged smoke & selfcheck: `python tools/exe_check.py dist/vulturetracker.exe` passed (including `audio transcription`
+  and `native score audio`); `dist/vulturetracker-win64.zip` integrity check passed (48 files, 0 corrupt entries, no
+  private fixtures).
+- [Tagged clean Windows CI build](https://github.com/shadoh420/VultureTracker/actions/runs/45066403927) passed (`exe` in
+  1m48s, artifact `vulturetracker-v1.11.0` uploaded). Full cross-platform CI (`tests.yml`) triggered on `main`
+  ([run 45066403909](https://github.com/shadoh420/VultureTracker/actions/runs/45066403909)).
+- Unrelated `Listen to current preview.lnk`, `suite/rift/variants/build.log` and all private audio/experiments in
+  `scratch/` were preserved untouched outside git.
+
+## Previous release: 1.10.0 published (2026-10-29)
 
 [Release and downloads](https://github.com/shadoh420/VultureTracker/releases/tag/v1.10.0).
 [PR #5](https://github.com/shadoh420/VultureTracker/pull/5) is merged (`d2deb5a`).
