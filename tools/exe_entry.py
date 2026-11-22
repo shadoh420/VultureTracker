@@ -54,6 +54,7 @@ def selfcheck():
                  "OpenJDK-TimSort-GPL-2.0-with-classpath.txt", "OpenJDK-TimSort-NOTICE.txt"):
         check(name, lambda n=name: f"{(pkg / 'licenses' / n).stat().st_size} bytes")
     check("plugins", lambda: f"{len(importlib.import_module('vulturetracker.plugins').EFFECTS)} DMO effects")
+    check("audio transcription", version("vulturetracker.transcription"))
     for mod in ("numpy", "yaml", "webview", "pedalboard", "mido", "guitarpro", "sounddevice"):
         check(mod, version(mod))
     info("faust", lambda: "faustwasm present" if importlib.import_module("vulturetracker.faust").have() else "faustwasm not fetched")

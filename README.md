@@ -63,7 +63,7 @@ included in the Windows download. Run `python -m vulturetracker --help` for impo
 
 ## Help and details
 
-[User guide](GUIDE.md) · [Song format](SONG_FORMAT.md) · [Sample recipes](SAMPLING.md) ·
+[User guide](GUIDE.md) · [Audio transcription guide](TRANSCRIPTION.md) · [Song format](SONG_FORMAT.md) · [Sample recipes](SAMPLING.md) ·
 [Score interchange limits](TABLATURE-PARITY.md) · [Changelog](CHANGELOG.md) ·
 [Report a bug](https://github.com/shadoh420/VultureTracker/issues/new/choose)
 

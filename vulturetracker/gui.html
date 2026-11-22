@@ -770,10 +770,31 @@ option.hascand{color:var(--acc);font-weight:700}
     <details id="import-midi-options"></details>
     <details id="import-gp-options"></details>
     <div style="margin-top:5px;font-size:10.5px;color:var(--dim)">written beside it as name.yaml, its samples as WAVs in name_samples/ (nothing is replaced). Native TAB import refuses unsupported features before writing. Uncheck for the legacy tracker conversion and its loss report.</div></div>
+  <button id="transcribe-button" class="btn" style="margin-top:14px" onclick="$('transcribe-dialog').showModal()">TRANSCRIBE AUDIO…</button>
   <button class="btn" id="collection-open" style="margin-top:14px" onclick="collectionOpen()">SCORE COLLECTION &amp; BATCH CONVERSION</button>
   <div id="recentlist" style="margin-top:18px"></div>
   <div id="demolist" style="margin-top:14px"></div>
 </div></div>
+<dialog id="transcribe-dialog" style="background:var(--panel);color:var(--ink);border:1px solid var(--line);width:580px;max-width:90vw" onclose="$('take-audio').pause();if(takePending)takePending.resume=false" onkeydown="event.stopPropagation()">
+  <h3>Transcribe audio</h3>
+  <p>Dettato estimates notes and instruments from the recording. The tracker preview plays those notes with its own samples.</p>
+  <div class="row"><input id="take-source" aria-label="Recording path" placeholder="Path to recording" style="flex:1"><button id="take-browse" onclick="takeBrowse()">Browse…</button><button id="take-mix" onclick="prepareTake('mix')">Transcribe full mix</button></div>
+  <fieldset id="take-review" hidden style="margin:14px 0"><legend>Audition takes</legend>
+    <div><button id="take-drums" onclick="prepareTake('drums')">Prepare separated drums</button> <button id="take-stems" onclick="prepareTake('stems')">Prepare full stem take</button></div>
+    <p><label>Listen to <select id="take-select" onchange="selectTake(true)"></select></label>
+      <label id="take-solo-label" hidden>Solo <select id="take-solo" onchange="selectTake(true)"><option value="">All instruments</option></select></label></p>
+    <audio id="take-audio" controls preload="metadata" style="width:100%" onwaiting="$('take-buffer').textContent='Buffering audio…'" oncanplay="$('take-buffer').textContent=''" onerror="$('take-buffer').textContent='Could not load the audio file.'"></audio>
+    <small id="take-buffer" role="status"></small>
+    <p id="take-original" style="overflow-wrap:anywhere"></p>
+    <button id="take-open" onclick="openTake()">Open selected take for editing</button>
+  </fieldset>
+  <div id="take-working" hidden><progress aria-label="Transcription in progress"></progress> <span id="take-elapsed"></span></div>
+  <p id="take-status" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:16vh;overflow:auto"></p>
+  <button onclick="$('transcribe-dialog').close()">Close</button>
+</dialog>
+<dialog id="song-loading" aria-labelledby="song-load-label" aria-busy="true" oncancel="event.preventDefault()" onkeydown="event.stopPropagation()" style="background:var(--panel);color:var(--ink);border:1px solid var(--line)">
+  <p id="song-load-label" role="status"></p><progress aria-label="Loading"></progress>
+</dialog>
 <dialog id="collection-dialog" style="background:var(--panel);color:var(--ink);border:1px solid var(--line);width:900px;max-width:90vw;max-height:85vh;overflow:auto" onkeydown="event.stopPropagation()">
   <h3>Score collection</h3>
   <p>Browse local songs and tabs. Each conversion writes a new folder; originals and existing outputs are kept.</p>
@@ -839,17 +860,100 @@ async function renderStart(){const j=await (await fetch('/api/start')).json();co
   $('demolist').innerHTML=(j.demos||[]).length?`<div class="k" style="margin-bottom:6px">DEMOS</div>`+j.demos.map(p=>li(p,'demo')).join(''):'';
   $('startver').textContent=j.version||'';$('startclose').style.display=S&&S.song?'':'none';toggle('start',true)}
 function resetPlayer(){AG.song=null;$('phrase-audio').pause();$('phrase-audio').removeAttribute('src');faLetGo();clearTimeout(FA.draftT);$('fa-code').value='';sel=null;focus=null;lastSrc='';audio.pause();audio.removeAttribute('src');lvStop();curSection=null;CUR.o=0;CUR.row=0;CUR.ch=0;CUR.col=0;CUR.score=null;clearTimeout(MIDI.timer);MIDI.pending=null;PAT={key:null,rows:null,order:-1,active:[],row:-2};SEL=null;phraseEditorKey=''}
-async function openSong(p){if(!p)return;await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}}
+async function withSongLoad(label,action){
+  const dialog=$('song-loading');
+  if(dialog.open)return;
+  $('song-load-label').textContent=label;dialog.showModal();
+  try{return await action()}catch(e){alert(e.message)}finally{dialog.close()}
+}
+async function openSong(p){if(!p)return;return withSongLoad('Opening '+p.split(/[\\/]/).pop()+'…',async()=>{
+  await EDQ.chain;const r=await fetch('/api/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen();return true}})}
+let takeSession=null,takeSongs={},takePending=null;
+const takeLabels={mix:'Full mix · tracker preview',drums:'Full mix with separated drums',stems:'Full stem take'};
+async function takeBrowse(){
+  const r=await fetch('/api/browsewav',{method:'POST',body:'{}'}),j=await r.json();
+  if(j.path)$('take-source').value=j.path;
+  if(j.error)$('take-status').textContent=j.error;
+}
+async function prepareTake(kind){
+  const source=$('take-source').value.trim(),status=$('take-status');
+  if(kind==='mix'&&!source){status.textContent='Choose a recording first.';return}
+  const controls=['take-source','take-browse','take-mix','take-drums','take-stems','take-open'];
+  for(const id of controls)$(id).disabled=true;
+  const started=performance.now();let active=true,polling=false;
+  status.textContent='Starting transcription…';$('take-elapsed').textContent='0 s';$('take-working').hidden=false;
+  $('transcribe-button').textContent='TRANSCRIPTION IN PROGRESS…';
+  const timer=setInterval(async()=>{
+    $('take-elapsed').textContent=Math.floor((performance.now()-started)/1000)+' s elapsed';
+    if(polling)return;polling=true;
+    try{
+      const r=await fetch('/api/transcription-status'),j=await r.json();
+      if(active&&j.stage&&status.textContent!==j.stage+'…')status.textContent=j.stage+'…';
+    }catch{}finally{polling=false}
+  },1000);
+  try{
+    const r=await fetch('/api/transcribe',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:source,take:kind,session:takeSession})}),j=await r.json();
+    if(!r.ok||j.error)throw Error(j.error||r.statusText);
+    const select=$('take-select');
+    if(kind==='mix'){
+      takeSongs={};select.replaceChildren(new Option('Original recording','source'),new Option('Dettato MIDI · GM SoundFont','gm'));
+      $('take-solo').replaceChildren(new Option('All instruments',''));takeSession=j.session;
+    }
+    if(!takeSongs[kind])select.add(new Option(takeLabels[kind],kind));
+    takeSongs[kind]=j.song;select.value=kind;selectTake();
+    $('take-original').textContent='Original MIDI: '+j.original;
+    $('take-review').hidden=false;status.textContent='Ready to compare the recording, direct MIDI and tracker preview.';
+  }catch(e){status.textContent=e.message}
+  finally{
+    active=false;clearInterval(timer);$('take-working').hidden=true;$('transcribe-button').textContent='TRANSCRIBE AUDIO…';
+    for(const id of controls)$(id).disabled=false;
+    $('take-open').disabled=!takeSongs[$('take-select').value];
+    for(const k of ['drums','stems'])$('take-'+k).disabled=!!takeSongs[k];
+  }
+}
+async function selectTake(keepPlace=false){
+  const audio=$('take-audio'),kind=$('take-select').value,solo=$('take-solo');
+  const pending={time:keepPlace?(takePending?.time??audio.currentTime):0,resume:keepPlace&&(takePending?.resume??!audio.paused)};
+  takePending=pending;audio.pause();audio.onloadedmetadata=null;
+  $('take-solo-label').hidden=kind!=='gm';
+  $('take-open').disabled=!$('take-working').hidden||!takeSongs[kind];
+  let preview=kind;
+  if(kind==='gm'){
+    const choice=solo.value;
+    audio.removeAttribute('src');audio.load();
+    $('take-buffer').textContent='Preparing SoundFont audio…';
+    try{
+      const r=await fetch('/api/transcription-midi',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({session:takeSession,track:choice===''?null:Number(choice)})}),j=await r.json();
+      if(takePending!==pending)return;
+      if(!r.ok||j.error)throw Error(j.error||r.statusText);
+      solo.replaceChildren(new Option('All instruments',''),...j.tracks.map(t=>new Option(t.name,t.id)));
+      solo.value=choice;preview=j.preview;
+    }catch(e){if(takePending===pending)$('take-buffer').textContent=e.message;return}
+  }
+  audio.onloadedmetadata=()=>{
+    if(takePending!==pending)return;
+    $('take-buffer').textContent='';
+    audio.currentTime=Math.min(pending.time,audio.duration||0);takePending=null;
+    if(pending.resume&&$('transcribe-dialog').open)audio.play().catch(()=>{});
+  };
+  $('take-buffer').textContent='Loading audio…';
+  audio.src=tok('/api/transcription-preview/'+takeSession+'/'+preview);
+}
+async function openTake(){
+  const song=takeSongs[$('take-select').value];
+  if(song&&await openSong(song))$('transcribe-dialog').close();
+}
 function scoreTemplates(){try{const value=JSON.parse(localStorage.getItem('vt-score-templates')||'{}');return value&&typeof value==='object'&&!Array.isArray(value)?value:{}}catch{return {}}}
 function refreshScoreTemplates(){const select=$('newtemplate'),selected=select.value;select.querySelectorAll('[data-custom]').forEach(o=>o.remove());for(const name of Object.keys(scoreTemplates()).sort()){const option=new Option(name,'custom:'+name);option.dataset.custom='1';select.add(option)}select.value=[...select.options].some(o=>o.value===selected)?selected:'band'}
 async function saveScoreTemplate(name){if(!name||name.length>80)throw new Error('Give the template a name (up to 80 characters).');await EDQ.chain;const r=await fetch('/api/score_template',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({revision:SCORE.view?.revision})}),j=await r.json();if(j.error)throw new Error(j.error);const templates=scoreTemplates();templates[name]=j.template;localStorage.setItem('vt-score-templates',JSON.stringify(templates));refreshScoreTemplates()}
 function deleteScoreTemplate(){const selected=$('newtemplate').value;if(!selected.startsWith('custom:'))return;const templates=scoreTemplates();delete templates[selected.slice(7)];localStorage.setItem('vt-score-templates',JSON.stringify(templates));refreshScoreTemplates()}
 async function newSong(){const p=$('newpath').value.trim();if(!p)return;await EDQ.chain;const selected=$('newtemplate').value,template=selected.startsWith('custom:')?scoreTemplates()[selected.slice(7)]:selected||null;const r=await fetch('/api/new',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:p,channels:+$('newch').value||8,template,bars:+$('newbars').value})});const j=await r.json();if(j.error)alert(j.error);else{resetPlayer();await refresh();toggle('start',false);tab(template?'tab':'pattern')}}
 refreshScoreTemplates();
-async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;await EDQ.chain;
+async function importModule(pick){const path=$('imppath').value.trim();if(!pick&&!path)return;return withSongLoad('Importing song…',async()=>{await EDQ.chain;
   const j=await (await fetch('/api/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...(pick?{browse:true}:{path}),native_tab:!!$('impnative')?.checked,gp_encoding:gpEncoding('import'),...($('impnative')?.checked?{midi_options:midiImportSettings('import')}:{})})})).json();
-  if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab(S?.song?.facts?.native_score?'tab':'pattern')}}
-async function browse(){await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}}
+  if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);tab(S?.song?.facts?.native_score?'tab':'pattern')}})}
+async function browse(){return withSongLoad('Opening song…',async()=>{await EDQ.chain;const j=await (await fetch('/api/browse',{method:'POST',body:'{}'})).json();if(j.error)alert(j.error);else if(j.path){resetPlayer();await refresh();toggle('start',false);if(faOn())faOpen()}})}
 let COLLECTION={files:[],selected:new Set(),timer:null};
 async function collectionRequest(body){const r=await fetch('/api/score_collection',body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{}),j=await r.json();if(!r.ok||j?.error&&j.status!=='failed')throw Error(j?.error||r.status);return j}
 function collectionOpen(){const d=$('collection-dialog');if(!d.open)d.showModal();if(!$('collection-folder').value)$('collection-folder').value=localStorage.getItem('vt-score-folder')||S?.song?.dir||'';collectionRequest().then(collectionResult).catch(e=>$('collection-status').textContent=e.message)}
@@ -3021,7 +3125,7 @@ async function ptPreview(action){$('pt-msg').textContent='rendering…';const r=
   const b=await r.blob();if(PTA.src)URL.revokeObjectURL(PTA.src);PTA.src=URL.createObjectURL(b);PTA.play().catch(()=>{});$('pt-msg').textContent=action==='preview'?'playing the picture':'playing slot '+pad(+$('pt-fslot').value)+' through the picture'}
 async function ptAct(action){$('pt-msg').textContent='writing…';const r=await fetch('/api/paint',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(ptBody(action))}),j=await r.json();
   $('pt-msg').textContent=(j.error||j.report||'').replace(/^\w+: /,'');refresh()}
-setSpeed(speed);refresh();setInterval(agReportUI,1000);setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
+setSpeed(speed);withSongLoad('Loading VultureTracker…',refresh);setInterval(agReportUI,1000);setInterval(()=>{const a=document.activeElement;if((a.tagName!=='INPUT'||a.type==='range')&&Date.now()-lastInput>500)refresh()},1000);
 function workflowDiff(title,help,lines,label,action){
   $('workflow-title').textContent=title;$('workflow-help').textContent=help;
   $('workflow-diff').textContent=(lines||[]).join('\n')||'No text changes.';

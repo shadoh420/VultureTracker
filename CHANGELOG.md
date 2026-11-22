@@ -2,6 +2,22 @@
 
 What changed in each VultureTracker release (the GitHub release notes, without their download and checksum parts). Newest first.
 
+## Unreleased
+
+- Audio transcription dialog on the start screen (**Transcribe audio…**): runs Dettato on the full mix by default,
+  preserving the raw performance MIDI in `mix/original.mid` beside the editable tracker song and WAV preview, with
+  explicit optional alternates (**Prepare separated drums**, **Prepare full stem take**) and live processing stage
+  and elapsed time reporting.
+- Synchronized A/B auditioning inside the transcription dialog: switch between the **Original recording**,
+  **Dettato MIDI · GM SoundFont** (rendered with FluidSynth and TimGM6mb, including per-track **Solo** or **All
+  instruments**), and each tracker take while keeping playback position.
+- Startup, open and import now display a non-blocking loading indicator dialog while songs load.
+- Updated `tools/transcribe_audio.py`, `tools/transcribe.cmd` and `tools/transcribe_setup.cmd` for Dettato full-mix
+  and `--audition drums|stems` workflows alongside the legacy `--notes basic-pitch|yourmt3` pipeline.
+- Added [TRANSCRIPTION.md](TRANSCRIPTION.md), a step-by-step guide for diagnosing automated transcription failures and
+  building ear-recognizable editable tracker songs (separating playback bugs from note errors, source-derived loop and
+  single-articulation instruments, band-pass wah/phaser handling, section dynamics and controlled listening checks).
+
 ## 1.10.0 (2026-10-29)
 
 - Score shortcuts ignore hidden panels, and refreshing an order preserves typed positions and range selections.

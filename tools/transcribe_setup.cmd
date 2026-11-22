@@ -1,7 +1,6 @@
 @echo off
 rem Sets up audio transcription on a Windows PC with nothing installed: Python (through uv), VultureTracker's few
-rem packages and the transcription environments (PyTorch for an NVIDIA card, demucs, basic-pitch, ADTOF, YourMT3+),
-rem in %LOCALAPPDATA%\VultureTracker\transcribe-env. Run it once: about 6 GB to download.
+rem packages and the Dettato and Demucs environment in %LOCALAPPDATA%\VultureTracker\transcribe-env.
 rem "transcribe_setup.cmd cpu" sets up without an NVIDIA card (everything then runs on the processor, slowly).
 setlocal
 set "ENV=%LOCALAPPDATA%\VultureTracker\transcribe-env"
@@ -24,7 +23,7 @@ echo Installing Python 3.14 and 3.11 (uv keeps them to itself)...
 "%UV%" venv -q --allow-existing -p 3.14 "%ENV%\vt" || goto :fail
 "%UV%" pip install -q -p "%ENV%\vt\Scripts\python.exe" pyyaml numpy mido imageio-ffmpeg || goto :fail
 set "PATH=%~dp0bin;%PATH%"
-"%ENV%\vt\Scripts\python.exe" "%~dp0transcribe_audio.py" --setup %CUDA% --yourmt3 --env "%ENV%" || goto :fail
+"%ENV%\vt\Scripts\python.exe" "%~dp0transcribe_audio.py" --setup %CUDA% --env "%ENV%" || goto :fail
 echo.
 echo Done. Drag a recording onto transcribe.cmd, or run: transcribe.cmd "path\to\song.mp3"
 pause

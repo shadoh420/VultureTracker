@@ -25,6 +25,7 @@ from .measure import RATE, _meters, spectrogram_png
 from .openmpt import OpenMPTError
 from .project import collect
 from .song import SongError
+from .transcription import TranscriptionReview
 from .wavload import SOUND_FILES
 
 # the page is served from one address every launch when it can be, so what the browser stores per address stays (the
@@ -219,6 +220,7 @@ class Handler(BaseHTTPRequestHandler):
     library = None       # library.Library, read on the first FIND SIMILAR or MAP request
     faust_job = None     # the faustwasm download: {"status", "got", "size", "error"}
     collection_job = None
+    transcription = TranscriptionReview()
     collection_cancel = threading.Event()
     collection_lock = threading.RLock()
 
@@ -744,6 +746,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, gui.HTML.with_name("icon.png").read_bytes(), "image/png")
         if path == "/api/state":
             return self._send(200, {**(st.snapshot() if st else start_snapshot()), "library": self.lib_snapshot()})
+        if path == "/api/transcription-status":
+            return self._send(200, {"stage": self.transcription.stage()})
+        if path.startswith("/api/transcription-preview/"):
+            parts = path.split("/")
+            preview = self.transcription.preview(*parts[3:]) if len(parts) == 5 else None
+            if preview is None:
+                return self._send(404, {"error": "No such take"})
+            return self._send_file(preview, "audio/wav")
         if path == "/api/score":
             if not st:
                 return self._send(400, {"error": "Open a song first"})
@@ -931,6 +941,10 @@ class Handler(BaseHTTPRequestHandler):
             LABEL.name = _step_label(act, body)
             if act == "open":
                 self.open_song(body["path"])
+            elif act == "transcribe":
+                return self._send(200, self.transcription.prepare(body))
+            elif act == "transcription-midi":
+                return self._send(200, self.transcription.midi_audition(body))
             elif act == 'score_collection':
                 return self._send(200, self.collection(body))
             elif act == "chord_library":

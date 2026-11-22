@@ -34,6 +34,92 @@ def _tmpdir(self):  # TestCase.enterContext is 3.11+; the floor is 3.10
 
 @unittest.skipIf(mido is None, "needs mido")
 class TestMidiImport(unittest.TestCase):
+    def test_direct_midi_solo_keeps_clock_programs_and_note_lengths(self):
+        import io
+        from tools.render_gm import performance
+        root = Path(_tmpdir(self))
+        path = root / "original.mid"
+        full = mido.MidiFile(type=1, ticks_per_beat=480)
+        full.tracks.extend([
+            track("clock", (0, mido.MetaMessage("set_tempo", tempo=500000)),
+                  (480, mido.MetaMessage("set_tempo", tempo=700000))),
+            track("synth bass", (0, mido.Message("program_change", channel=0, program=38)),
+                  *note(0, 39, 75, 950)),
+            track("drums", *note(9, 50, 240, 30), *note(9, 50, 1350, 45))])
+        full.save(path)
+        original = path.read_bytes()
+        self.assertEqual(performance(path, None)[0], original)
+        for selected in (1, 2):
+            data, duration = performance(path, selected)
+            solo = mido.MidiFile(file=io.BytesIO(data))
+            self.assertEqual(solo.tracks[0], mido.MidiFile(path).tracks[0])
+            self.assertEqual(solo.tracks[selected], mido.MidiFile(path).tracks[selected])
+            self.assertFalse(any(e.type in ("note_on", "note_off") for e in solo.tracks[3-selected]))
+            self.assertAlmostEqual(solo.length, duration)
+        self.assertEqual(original, path.read_bytes())
+
+    def test_drum_audition_preserves_pitched_events_and_uses_only_new_drum_hits(self):
+        from tools.dettato_takes import replace_drums
+        root = Path(_tmpdir(self))
+        full = mido.MidiFile()
+        full.tracks.extend([track("tempo", (0, mido.MetaMessage("set_tempo", tempo=500000))),
+                            track("lead", *note(1, 64, 5, 80), *note(1, 64, 8, 91)),
+                            track("kit", *note(9, 36, 2, 11))])
+        original = root / "original.mid"
+        full.save(original)
+        before = original.read_bytes()
+        alt = mido.MidiFile()
+        alt.tracks.extend([full.tracks[0], track("bleed", *note(2, 48, 4, 55)), track("kit", *note(9, 42, 7, 4))])
+        alt.save(root / "drums.mid")
+        replace_drums(original, root / "drums.mid", root / "out.mid")
+        saved = mido.MidiFile(root / "out.mid").tracks
+        self.assertEqual(saved[:2], mido.MidiFile(original).tracks[:2])
+        self.assertEqual(saved[2:], mido.MidiFile(root / "drums.mid").tracks[2:])
+        self.assertEqual(original.read_bytes(), before)
+
+    def test_reviewing_an_alternate_keeps_the_original_and_edited_take(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from vulturetracker.transcription import TranscriptionReview
+
+        root = Path(_tmpdir(self))
+        recording = root / "band.wav"
+        recording.touch()
+        review = TranscriptionReview()
+
+        def prepare(cmd, **kwargs):
+            Path(kwargs["env"]["VT_TRANSCRIPTION_STATUS"]).write_text("Rendering the tracker preview", encoding="utf-8")
+            self.assertEqual(review.stage(), "Rendering the tracker preview")
+            work = Path(cmd[cmd.index("--work") + 1])
+            kind = cmd[cmd.index("--audition") + 1] if "--audition" in cmd else "mix"
+            folder = work / kind
+            folder.mkdir()
+            (folder / ("original.mid" if kind == "mix" else "take.mid")).write_bytes(kind.encode())
+            (folder / (kind + ".yaml")).write_text(kind)
+            (folder / "preview.wav").touch()
+            return SimpleNamespace(returncode=0)
+
+        with patch("vulturetracker.transcription.runtime", return_value=(root / "runner", root / "python", root)), \
+             patch("vulturetracker.transcription.subprocess.run", side_effect=prepare) as runner:
+            full = review.prepare({"path": str(recording)})
+            session = full["session"]
+            starting_song = Path(full["song"])
+            self.assertEqual(review.stage(), "")
+            self.assertEqual(review.preview(session, "source"), starting_song.parent / "source.wav")
+            self.assertIsNone(review.preview("unknown-session", "source"))
+            starting_song.write_text("my edits")
+            for kind in ("drums", "stems"):
+                result = review.prepare({"session": session, "take": kind})
+                self.assertTrue(review.preview(session, kind).is_file())
+                self.assertNotEqual(result["song"], full["song"])
+            self.assertEqual(result, review.prepare({"session": session, "take": "stems"}))
+            self.assertEqual(runner.call_count, 3)
+            again = review.prepare({"path": str(recording)})
+            self.assertNotEqual(again["original"], full["original"])
+            self.assertEqual(Path(full["original"]).read_bytes(), b"mix")
+            self.assertEqual(starting_song.read_text(), "my edits")
+            self.assertIsNone(review.preview(session, "../mix"))
+
     def test_a_midi_file_becomes_a_song(self):
         mid = mido.MidiFile(type=1, ticks_per_beat=480)
         mid.tracks.append(track("Song", (0, mido.MetaMessage("set_tempo", tempo=600000)),  # 100 BPM

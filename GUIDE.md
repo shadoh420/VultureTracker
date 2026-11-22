@@ -12,6 +12,50 @@ song.yaml ──build──▶ song.it ──render──▶ song.wav
 
 ## Setup
 
+### Transcribe a recording
+
+On the **Open a song** screen, choose **Transcribe audio…**, choose a recording, then select **Transcribe full mix**.
+Dettato writes its performance MIDI to `mix/original.mid` in a new take folder beside the recording.
+The player previews the editable tracker song with VultureTracker's placeholder instruments. Its timing follows the
+tracker grid. The original MIDI retains Dettato's note times.
+
+**Prepare separated drums** keeps the pitched notes from the full mix and transcribes the isolated drum stem.
+**Prepare full stem take** transcribes the separated instruments. The dialog shows the current operation and elapsed time.
+Under **Listen to**, compare **Original recording**, **Dettato MIDI · GM SoundFont**, and **Full mix · tracker preview**.
+The direct audition plays Dettato's original MIDI with its own timing, velocities, GM programs and drum keys. Under
+**Solo**, choose a detected instrument or **All instruments**. Seek once and switch while paused or playing to compare
+the same passage. Position is limited to the duration of the selected audio. Each requested SoundFont render is cached
+beside the original MIDI under `mix/gm`. The editable tracker take uses the tracker grid and its own samples.
+
+Direct audition uses the TimGM6mb SoundFont included with the transcription environment's pretty_midi package. It
+needs the FluidSynth shared library. VultureTracker checks the system library path and on Windows also checks beside
+the FluidSynth executable and in the standard TuxGuitar installation. Set `VT_FLUIDSYNTH` to the library's full path
+for a custom install, or `VT_GM_SOUNDFONT` to use another General MIDI SF2 bank for new transcriptions.
+**Open selected take for editing** switches to that take's own song. You can return to the dialog and open another.
+Each take's MIDI, song and WAV stay on disk.
+
+Windows setup for this optional feature is `tools\transcribe_setup.cmd` (or `tools\transcribe_setup.cmd cpu`).
+Setup registers the checkout for the desktop app. Keep that checkout in place. Dettato downloads about 113 MB of
+weights on first use. Separation runs only when you request an alternate. For offline Dettato weights, set
+`DETTATO_WEIGHTS` or place the four model directories under `dettato-weights` in the transcription environment.
+From the command line, drag a recording onto `tools\transcribe.cmd`, or use:
+
+```
+python tools/transcribe_audio.py recording.mp3 --work my-takes
+python tools/transcribe_audio.py --work my-takes --audition drums
+python tools/transcribe_audio.py --work my-takes --audition stems
+```
+
+The earlier stem-first methods are available with `--notes basic-pitch` or `--notes yourmt3`. Use
+`--setup --legacy` for Basic Pitch and ADTOF or `--setup --yourmt3` to include YourMT3+.
+
+For diagnosing why an automated transcription sounds off and turning a recording into an ear-recognizable editable
+tracker song (separating playback failures from note errors, source-derived loop and single-articulation instruments,
+band-pass wah/phaser handling, dynamics calibration and controlled listening checks), see
+[TRANSCRIPTION.md](TRANSCRIPTION.md).
+
+### Install from source
+
 ```
 git clone https://github.com/shadoh420/VultureTracker.git
 cd VultureTracker

@@ -1,5 +1,10 @@
-"""Transcribe a recording into a VultureTracker song: stems, notes, drums, one MIDI on the recording's beat grid, the
-song imported and rendered, and the result scored against the recording.
+"""Transcribe the full recording with Dettato. Keep its MIDI and render an editable VultureTracker take.
+
+  python tools/transcribe_audio.py track.mp3 [--work NEW_FOLDER]
+  python tools/transcribe_audio.py --work FOLDER --audition drums
+  python tools/transcribe_audio.py --work FOLDER --audition stems
+
+The optional takes each have their own MIDI, song and preview. The older stem-first pipeline is available with --notes:
 
   python tools/transcribe_audio.py --setup [--cuda] [--yourmt3]   # once: the environments (needs uv; 3 to 6 GB)
   python tools/transcribe_audio.py track.mp3 [--work DIR] [--separator htdemucs_ft|htdemucs_6s|roformer]
@@ -29,12 +34,16 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 TOOLS = REPO / "tools"
+sys.path.insert(0, str(REPO))
+from tools.dettato_takes import report_stage
 WIN = os.name == "nt"
 ADTOF = "adtof-pytorch @ https://github.com/xavriley/ADTOF-pytorch/archive/85c192e78f716ea0b111cc8a5ee4a8f6a3a4f8a9.zip"
+DETTATO = "dettato @ https://github.com/kobimusic/dettato/archive/51ade0f09f2272f4674166026582185d26baaeaf.zip"
 YOURMT3 = ("mimbres/YourMT3", "5e66c1ea173a8186e0d20432b841d3180cc015b5")  # the Hugging Face space and its revision
 YOURMT3_FILES = ["*.py", "amt/src/**", "amt/logs/2024/mc13_256_g4_all_v7_mt3f_sqr_rms_moe_wf4_n8k2_silu_rope_rp_b36_nops/**"]
 YOURMT3_DEPS = ["pytorch-lightning>=2.2.1", "transformers==4.45.1", "einops", "mido", "mir_eval", "deprecated", "wandb", "python-dotenv"]
@@ -64,14 +73,15 @@ def setup(env, args):
     if not uv:
         sys.exit("--setup needs uv (https://docs.astral.sh/uv/: pip install uv)")
     envs = {  # name: the installs, in order (a list per uv call)
-        "torch": [torch_pkgs(args.cuda), ["demucs==4.1.0", "soundfile", "numpy<2", "librosa", "pretty_midi", ADTOF]
+        "torch": [torch_pkgs(args.cuda), [DETTATO, "demucs==4.1.0", "soundfile", "numpy<2"]
+                  + (["librosa", "pretty_midi", ADTOF] if args.legacy or args.yourmt3 else [])
                   + (YOURMT3_DEPS if args.yourmt3 else [])],
         "bp": [["basic-pitch[onnx]==0.4.0", "setuptools<81", "matplotlib", "soundfile",  # resampy imports pkg_resources
                 "pyyaml",  # stems_to_song.py imports vulturetracker
                 "pyguitarpro"]],  # make_notes.py writes Guitar Pro
         "sep": [torch_pkgs(args.cuda), ["audio-separator[gpu]==0.47.0" if args.cuda else "audio-separator[cpu]==0.47.0"]],
     }
-    for name in ["torch", "bp"] + (["sep"] if args.separator == "roformer" else []):
+    for name in ["torch"] + (["bp"] if args.legacy or args.yourmt3 else []) + (["sep"] if args.separator == "roformer" else []):
         py = exe(env, name)
         if not py.exists():
             run([uv, "venv", "-q", "-p", "3.11", env / name])
@@ -89,6 +99,8 @@ def setup(env, args):
         run([exe(env, "torch"), "-c", "import torch; ok = torch.cuda.is_available(); "
              "print('GPU:', torch.cuda.get_device_name(0) if ok else 'none found: the models will run on the CPU')"])
     print(f"environments ready in {env}")
+    from vulturetracker.transcription import register_runtime
+    register_runtime(Path(__file__).resolve(), Path(sys.executable), env)
 
 
 def ffmpeg():
@@ -123,6 +135,60 @@ def separate(args, env, wav, work, child):
     return out
 
 
+def dettato_take(args, env, work, child):
+    kind = args.audition or "mix"
+    original = work / "mix" / "original.mid"
+    source = work / "mix" / "source.wav"
+    if kind == "mix":
+        folder = work / kind
+        try:
+            folder.mkdir()  # exclusive: preserve prior MIDI, edits and renders on reruns
+        except FileExistsError:
+            sys.exit(f"A full-mix take already exists in {work}. Choose a new --work folder.")
+        report_stage("Decoding the recording")
+        run([ffmpeg(), "-n", "-loglevel", "error", "-i", args.audio, "-map", "0:a:0",
+             "-c:a", "pcm_f32le", source])  # retain the source rate for Dettato's drum detector
+        run([exe(env, "torch"), TOOLS / "dettato_takes.py", kind, folder, source], env=child)
+        render_take(original, folder)
+        print(f"Original MIDI: {original}")
+    else:
+        folder = work / kind
+        if not (original.is_file() and source.is_file()):
+            sys.exit("Choose the --work folder of a completed full-mix transcription.")
+        if folder.exists():
+            sys.exit(f"Take already exists: {folder}. Its MIDI and any edits were kept.")
+        with tempfile.TemporaryDirectory(dir=work) as staging:
+            stage = Path(staging)
+            stems = args.stems or work / (args.separator + "-stems")
+            if not stems.is_dir():
+                report_stage("Separating instruments from the recording")
+                separate(args, env, source, stage, child).rename(stems)
+            names = ["drums"] if kind == "drums" else ["drums", *PITCHED]
+            inputs = [stems / (s + ".wav") for s in names if (stems / (s + ".wav")).is_file()]
+            if not inputs or inputs[0].stem != "drums" or (kind == "stems" and len(inputs) < 2):
+                sys.exit("Need drums.wav, and for a full stem take at least one pitched stem.")
+            candidate = stage / kind
+            candidate.mkdir()
+            run([exe(env, "torch"), TOOLS / "dettato_takes.py", kind, candidate, *inputs,
+                 "--original", original], env=child)
+            render_take(candidate / "take.mid", candidate)
+            candidate.rename(folder)
+    print(f"Song: {folder / (kind + '.yaml')}\nPreview: {folder / 'preview.wav'}")
+
+
+def render_take(mid, folder):
+    from vulturetracker import api
+    from vulturetracker.midiimport import import_midi
+
+    song = folder / (folder.name + ".yaml")
+    report_stage("Importing MIDI notes into the tracker")
+    _, warnings = import_midi(mid, song, folder / (folder.name + "_samples"))
+    for message in warnings:
+        print("MIDI import:", message)
+    report_stage("Rendering the tracker preview")
+    api.render(song, folder / "preview.wav")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
                                  epilog=__doc__.split("\n\n", 1)[1])
@@ -130,38 +196,64 @@ def main():
     ap.add_argument("--setup", action="store_true", help="make the environments (with --separator roformer: that one too)")
     ap.add_argument("--cuda", action="store_true", help="with --setup: PyTorch for NVIDIA cards (CUDA 12.4)")
     ap.add_argument("--yourmt3", action="store_true", help="with --setup: YourMT3+'s code and model")
+    ap.add_argument("--legacy", action="store_true", help="with --setup: also install Basic Pitch and ADTOF")
+    ap.add_argument("--audition", choices=["drums", "stems"], help="make an alternate in an existing full-mix --work folder")
     ap.add_argument("--env", type=Path, default=TOOLS / "transcribe-env", help="where the environments live")
     ap.add_argument("--work", type=Path, help="the folder for everything made (default: <recording>-transcription)")
     ap.add_argument("--separator", choices=["htdemucs_ft", "htdemucs_6s", "roformer"], default="htdemucs_ft")
     ap.add_argument("--stems", type=Path, help="a folder of <stem>.wav already made: separation is skipped")
-    ap.add_argument("--notes", choices=["basic-pitch", "yourmt3"], nargs="+", default=["basic-pitch"],
-                    help="where the pitched stems' notes come from; each makes its own song")
-    ap.add_argument("--bass", choices=["notes", "yin"], default="notes", help="the bass from --notes, or one line by YIN")
-    ap.add_argument("--drums", choices=["adtof", "bands"], default="adtof")
+    ap.add_argument("--notes", choices=["dettato", "basic-pitch", "yourmt3"], nargs="+",
+                    help="default: Dettato on the full mix; choose Basic Pitch or YourMT3+ for the legacy pipeline")
+    ap.add_argument("--bass", choices=["notes", "yin"], help="legacy pipeline: the bass from --notes, or one line by YIN")
+    ap.add_argument("--drums", choices=["adtof", "bands"], help="legacy pipeline: drum method")
     args = ap.parse_args()
+    if args.notes is None:
+        args.notes = ["basic-pitch"] if args.bass or args.drums or (args.stems and not args.audition) else ["dettato"]
+    if "dettato" in args.notes and (args.bass or args.drums or (args.stems and not args.audition)):
+        ap.error("Dettato uses the full mix. To use separated audio, choose --audition drums or stems.")
+    args.bass = args.bass or "notes"
+    args.drums = args.drums or "adtof"
     env = args.env.resolve()
     if args.setup:
         setup(env, args)
         if not args.audio:
             return
-    if not args.audio:
+    if args.audition and (args.audio or not args.work or args.notes != ["dettato"]):
+        ap.error("--audition needs --work from a full-mix run, with no new recording or other note method")
+    if not args.audio and not args.audition:
         ap.error("name the recording (or --setup)")
-    if not args.audio.is_file():
+    if args.audio and not args.audio.is_file():
         ap.error(f"no such file: {args.audio}")
     if args.stems and not args.stems.is_dir():
         ap.error(f"no such folder: {args.stems}")
-    need = (["bp"] + (["torch"] if args.drums == "adtof" or not args.stems or "yourmt3" in args.notes else [])
-            + (["sep"] if args.separator == "roformer" and not args.stems else []))
+    if "dettato" in args.notes and args.notes != ["dettato"]:
+        ap.error("run Dettato separately from the legacy note methods")
+    if args.notes == ["dettato"]:
+        need = ["torch"]
+    else:
+        need = ["bp"]
+        if args.drums == "adtof" or not args.stems or "yourmt3" in args.notes:
+            need.append("torch")
+    if args.separator == "roformer" and not args.stems and (args.audition or args.notes != ["dettato"]):
+        need.append("sep")
     missing = [n for n in need if not exe(env, n).exists()]
     if "yourmt3" in args.notes and not (env / "yourmt3" / "model_helper.py").exists():
         missing.append("yourmt3")
     if missing:
-        ap.error(f"{', '.join(missing)} missing in {env}: run with --setup"
+        ap.error(f"{', '.join(missing)} missing in {env}: run with --setup" + (" --legacy" if "bp" in missing else "")
                  + (" --separator roformer" if "sep" in missing else "") + (" --yourmt3" if "yourmt3" in missing else ""))
 
     work = (args.work or args.audio.with_name(args.audio.stem + "-transcription")).resolve()
     work.mkdir(parents=True, exist_ok=True)
     child = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", PATH=str(env / "bin") + os.pathsep + os.environ["PATH"])
+    if args.notes == ["dettato"]:
+        offline_weights = env / "dettato-weights"
+        if offline_weights.is_dir():
+            child.setdefault("DETTATO_WEIGHTS", str(offline_weights))
+        if not args.work and (work / "mix").exists():
+            work = Path(tempfile.mkdtemp(prefix="take-", dir=work))
+        dettato_take(args, env, work, child)
+        return
     name = args.audio.stem
     wav = work / f"{name}.wav"
     if not wav.exists():

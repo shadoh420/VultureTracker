@@ -2293,7 +2293,7 @@ class TestGui(unittest.TestCase):
                   "/api/autoloop/1", "/api/pattern/0", "/api/slices/1", "/api/wave/1", "/api/sounding/0", "/wav/KEY",
                   "/spec/KEY", "/api/meters/KEY", "/refspec/KEY", "/api/refdiff/KEY", "/raw/0", "/api/diff/0",
                   "/api/mixdiff", "/api/it", "/api/playback?sample_rate=48000", "/api/score", "/api/chord_library",
-                  "/score-print"]
+                  "/score-print", "/api/transcription-status", "/api/transcription-preview/x/mix"]
 
     def test_no_get_route_writes(self):
         # S6: every GET route answered with the song open, a candidate rendered and a finished recording not yet kept:
