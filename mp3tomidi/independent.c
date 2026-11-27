@@ -415,6 +415,26 @@ static float read_best_bg(const float *r_lo, const float *r_md, const float *r_h
     return sample_spec_bg(r_hi, IND_NFFT_HI, IND_NB_HI, hz);
 }
 
+/* Narrowband peak-to-shoulder sharpness on raw HPSS harmonic spectrum (h_md / h_hi):
+ * genuine tonal partials have sharp Hann lobes (ratio 6..40), while resonant reverb/noise
+ * washes spanning several bins have flat plateaus (ratio ~2..4). */
+static double sample_h_sharpness(const float *h, int nfft, int nb, double hz, int one_sided_safe) {
+    double c = hz * (double)nfft / (double)IND_SR16;
+    int ic = (int)floor(c + 0.5);
+    if (ic < 5 || ic >= nb - 5) return 10.0;
+    int pk = ic;
+    for (int k = ic - 1; k <= ic + 1; ++k) {
+        if (h[k] > h[pk]) pk = k;
+    }
+    if (pk < 4 || pk >= nb - 4) return 10.0;
+    double lsh = 0.5 * ((double)h[pk - 3] + (double)h[pk - 4]);
+    double rsh = 0.5 * ((double)h[pk + 3] + (double)h[pk + 4]);
+    /* For lower-high notes (65..69) where a real minor-2nd chord sits ~3 bins away on one side,
+     * measure against the quieter shoulder so minor 2nds stay sharp while broad flat washes fail */
+    double sh = one_sided_safe ? fmin(lsh, rsh) : (0.5 * (lsh + rsh));
+    return (double)h[pk] / (sh + 1e-9);
+}
+
 struct pitch_ctx {
     const float *t_lo, *t_md, *t_hi;   /* HPSS tonal-floor-subtracted spectra */
     const float *h_lo, *h_md, *h_hi;   /* Raw HPSS harmonic spectra (for envelope & timbre) */
@@ -557,9 +577,18 @@ static void pitch_frame_worker(int start, int end, void *arg) {
                  * >= 220 Hz uses tight +-45 cents (0.974..1.026) across the 285 Hz r_lo/r_md
                  * boundary; < 220 Hz uses +-62 cents (0.965..1.036) to block +-100 cent bass
                  * neighbor steals while allowing minor attack/chorus detune on real bass notes */
-                double tol_lo = (f_nom >= 220.0) ? 0.974 : 0.965;
-                double tol_hi = (f_nom >= 220.0) ? 1.026 : 1.036;
+                double tol_lo = (midi_p >= 70) ? 0.978 : ((f_nom >= 220.0) ? 0.974 : 0.965);
+                double tol_hi = (midi_p >= 70) ? 1.022 : ((f_nom >= 220.0) ? 1.026 : 1.036);
                 if (f_exact < f_nom * tol_lo || f_exact > f_nom * tol_hi) {
+                    if (midi_p >= 70) {
+                        /* High register: do not grab the flat skirt of a broad noise wash or
+                         * adjacent semitone unless f_nom itself is a local spectral maximum */
+                        const float *rr = (f_nom < 1500.0) ? r_md : r_hi;
+                        int rn = (f_nom < 1500.0) ? IND_NFFT_MD : IND_NFFT_HI;
+                        int rnb = (f_nom < 1500.0) ? IND_NB_MD : IND_NB_HI;
+                        int kn = clamp_i((int)floor(f_nom * (double)rn / (double)IND_SR16 + 0.5), 1, rnb - 2);
+                        if (rr[kn] < 0.97f * fmaxf(rr[kn - 1], rr[kn + 1])) continue;
+                    }
                     f_exact = f_nom;
                     a1 = (f_nom < 285.0) ? sample_spec_at(r_lo, IND_NFFT_LO, IND_NB_LO, f_nom)
                        : ((f_nom < 1500.0) ? sample_spec_at(r_md, IND_NFFT_MD, IND_NB_MD, f_nom)
@@ -612,9 +641,19 @@ static void pitch_frame_worker(int start, int end, void *arg) {
                 if (midi_p <= 38 && h_ratio < 0.55 && snr1 < 2.6 && snr2 < 2.8) continue;
 
                 /* High-register (> D5 / MIDI 74) needs progressively sharper tonal peak
-                 * to reject cymbal partials & residual upper harmonics */
+                 * to reject cymbal partials, residual upper harmonics, & ambient reverb shimmer */
                 if (midi_p > 84 && snr1 < 5.0) continue;
                 else if (midi_p > 76 && snr1 < 3.2) continue;
+                if (midi_p >= 65) {
+                    int one_sided = (midi_p < 70);
+                    double h_sh = (f_exact < 1500.0)
+                        ? sample_h_sharpness(hmd, IND_NFFT_MD, IND_NB_MD, f_exact, one_sided)
+                        : sample_h_sharpness(hhi, IND_NFFT_HI, IND_NB_HI, f_exact, one_sided);
+                    double min_sh = (midi_p >= 76) ? 4.6 : ((midi_p >= 70) ? 3.6 : 3.0);
+                    if (h_sh < min_sh) continue;
+                    /* Blurry AND wandering (>26 cents off semitone center) -> resonant noise wash */
+                    if (midi_p >= 70 && h_sh < 6.0 && fabs(f_exact - f_nom) > 0.015 * f_nom) continue;
+                }
 
                 /* Klapuri-style compressed harmonic salience */
                 double sal = 0.0;
@@ -639,8 +678,8 @@ static void pitch_frame_worker(int start, int end, void *arg) {
                 double rel_coef = (midi_p >= 45 && midi_p <= 64)
                     ? (0.15 + 0.018 * (double)pass)
                     : ((midi_p >= 65 && midi_p <= 74)
-                        ? (0.18 + 0.024 * (double)pass)
-                        : (0.20 + 0.030 * (double)pass));
+                        ? (0.18 + 0.025 * (double)pass)
+                        : (0.23 + 0.032 * (double)pass));
                 double rel_thr = (pass > 0) ? (frame_ref_sal * rel_coef * noise_mult) : 0.0;
                 double thr_pi = abs_thr > rel_thr ? abs_thr : rel_thr;
                 if (perc_sal < thr_pi * 0.55) continue;
@@ -852,6 +891,50 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
             state[t] = state[t + 1] ? bt1[t + 1] : bt0[t + 1];
         }
 
+        /* Mid-register chord sustain bridging (45..64): heal brief 1..8 frame (20..160 ms)
+         * masking dropouts caused by drum fills or bass octave jumps when raw HPSS harmonic
+         * envelope env_db never actually dropped into a rest */
+        if (midi_p >= 45 && midi_p <= 64) {
+            int gt = 0;
+            while (gt < T) {
+                if (state[gt]) { ++gt; continue; }
+                int ga = gt;
+                while (gt < T && !state[gt]) ++gt;
+                int gb = gt;
+                int glen = gb - ga;
+                if (glen >= 1 && glen <= 4 && ga >= 2 && gb <= T - 2 &&
+                    state[ga - 1] && state[ga - 2] && state[gb] && state[gb + 1]) {
+                    double e_l = 0.5 * (env_db[ga - 2] + env_db[ga - 1]);
+                    double e_r = 0.5 * (env_db[gb] + env_db[gb + 1]);
+                    double e_ref = fmin(e_l, e_r);
+                    double e_min = env_db[ga];
+                    for (int k = ga + 1; k < gb; ++k) {
+                        if (env_db[k] < e_min) e_min = env_db[k];
+                    }
+                    if (e_min >= e_ref - 5.5) {
+                        for (int k = ga; k < gb; ++k) state[k] = 1;
+                    }
+                } else if (glen >= 5 && glen <= 8 && ga >= 3 && gb <= T - 3 &&
+                    state[ga - 1] && state[ga - 2] && state[ga - 3] &&
+                    state[gb] && state[gb + 1] && state[gb + 2]) {
+                    double e_l = (env_db[ga - 3] + env_db[ga - 2] + env_db[ga - 1]) / 3.0;
+                    double e_r = (env_db[gb] + env_db[gb + 1] + env_db[gb + 2]) / 3.0;
+                    double e_ref = fmin(e_l, e_r);
+                    double e_min = env_db[ga];
+                    double f1_ref = fmin(fmax(f1_db[ga - 1], f1_db[ga - 2]),
+                                         fmax(f1_db[gb], f1_db[gb + 1]));
+                    double f1_min = f1_db[ga];
+                    for (int k = ga + 1; k < gb; ++k) {
+                        if (env_db[k] < e_min) e_min = env_db[k];
+                        if (f1_db[k] < f1_min) f1_min = f1_db[k];
+                    }
+                    if (e_min >= e_ref - 4.2 && f1_min >= f1_ref - 6.5) {
+                        for (int k = ga; k < gb; ++k) state[k] = 1;
+                    }
+                }
+            }
+        }
+
         /* Extract contiguous ON segments & split repeated re-articulations / smeared gaps */
         int t = 0;
         while (t < T) {
@@ -962,26 +1045,31 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                 while (fb > fa + 2 && pc->act[(size_t)(fb - 1) * IND_NP + pi] <= 0.0f) fb--;
                 if (fb - fa < 3) continue;
 
-                /* Edge sharpening for bass notes (<= C-3) smeared by the 512 ms 8192-pt Hann window:
-                 * trim pre-onset lead-in bleed and post-offset/gap-valley tail bleed using 128 ms f1_db */
-                if (midi_p <= 48) {
+                /* Edge sharpening for notes using 512 ms 8192-pt Hann window (<= C#4 / MIDI 61):
+                 * trim pre-onset lead-in bleed (bass & mid chords) and post-offset/gap-valley tail
+                 * bleed (bass) using short-window f1_db so onsets land cleanly on the beat */
+                int trimmed = 0;
+                if (midi_p <= 61) {
                     double pk_f1 = f1_db[fa];
                     for (int k = fa + 1; k < fb; ++k) if (f1_db[k] > pk_f1) pk_f1 = f1_db[k];
 
-                    double lead_cut = (midi_p <= 44) ? 4.5 : 6.0;
-                    int max_lead_trim = (si == 0) ? 7 : 3;
-                    int trimmed = 0;
+                    double lead_cut = (midi_p <= 44) ? 8.0 : ((midi_p <= 48) ? 7.0 : 6.5);
+                    double min_slope = (midi_p <= 48) ? 1.0 : 1.2;
+                    int max_lead_trim = (midi_p <= 48) ? ((si == 0) ? 7 : 3)
+                                                       : ((si == 0) ? 5 : 2);
                     while (trimmed < max_lead_trim && fa + 3 < fb &&
-                           f1_db[fa] < pk_f1 - lead_cut && f1_db[fa + 1] > f1_db[fa] + 0.8) {
+                           f1_db[fa] < pk_f1 - lead_cut && f1_db[fa + 1] > f1_db[fa] + min_slope) {
                         fa++;
                         trimmed++;
                     }
 
-                    /* Trim trailing gap/release bleed (before a gap split or segment end) */
-                    double tail_cut = (midi_p <= 44) ? 6.5 : 8.0;
-                    int trim_tail = (si == n_sp - 2) || (si + 1 < n_sp && sp_gap[si + 1]);
-                    if (trim_tail) {
-                        while (fb - 3 > fa && f1_db[fb - 1] < pk_f1 - tail_cut) fb--;
+                    /* Trim trailing gap/release bleed for bass (<= C-3) */
+                    if (midi_p <= 48) {
+                        double tail_cut = (midi_p <= 44) ? 6.5 : 8.0;
+                        int trim_tail = (si == n_sp - 2) || (si + 1 < n_sp && sp_gap[si + 1]);
+                        if (trim_tail) {
+                            while (fb - 3 > fa && f1_db[fb - 1] < pk_f1 - tail_cut) fb--;
+                        }
                     }
                     if (fb - fa < 3) continue;
                 }
@@ -1000,8 +1088,10 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                 }
                 double mean_act = n_pos ? (sum_act / (double)n_pos) : 0.0;
                 if (mean_act < 0.85 || max_act < 1.05) continue;
-                /* Short blips (< 100 ms) need higher confidence; deep bass kick-bleed blips stricter */
-                if (fb - fa < 5 && mean_act < (midi_p <= 38 ? 1.55 : 1.25)) continue;
+                /* Short blips (< 100 ms) require strong confidence so 60-80 ms bleed/shimmer glitches vanish */
+                if (fb - fa < 4 && mean_act < (midi_p >= 68 ? 2.15 : 1.90)) continue;
+                if (fb - fa == 4 && mean_act < (midi_p <= 44 ? 1.50 : (midi_p >= 68 ? 1.80 : 1.55))) continue;
+                if (midi_p >= 68 && fb - fa < 7 && mean_act < 1.32) continue;
 
                 /* Sustain ratio (late/early) on notes >= 160 ms */
                 double sust = -1.0;
@@ -1021,9 +1111,10 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                     sust = clamp_d(pow(10.0, (dl - de) / 20.0), 0.0, 2.0);
                 }
 
-                /* Snap onset back by up to 1 frame if sharp attack peaked right before fa */
+                /* Snap onset back by up to 1 frame if sharp attack peaked right before fa
+                 * (skip on Mid chords where lead-in trimming just moved fa out of Hann pre-smear) */
                 int fa_sn = fa;
-                if (fa > 0 && flux[fa] < flux[fa - 1] && flux[fa - 1] >= 4.0 &&
+                if ((midi_p <= 48 || !trimmed) && fa > 0 && flux[fa] < flux[fa - 1] && flux[fa - 1] >= 4.0 &&
                     (si == 0 || fa - 1 > splits[si - 1])) {
                     fa_sn = fa - 1;
                 }
@@ -1062,20 +1153,31 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
 
     if (n > 1) qsort(notes, n, sizeof(*notes), cmp_cand_note);
 
-    /* Post-cleanup 1: Adjacent-semitone spectral-leakage suppression */
+    /* Post-cleanup 1: Adjacent-semitone spectral-leakage & high-register wobble suppression */
     for (size_t i = 0; i < n; ++i) {
         if (!notes[i].keep) continue;
         for (size_t j = i + 1; j < n; ++j) {
-            if (notes[j].onset > notes[i].offset) break;
+            if (notes[j].onset > notes[i].offset + 0.06) break;
             if (!notes[j].keep) continue;
             if (abs(notes[i].pitch - notes[j].pitch) != 1) continue;
+            double di = notes[i].offset - notes[i].onset;
+            double dj = notes[j].offset - notes[j].onset;
             double ov = fmin(notes[i].offset, notes[j].offset) - fmax(notes[i].onset, notes[j].onset);
-            double md = fmin(notes[i].offset - notes[i].onset, notes[j].offset - notes[j].onset);
+            double md = fmin(di, dj);
+            double si = notes[i].strength * sqrt(notes[i].amp_lin + 1e-9);
+            double sj = notes[j].strength * sqrt(notes[j].amp_lin + 1e-9);
             if (md > 0.0 && ov > 0.55 * md) {
-                double si = notes[i].strength * sqrt(notes[i].amp_lin + 1e-9);
-                double sj = notes[j].strength * sqrt(notes[j].amp_lin + 1e-9);
                 if (si > 1.75 * sj) notes[j].keep = 0;
                 else if (sj > 1.75 * si) { notes[i].keep = 0; break; }
+            } else if (ov > -0.06 && notes[i].pitch >= 66 && notes[j].pitch >= 66) {
+                /* Drop brief (<140 ms) weak adjacent-semitone vibrato/shimmer wobble next to a
+                 * much longer & stronger neighbor note */
+                if (dj < 0.14 && notes[j].strength < 1.55 && di >= 2.0 * dj && si >= 1.30 * sj) {
+                    notes[j].keep = 0;
+                } else if (di < 0.14 && notes[i].strength < 1.55 && dj >= 2.0 * di && sj >= 1.30 * si) {
+                    notes[i].keep = 0;
+                    break;
+                }
             }
         }
     }
@@ -1181,6 +1283,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     double *e_hat   = (double *)calloc((size_t)T, sizeof(double));
     double *e_hat6  = (double *)calloc((size_t)T, sizeof(double));
     double *e_tot   = (double *)calloc((size_t)T, sizeof(double));
+    double *e_mtot  = (double *)calloc((size_t)T, sizeof(double));
     double *pr_k    = (double *)calloc((size_t)T, sizeof(double));
     double *pr_sn   = (double *)calloc((size_t)T, sizeof(double));
     double *pr_sh   = (double *)calloc((size_t)T, sizeof(double));
@@ -1197,7 +1300,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
 
     int ok = 0;
     if (!e_kick || !e_ksub || !e_kmid || !e_kbod || !e_kraw || !e_snlo || !e_snhi ||
-        !e_hat || !e_hat6 || !e_tot || !pr_k || !pr_sn || !pr_sh || !pr_h || !fl_sn ||
+        !e_hat || !e_hat6 || !e_tot || !e_mtot || !pr_k || !pr_sn || !pr_sh || !pr_h || !fl_sn ||
         !fx_ksub || !fx_kmid || !fx_kbod || !fx_k || !fx_sn || !fx_h || !fx_h6) {
         goto cleanup;
     }
@@ -1281,6 +1384,9 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
         e_hat6[t] = ph6;
         pr_h[t] = ph / (mh + 1e-18);
         e_tot[t] = e_kick[t] + ps + psh + ph;
+        double mt = 0.0;
+        for (int k = 1; k < nb; ++k) mt += (double)mm[k] * (double)mm[k];
+        e_mtot[t] = mt;
     }
 
     /* Spectral positive log-flux per band */
@@ -1357,10 +1463,13 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     }
 
     /* Global band scale statistics anchored at 99.5th / 99th percentile so sparse drum sections
-     * (e.g. 3 snares in 12 s) never collapse thresholds onto background bleed! */
+     * (e.g. 3 snares in 12 s) never collapse thresholds onto background bleed; also compare
+     * against total signal energy m95_all so drumless ambient tracks don't self-normalize swells */
     double e995_k   = ind_percentile(e_kick, (size_t)T, 0.995);
     double e995_sn  = ind_percentile(e_snlo, (size_t)T, 0.995);
+    double e995_sh  = ind_percentile(e_snhi, (size_t)T, 0.995);
     double e995_tot = ind_percentile(e_tot,  (size_t)T, 0.995);
+    double m95_all  = ind_percentile(e_mtot, (size_t)T, 0.95) + 1e-15;
     double e95_h    = ind_percentile(e_hat,  (size_t)T, 0.95);
     double f99_k    = ind_percentile(fx_k,   (size_t)T, 0.99);
     double f99_sn   = ind_percentile(fx_sn,  (size_t)T, 0.99);
@@ -1386,7 +1495,8 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     double mbuf[31];
 
     /* ---- 1. Kick (GM 36) ---- */
-    if (e995_k > 1e-8 && e995_k > e995_tot * 0.015 && f99_k > 0.055) {
+    if (e995_k > 1e-8 && e995_k > e995_tot * 0.015 && f99_k > 0.055 &&
+        e995_k > m95_all * 0.12 && e995_tot > m95_all * 0.22) {
         int last_k = -100;
         double e_floor = e995_k * 0.112; /* -9.5 dB below loudest kicks (catches syncopated kicks, rejects bleed) */
         for (int t = 3; t < T - 5; ++t) {
@@ -1435,7 +1545,10 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
             double bod_pre = 0.5 * (e_kbod[t - 2] + e_kbod[t - 3]) + 1e-12;
             double bod_rise = bod_post / bod_pre;
             if (pr_max < 0.36 && km_rise < 2.8 && bod_rise < 2.4 && k_decay < 1.85) continue;
-            /* Reject weak pure-sub drone/rumble without click/body unless strongly decaying & dominant */
+            if (e_post < e995_k * 0.22 && k_decay < 1.45 && pr_max < 0.52) continue;
+            /* Reject pure-sub bass notes/drones lacking BOTH kick-mid punch (95-165 Hz) & click/body (165-350 Hz) */
+            if (bod_post < 0.06 * e_post && km_post < 0.15 * e_post) continue;
+            if (km_post < 0.12 * e_post && bod_post < 0.22 * e_post && k_decay < 2.60) continue;
             if (bod_post < 0.08 * e_post && (e_post < e995_k * 0.78 || k_decay < 2.15)) continue;
 
             double on_s = parabolic_time(fx_k, t, T, dt);
@@ -1449,9 +1562,9 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     }
 
     /* ---- 2. Snare (GM 38) ---- */
-    if (e995_sn > 1e-8 && f99_sn > 0.035) {
+    if (e995_sn > 1e-8 && f99_sn > 0.035 && e995_sh > m95_all * 0.025) {
         int last_s = -100;
-        double e_floor = e995_sn * 0.022; /* -16.5 dB below loudest snares (kills hat bleed on sparse tracks) */
+        double e_floor = e995_sn * 0.036; /* -14.5 dB below loudest snares (kills intro & hat bleed) */
         for (int t = 3; t < T - 3; ++t) {
             if (t - last_s < 8) continue; /* 80 ms refractory */
             double v = fx_sn[t];
@@ -1482,12 +1595,13 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
 
             /* Hat-dominance rejection: if >6.2 kHz cymbal energy dwarfs snare wire & body, it's a hat */
             if (e_hat_p > 1.70 * e_hi_p && e_hat_p > 0.55 * e_post) continue;
+            if (e_post < e995_sn * 0.085 && e_hat_p > 0.95 * e_hi_p && e_hat_p > 0.30 * e_post) continue;
 
-            /* Percussive & broadband wire gate (rejects tonal synth/guitar notes) */
+            /* Percussive & broadband wire gate (rejects tonal synth/guitar notes & ambient swells) */
             double pr_body = fmax(pr_sn[t], pr_sn[t + 1]);
             double pr_snap = fmax(pr_sh[t], pr_sh[t + 1]);
             double fl_max = fmax(fl_sn[t], fl_sn[t + 1]);
-            if (pr_body < 0.19 && pr_snap < 0.28) continue;
+            if (pr_snap < 0.30 || (pr_body < 0.19 && pr_snap < 0.36)) continue;
             if (e_hi_p < 0.012 * e_post && fl_max < 0.14) continue;
 
             /* Cross-band kick & low-tom/sub-thump bleed rejection:
@@ -1584,7 +1698,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
 cleanup:
     free(perc_lo); free(mag_lo); free(perc); free(mag);
     free(e_kick); free(e_ksub); free(e_kmid); free(e_kbod); free(e_kraw);
-    free(e_snlo); free(e_snhi); free(e_hat); free(e_hat6); free(e_tot);
+    free(e_snlo); free(e_snhi); free(e_hat); free(e_hat6); free(e_tot); free(e_mtot);
     free(pr_k); free(pr_sn); free(pr_sh); free(pr_h); free(fl_sn);
     free(fx_ksub); free(fx_kmid); free(fx_kbod); free(fx_k); free(fx_sn); free(fx_h); free(fx_h6);
     return ok;
@@ -1711,35 +1825,50 @@ static void subtract_drum_class_template(float *mag, int T, int nb, int nfft,
         }
     }
 
-    /* Precompute local 20th-percentile background per sampled hit & frequency bin */
+    /* Mark frames covered by this drum class's hits so local background estimation reads
+     * true sustained-chord/bass floor from non-hit gaps instead of absorbing overlapping drum tails */
+    uint8_t *near_hit = (uint8_t *)calloc((size_t)T, 1);
     float *s_bg = (float *)calloc(ns * (size_t)nk, sizeof(float));
     float *tmpl = (float *)calloc((size_t)ntau * (size_t)nk, sizeof(float));
     float *vals = (float *)malloc(ns * sizeof(float));
-    if (!s_bg || !tmpl || !vals) {
-        free(s_bg); free(tmpl); free(vals); free(h_fr); free(h_vel);
+    if (!near_hit || !s_bg || !tmpl || !vals) {
+        free(near_hit); free(s_bg); free(tmpl); free(vals); free(h_fr); free(h_vel);
         return;
+    }
+    int m_lo = (tau_lo < -6) ? -6 : tau_lo;
+    int m_hi = (tau_hi > 14) ? 14 : tau_hi;
+    for (size_t i = 0; i < nh; ++i) {
+        int a = clamp_i(h_fr[i] + m_lo, 0, T - 1);
+        int b = clamp_i(h_fr[i] + m_hi, 0, T - 1);
+        for (int f = a; f <= b; ++f) near_hit[f] = 1;
     }
 
     for (size_t i = 0; i < ns; ++i) {
         int fk = s_fr[i];
         float *bg_row = s_bg + i * (size_t)nk;
+        int f_non[40], f_all[40];
+        int nn = 0, na = 0;
+        for (int d = -72; d <= 72; d += 4) {
+            int f = clamp_i(fk + d, 0, T - 1);
+            f_all[na++] = f;
+            if (!near_hit[f]) f_non[nn++] = f;
+        }
+        const int *flist = (nn >= 6) ? f_non : f_all;
+        int nlist = (nn >= 6) ? nn : na;
+        int qpct = (nn >= 6) ? 15 : 10;
         for (int ki = 0; ki < nk; ++ki) {
             int k = k0 + ki;
-            float wbuf[24];
-            int nw = 0;
-            for (int d = -22; d <= 22; d += 2) {
-                int f = clamp_i(fk + d, 0, T - 1);
-                wbuf[nw++] = mag[(size_t)f * (size_t)nb + (size_t)k];
-            }
-            /* Insertion sort small buffer to get local 15th-percentile non-hit floor */
-            for (int a = 1; a < nw; ++a) {
+            float wbuf[40];
+            for (int w = 0; w < nlist; ++w)
+                wbuf[w] = mag[(size_t)flist[w] * (size_t)nb + (size_t)k];
+            for (int a = 1; a < nlist; ++a) {
                 float key = wbuf[a];
                 int b = a - 1;
                 while (b >= 0 && wbuf[b] > key) { wbuf[b + 1] = wbuf[b]; --b; }
                 wbuf[b + 1] = key;
             }
-            int qidx = (nw * 15) / 100;
-            if (qidx >= nw) qidx = nw - 1;
+            int qidx = (nlist * qpct) / 100;
+            if (qidx >= nlist) qidx = nlist - 1;
             bg_row[ki] = wbuf[qidx];
         }
     }
@@ -1781,15 +1910,16 @@ static void subtract_drum_class_template(float *mag, int T, int nb, int nfft,
         }
         float e0 = tmpl[(size_t)ti_edge0 * (size_t)nk + (size_t)ki];
         float e1 = tmpl[(size_t)ti_edge1 * (size_t)nk + (size_t)ki];
-        if (pk <= 1e-6f || (e0 > 0.85f * pk && e1 > 0.85f * pk)) {
+        if (pk <= 1e-6f || (e0 > 0.88f * pk && e1 > 0.88f * pk)) {
             for (int ti = 0; ti < ntau; ++ti) tmpl[(size_t)ti * (size_t)nk + (size_t)ki] = 0.0f;
         }
     }
 
-    /* Subtract velocity-scaled template at every detected hit (clamped to avoid double-sub) */
+    /* Subtract velocity-scaled template at every detected hit (vel ~ sqrt(amp) so amp ~ (vel/med)^2) */
     for (size_t i = 0; i < nh; ++i) {
         int fk = h_fr[i];
-        float alpha = (float)clamp_d(h_vel[i] / med_vel, 0.55, 1.35) * sub_gain;
+        double vr = h_vel[i] / med_vel;
+        float alpha = (float)clamp_d(vr * vr, 0.45, 1.40) * sub_gain;
         for (int ti = 0; ti < ntau; ++ti) {
             int f = fk + tau_lo + ti;
             if (f < 0 || f >= T) continue;
@@ -1805,7 +1935,7 @@ static void subtract_drum_class_template(float *mag, int T, int nb, int nfft,
         }
     }
 
-    free(s_bg); free(tmpl); free(vals); free(h_fr); free(h_vel);
+    free(near_hit); free(s_bg); free(tmpl); free(vals); free(h_fr); free(h_vel);
 }
 
 static int extract_pitched_internal(const float *audio_retuned_16k, size_t n_retuned_16k,
@@ -1845,10 +1975,14 @@ static int extract_pitched_internal(const float *audio_retuned_16k, size_t n_ret
      * harmonic-floor sub=0.55 preserves mid/low chords without drum dropouts */
     if (!compute_mag_stft(audio_retuned_16k, n_retuned_16k, T, IND_HOP16, IND_NFFT_LO, IND_NB_LO, &m_lo)) goto cleanup;
     if (drum_notes && n_drums >= 12) {
+        /* Gentle deep-sub kick removal (35..95 Hz) protects dense breakbeat basslines,
+         * while full-tail kick-body removal (95..165 Hz) strips ringing pitched kicks (e.g. B-2) */
         subtract_drum_class_template(m_lo, T, IND_NB_LO, IND_NFFT_LO, hop_scale,
-                                     drum_notes, n_drums, 36, 35.0, 165.0, -9, 14, 0.95f);
+                                     drum_notes, n_drums, 36, 35.0, 95.0, -8, 13, 0.85f);
         subtract_drum_class_template(m_lo, T, IND_NB_LO, IND_NFFT_LO, hop_scale,
-                                     drum_notes, n_drums, 36, 165.0, 260.0, -7, 11, 0.55f);
+                                     drum_notes, n_drums, 36, 95.0, 165.0, -10, 18, 1.00f);
+        subtract_drum_class_template(m_lo, T, IND_NB_LO, IND_NFFT_LO, hop_scale,
+                                     drum_notes, n_drums, 36, 165.0, 260.0, -8, 13, 0.62f);
         subtract_drum_class_template(m_lo, T, IND_NB_LO, IND_NFFT_LO, hop_scale,
                                      drum_notes, n_drums, 38, 195.0, 260.0, -6, 10, 0.80f);
     }
@@ -1865,7 +1999,7 @@ static int extract_pitched_internal(const float *audio_retuned_16k, size_t n_ret
     if (!compute_mag_stft(audio_retuned_16k, n_retuned_16k, T, IND_HOP16, IND_NFFT_MD, IND_NB_MD, &m_md)) goto cleanup;
     if (drum_notes && n_drums >= 12) {
         subtract_drum_class_template(m_md, T, IND_NB_MD, IND_NFFT_MD, hop_scale,
-                                     drum_notes, n_drums, 36, 35.0, 175.0, -3, 8, 0.90f);
+                                     drum_notes, n_drums, 36, 35.0, 175.0, -4, 12, 0.95f);
         subtract_drum_class_template(m_md, T, IND_NB_MD, IND_NFFT_MD, hop_scale,
                                      drum_notes, n_drums, 38, 195.0, 260.0, -2, 6, 0.75f);
     }

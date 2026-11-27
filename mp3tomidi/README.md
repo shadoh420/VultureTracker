@@ -76,20 +76,25 @@ Environment variable: `MP3TOMIDI_THREADS=<N>` overrides automatic CPU thread-poo
    so every note lines up on exact semitone centers.
 2. **Find drums first:** Splits the full-rate audio into fine low-frequency slices and crisp mid/high
    slices (`transcribe_drums_dsp`) so it detects both acoustic/808 kicks and downward-sweeping synth
-   kicks right at impact, separates real snares from low thumps and cymbal bleed, and distinguishes closed
-   hats, open hats, and crashes.
+   kicks right at impact, separates real snares from low thumps and cymbal bleed, distinguishes closed
+   hats, open hats, and crashes, and automatically stays silent on drumless harmonic/ambient recordings
+   by gating band percussive peaks against total signal energy and wire-snap percussiveness.
 3. **Subtract drum ring before reading melody & chords:** Automatically learns the song's own average
-   kick and snare body resonance from its detected hits (`subtract_drum_class_template`) and subtracts
-   that repeating drum ring from the low/mid spectrograms — without hardcoding any pitches and without
-   erasing sustained bass or chords.
+   kick and snare body resonance from its detected hits (`subtract_drum_class_template`) — measuring
+   local background from non-hit gaps across `±1.44 s`, splitting deep-sub (`35–95 Hz`) from kick-body
+   (`95–165 Hz`), and scaling by linear hit amplitude — then subtracts that repeating drum ring from
+   the low/mid spectrograms without hardcoding any pitches or erasing sustained bass or chords.
 4. **Separate notes & chords across three zoom levels:** Computes long (`8192`-pt), medium (`2048`-pt),
    and short (`1024`-pt) STFTs with 2D harmonic/percussive separation (`hpss_worker`), subtracting only
    the *sustained* harmonic wash so drum hits don't punch holes in held chords. An iterative pitch
    extractor (`pitch_frame_worker`) peels off up to 8 simultaneous voices per frame from bass upward while
-   preserving layered mid-register chord octaves/fifths and blocking high overtone ghosts.
+   preserving layered mid-register chord octaves/fifths and rejecting high overtone ghosts and blurry
+   broadband reverb/noise shimmer via narrowband peak-to-shoulder sharpness gating.
 5. **Track note holds & repeated attacks:** A 2-state Viterbi decoder (`decode_pitched_notes`) tracks
-   smooth note holds while a parallel short-window un-HPSS attack detector splits repeated bass/lead hits
-   without chopping up sustained or chorused pads.
+   smooth note holds, bridges brief masking dropouts in mid-register chords (`45..64`) when the raw
+   harmonic envelope stays steady, sharpens `8192`-pt pre-onset lead-in edges across Bass & Mid (`<= C#4`),
+   and splits repeated attacks via a parallel short-window un-HPSS detector without chopping up sustained
+   or chorused pads.
 6. **Assign roles, tempo & dynamics:** Clusters surviving notes into Bass, Mid/Chords, and High/Lead
    tracks with automatic GM instrument matching, estimates tempo with a duple-subdivision autocorrelation
    comb + 16th-note phase-fold refinement (`tempo.c`), and writes audio-driven velocity, `CC7`, `CC11`,
@@ -113,11 +118,17 @@ Environment variable: `MP3TOMIDI_THREADS=<N>` overrides automatic CPU thread-poo
 
 ## Verification & Timbre-Free Symbolic Benchmarking
 
+> **Runtime vs. Developer Test Tools:** Running `mp3tomidi-independent` itself to transcribe an `.mp3`
+> into `.mid` has **zero runtime dependencies** — no Python, no `ffmpeg`, no DLLs, and no external files
+> (MP3 decoding is compiled into the binary via `vendor/dr_mp3.h`). Python (and optional `ffmpeg` when
+> slicing a `.wav` into a temporary `.mp3` fixture) is used **only** by the optional developer verification
+> and grading harnesses listed below.
+
 SoundFont GM audio renders mix MIDI instrument timbre mismatch into audio comparisons and obscure real
 note/drum errors. Evaluate changes strictly in **timbre-free symbolic form** using:
 
 - **`mp3tomidi/check_independent.py`** — verifies JSON metadata, MIDI structure, and Windows vs WSL Linux
-  byte-for-byte determinism:
+  byte-for-byte determinism (`--ffmpeg` is only needed when creating a test `.mp3` slice from a `.wav`):
   ```powershell
   tools/transcribe-env/bp/Scripts/python.exe mp3tomidi/check_independent.py build/mp3tomidi-independent `
     --wav demo4/vantage.wav --start-s 12.0 --seconds 12.0 --ffmpeg dist/ffmpeg.exe
@@ -146,14 +157,15 @@ note/drum errors. Evaluate changes strictly in **timbre-free symbolic form** usi
 
 ---
 
-## Verified Benchmark Snapshot (2026-11-27)
+## Verified Benchmark Snapshot (2026-11-27, Pass 2)
 
-Measured on `build/mp3tomidi-independent` (`1.05 MB`, WIN == WSL byte-identical `3,713` bytes on
-`demo4/vantage.yaml` 12–24 s, sha256 `63c892a00450cdcf`):
+Measured on `build/mp3tomidi-independent` (`1.05 MB` / `1,105,782` bytes, APE sha256 `2878c936d7080b10`,
+WIN == WSL byte-identical `3,712` bytes on `demo4/vantage.yaml` 12–24 s, sha256 `b6433ab9279bfd0a`):
 
 | Target | Ground Truth | NotePitch F1 (R) | FrmPitch F1 | FrmChroma F1 | Bass / Mid / High | Drums F1 (K / S / H) | CPU |
 |---|---|---|---|---|---|---|---|
-| `demo2/iron_relay.yaml` (full 54.92 s) | Exact YAML | `0.256` (`0.41`) | `0.666` | `0.759` | `0.74 / 0.68 / 0.54` | `0.898` (`0.89 / 0.49 / 0.98`) | `1.70 s` |
-| `demo2/iron_relay.yaml` (Bars 7–14) | Exact YAML | `0.222` (`0.39`) | `0.616` | `0.715` | `0.70 / 0.65 / 0.26` | `0.886` (`0.85 / 0.52 / 0.97`) | — |
-| `demo4/vantage.yaml` (`12..24 s`) | Exact YAML | `0.435` (`0.32`) | `0.692` | `0.719` | `0.63 / — / 0.83` | `0.951` (`— / 0.80 / 0.99`) | `0.38 s` |
-| Private 4:19 test track (Bars 104–113) | Acoustic CQT | `0.191` (`0.13`) | `0.480` | `0.578` | `0.48 / 0.56 / 0.28` | `0.604` (`0.35 / 0.50 / 0.84`) | `7.97 s` |
+| `demo2/iron_relay.yaml` (full 54.92 s) | Exact YAML | `0.307` (`0.46`) | `0.685` | `0.788` | `0.74 / 0.70 / 0.54` | `0.908` (`0.92 / 0.51 / 0.98`) | `1.55 s` |
+| `demo2/iron_relay.yaml` (Bars 7–14) | Exact YAML | `0.325` (`0.53`) | `0.666` | `0.767` | `0.71 / 0.72 / 0.26` | `0.888` (`0.93 / 0.49 / 0.97`) | — |
+| `demo4/vantage.yaml` (`12..24 s`) | Exact YAML | `0.437` (`0.33`) | `0.695` | `0.726` | `0.62 / — / 0.85` | `0.969` (`— / 0.80 / 0.99`) | `0.40 s` |
+| Private 4:19 test track (Bars 104–113) | Acoustic CQT | `0.177` (`0.12`) | `0.482` | `0.568` | `0.49 / 0.56 / 0.29` | `0.604` (`0.35 / 0.50 / 0.84`) | `7.93 s` |
+| Private 2:39 dark-ambient cue (`30..46 s` / full) | Acoustic CQT | `0.170` / `0.174` | `0.424` / `0.383` | `0.632` / `0.572` | `0.72 / — / 0.27` | `0` phantom drums (`K=0 S=0 H=0`) | `5.86 s` |
