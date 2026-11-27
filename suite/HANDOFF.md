@@ -1,5 +1,222 @@
 # VultureTracker handoff
 
+## In progress — single-file mp3tomidi CLI (2026-11-27)
+
+Branch `cosmopolitan-mp3tomidi-enhanced`, source in `mp3tomidi/`. The target is
+`./mp3tomidi foo.mp3 -o foo-.midi` using one Cosmopolitan APE, offline, with
+all runtime code and weights inside. The owner chose Dettato parity first, then
+Path A enhanced MIDI and an independent non-Dettato transcriber for comparison.
+The existing Python implementation is the development reference only.
+
+**Working candidate:** `build/mp3tomidi` (58,347,571 bytes; unembedded base `build/mp3tomidi-base`).
+Runs completely offline with zero external files or runtime dependencies:
+`./mp3tomidi INPUT.mp3 -o OUTPUT.mid [--mode parity|enhanced] [--no-cc74]` decodes the MP3
+(`dr_mp3.h`, float32), preserves native source rate for drums, resamples to 16 kHz (`mp3tomidi/resample.c`,
+Kaiser-windowed sinc matched to `soxr HQ`), estimates/applies A440 retuning (`mp3tomidi/retune.c`),
+runs all four embedded FP16 Dettato models from `/zip/weights/*.vtwt` (`lanenet.c` + `transcribe.c`,
+`evidence.c`, `grouper.c`, `drums.c` on `nn.c` AVX2+FMA/NEON/pthread SGEMM), and writes a Type-1 SMF
+MIDI file (`mp3tomidi/midi.c`). `--mode parity` (default) preserves bit-exact Dettato parity;
+`--mode enhanced` adds native tempo/beat-grid estimation (`mp3tomidi/tempo.c`), acoustic verification,
+cross-track duplicate & ghost/drum-bleed pruning, register/envelope/harmonicity GM patch refinement,
+and orthogonal audio-driven dynamics (`CC7` mix balance + `CC11` macro expression + local-accent
+velocities + optional `CC74` brightness via `mp3tomidi/enhance.c`). Diagnostic modes `--inspect`,
+`--features`, `--retune-test`, `--tempo-test`, `--enhance-midi`, `--lanenet-test`, `--evidence-test`,
+`--grouper-test`, `--drums-test`, and optional `--weights-dir DIR` override are preserved. User audio
+is never modified.
+
+**Build, embed, and check from the repository root.** The local approved SDK is the official
+`jart/cosmopolitan` GitHub release 4.0.2, asset `cosmocc-4.0.2.zip`, unpacked under
+ignored `build/mp3tomidi-sdk/` (archive symlinks materialized as local hard links).
+The primary cosmo.zip host timed out. The decoder is dr_libs `dr_mp3.h` at
+`7f032b984ae5dd3ab8a58721375aca9200f91965`. Dettato reference is pinned by
+`tools/transcribe_audio.py` at `51ade0f09f2272f4674166026582185d26baaeaf`.
+The SDK, torch, Python and fixture encoder are development tools only.
+
+```powershell
+$env:TMPDIR="$PWD/build/mp3tomidi-sdk/tmp"
+$env:Path='C:\msys64\usr\bin;'+$env:Path
+C:\msys64\usr\bin\bash.exe build/mp3tomidi-sdk/bin/cosmocc -O2 -std=c11 -Wall -Wextra -pthread -o build/mp3tomidi-base mp3tomidi/main.c mp3tomidi/features.c mp3tomidi/resample.c mp3tomidi/nn.c mp3tomidi/weights.c mp3tomidi/lanenet.c mp3tomidi/retune.c mp3tomidi/transcribe.c mp3tomidi/midi.c mp3tomidi/evidence.c mp3tomidi/grouper.c mp3tomidi/drums.c mp3tomidi/tempo.c mp3tomidi/enhance.c
+tools/transcribe-env/torch/Scripts/python.exe mp3tomidi/embed_weights.py build/mp3tomidi-base build/weights build/mp3tomidi
+tools/transcribe-env/torch/Scripts/python.exe mp3tomidi/check_frontend.py build/mp3tomidi --ffmpeg dist/ffmpeg.exe
+tools/transcribe-env/torch/Scripts/python.exe mp3tomidi/check_e2e.py build/mp3tomidi --wav demo4/vantage.wav --start-s 12.0 --seconds 12.0 --ffmpeg dist/ffmpeg.exe
+tools/transcribe-env/torch/Scripts/python.exe mp3tomidi/check_enhanced.py build/mp3tomidi --wav demo4/vantage.wav --start-s 12.0 --seconds 12.0 --ffmpeg dist/ffmpeg.exe
+```
+
+**Verified:**
+- Direct Windows execution passed `mp3tomidi/check_frontend.py` across 16 kHz stereo,
+  44.1 kHz mono/stereo, and 48 kHz stereo MP3s (including 5.5 kHz in-band and 12 kHz
+  above-Nyquist tones for anti-aliasing):
+  - 16 kHz 2ch: max 0.002559, p99.9 0.000805, mean 2.85e-5 (tolerance 0.004)
+  - 44.1 kHz 1ch: max 0.003254, p99.9 0.00191, mean 1.24e-4
+  - 44.1 kHz 2ch: max 0.02200, p99.9 0.00184, mean 9.64e-5 (passband channels <= 0.005)
+  - 48 kHz 2ch: max 0.02915, p99.9 0.00118, mean 6.52e-5 (passband channels <= 0.005)
+  - Gapless frame counts, RMS, malformed input, and preservation of existing output all pass.
+- Initial 16 kHz max error was 0.11975 because the decoder rounded internally to int16;
+  direct float decoding (`DR_MP3_FLOAT_OUTPUT`) fixed it. Initial 44.1 kHz transition-band
+  error was 0.322 with `ROLLOFF=0.975`; matching `soxr HQ`'s impulse response (`ROLLOFF=0.9565`,
+  `SINC_WINGS=92`, `KAISER_BETA=12.5`) brought interior waveform error down to 1.26e-5.
+- Use direct execution outside the desktop sandbox on this host.
+- Identical APE ran via `wsl -d docker-desktop --exec /bin/sh build/mp3tomidi`: byte-identical
+  feature output to Windows on `build/mp3tomidi-compare.mp3` (259,200 bytes, sha256 `557fbd9a945f476d`)
+  and on a 48 kHz stereo MP3 (1,036,800 bytes, sha256 `6cb635eea8b96445`).
+- Cross-platform SIMD + pthread tensor engine (`mp3tomidi/nn.c`, `mp3tomidi/nn.h`) and VTWT
+  binary weight archive (`mp3tomidi/weights.c`, `mp3tomidi/weights.h`, `mp3tomidi/pack_weights.py`)
+  verified on Windows & WSL: AVX2+FMA runtime dispatch (`6x16` microkernel) + NEON (`aarch64`) +
+  scalar fallback; SGEMM accuracy `<= 6.7e-6` across odd shapes; `17600x736x368` benchmark runs in
+  `11.73 ms` (`812.9 GFLOP/s`) on 16 threads (`17.54 ms` / `543.5 GFLOP/s` on 8 threads,
+  `20.91 ms` / `456.0 GFLOP/s` on WSL). Cosmopolitan `/zip/...` embedded assets verified on
+  both Windows and WSL via `zipfile.ZipFile(..., 'a', ZIP_STORED)`. Transcriber packed to
+  `build/weights/transcriber_f32.vtwt` (61.2 MB) and `transcriber_f16.vtwt` (30.8 MB).
+- `LaneNet` (`mp3tomidi/lanenet.c`, `mp3tomidi/check_lanenet.py`) verified against PyTorch
+  `dettato.transcriber.model.LaneNet` on full 8.0 s windows (`T=400`, 16 threads, AVX2+FMA):
+  - FP32: `load=0.021s`, `forward=2.118s`, `stem max=1.67e-4`, `hidden max=6.87e-5`,
+    `logits max=4.58e-5`, `probs max=1.25e-6` (mean `2.88e-9`).
+  - FP16 (30.8 MB): `load=0.026s`, `forward=2.106s`, `stem max=2.77e-3`, `hidden max=9.31e-2`,
+    `logits max=6.42e-2`, `probs max=3.66e-4` (mean `1.28e-6`).
+  - Windows vs WSL Linux logits: **byte-identical** (`max_diff = 0.0`) on 2.0 s test fixture.
+- Tuning estimation (`mp3tomidi/retune.c`), overlapping Hann-windowed `LaneNet` runner +
+  two-voice note decoder (`mp3tomidi/transcribe.c`), SMF Type-1 writer (`mp3tomidi/midi.c`),
+  and `mp3tomidi INPUT.mp3 -o OUTPUT.mid [--weights-dir DIR]` verified via `mp3tomidi/check_transcribe.py`
+  on 44.1 kHz stereo detuned fixtures (`+0c`, `+27c`, and 9.5 s `+24c`):
+  - Retune parity: `-0.018c` / `27.334c` exact to 0.001c (`strength` exact to 0.0001).
+  - Multi-window 9.5 s `+24c` transcription + MIDI output (FP16 weights): `14/14` notes matched
+    (`F1 = 1.0000`, `max_on_diff = 0.47 ms`, `16.8 s` for 7 overlapping 8 s windows on CPU).
+- All four Dettato models packed in FP16 under `build/weights/` (57.06 MB total: transcriber 30.82 MB,
+  evidence 9.89 MB, grouper 5.89 MB, drums 10.46 MB) and embedded into `build/mp3tomidi` via
+  `mp3tomidi/embed_weights.py` (58,260,360 bytes total, zero external files).
+- Evidence Repairer (`mp3tomidi/evidence.c`, `mp3tomidi/check_evidence.py`) verified against Python
+  Dettato (`Transcriber.run` + `EvidenceRepairer.from_run`) on a 9.5 s 44.1 kHz stereo detuned (+18c)
+  MP3 (FP16 weights): `14/14` notes matched (`F1 = 1.0000`, `max_on_diff = 0.05 ms`, exact keep/drop/insert counts).
+- Instrument Grouper (`mp3tomidi/grouper.c`, `mp3tomidi/check_grouper.py`) verified against Python
+  `Dettato.pitched` (retune + LaneNet + Evidence + Grouper, FP16 weights): initial EMA PCEN differed
+  from PyTorch's float32 FFT PCEN on silent bins due to FFT noise floor; switching `pcen_and_standardise`
+  to float32 radix-2 FFT fixed it: exact track (`synth_lead`, GM program 80), `14/14` notes matched
+  (`F1 = 1.0000`, `max_on_diff = 0.00 ms`). Filtering uncovered `track_id < 0` notes (onset `< 0.0` at
+  frame 0) also closed a 79-vs-85 count discrepancy on real audio.
+- Drum Transcriber (`mp3tomidi/drums.c`, `mp3tomidi/check_drums.py`) verified against Python
+  `DrumTranscriber` (drum-kit + 3 orchestral experts + Bluestein 1411 FFT + 3x2048 6144 FFT + router)
+  on a 48 kHz stereo kit fixture: `router = 0.0053` vs `0.0053`, `28/28` hits matched (`F1 = 1.0000`),
+  and 16 kHz source drum skip verified.
+- Full end-to-end single-file APE verification (`mp3tomidi/check_e2e.py`) on a 12.0 s 44.1 kHz stereo
+  MP3 excerpt of `demo4/vantage.wav` (`12..24 s`), run from an isolated temp directory with ZERO flags
+  or external weights (`build/mp3tomidi clip.mp3 -o clip.midi`, `23.7 s` total on CPU):
+  - Exact tuning (`-0.18 c`), exact track list (`celesta` GM program 8 + `Drums`),
+  - Pitched events: **`79/79` matched (`F1 = 1.0000`)**,
+  - Drum events: **`88/88` matched (`F1 = 1.0000`)**,
+  - Windows vs Linux WSL (`wsl -d docker-desktop --exec /bin/sh build/mp3tomidi ...`): **byte-identical**
+    MIDI file (`1,464` bytes, sha256 `8a9d9ff2606fa8bf`).
+- Full-track real-world A/B listening pack and machine comparison staged in ignored
+  `scratch/mp3tomidi-listen/` (private 4:19 electronic/breakbeat test recording,
+  44.1 kHz stereo, 258.64 s, untouched and never committed):
+  - Native APE (`build/mp3tomidi`, FP16, zero dependencies): `425.8 s`, `2.94 GiB` peak RAM,
+    tuning `-3.08 c`, `drum-kit`, 6 tracks (`3,475` pitched notes, `2,980` drum hits).
+  - Python Dettato (FP32 PyTorch CPU): `273.8 s`, `4.50 GiB` peak RAM,
+    tuning `-3.08 c`, `drum-kit`, exact same 6 tracks & GM programs (`synth lead` 80,
+    `electric guitar` 26, `synth bass` 38, `harp` 46, `voice` 52, `Drums`; `3,471` pitched, `2,983` drums).
+  - MIDI event parity (native vs Python Dettato): pitched (30 ms) `3,461 / 3,471` vs `3,475`
+    (**`F1 = 0.9965`**), drums (25 ms) `2,978 / 2,983` vs `2,980` (**`F1 = 0.9988`**); per-track
+    F1 `0.9861`–`1.0000` (`harp` `134/134 = 1.0000`).
+  - FluidSynth GM renders measured with `vulturetracker/measure.py` and `tools/transcription_diff.py`:
+    - Native GM vs Dettato GM: mean `|DELTA| = 0.748 dB` (median `0.7 dB`, p95 `1.3 dB`,
+      `ref_gain_db = 0.0 dB`), loudness `-27.99` vs `-27.99 LUFS`, stereo corr `0.982` vs `0.982`,
+      onset novelty corr `0.95`.
+    - Native GM vs source vs Dettato GM vs source: mean `|DELTA| = 8.528` vs
+      `8.516 dB` (median `7.9` vs `7.9 dB`), onset corr `0.53` vs `0.52`, `transcription_diff`
+      log-mel median delta `10.4` vs `10.3 dB`.
+- Path A Checkpoint 1 — timbre vs MIDI error decomposition staged in ignored
+  `scratch/mp3tomidi-listen/` on a downbeat-aligned 10-bar (`18.462 s`) passage of the
+  4:19 test recording (Bars 104–114, `192.034–210.495 s` at `130.000 BPM`, spanning 4 bars of the pulsing
+  main groove/pre-coda into 6 bars of the coda at `t = 7.385 s`):
+  - Loudness-matched listening clips (`-17.00 LUFS`, `0` clips): `00-ab-orig-gm-neutral.wav`
+    (Original -> 0.7 s -> Native GM -> 0.7 s -> Neutral Synth on unmodified MIDI), `01-original.wav`,
+    `02-native-gm-all.wav`, `09-unmodified-midi-neutral-synth.wav`, plus all 6 `tools/render_gm.py --track`
+    solos (`03-solo-t1-synth-lead-gm80.wav` through `08-solo-t6-drums.wav`), `passage-diagnostic.png`,
+    `diff-passage-gm.png`, `diff-passage-neutral.png`, and `passage-report.json`.
+  - Full-song tempo & dynamics audit vs parity GM render / MIDI:
+    - `tools/tempo_check.py`: recording is locked to **`129.999 BPM`** (`row 0 = 22.8 ms`, every
+      stretch within `±0.1 ms` over 258.6 s); parity `midi.c` hardcodes `120 BPM`.
+    - Dynamic inversion root cause: `grouper.c` sets pitched velocity strictly from model confidence
+      (`20 + 107 * conf`), yielding `r(vel, src_dB) = -0.115` (`electric guitar`), `-0.094` (`harp`),
+      `-0.007` (`synth bass`). Across 10 s windows, source swings `25.2 dB` (`-38.6` to `-13.4 dB`)
+      while GM swings only `8.4 dB` (`-34.7` to `-26.3 dB`); fade-out (`250–258 s`) renders `+5.9 dB`
+      louder raw (`~+19 dB` after loudness match). In the passage, 100 ms A-weighted envelope
+      correlation is **`r = -0.407`** (GM jumps louder at Bar 108 when `harp` enters at `vel 110`).
+  - Passage timbre vs MIDI split (`Bars 104–114`):
+    - **Coda (`Bars 108–113`, `7.38–18.46 s`) — mostly SoundFont timbre + mix balance, NOT bad notes:**
+      chroma cosine is `0.900` (GM) and **`0.960` (Neutral Synth on unmodified MIDI)**. `synth bass`
+      (`A1/G#1/G1`), `electric guitar` (`A2/E3`, `G#2/D#3`, `G2/D3` sustained power chords, `100%`
+      local CQT peak, `+10.2 dB` SNR), and `harp` (`A4/G#4/D#5`, `78.4%` local CQT peak, `+11.3 dB`
+      SNR) all sit on real source CQT ridges (`transcription_diff.py` scored `harp` `0%` only because
+      unweighted global `fmax - 15 dB` is dominated by sub-bass). GM fails here because `harp` (GM 46)
+      is the loudest track (`-18.60 LUFS`), `synth bass` (GM 38) is buried at `-30.26 LUFS`, GM 26
+      Jazz Guitar plucks instead of sustaining, and A-weighted energy piles into `250–600 Hz` (`55.1%`
+      vs source `10.9%`) while `1.5–4 kHz` collapses (`7.7%` vs source `52.0%`).
+    - **Pre-coda (`Bars 104–107`, `0–7.38 s`) — genuine MIDI transcription errors:** Dettato misses
+      the prominent sustained `C#4(61)` line (`-20.0 dBA`) and mis-tracks the `G#1/G1` bass shift
+      (still emitting `D#1/D#2` on GM 80 `synth lead` and `synth bass`; only `27–33%` local CQT peak
+      support, chroma drops to `0.827` GM / `0.847` Neutral).
+    - **Drums & ghosts:** core kit is strong (`Kick 36` `96.2%`, `Snare 38/40` `97–100%`, `HH 42/46`
+      `88–91%`, overall broadband onset P `89.6%` / R `91.7%`), while `Cabasa 69` (`45` hits, `60.0%`
+      high-band match) leaks filter-sweep/grit bleed and `voice` (GM 52, `6` notes, `33%` local peak,
+      `+0.4 dB` SNR, `-31.55 LUFS`) is mostly phantom/duplicating `D#5(75)`.
+    - Passage `measure.py` mean `|DELTA|` drops `13.26 -> 11.70 dB` and `transcription_diff` median
+      drops `11.6 -> 10.5 dB` with timbre/dynamics change alone (zero note edits).
+- Path A Checkpoint 2 — Dettato-Enhanced Mode (`--mode enhanced`, preserving `--mode parity`
+  byte-for-byte) implemented and verified (`mp3tomidi/tempo.c`, `mp3tomidi/enhance.c`,
+  `mp3tomidi/midi.c`, `mp3tomidi/main.c`, `mp3tomidi/check_enhanced.py`, plus retained
+  parameterized `tools/passage_audit.py`):
+  - Zero warnings under `cosmocc -O2 -std=c11 -Wall -Wextra`; single-file APE `build/mp3tomidi`
+    is `58,347,571` bytes (+87 KB over parity baseline).
+  - Parity preservation (`mp3tomidi/check_e2e.py` on `demo4/vantage.wav` `12..24 s`): `79/79`
+    pitched (`F1 = 1.0000`), `88/88` drums (`F1 = 1.0000`), Windows vs WSL Linux **byte-identical**
+    (`1,464` bytes, exact same sha256 `8a9d9ff2606fa8bf`).
+  - Enhanced E2E (`mp3tomidi/check_enhanced.py` on `demo4/vantage.wav` `12..24 s`): `110.365 BPM`
+    (`clarity 2.186`, steady), `79/79` pitched (`0` false drops), `88/88` drums (`0` false drops),
+    `celesta` untouched (`0` false remaps), `235` CC events (`CC7`, `CC11`, `CC74`), `+0.28 s`
+    overhead (`22.11 s` total), Windows vs WSL Linux **byte-identical** (`2,365` bytes, sha256
+    `563a40ed314a9e86`).
+  - Full 4:19 test recording & Bars 104–114 A/B verification staged in ignored
+    `scratch/mp3tomidi-listen/` (enhanced MIDI, FluidSynth GM render, delta PNGs, JSON report,
+    and 3-way loudness-matched `-17.00 LUFS` listening clips `00-ab-bars104-114-orig-parity-enhanced.wav`
+    and `00-ab-intro0-18s-orig-parity-enhanced.wav`):
+    - Tempo: `129.998 BPM` (`clarity 4.908`, `worst_drift = 2.31 ms`, `steady = 1`; vs hardcoded `120 BPM`).
+    - Pruning & GM refinement (`4.81 s` total): `86` cross-track dups + `209` low-SNR ghosts + `43`
+      peripheral drum bleed hits dropped; `4` programs refined (`synth lead` 80 -> `synth bass pulse` 39,
+      `electric guitar` 26 -> `synth saw` 81, `synth bass` 38 -> `synth bass 2` 39, `harp` 46 ->
+      `synth crystal` 98); `9,393` CC events (`CC7/11/74`).
+    - Full-song metrics (Parity GM -> Enhanced GM vs source WAV):
+      - `measure.py` mean `|DELTA|`: `8.528 -> 7.801 dB` (median `7.9 -> 7.4 dB`, p95 `13.72 -> 12.7 dB`).
+      - Dynamic inversion eliminated: 1 s RMS corr `+0.605 -> +0.896` (frame `+0.471 -> +0.809`),
+        LRA `8.16 -> 15.40 LU` (source `13.77 LU`), intro `0–10 s` error `+12.6 -> +0.4 dB`,
+        outro `250–258 s` error `+19.2 -> +4.0 dB`.
+      - Chroma cosine `0.898 -> 0.922`, onset corr `0.53 -> 0.56`, centroid `1434 -> 1822 Hz` (src `2549 Hz`).
+      - `transcription_diff.py` part precision improved: bass `73% -> 80%`, pulse `55% -> 58%`, drums `58% -> 60%`.
+    - Passage Bars 104–114 (`192.03–210.50 s`, Parity GM -> Enhanced GM):
+      - `measure.py` mean `|DELTA|`: `13.260 -> 10.822 dB` (`-2.44 dB`), `transcription_diff` median `11.6 -> 8.7 dB` (`-2.9 dB`).
+      - Chroma cosine `0.871 -> 0.919` (pre-coda `0.827 -> 0.881`, coda `0.900 -> 0.944`), centroid `1678 -> 2375 Hz` (src `2638 Hz`).
+      - A-weighted `250–600 Hz` mud `55.1% -> 17.3%` (src `10.9%`), `1.5–4 kHz` presence `7.7% -> 20.8%` (src `52.0%`).
+      - Balanced in-mix solo levels: `Drums -22.36`, `synth saw -23.73`, `synth bass 2 -24.58`, `synth crystal -26.22` LUFS.
+- Note: build with `-O2` (cosmocc GCC 14.1 `-O3` hung in GIMPLE pass `ch` on large functions; `nn.c`
+  uses explicit AVX2+FMA / NEON intrinsics so `-O2` retains full speed).
+- macOS and ARM hardware remain untested.
+
+**Resume here:** Path A **Checkpoints 1 & 2** are complete, verified across Windows and Linux WSL,
+and pushed on branch `cosmopolitan-mp3tomidi-enhanced`. Next milestone — **Checkpoint 3: Non-Dettato
+Independent Transcriber (`--mode independent` + optional `--mode hybrid`):**
+1. Design and build a completely independent, non-Dettato audio-to-MIDI engine inside `mp3tomidi/`
+   (reusing `dr_mp3.h`, `resample.c`, `retune.c`, `tempo.c`, `enhance.c`, `midi.c`, `nn.c`), capable of
+   running standalone with zero Dettato weights (`--mode independent`) and optionally fusing/rescuing
+   Dettato misses (e.g., Bars 104–107 missed `C#4(61)` and `G#1/G1` bass shift where Dettato's
+   prior stays stuck on `D#1/D#2`).
+2. Benchmark pure-DSP / harmonic-CQT + HPSS + NMF/ridge-tracking + multi-band drum transcription
+   (zero extra binary size, fast CPU) vs optional lightweight neural separation/transcription trade-offs
+   (accuracy, APE binary size, RAM, CPU speed) against both the private 4:19 test recording and
+   committed demos (`demo4/vantage.wav`, `demo2/iron_relay.yaml`) using `vulturetracker/measure.py`,
+   `tools/transcription_diff.py`, and `tools/passage_audit.py`.
+3. Optional later checks: orchestral percussion routing (`router >= 0.5` + timpani) and macOS / ARM64.
+Keep copyrighted game audio strictly in ignored `scratch/`, and keep `Listen to current preview.lnk`
+and `suite/rift/variants/build.log` untouched.
+
 ## Current release: 1.11.0 published (2026-11-22)
 
 [Release and downloads](https://github.com/shadoh420/VultureTracker/releases/tag/v1.11.0).
