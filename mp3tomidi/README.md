@@ -1,6 +1,6 @@
 # mp3tomidi-independent — Zero-Dependency Offline Audio-to-MIDI
 
-`mp3tomidi/` builds a single ~`1.05 MB` offline [Cosmopolitan APE](https://justine.lol/ape.html) binary
+`mp3tomidi/` builds a single ~`1.10 MB` offline [Cosmopolitan APE](https://justine.lol/ape.html) binary
 (`build/mp3tomidi-independent`) that transcribes an MP3 or WAV file into a multi-track Standard MIDI File
 (`.mid`) using pure C11 digital signal processing — **zero neural weights, zero PyTorch/Python runtime
 dependencies, and zero external files**. The same compiled binary runs natively on Windows and Linux
@@ -73,14 +73,19 @@ Environment variable: `MP3TOMIDI_THREADS=<N>` overrides automatic CPU thread-poo
 
 ### Plain-English Overview
 
-1. **Decode & tune:** Reads the MP3 straight into memory (`vendor/dr_mp3.h`), mixes to mono, measures if
-   the song is slightly sharp or flat relative to standard A440 tuning (`retune.c`), and gently resamples
-   so every note lines up on exact semitone centers.
-2. **Find drums first:** Splits the full-rate audio into fine low-frequency slices and crisp mid/high
-   slices (`transcribe_drums_dsp`) so it detects both acoustic/808 kicks and downward-sweeping synth
-   kicks right at impact, separates real snares from low thumps and cymbal bleed, distinguishes closed
-   hats, open hats, and crashes, and automatically stays silent on drumless harmonic/ambient recordings
-   by gating band percussive peaks against total signal energy and wire-snap percussiveness.
+1. **Decode & tune:** Reads MP3 (`vendor/dr_mp3.h`) or native RIFF/WAVE (`main.c`, 8/16/24/32-bit PCM &
+   32/64-bit IEEE float) straight into memory, mixes to mono, measures if the song is slightly sharp or
+   flat relative to standard A440 tuning (`retune.c`), and gently resamples so every note lines up on
+   exact semitone centers.
+2. **Find drums first (two-pass self-bootstrapped):** Splits the full-rate audio into fine low-frequency
+   slices and crisp mid/high slices (`transcribe_drums_dsp`) so Pass 1 detects acoustic/808 kicks,
+   downward-sweeping synth kicks, sub-masked kicks (via kick-mid `95–165 Hz` percussive ratio),
+   simultaneous kick+snare hits, closed/open hats, and crashes while staying completely silent on drumless
+   harmonic/ambient recordings. On tracks with enough anchor hits (`>= 12`), Pass 2 learns the song's own
+   zero-mean 2D `(time × 35–350 Hz)` kick fingerprint and 1D `(150–4500 Hz)` linear+sqrt snare attack
+   fingerprint (`build_kick_template_sim`, `build_snare_template_sim`), self-calibrates via anchor
+   consistency to prune mismatched false hits on consistent kits, and rescues quiet ghost snares, snare
+   rolls, and busy breakbeat kicks without any hardcoded drum presets or neural weights.
 3. **Subtract drum ring before reading melody & chords:** Automatically learns the song's own average
    kick and snare body resonance from its detected hits (`subtract_drum_class_template`) — measuring
    local background from non-hit gaps across `±1.44 s`, splitting deep-sub (`35–95 Hz`) from kick-body
@@ -90,23 +95,27 @@ Environment variable: `MP3TOMIDI_THREADS=<N>` overrides automatic CPU thread-poo
    and short (`1024`-pt) STFTs with 2D harmonic/percussive separation (`hpss_worker`), subtracting only
    the *sustained* harmonic wash so drum hits don't punch holes in held chords. An iterative pitch
    extractor (`pitch_frame_worker`) peels off up to 8 simultaneous voices per frame from bass upward while
-   preserving layered mid-register chord octaves/fifths and rejecting high overtone ghosts and blurry
-   broadband reverb/noise shimmer via narrowband peak-to-shoulder sharpness gating.
+   preserving layered mid-register chord octaves/fifths, capping `h >= 5` overtone subtraction by each low
+   voice's own lower-harmonic envelope (so dark sub-basses never erase real high melody notes sitting on
+   their 6th–9th harmonics), and rejecting blurry broadband reverb/noise shimmer via narrowband
+   peak-to-shoulder sharpness gating.
 5. **Track note holds & repeated attacks:** A 2-state Viterbi decoder (`decode_pitched_notes`) tracks
-   smooth note holds, bridges brief masking dropouts in mid-register chords (`45..64`) when the raw
-   harmonic envelope stays steady, sharpens `8192`-pt pre-onset lead-in edges across Bass & Mid (`<= C#4`),
-   and splits repeated attacks via a parallel short-window un-HPSS detector without chopping up sustained
-   or chorused pads.
-6. **Assign roles, tempo & dynamics:** Clusters surviving notes into Bass, Mid/Chords, and High/Lead
-   tracks with automatic GM instrument matching, estimates tempo with a duple-subdivision autocorrelation
-   comb + 16th-note phase-fold refinement (`tempo.c`), and writes audio-driven velocity, `CC7`, `CC11`,
-   and `CC74` curves (`enhance.c`, `midi.c`).
+   smooth note holds, bridges brief masking dropouts in mid-register chords (`45..64`, up to `240 ms`)
+   when the raw harmonic envelope stays steady, trims `8192`-pt Hann pre-onset smear on Bass & Mid
+   (`<= C#4`) using each note's local `260 ms` attack peak (plus flat silent-floor stepping so filter
+   swells and slow lead-ins land right on the beat), splits repeated attacks and sustained mid-register
+   loud re-entries via a parallel short-window un-HPSS detector without chopping chorused pads, and prunes
+   adjacent-semitone sub-bass blips.
+6. **Assign roles, tempo & dynamics:** Clusters surviving notes into Bass, Mid/Chords (up to 5 voices),
+   and High/Lead tracks with automatic GM instrument matching, estimates tempo with a duple-subdivision
+   autocorrelation comb + 16th-note phase-fold refinement (`tempo.c`), and writes audio-driven velocity,
+   `CC7`, `CC11`, and `CC74` curves (`enhance.c`, `midi.c`).
 
 ### Source Layout
 
 | File | Role |
 |---|---|
-| `mp3tomidi/main.c` | CLI entry point, MP3 decoding (`vendor/dr_mp3.h`), JSON reporting |
+| `mp3tomidi/main.c` | CLI entry point, MP3 (`vendor/dr_mp3.h`) & native RIFF/WAVE decoding, JSON reporting |
 | `mp3tomidi/independent.c`, `.h` | Pure-DSP drum transcriber, unsupervised drum template subtraction, tri-res HPSS, multi-pitch salience & cancellation, Viterbi HMM + repeated-note re-articulation, role/GM assignment |
 | `mp3tomidi/tempo.c`, `.h` | 4-band log-flux onset envelope, drum-reinforced autocorrelation tempogram (`sigma=0.80`), 4-round 16th-note phase-fold refinement |
 | `mp3tomidi/retune.c`, `.h` | Chroma-based A440 tuning deviation estimator and retune resampler |
@@ -160,16 +169,17 @@ note/drum errors. Evaluate changes strictly in **timbre-free symbolic form** usi
 
 ---
 
-## Verified Benchmark Snapshot (2026-11-27, Pass 2)
+## Verified Benchmark Snapshot (2026-11-27, Pass 3)
 
-Measured on `build/mp3tomidi-independent` (`1.07 MB` / `1,124,550` bytes, APE sha256 `eab78eae7ec300e3`,
-WIN == WSL byte-identical on `demo4/vantage.yaml` 12–24 s for both `.mp3` [`3,712` bytes, sha256
-`b6433ab9279bfd0a`] and native `.wav` [`3,725` bytes, sha256 `80e6506bbd75451c`]):
+Measured on `build/mp3tomidi-independent` (`1.10 MB` / `1,152,181` bytes, APE sha256 `59d907ec9d4e5494`,
+WIN == WSL byte-identical on `demo4/vantage.yaml` 12–24 s for both `.mp3` [`3,768` bytes, sha256
+`e5810a73094c7fb5`] and native `.wav` [`3,768` bytes, sha256 `8f464b04c7451fc2`]):
 
 | Target | Ground Truth | NotePitch F1 (R) | FrmPitch F1 | FrmChroma F1 | Bass / Mid / High | Drums F1 (K / S / H) | CPU |
 |---|---|---|---|---|---|---|---|
-| `demo2/iron_relay.yaml` (full 54.92 s) | Exact YAML | `0.307` (`0.46`) | `0.685` | `0.788` | `0.74 / 0.70 / 0.54` | `0.908` (`0.92 / 0.51 / 0.98`) | `1.55 s` |
-| `demo2/iron_relay.yaml` (Bars 7–14) | Exact YAML | `0.325` (`0.53`) | `0.666` | `0.767` | `0.71 / 0.72 / 0.26` | `0.888` (`0.93 / 0.49 / 0.97`) | — |
-| `demo4/vantage.yaml` (`12..24 s`) | Exact YAML | `0.437` (`0.33`) | `0.695` | `0.726` | `0.62 / — / 0.85` | `0.969` (`— / 0.80 / 0.99`) | `0.40 s` |
-| Private 4:19 test track (Bars 104–113) | Acoustic CQT | `0.177` (`0.12`) | `0.482` | `0.568` | `0.49 / 0.56 / 0.29` | `0.604` (`0.35 / 0.50 / 0.84`) | `7.93 s` |
-| Private 2:39 dark-ambient cue (`30..46 s` / full) | Acoustic CQT | `0.170` / `0.174` | `0.424` / `0.383` | `0.632` / `0.572` | `0.72 / — / 0.27` | `0` phantom drums (`K=0 S=0 H=0`) | `5.86 s` |
+| `demo2/iron_relay.yaml` (full 54.92 s, `.mp3`) | Exact YAML | `0.359` (`0.55`) | `0.724` | `0.810` | `0.76 / 0.76 / 0.55` | `0.925` (`0.99 / 0.62 / 0.98`) | `1.57 s` |
+| `demo2/iron_relay.yaml` (full 54.92 s, `.wav`) | Exact YAML | `0.359` (`0.55`) | `0.722` | `0.807` | `0.76 / 0.75 / 0.56` | `0.924` (`1.00 / 0.63 / 0.98`) | `1.60 s` |
+| `demo2/iron_relay.yaml` (Bars 7–14, `.mp3` / `.wav`) | Exact YAML | `0.336` / `0.347` (`0.57` / `0.58`) | `0.679` / `0.681` | `0.765` / `0.767` | `0.73 / 0.73 / 0.28` | `0.912` (`0.96 / 0.63 / 0.97`) / `0.915` (`0.98 / 0.64 / 0.98`) | — |
+| `demo4/vantage.yaml` (`12..24 s`, `.mp3` / `.wav`) | Exact YAML | `0.450` / `0.451` (`0.34`) | `0.727` / `0.730` | `0.756` / `0.757` | `0.63 / — / 0.90` (`0.91` `.wav`) | `0.969` (`— / 0.80 / 0.99`) | `0.37 s` |
+| Private 4:19 test track (Bars 104–113) | Acoustic CQT | `0.231` (`0.16`) | `0.509` | `0.582` | `0.48 / 0.59 / 0.38` | `0.637` (`0.44 / 0.51 / 0.84`) | `7.30 s` |
+| Private 2:39 dark-ambient cue (`30..46 s` / full) | Acoustic CQT | `0.183` / `0.177` | `0.422` / `0.385` | `0.617` / `0.575` | `0.73 / — / 0.29` | `0` phantom drums (`K=0 S=0 H=0`) | `5.55 s` |

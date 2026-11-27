@@ -676,7 +676,7 @@ static void pitch_frame_worker(int start, int end, void *arg) {
                  * loop while valid mid/high chord voices remain above threshold! */
                 double perc_sal = sal * c->p_perc_wt[pi];
                 double rel_coef = (midi_p >= 45 && midi_p <= 64)
-                    ? (0.15 + 0.018 * (double)pass)
+                    ? (0.14 + 0.016 * (double)pass)
                     : ((midi_p >= 65 && midi_p <= 74)
                         ? (0.18 + 0.025 * (double)pass)
                         : (0.23 + 0.032 * (double)pass));
@@ -704,7 +704,7 @@ static void pitch_frame_worker(int start, int end, void *arg) {
             double perc_sal = best_perc_sal;
             if (pass == 0) {
                 frame_ref_sal = perc_sal;
-                double rel_coef0 = (best_midi >= 45 && best_midi <= 64) ? 0.15
+                double rel_coef0 = (best_midi >= 45 && best_midi <= 64) ? 0.14
                                  : ((best_midi >= 65 && best_midi <= 74) ? 0.18 : 0.20);
                 double rel_thr0 = frame_ref_sal * rel_coef0 * noise_mult;
                 best_thr = abs_thr > rel_thr0 ? abs_thr : rel_thr0;
@@ -745,18 +745,29 @@ static void pitch_frame_worker(int start, int end, void *arg) {
                         subtract_partial(r_hi, IND_NFFT_HI, IND_NB_HI, fh, shi > ah ? shi : ah);
                     }
                     continue;
-                } else if ((best_midi <= 42 && h >= 2 && h <= 4) ||
-                           (best_midi <= 49 && h == 2)) {
-                    /* Bass & octave-bass (<= C#3) lower harmonics: 1/h-bounded gentle cancellation
-                     * suppresses pure-bass overtones while preserving layered octave/5th/double-octave
-                     * mid chord voices (e.g. C-3 under C-4, A-2 under A-3, Bb2 under Bb3) */
+                } else if (best_midi <= 42 && (h == 3 || h == 4)) {
+                    /* Bass 3rd/4th harmonics (5th + double-octave): preserve mid pad chord tones
+                     * (e.g. G-3 & C-4 over C-2, A-3 over A-1) while curbing raw bass overtones */
+                    double cap = a1_ref * (0.78 / pow((double)h, 0.95));
+                    double est = ((double)ah < cap) ? (double)ah : cap;
+                    sub = (float)(0.58 * est);
+                } else if (best_midi <= 49 && h == 2) {
+                    /* Bass & low-mid octave (<= C#3): 1/h-bounded cancellation preserves octave bass */
                     double cap = a1_ref * (0.85 / pow((double)h, 0.95));
                     double est = ((double)ah < cap) ? (double)ah : cap;
                     sub = (float)(0.68 * est);
                 } else {
-                    /* Strong overtone suppression for higher harmonics & mid/high voices
-                     * (eliminates 2f/3f/4f MIDI 76..96 chatter on bright synths & leads) */
+                    /* Strong overtone suppression for higher harmonics & mid/high voices;
+                     * for h >= 5 bound by the voice's own smooth lower-harmonic envelope so a dark
+                     * sub-bass/pad (with near-zero h=4,5) never erases a real high melody note
+                     * sitting on h=6 or h=9 (e.g. F#4 over B-1/E-1, F-4 over A#1). */
                     double cap = a1_ref * (1.35 / pow((double)h, 0.58));
+                    if (h >= 5 && best_midi <= 52) {
+                        int p1 = (h - 2 < IND_MAX_HARM) ? (h - 2) : (IND_MAX_HARM - 1);
+                        int p2 = (h - 3 < IND_MAX_HARM) ? (h - 3) : (IND_MAX_HARM - 2);
+                        double env_cap = 1.60 * fmax((double)best_a[p1], (double)best_a[p2]);
+                        if (env_cap < cap) cap = env_cap;
+                    }
                     double est = ((double)ah < cap) ? (double)ah : cap;
                     sub = (float)(0.94 * est);
                 }
@@ -914,7 +925,7 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                     if (e_min >= e_ref - 5.5) {
                         for (int k = ga; k < gb; ++k) state[k] = 1;
                     }
-                } else if (glen >= 5 && glen <= 8 && ga >= 3 && gb <= T - 3 &&
+                } else if (glen >= 5 && glen <= 12 && ga >= 3 && gb <= T - 3 &&
                     state[ga - 1] && state[ga - 2] && state[ga - 3] &&
                     state[gb] && state[gb + 1] && state[gb + 2]) {
                     double e_l = (env_db[ga - 3] + env_db[ga - 2] + env_db[ga - 1]) / 3.0;
@@ -928,7 +939,9 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                         if (env_db[k] < e_min) e_min = env_db[k];
                         if (f1_db[k] < f1_min) f1_min = f1_db[k];
                     }
-                    if (e_min >= e_ref - 4.2 && f1_min >= f1_ref - 6.5) {
+                    double max_e_drop = (glen <= 8) ? 4.2 : 3.4;
+                    double max_f1_drop = (glen <= 8) ? 6.5 : 5.2;
+                    if (e_min >= e_ref - max_e_drop && f1_min >= f1_ref - max_f1_drop) {
                         for (int k = ga; k < gb; ++k) state[k] = 1;
                     }
                 }
@@ -964,10 +977,12 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                 if (fe_db[k - 1] > run_pk_fe) run_pk_fe = fe_db[k - 1];
                 if (f1_db[k - 1] > run_pk_f1) run_pk_f1 = f1_db[k - 1];
                 if (env_db[k - 1] > run_pk_env) run_pk_env = env_db[k - 1];
-                /* Minimum 100 ms (5 frames) between re-articulations */
-                if (k - last_sp < 5 || n_sp >= max_sp - 2) continue;
+                /* Minimum 80 ms (4 frames, 16ths to 187 BPM) for high riffs, 100 ms (5 frames) for bass/mid */
+                int min_gap = (midi_p >= 65) ? 4 : 5;
+                if (k - last_sp < min_gap || n_sp >= max_sp - 2) continue;
 
                 int km2 = (k >= 2) ? (k - 2) : (k - 1);
+                int km3 = (k >= 3) ? (k - 3) : km2;
                 int kp2 = (k + 2 < seg_b) ? (k + 2) : (k + 1);
 
                 /* 1. Low-register smeared-gap split on short-window fundamental (catches octave hops & rests
@@ -984,7 +999,7 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                                  rf1_k >= 2.0 && rf1_k >= rf1_p && rf1_k >= rf1_n);
 
                 /* 2. Tonal-excess short-window harmonic re-articulation (splits repeated attacks
-                 *    while rejecting broadband drum hits & chorused/vibrato pads like ice C#4) */
+                 *    while rejecting broadband drum hits & chorused/vibrato pads like sustained C#4) */
                 double val_fe = fmin(fe_db[k - 1], fe_db[km2]);
                 double pk_fe_after = fmax(fe_db[k + 1], fe_db[kp2]);
                 double dip_fe = run_pk_fe - val_fe;
@@ -1002,23 +1017,49 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                 double jump_env = env_db[k + 1] - env_db[k - 1];
                 double dip_env = run_pk_env - val_env;
 
+                /* Plateau-to-plateau sustained step-up (immune to 1-2 frame chorus/vibrato notches!):
+                 * compares min(post 2 frames) against max(pre 3 frames). */
+                double pre_fe_hi = fmax(fe_db[k - 1], fmax(fe_db[km2], fe_db[km3]));
+                double post_fe_lo = fmin(fe_db[k + 1], fe_db[kp2]);
+                double step_fe = post_fe_lo - pre_fe_hi;
+                double pre_f1_hi = fmax(f1_db[k - 1], fmax(f1_db[km2], f1_db[km3]));
+                double post_f1_lo = fmin(f1_db[k + 1], f1_db[kp2]);
+                double step_f1 = post_f1_lo - pre_f1_hi;
+
                 int is_reartic = 0;
                 if (midi_p <= 48) {
                     /* Bass (<= C-3): short-window harmonic attack with fundamental confirmation */
-                    if (rfe_k >= 1.8 && rfe_k >= rfe_p && rfe_k >= rfe_n &&
-                        dip_fe >= 2.8 && jump_fe >= 3.4 && tonal_jump >= 2.4 &&
+                    if (rfe_k >= 1.6 && rfe_k >= rfe_p && rfe_k >= rfe_n &&
+                        dip_fe >= 2.5 && jump_fe >= 2.6 && tonal_jump >= 2.0 &&
                         pk_f1_after >= run_pk_f1 - 5.5) {
                         is_reartic = 1;
                     }
-                } else {
-                    /* Mid / High (> C-3): require smooth HPSS valley+rise so sustained chorused/vibrato
-                     * pads (e.g. ice C#4) never over-split while genuine repeated leads/plucks split */
+                } else if (midi_p <= 64) {
+                    /* Mid chords & octave-bass (C#3..E4):
+                     * (a) smooth HPSS valley+rise, (b) sharp pluck, or
+                     * (c) sustained plateau step-up (e.g. loud octave bass D-3 entering over a quiet pad) */
                     int smooth_split = (jump_env >= 5.5 && dip_env >= 4.5 &&
                                         env_flux[k] >= env_flux[k - 1] && env_flux[k] >= env_flux[k + 1]);
                     int sharp_pluck = (rfe_k >= 4.0 && rfe_k >= rfe_p && rfe_k >= rfe_n &&
                                        dip_fe >= 7.5 && jump_fe >= 8.0 && tonal_jump >= 7.0 &&
                                        dip_f1 >= 6.5 && jump_f1 >= 6.5 && dip_env >= 3.5);
-                    if (smooth_split || sharp_pluck) {
+                    int loud_reentry = (rfe_k >= 3.0 && rfe_k >= rfe_p && rfe_k >= rfe_n &&
+                                        step_fe >= 6.0 && step_f1 >= 6.5 && tonal_jump >= 5.5 &&
+                                        (env_db[kp2] - env_db[km2]) >= 1.5);
+                    if (smooth_split || sharp_pluck || loud_reentry) {
+                        is_reartic = 1;
+                    }
+                } else {
+                    /* High leads & fast 16th riffs (>= F4): allow notch-proof sharp re-attack
+                     * without requiring HPSS dip_env (140-180 ms median flattens 90 ms 16th dips),
+                     * while keeping strict thresholds so bright reverb/arps don't over-split */
+                    int smooth_split = (jump_env >= 5.5 && dip_env >= 4.5 &&
+                                        env_flux[k] >= env_flux[k - 1] && env_flux[k] >= env_flux[k + 1]);
+                    int fast_riff = (rfe_k >= 4.0 && rfe_k >= rfe_p && rfe_k >= rfe_n &&
+                                     dip_fe >= 7.0 && jump_fe >= 7.5 && tonal_jump >= 6.5 &&
+                                     dip_f1 >= 6.0 && jump_f1 >= 6.5 &&
+                                     post_f1_lo >= val_f1 + 4.5 && post_fe_lo >= val_fe + 4.5);
+                    if (smooth_split || fast_riff) {
                         is_reartic = 1;
                     }
                 }
@@ -1053,12 +1094,25 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                     double pk_f1 = f1_db[fa];
                     for (int k = fa + 1; k < fb; ++k) if (f1_db[k] > pk_f1) pk_f1 = f1_db[k];
 
-                    double lead_cut = (midi_p <= 44) ? 8.0 : ((midi_p <= 48) ? 7.0 : 6.5);
-                    double min_slope = (midi_p <= 48) ? 1.0 : 1.2;
-                    int max_lead_trim = (midi_p <= 48) ? ((si == 0) ? 7 : 3)
-                                                       : ((si == 0) ? 5 : 2);
-                    while (trimmed < max_lead_trim && fa + 3 < fb &&
-                           f1_db[fa] < pk_f1 - lead_cut && f1_db[fa + 1] > f1_db[fa] + min_slope) {
+                    /* Measure onset-region peak (first 260 ms) so slow filter swells don't over-trim */
+                    int early_end = (fa + 13 < fb) ? (fa + 13) : fb;
+                    double pk_early = f1_db[fa];
+                    int pk_early_k = fa;
+                    for (int k = fa + 1; k < early_end; ++k) {
+                        if (f1_db[k] > pk_early) { pk_early = f1_db[k]; pk_early_k = k; }
+                    }
+
+                    /* A symmetric Hann window centered on T_onset sits ~6..8 dB below steady peak;
+                     * cutting at -10.5 dB (Bass) / -9.0 dB (Mid) stops right on T_onset, while also
+                     * stepping past flat silent pre-smear frames (< pk_early - lead_cut - 4 dB). */
+                    double lead_cut = (midi_p <= 44) ? 10.5 : ((midi_p <= 48) ? 9.0 : 8.5);
+                    double min_slope = (midi_p <= 48) ? 0.8 : 1.0;
+                    int max_lead_trim = (midi_p <= 48) ? ((si == 0) ? 9 : 3)
+                                                       : ((si == 0) ? 7 : 2);
+                    while (trimmed < max_lead_trim && fa + 3 < fb && fa < pk_early_k &&
+                           f1_db[fa] < pk_early - lead_cut &&
+                           (f1_db[fa + 1] > f1_db[fa] + min_slope ||
+                            f1_db[fa] < pk_early - (lead_cut + 4.0))) {
                         fa++;
                         trimmed++;
                     }
@@ -1112,9 +1166,9 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
                 }
 
                 /* Snap onset back by up to 1 frame if sharp attack peaked right before fa
-                 * (skip on Mid chords where lead-in trimming just moved fa out of Hann pre-smear) */
+                 * (skip when lead-in trimming already aligned fa onto the onset) */
                 int fa_sn = fa;
-                if ((midi_p <= 48 || !trimmed) && fa > 0 && flux[fa] < flux[fa - 1] && flux[fa - 1] >= 4.0 &&
+                if (!trimmed && fa > 0 && flux[fa] < flux[fa - 1] && flux[fa - 1] >= 4.0 &&
                     (si == 0 || fa - 1 > splits[si - 1])) {
                     fa_sn = fa - 1;
                 }
@@ -1169,6 +1223,14 @@ static int decode_pitched_notes(const struct pitch_ctx *pc, double retune_ratio,
             if (md > 0.0 && ov > 0.55 * md) {
                 if (si > 1.75 * sj) notes[j].keep = 0;
                 else if (sj > 1.75 * si) { notes[i].keep = 0; break; }
+            } else if (ov > -0.06 && notes[i].pitch <= 40 && notes[j].pitch <= 40) {
+                /* Drop brief (<= 150 ms) adjacent-semitone retrigger blip next to a long sustained sub-bass */
+                if (dj <= 0.15 && di >= 4.0 * dj && si >= 1.15 * sj) {
+                    notes[j].keep = 0;
+                } else if (di <= 0.15 && dj >= 4.0 * di && sj >= 1.15 * si) {
+                    notes[i].keep = 0;
+                    break;
+                }
             } else if (ov > -0.06 && notes[i].pitch >= 66 && notes[j].pitch >= 66) {
                 /* Drop brief (<140 ms) weak adjacent-semitone vibrato/shimmer wobble next to a
                  * much longer & stronger neighbor note */
@@ -1232,6 +1294,295 @@ static double parabolic_time(const double *x, int idx, int n, double dt) {
     return (double)idx * dt;
 }
 
+struct drum_cand {
+    int t;
+    double on_s;
+    double ep;
+    int vel;
+    uint8_t keep;
+};
+
+static int cmp_drum_cand_ep_desc(const void *pa, const void *pb) {
+    const struct drum_cand *a = (const struct drum_cand *)pa;
+    const struct drum_cand *b = (const struct drum_cand *)pb;
+    if (a->ep > b->ep) return -1;
+    if (a->ep < b->ep) return 1;
+    return a->t - b->t;
+}
+
+static double median_buf_d(double *arr, int n) {
+    for (int i = 1; i < n; ++i) {
+        double key = arr[i];
+        int j = i - 1;
+        while (j >= 0 && arr[j] > key) { arr[j + 1] = arr[j]; --j; }
+        arr[j + 1] = key;
+    }
+    return arr[n / 2];
+}
+
+/* Unsupervised 2D (tau=0..3, 35..350 Hz) Kick spectral matched filter:
+ * learns this song's own kick transient fingerprint from its loudest Pass-1 anchor hits
+ * and returns per-frame zero-mean Pearson correlation in sim_out[0..T-1] plus median anchor
+ * self-consistency (skipped automatically when fewer than 12 anchors exist). */
+static int build_kick_template_sim(const float *perc_lo, int T, int nb_lo, double bin_lo,
+                                   const struct drum_cand *cands, size_t n_cands,
+                                   double *anc_cons_out, float *sim_out) {
+    *anc_cons_out = 0.0;
+    if (!perc_lo || !cands || n_cands < 12 || T < 16) return 0;
+
+    int k0 = clamp_i((int)ceil(35.0 / bin_lo), 1, nb_lo - 1);
+    int k1 = clamp_i((int)floor(350.0 / bin_lo), k0, nb_lo - 1);
+    int nk = k1 - k0 + 1;
+    int dim = nk * 4; /* tau = 0, 1, 2, 3 */
+    if (dim <= 4 || dim > 512) return 0;
+
+    struct drum_cand *sorted = (struct drum_cand *)malloc(n_cands * sizeof(*sorted));
+    if (!sorted) return 0;
+    memcpy(sorted, cands, n_cands * sizeof(*sorted));
+    qsort(sorted, n_cands, sizeof(*sorted), cmp_drum_cand_ep_desc);
+
+    /* Top 50% loudest anchor kicks, strided to at most 96 for fast deterministic median */
+    size_t n_top = n_cands / 2;
+    if (n_top < 10) n_top = n_cands;
+    enum { MAX_ANC = 96 };
+    int anc_t[MAX_ANC];
+    int na = 0;
+    if (n_top <= MAX_ANC) {
+        for (size_t i = 0; i < n_top; ++i) {
+            if (sorted[i].t >= 3 && sorted[i].t + 3 < T) anc_t[na++] = sorted[i].t;
+        }
+    } else {
+        for (size_t i = 0; i < MAX_ANC; ++i) {
+            int tf = sorted[(i * n_top) / MAX_ANC].t;
+            if (tf >= 3 && tf + 3 < T) anc_t[na++] = tf;
+        }
+    }
+    free(sorted);
+    if (na < 8) return 0;
+
+    double *anc_mat = (double *)malloc((size_t)na * (size_t)dim * sizeof(double));
+    double *tmpl = (double *)calloc((size_t)dim, sizeof(double));
+    double vec[512];
+    double col[MAX_ANC];
+    if (!anc_mat || !tmpl) { free(anc_mat); free(tmpl); return 0; }
+
+    for (int a = 0; a < na; ++a) {
+        int t = anc_t[a];
+        const float *p2 = perc_lo + (size_t)(t - 2) * (size_t)nb_lo + (size_t)k0;
+        const float *p3 = perc_lo + (size_t)(t - 3) * (size_t)nb_lo + (size_t)k0;
+        double mean = 0.0;
+        for (int tau = 0; tau < 4; ++tau) {
+            const float *pt = perc_lo + (size_t)(t + tau) * (size_t)nb_lo + (size_t)k0;
+            for (int ki = 0; ki < nk; ++ki) {
+                double d = (double)pt[ki] - 0.5 * ((double)p2[ki] + (double)p3[ki]);
+                double v = d > 0.0 ? d : 0.0;
+                vec[tau * nk + ki] = v;
+                mean += v;
+            }
+        }
+        mean /= (double)dim;
+        double norm2 = 0.0;
+        for (int j = 0; j < dim; ++j) {
+            vec[j] -= mean;
+            norm2 += vec[j] * vec[j];
+        }
+        double inv = 1.0 / (sqrt(norm2) + 1e-12);
+        double *row = anc_mat + (size_t)a * (size_t)dim;
+        for (int j = 0; j < dim; ++j) row[j] = vec[j] * inv;
+    }
+
+    double tmean = 0.0;
+    for (int j = 0; j < dim; ++j) {
+        for (int a = 0; a < na; ++a) col[a] = anc_mat[(size_t)a * (size_t)dim + (size_t)j];
+        tmpl[j] = median_buf_d(col, na);
+        tmean += tmpl[j];
+    }
+    tmean /= (double)dim;
+    double tnorm2 = 0.0;
+    for (int j = 0; j < dim; ++j) {
+        tmpl[j] -= tmean;
+        tnorm2 += tmpl[j] * tmpl[j];
+    }
+    if (tnorm2 < 1e-18) { free(anc_mat); free(tmpl); return 0; }
+    double tinv = 1.0 / sqrt(tnorm2);
+    for (int j = 0; j < dim; ++j) tmpl[j] *= tinv;
+
+    memset(sim_out, 0, (size_t)T * sizeof(float));
+    for (int t = 3; t < T - 3; ++t) {
+        const float *p2 = perc_lo + (size_t)(t - 2) * (size_t)nb_lo + (size_t)k0;
+        const float *p3 = perc_lo + (size_t)(t - 3) * (size_t)nb_lo + (size_t)k0;
+        double mean = 0.0;
+        for (int tau = 0; tau < 4; ++tau) {
+            const float *pt = perc_lo + (size_t)(t + tau) * (size_t)nb_lo + (size_t)k0;
+            for (int ki = 0; ki < nk; ++ki) {
+                double d = (double)pt[ki] - 0.5 * ((double)p2[ki] + (double)p3[ki]);
+                double v = d > 0.0 ? d : 0.0;
+                vec[tau * nk + ki] = v;
+                mean += v;
+            }
+        }
+        mean /= (double)dim;
+        double norm2 = 0.0, dot = 0.0;
+        for (int j = 0; j < dim; ++j) {
+            double z = vec[j] - mean;
+            norm2 += z * z;
+            dot += z * tmpl[j];
+        }
+        sim_out[t] = (norm2 > 1e-18) ? (float)(dot / sqrt(norm2)) : 0.0f;
+    }
+
+    for (int a = 0; a < na; ++a) {
+        int t = anc_t[a];
+        double s = (double)sim_out[t];
+        if (t > 3 && (double)sim_out[t - 1] > s) s = (double)sim_out[t - 1];
+        if (t + 1 < T - 3 && (double)sim_out[t + 1] > s) s = (double)sim_out[t + 1];
+        col[a] = s;
+    }
+    *anc_cons_out = median_buf_d(col, na);
+
+    free(anc_mat);
+    free(tmpl);
+    return 1;
+}
+
+/* Unsupervised 1D (150..4500 Hz) Snare spectral matched filter:
+ * learns both linear-magnitude and sqrt-magnitude zero-mean snare attack templates from
+ * the song's loudest Pass-1 anchor snares (skipped when fewer than 12 anchors exist). */
+static int build_snare_template_sim(const float *perc, int T, int nb, double bin_hz,
+                                    const struct drum_cand *cands, size_t n_cands,
+                                    double *anc_cons_out, float *lin_sim_out, float *sq_sim_out) {
+    *anc_cons_out = 0.0;
+    if (!perc || !cands || n_cands < 12 || T < 16) return 0;
+
+    int k0 = clamp_i((int)ceil(150.0 / bin_hz), 1, nb - 1);
+    int k1 = clamp_i((int)floor(4500.0 / bin_hz), k0, nb - 1);
+    int nk = k1 - k0 + 1;
+    if (nk <= 8 || nk > 512) return 0;
+
+    struct drum_cand *sorted = (struct drum_cand *)malloc(n_cands * sizeof(*sorted));
+    if (!sorted) return 0;
+    memcpy(sorted, cands, n_cands * sizeof(*sorted));
+    qsort(sorted, n_cands, sizeof(*sorted), cmp_drum_cand_ep_desc);
+
+    size_t n_top = (n_cands * 45) / 100;
+    if (n_top < 8) n_top = n_cands;
+    enum { MAX_ANC = 96 };
+    int anc_t[MAX_ANC];
+    int na = 0;
+    if (n_top <= MAX_ANC) {
+        for (size_t i = 0; i < n_top; ++i) {
+            if (sorted[i].t >= 3 && sorted[i].t + 1 < T) anc_t[na++] = sorted[i].t;
+        }
+    } else {
+        for (size_t i = 0; i < MAX_ANC; ++i) {
+            int tf = sorted[(i * n_top) / MAX_ANC].t;
+            if (tf >= 3 && tf + 1 < T) anc_t[na++] = tf;
+        }
+    }
+    free(sorted);
+    if (na < 8) return 0;
+
+    double *anc_lin = (double *)malloc((size_t)na * (size_t)nk * sizeof(double));
+    double *anc_sq  = (double *)malloc((size_t)na * (size_t)nk * sizeof(double));
+    double *t_lin   = (double *)calloc((size_t)nk, sizeof(double));
+    double *t_sq    = (double *)calloc((size_t)nk, sizeof(double));
+    double vlin[512], vsq[512], col[MAX_ANC];
+    if (!anc_lin || !anc_sq || !t_lin || !t_sq) {
+        free(anc_lin); free(anc_sq); free(t_lin); free(t_sq);
+        return 0;
+    }
+
+    for (int a = 0; a < na; ++a) {
+        int t = anc_t[a];
+        const float *p0 = perc + (size_t)t * (size_t)nb + (size_t)k0;
+        const float *p1 = perc + (size_t)(t + 1) * (size_t)nb + (size_t)k0;
+        const float *m2 = perc + (size_t)(t - 2) * (size_t)nb + (size_t)k0;
+        const float *m3 = perc + (size_t)(t - 3) * (size_t)nb + (size_t)k0;
+        double ml = 0.0, ms = 0.0;
+        for (int ki = 0; ki < nk; ++ki) {
+            double atk = (double)(p0[ki] > p1[ki] ? p0[ki] : p1[ki]);
+            double d = atk - 0.5 * ((double)m2[ki] + (double)m3[ki]);
+            double vl = d > 0.0 ? d : 0.0;
+            double vs = sqrt(vl);
+            vlin[ki] = vl; vsq[ki] = vs;
+            ml += vl; ms += vs;
+        }
+        ml /= (double)nk; ms /= (double)nk;
+        double nl2 = 0.0, ns2 = 0.0;
+        for (int ki = 0; ki < nk; ++ki) {
+            vlin[ki] -= ml; vsq[ki] -= ms;
+            nl2 += vlin[ki] * vlin[ki];
+            ns2 += vsq[ki] * vsq[ki];
+        }
+        double il = 1.0 / (sqrt(nl2) + 1e-12), isq = 1.0 / (sqrt(ns2) + 1e-12);
+        double *rl = anc_lin + (size_t)a * (size_t)nk;
+        double *rs = anc_sq  + (size_t)a * (size_t)nk;
+        for (int ki = 0; ki < nk; ++ki) { rl[ki] = vlin[ki] * il; rs[ki] = vsq[ki] * isq; }
+    }
+
+    double ml = 0.0, ms = 0.0;
+    for (int ki = 0; ki < nk; ++ki) {
+        for (int a = 0; a < na; ++a) col[a] = anc_lin[(size_t)a * (size_t)nk + (size_t)ki];
+        t_lin[ki] = median_buf_d(col, na);
+        ml += t_lin[ki];
+        for (int a = 0; a < na; ++a) col[a] = anc_sq[(size_t)a * (size_t)nk + (size_t)ki];
+        t_sq[ki] = median_buf_d(col, na);
+        ms += t_sq[ki];
+    }
+    ml /= (double)nk; ms /= (double)nk;
+    double nl2 = 0.0, ns2 = 0.0;
+    for (int ki = 0; ki < nk; ++ki) {
+        t_lin[ki] -= ml; nl2 += t_lin[ki] * t_lin[ki];
+        t_sq[ki]  -= ms; ns2 += t_sq[ki]  * t_sq[ki];
+    }
+    if (nl2 < 1e-18 || ns2 < 1e-18) {
+        free(anc_lin); free(anc_sq); free(t_lin); free(t_sq);
+        return 0;
+    }
+    double il = 1.0 / sqrt(nl2), isq = 1.0 / sqrt(ns2);
+    for (int ki = 0; ki < nk; ++ki) { t_lin[ki] *= il; t_sq[ki] *= isq; }
+
+    memset(lin_sim_out, 0, (size_t)T * sizeof(float));
+    memset(sq_sim_out,  0, (size_t)T * sizeof(float));
+    for (int t = 3; t < T - 1; ++t) {
+        const float *p0 = perc + (size_t)t * (size_t)nb + (size_t)k0;
+        const float *p1 = perc + (size_t)(t + 1) * (size_t)nb + (size_t)k0;
+        const float *m2 = perc + (size_t)(t - 2) * (size_t)nb + (size_t)k0;
+        const float *m3 = perc + (size_t)(t - 3) * (size_t)nb + (size_t)k0;
+        double dml = 0.0, dms = 0.0;
+        for (int ki = 0; ki < nk; ++ki) {
+            double atk = (double)(p0[ki] > p1[ki] ? p0[ki] : p1[ki]);
+            double d = atk - 0.5 * ((double)m2[ki] + (double)m3[ki]);
+            double vl = d > 0.0 ? d : 0.0;
+            double vs = sqrt(vl);
+            vlin[ki] = vl; vsq[ki] = vs;
+            dml += vl; dms += vs;
+        }
+        dml /= (double)nk; dms /= (double)nk;
+        double anl = 0.0, ans = 0.0, dl = 0.0, ds = 0.0;
+        for (int ki = 0; ki < nk; ++ki) {
+            double zl = vlin[ki] - dml;
+            double zs = vsq[ki]  - dms;
+            anl += zl * zl; dl += zl * t_lin[ki];
+            ans += zs * zs; ds += zs * t_sq[ki];
+        }
+        lin_sim_out[t] = (anl > 1e-18) ? (float)(dl / sqrt(anl)) : 0.0f;
+        sq_sim_out[t]  = (ans > 1e-18) ? (float)(ds / sqrt(ans)) : 0.0f;
+    }
+
+    for (int a = 0; a < na; ++a) {
+        int t = anc_t[a];
+        double s = (double)lin_sim_out[t];
+        if (t > 3 && (double)lin_sim_out[t - 1] > s) s = (double)lin_sim_out[t - 1];
+        if (t + 1 < T - 1 && (double)lin_sim_out[t + 1] > s) s = (double)lin_sim_out[t + 1];
+        col[a] = s;
+    }
+    *anc_cons_out = median_buf_d(col, na);
+
+    free(anc_lin); free(anc_sq); free(t_lin); free(t_sq);
+    return 1;
+}
+
 static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr,
                                 struct midi_note **out_notes, size_t *out_count,
                                 struct independent_stats *stats) {
@@ -1285,6 +1636,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     double *e_tot   = (double *)calloc((size_t)T, sizeof(double));
     double *e_mtot  = (double *)calloc((size_t)T, sizeof(double));
     double *pr_k    = (double *)calloc((size_t)T, sizeof(double));
+    double *pr_km   = (double *)calloc((size_t)T, sizeof(double));
     double *pr_sn   = (double *)calloc((size_t)T, sizeof(double));
     double *pr_sh   = (double *)calloc((size_t)T, sizeof(double));
     double *pr_h    = (double *)calloc((size_t)T, sizeof(double));
@@ -1300,7 +1652,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
 
     int ok = 0;
     if (!e_kick || !e_ksub || !e_kmid || !e_kbod || !e_kraw || !e_snlo || !e_snhi ||
-        !e_hat || !e_hat6 || !e_tot || !e_mtot || !pr_k || !pr_sn || !pr_sh || !pr_h || !fl_sn ||
+        !e_hat || !e_hat6 || !e_tot || !e_mtot || !pr_k || !pr_km || !pr_sn || !pr_sh || !pr_h || !fl_sn ||
         !fx_ksub || !fx_kmid || !fx_kbod || !fx_k || !fx_sn || !fx_h || !fx_h6) {
         goto cleanup;
     }
@@ -1333,14 +1685,17 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
         const float *pm = perc + (size_t)t * (size_t)nb;
         const float *mm = mag + (size_t)t * (size_t)nb;
 
-        double psub = 0.0, pmid = 0.0, pbod = 0.0, mk = 0.0;
+        double psub = 0.0, pmid = 0.0, mmid = 0.0, pbod = 0.0, mk = 0.0;
         for (int k = kl_s0; k <= kl_s1; ++k) {
             psub += (double)plo[k] * (double)plo[k];
             mk += (double)mlo[k] * (double)mlo[k];
         }
         for (int k = kl_m0; k <= kl_m1; ++k) {
-            pmid += (double)plo[k] * (double)plo[k];
-            mk += (double)mlo[k] * (double)mlo[k];
+            double vp = (double)plo[k] * (double)plo[k];
+            double vm = (double)mlo[k] * (double)mlo[k];
+            pmid += vp;
+            mmid += vm;
+            mk += vm;
         }
         for (int k = kl_b0; k <= kl_b1; ++k) {
             pbod += (double)plo[k] * (double)plo[k];
@@ -1351,6 +1706,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
         e_kbod[t] = pbod;
         e_kraw[t] = mk;
         pr_k[t] = (psub + pmid) / (mk + 1e-18);
+        pr_km[t] = pmid / (mmid + 1e-18);
 
         double ps = 0.0, ms = 0.0, log_sum = 0.0;
         int n_s = k_s1 - k_s0 + 1;
@@ -1436,9 +1792,8 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
         fx_h6[t] = fh6 / (double)(k_h1 - k_h6 + 1);
     }
 
-    free(perc_lo); perc_lo = NULL;
+    /* Keep perc_lo and perc until after the self-bootstrapped Kick/Snare template matched filter */
     free(mag_lo); mag_lo = NULL;
-    free(perc); perc = NULL;
     free(mag); mag = NULL;
 
     /* Unified Kick onset flux: combines immediate sub/kick-mid impulse AND downward pitch-sweep
@@ -1494,13 +1849,17 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     /* Helper buffer: local median over +-24 frames (0.48 s) strided by 2 */
     double mbuf[31];
 
-    /* ---- 1. Kick (GM 36) ---- */
+    /* ---- 1. Kick (GM 36): Pass 1 anchors + Pass 2 self-bootstrapped template refine ---- */
     if (e995_k > 1e-8 && e995_k > e995_tot * 0.015 && f99_k > 0.055 &&
         e995_k > m95_all * 0.12 && e995_tot > m95_all * 0.22) {
+        size_t kc_cap = 128, n_kc = 0;
+        struct drum_cand *kc = (struct drum_cand *)malloc(kc_cap * sizeof(*kc));
+        if (!kc) { free(hits); free(kick_at); free(snare_at); goto cleanup; }
+
         int last_k = -100;
-        double e_floor = e995_k * 0.112; /* -9.5 dB below loudest kicks (catches syncopated kicks, rejects bleed) */
+        double e_floor = e995_k * 0.112; /* -9.5 dB below loudest kicks */
         for (int t = 3; t < T - 5; ++t) {
-            if (t - last_k < 11) continue; /* 110 ms refractory (supports 16ths to 136 BPM, kills HPSS rebounds) */
+            if (t - last_k < 11) continue; /* 110 ms refractory */
             double v = fx_k[t];
             if (v < fx_k[t - 1] || v < fx_k[t + 1] || v < fx_k[t - 2] || v < fx_k[t + 2]) continue;
 
@@ -1510,34 +1869,36 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
                 mbuf[nm++] = fx_k[idx];
             }
             double med = median_small_d(mbuf, nm);
+            if (med > f99_k * 0.22) med = f99_k * 0.22;
             double thr = med * 2.30 + f99_k * 0.30 + 0.048;
             if (v < thr) continue;
 
-            /* Look across [t..t+5] so both immediate 808/acoustic kicks and 40 ms pitch-drop kicks
-             * are measured at their true sub+kick-mid peak */
-            double e_post = e_kick[t], km_post = e_kmid[t], pr_max = pr_k[t], raw_pk = e_kraw[t];
+            double e_post = e_kick[t], km_post = e_kmid[t], pr_max = pr_k[t], pr_km_max = pr_km[t], raw_pk = e_kraw[t];
             for (int d = 1; d <= 5 && t + d < T; ++d) {
                 if (e_kick[t + d] > e_post) e_post = e_kick[t + d];
                 if (e_kmid[t + d] > km_post) km_post = e_kmid[t + d];
                 if (pr_k[t + d] > pr_max) pr_max = pr_k[t + d];
+                if (pr_km[t + d] > pr_km_max) pr_km_max = pr_km[t + d];
                 if (e_kraw[t + d] > raw_pk) raw_pk = e_kraw[t + d];
             }
             double e_pre = 0.5 * (e_kick[t - 2] + e_kick[t - 3]) + 1e-12;
             double km_pre = 0.5 * (e_kmid[t - 2] + e_kmid[t - 3]) + 1e-12;
+            double e_rise = e_post / e_pre;
             double km_rise = km_post / km_pre;
             if (e_post < e_floor) continue;
-            if (e_post / e_pre < 2.10 && km_rise < 3.4) continue;
-            if (pr_max < 0.23) continue;
+            if (e_rise < 2.10 && km_rise < 3.4) continue;
+            int km_sub_rescue = (pr_max >= 0.18 && km_post >= 0.35 * e_post && e_post >= e995_k * 0.25 &&
+                                 ((pr_km_max >= 0.35 && e_rise >= 8.0 && km_rise >= 8.0) ||
+                                  (e_post >= e995_k * 0.35 && e_rise >= 11.0 && km_rise >= 9.0)));
+            if (pr_max < 0.23 && !km_sub_rescue) continue;
 
-            /* Snare-to-kick bleed rejection: snare has dominant 165-350 Hz body + wire snap
-             * with much weaker low-end punch relative to track kick scale */
             double bod_post = fmax(e_kbod[t], fmax(e_kbod[t + 1], e_kbod[t + 2]));
             double snh_post = fmax(e_snhi[t], e_snhi[t + 1]);
-            if (bod_post > 3.2 * e_post && e_post < e995_k * 0.36) continue;
+            if (bod_post > 3.2 * e_post && e_post < e995_k * 0.36 &&
+                (km_rise < 8.0 || snh_post > 0.14 * e_post)) continue;
             if (bod_post > 1.8 * e_post && km_rise < 2.9) continue;
             if (snh_post > 0.30 * e_post && e_post < e995_k * 0.26 && bod_post > 2.0 * e_post) continue;
 
-            /* Sustained bass-note / low-bed rejection */
             double raw_tail = 0.0;
             int n_tl = 0;
             for (int k = t + 9; k <= t + 15 && k < T; ++k) { raw_tail += e_kraw[k]; n_tl++; }
@@ -1546,25 +1907,118 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
             double bod_rise = bod_post / bod_pre;
             if (pr_max < 0.36 && km_rise < 2.8 && bod_rise < 2.4 && k_decay < 1.85) continue;
             if (e_post < e995_k * 0.22 && k_decay < 1.45 && pr_max < 0.52) continue;
-            /* Reject pure-sub bass notes/drones lacking BOTH kick-mid punch (95-165 Hz) & click/body (165-350 Hz) */
             if (bod_post < 0.06 * e_post && km_post < 0.15 * e_post) continue;
-            if (km_post < 0.12 * e_post && bod_post < 0.22 * e_post && k_decay < 2.60) continue;
+            if (km_post < 0.13 * e_post && bod_post < 0.20 * e_post) continue;
             if (bod_post < 0.08 * e_post && (e_post < e995_k * 0.78 || k_decay < 2.15)) continue;
 
             double on_s = parabolic_time(fx_k, t, T, dt);
             double rel_db = clamp_d(10.0 * log10((e_post + 1e-12) / (e995_k + 1e-12)), -18.0, 3.0);
             int vel = (int)floor(108.0 * pow(10.0, rel_db / 40.0) + 0.5);
-            PUSH_HIT(on_s, 36, vel);
-            kick_at[t] = 1;
+            if (n_kc == kc_cap) {
+                kc_cap *= 2;
+                struct drum_cand *g = (struct drum_cand *)realloc(kc, kc_cap * sizeof(*kc));
+                if (!g) { free(kc); free(hits); free(kick_at); free(snare_at); goto cleanup; }
+                kc = g;
+            }
+            kc[n_kc++] = (struct drum_cand){ t, on_s, e_post, vel, 1 };
             last_k = t;
+        }
+
+        /* Pass 2 Kick template matched filter (runs only when >= 12 anchor kicks exist) */
+        if (n_kc >= 12) {
+            float *ksim = (float *)malloc((size_t)T * sizeof(float));
+            double k_cons = 0.0;
+            if (ksim && build_kick_template_sim(perc_lo, T, nb_lo, bin_lo, kc, n_kc, &k_cons, ksim)) {
+                /* Consistent-kit FP pruning (e.g. bass/tom bleeds with low correlation vs kit kick) */
+                if (k_cons >= 0.72) {
+                    double k_prune = k_cons * 0.45;
+                    for (size_t i = 0; i < n_kc; ++i) {
+                        int tk = kc[i].t;
+                        double s = (double)ksim[tk];
+                        if (tk > 3 && (double)ksim[tk - 1] > s) s = (double)ksim[tk - 1];
+                        if (tk + 1 < T - 3 && (double)ksim[tk + 1] > s) s = (double)ksim[tk + 1];
+                        if (s < k_prune) kc[i].keep = 0;
+                    }
+                }
+                for (size_t i = 0; i < n_kc; ++i) {
+                    if (kc[i].keep) kick_at[kc[i].t] = 1;
+                }
+
+                /* Template-matched rescue for breakbeat / stab-layered / sub-masked kicks */
+                double k_resc_thr = fmax(0.58, k_cons * 0.76);
+                for (int t = 3; t < T - 5; ++t) {
+                    double v = fx_k[t];
+                    if (v < fx_k[t - 1] || v < fx_k[t + 1] || v < fx_k[t - 2] || v < fx_k[t + 2]) continue;
+                    int near_ex = 0;
+                    for (int d = -8; d <= 8; ++d) {
+                        int idx = t + d;
+                        if (idx >= 0 && idx < T && kick_at[idx]) { near_ex = 1; break; }
+                    }
+                    if (near_ex) continue;
+
+                    double ks = (double)ksim[t];
+                    if ((double)ksim[t - 1] > ks) ks = (double)ksim[t - 1];
+                    if ((double)ksim[t + 1] > ks) ks = (double)ksim[t + 1];
+                    if (ks < k_resc_thr) continue;
+
+                    int nm = 0;
+                    for (int d = -24; d <= 24; d += 2) mbuf[nm++] = fx_k[clamp_i(t + d, 0, T - 1)];
+                    double med = median_small_d(mbuf, nm);
+                    if (med > f99_k * 0.22) med = f99_k * 0.22;
+                    double thr = med * 2.30 + f99_k * 0.30 + 0.048;
+                    if (v < thr * 0.48) continue;
+
+                    double e_post = e_kick[t], km_post = e_kmid[t], pr_max = pr_k[t];
+                    for (int d = 1; d <= 5 && t + d < T; ++d) {
+                        if (e_kick[t + d] > e_post) e_post = e_kick[t + d];
+                        if (e_kmid[t + d] > km_post) km_post = e_kmid[t + d];
+                        if (pr_k[t + d] > pr_max) pr_max = pr_k[t + d];
+                    }
+                    double e_pre = 0.5 * (e_kick[t - 2] + e_kick[t - 3]) + 1e-12;
+                    double km_pre = 0.5 * (e_kmid[t - 2] + e_kmid[t - 3]) + 1e-12;
+                    double bod_post = fmax(e_kbod[t], fmax(e_kbod[t + 1], e_kbod[t + 2]));
+                    if (e_post < e995_k * 0.095) continue;
+                    if (e_post / e_pre < 1.90 && km_post / km_pre < 2.8) continue;
+                    if (pr_max < 0.16) continue;
+                    if (bod_post < 0.06 * e_post && km_post < 0.15 * e_post) continue;
+                    if (km_post < 0.13 * e_post && bod_post < 0.20 * e_post) continue;
+
+                    double on_s = parabolic_time(fx_k, t, T, dt);
+                    double rel_db = clamp_d(10.0 * log10((e_post + 1e-12) / (e995_k + 1e-12)), -18.0, 3.0);
+                    int vel = (int)floor(108.0 * pow(10.0, rel_db / 40.0) + 0.5);
+                    if (n_kc == kc_cap) {
+                        kc_cap *= 2;
+                        struct drum_cand *g = (struct drum_cand *)realloc(kc, kc_cap * sizeof(*kc));
+                        if (!g) { free(ksim); free(kc); free(hits); free(kick_at); free(snare_at); goto cleanup; }
+                        kc = g;
+                    }
+                    kc[n_kc++] = (struct drum_cand){ t, on_s, e_post, vel, 1 };
+                    kick_at[t] = 1;
+                }
+            } else {
+                for (size_t i = 0; i < n_kc; ++i) kick_at[kc[i].t] = 1;
+            }
+            free(ksim);
+        } else {
+            for (size_t i = 0; i < n_kc; ++i) kick_at[kc[i].t] = 1;
+        }
+
+        for (size_t i = 0; i < n_kc; ++i) {
+            if (!kc[i].keep) continue;
+            PUSH_HIT(kc[i].on_s, 36, kc[i].vel);
             if (stats) stats->kick_hits++;
         }
+        free(kc);
     }
 
-    /* ---- 2. Snare (GM 38) ---- */
+    /* ---- 2. Snare (GM 38): Pass 1 anchors + Pass 2 self-bootstrapped template refine ---- */
     if (e995_sn > 1e-8 && f99_sn > 0.035 && e995_sh > m95_all * 0.025) {
+        size_t sc_cap = 128, n_sc = 0;
+        struct drum_cand *sc = (struct drum_cand *)malloc(sc_cap * sizeof(*sc));
+        if (!sc) { free(hits); free(kick_at); free(snare_at); goto cleanup; }
+
         int last_s = -100;
-        double e_floor = e995_sn * 0.036; /* -14.5 dB below loudest snares (kills intro & hat bleed) */
+        double e_floor = e995_sn * 0.036; /* -14.5 dB below loudest snares */
         for (int t = 3; t < T - 3; ++t) {
             if (t - last_s < 8) continue; /* 80 ms refractory */
             double v = fx_sn[t];
@@ -1586,29 +2040,21 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
             double e_hi_pre = 0.5 * (e_snhi[t - 2] + e_snhi[t - 3]) + 1e-12;
             if (e_post < e_floor) continue;
 
-            /* Require genuine snare body rise (prevents pure hat transients from bypassing via wire band) */
             double body_rise = e_post / e_pre;
             double wire_rise = e_hi_p / e_hi_pre;
             if (body_rise < 1.65 && !(body_rise >= 1.35 && wire_rise >= 2.8 && e_post >= e995_sn * 0.06)) {
                 continue;
             }
 
-            /* Hat-dominance rejection: if >6.2 kHz cymbal energy dwarfs snare wire & body, it's a hat */
             if (e_hat_p > 1.70 * e_hi_p && e_hat_p > 0.55 * e_post) continue;
             if (e_post < e995_sn * 0.085 && e_hat_p > 0.95 * e_hi_p && e_hat_p > 0.30 * e_post) continue;
 
-            /* Percussive & broadband wire gate (rejects tonal synth/guitar notes & ambient swells) */
             double pr_body = fmax(pr_sn[t], pr_sn[t + 1]);
             double pr_snap = fmax(pr_sh[t], pr_sh[t + 1]);
             double fl_max = fmax(fl_sn[t], fl_sn[t + 1]);
             if (pr_snap < 0.30 || (pr_body < 0.19 && pr_snap < 0.36)) continue;
             if (e_hi_p < 0.012 * e_post && fl_max < 0.14) continue;
 
-            /* Cross-band kick & low-tom/sub-thump bleed rejection:
-             * (a) even without a detected kick, reject sub-heavy low thumps lacking snare wire snap
-             * (b) near a detected kick, allow simultaneous K+S (e.g. breakbeats) ONLY when broadband
-             *     snare wire (1.8-5.2 kHz) is strong relative to the kick's low punch
-             *     (solo pitch-drop kicks have snh/ek ~ 0.14 & fl ~ 0.17, K+S has snh/ek ~ 0.73 & fl ~ 0.48) */
             double ek_here = e_kick[t];
             for (int d = 1; d <= 5 && t + d < T; ++d)
                 if (e_kick[t + d] > ek_here) ek_here = e_kick[t + d];
@@ -1617,19 +2063,133 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
             int near_kick = kick_at[t] || kick_at[t - 1] || kick_at[t + 1] ||
                             (t >= 2 && kick_at[t - 2]) || (t + 2 < T && kick_at[t + 2]);
             if (near_kick) {
-                if (e_hi_p < 0.36 * ek_here || wire_rise < 1.8) continue;
-                if (e_hi_p < 0.55 * ek_here && fl_max < 0.28) continue;
+                int loud_ks = (e_post >= e995_sn * 0.25 && e_hi_p >= 0.20 * ek_here &&
+                               wire_rise >= 3.5 && pr_snap >= 0.50 && fl_max >= 0.22);
+                if (!loud_ks) {
+                    if (e_hi_p < 0.36 * ek_here || wire_rise < 1.8) continue;
+                    if (e_hi_p < 0.55 * ek_here && fl_max < 0.28) continue;
+                }
             }
 
             double on_s = parabolic_time(fx_sn, t, T, dt);
             double rel_db = clamp_d(10.0 * log10((e_post + 1e-12) / (e995_sn + 1e-12)), -18.0, 3.0);
             int vel = (int)floor(108.0 * pow(10.0, rel_db / 40.0) + 0.5);
-            PUSH_HIT(on_s, 38, vel);
-            snare_at[t] = 1;
+            if (n_sc == sc_cap) {
+                sc_cap *= 2;
+                struct drum_cand *g = (struct drum_cand *)realloc(sc, sc_cap * sizeof(*sc));
+                if (!g) { free(sc); free(hits); free(kick_at); free(snare_at); goto cleanup; }
+                sc = g;
+            }
+            sc[n_sc++] = (struct drum_cand){ t, on_s, e_post, vel, 1 };
             last_s = t;
+        }
+
+        /* Pass 2 Snare template matched filter (runs only when >= 12 anchor snares exist) */
+        if (n_sc >= 12) {
+            float *slin = (float *)malloc((size_t)T * sizeof(float));
+            float *ssq  = (float *)malloc((size_t)T * sizeof(float));
+            double s_cons = 0.0;
+            if (slin && ssq && build_snare_template_sim(perc, T, nb, bin_hz, sc, n_sc, &s_cons, slin, ssq)) {
+                /* Consistent-kit FP pruning on weaker candidates (< 0.35 * e995_sn) or near-kick bleed */
+                if (s_cons >= 0.75) {
+                    double pr_lin = s_cons * 0.58;
+                    double pr_sq  = s_cons * 0.52;
+                    for (size_t i = 0; i < n_sc; ++i) {
+                        int ts = sc[i].t;
+                        int nk = kick_at[ts] || kick_at[ts - 1] || kick_at[ts + 1] ||
+                                 (ts >= 2 && kick_at[ts - 2]) || (ts + 2 < T && kick_at[ts + 2]);
+                        if (sc[i].ep >= e995_sn * 0.35 && !nk) continue;
+                        double sl = fmax((double)slin[ts], (double)slin[ts + 1]);
+                        double sq = fmax((double)ssq[ts],  (double)ssq[ts + 1]);
+                        if (sl < pr_lin && sq < pr_sq) sc[i].keep = 0;
+                    }
+                }
+                for (size_t i = 0; i < n_sc; ++i) {
+                    if (sc[i].keep) snare_at[sc[i].t] = 1;
+                }
+
+                /* Template-matched rescue for quiet ghost snares & rapid snare rolls */
+                double lin_resc = fmax(0.62, s_cons * 0.74);
+                double sq_resc  = fmax(0.52, s_cons * 0.64);
+                for (int t = 3; t < T - 3; ++t) {
+                    double v = fx_sn[t];
+                    if (v < fx_sn[t - 1] || v < fx_sn[t + 1] || v < fx_sn[t - 2] || v < fx_sn[t + 2]) continue;
+                    int near_ex = 0;
+                    for (int d = -7; d <= 7; ++d) {
+                        int idx = t + d;
+                        if (idx >= 0 && idx < T && snare_at[idx]) { near_ex = 1; break; }
+                    }
+                    if (near_ex) continue;
+
+                    double sl = fmax((double)slin[t], (double)slin[t + 1]);
+                    double sq = fmax((double)ssq[t],  (double)ssq[t + 1]);
+                    if (sl < lin_resc || sq < sq_resc) continue;
+
+                    int nm = 0;
+                    for (int d = -24; d <= 24; d += 2) mbuf[nm++] = fx_sn[clamp_i(t + d, 0, T - 1)];
+                    double med = median_small_d(mbuf, nm);
+                    if (med > f99_sn * 0.22) med = f99_sn * 0.22;
+                    double thr = med * 1.75 + f99_sn * 0.16 + 0.020;
+                    if (v < thr * 0.48) continue;
+
+                    double e_post = fmax(e_snlo[t], fmax(e_snlo[t + 1], e_snlo[t + 2]));
+                    double e_hi_p = fmax(e_snhi[t], e_snhi[t + 1]);
+                    double e_hat_p = fmax(e_hat6[t], e_hat6[t + 1]);
+                    double e_pre = 0.5 * (e_snlo[t - 2] + e_snlo[t - 3]) + 1e-12;
+                    double e_hi_pre = 0.5 * (e_snhi[t - 2] + e_snhi[t - 3]) + 1e-12;
+                    if (e_post < e995_sn * 0.018) continue;
+
+                    double body_rise = e_post / e_pre;
+                    double wire_rise = e_hi_p / e_hi_pre;
+                    double pr_body = fmax(pr_sn[t], pr_sn[t + 1]);
+                    double pr_snap = fmax(pr_sh[t], pr_sh[t + 1]);
+                    double fl_max = fmax(fl_sn[t], fl_sn[t + 1]);
+                    if (body_rise < 1.50 || wire_rise < 2.2) continue;
+                    if (pr_snap < 0.32 || pr_body < 0.16) continue;
+                    if (e_hat_p > 1.25 * e_hi_p) continue;
+
+                    double ek_here = e_kick[t];
+                    for (int d = 1; d <= 5 && t + d < T; ++d)
+                        if (e_kick[t + d] > ek_here) ek_here = e_kick[t + d];
+                    if (ek_here > e995_k * 0.20 && e_hi_p < 0.05 * ek_here) continue;
+                    int near_kick = kick_at[t] || kick_at[t - 1] || kick_at[t + 1] ||
+                                    (t >= 2 && kick_at[t - 2]) || (t + 2 < T && kick_at[t + 2]);
+                    if (near_kick) {
+                        if (e_hi_p < 0.36 * ek_here || wire_rise < 1.8) continue;
+                        if (e_hi_p < 0.55 * ek_here && fl_max < 0.28) continue;
+                    }
+
+                    double on_s = parabolic_time(fx_sn, t, T, dt);
+                    double rel_db = clamp_d(10.0 * log10((e_post + 1e-12) / (e995_sn + 1e-12)), -18.0, 3.0);
+                    int vel = (int)floor(108.0 * pow(10.0, rel_db / 40.0) + 0.5);
+                    if (n_sc == sc_cap) {
+                        sc_cap *= 2;
+                        struct drum_cand *g = (struct drum_cand *)realloc(sc, sc_cap * sizeof(*sc));
+                        if (!g) { free(slin); free(ssq); free(sc); free(hits); free(kick_at); free(snare_at); goto cleanup; }
+                        sc = g;
+                    }
+                    sc[n_sc++] = (struct drum_cand){ t, on_s, e_post, vel, 1 };
+                    snare_at[t] = 1;
+                }
+            } else {
+                for (size_t i = 0; i < n_sc; ++i) snare_at[sc[i].t] = 1;
+            }
+            free(slin);
+            free(ssq);
+        } else {
+            for (size_t i = 0; i < n_sc; ++i) snare_at[sc[i].t] = 1;
+        }
+
+        for (size_t i = 0; i < n_sc; ++i) {
+            if (!sc[i].keep) continue;
+            PUSH_HIT(sc[i].on_s, 38, sc[i].vel);
             if (stats) stats->snare_hits++;
         }
+        free(sc);
     }
+
+    free(perc_lo); perc_lo = NULL;
+    free(perc); perc = NULL;
 
     /* ---- 3. Hi-Hats (GM 42 Closed / GM 46 Open) & Crash (GM 49) ---- */
     if (e95_h > 1e-9 && f90_h > 0.010) {
@@ -1699,7 +2259,7 @@ cleanup:
     free(perc_lo); free(mag_lo); free(perc); free(mag);
     free(e_kick); free(e_ksub); free(e_kmid); free(e_kbod); free(e_kraw);
     free(e_snlo); free(e_snhi); free(e_hat); free(e_hat6); free(e_tot); free(e_mtot);
-    free(pr_k); free(pr_sn); free(pr_sh); free(pr_h); free(fl_sn);
+    free(pr_k); free(pr_km); free(pr_sn); free(pr_sh); free(pr_h); free(fl_sn);
     free(fx_ksub); free(fx_kmid); free(fx_kbod); free(fx_k); free(fx_sn); free(fx_h); free(fx_h6);
     return ok;
 }
@@ -2179,7 +2739,7 @@ int independent_transcribe(const float *audio_native, size_t n_native, unsigned 
     struct independent_track *out = (struct independent_track *)calloc(4, sizeof(*out));
     if (!out) goto cleanup;
     size_t n_out = 0;
-    static const int role_max_poly[3] = { 2, 4, 3 };
+    static const int role_max_poly[3] = { 2, 5, 3 };
 
     for (int r = 0; r < 3; ++r) {
         size_t cnt = 0;
