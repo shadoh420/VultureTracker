@@ -8,11 +8,11 @@ benchmark & diff tools in `tools/symbolic_diff.py` and `tools/mp3tomidi_bench.py
 + Hybrid branch remains separate on `cosmopolitan-mp3tomidi-enhanced`, with Checkpoint 3 hybrid backup in
 ignored `scratch/mp3tomidi-listen/cp3-enhanced-backup/`.)
 
-**Working candidate:** `build/mp3tomidi-independent` (`1.05 MB` / `1,105,782` bytes single offline
+**Working candidate:** `build/mp3tomidi-independent` (`1.07 MB` / `1,124,550` bytes single offline
 Cosmopolitan APE, zero warnings under `cosmocc -O2 -std=c11 -Wall -Wextra -pthread`, Windows == Linux WSL
 byte-identical). Runs with zero external files or runtime dependencies:
-`./mp3tomidi-independent INPUT.mp3 -o OUTPUT.mid [--no-cc74]` decodes the MP3 (`vendor/dr_mp3.h`,
-float32), resamples to 16 kHz (`resample.c`, Kaiser-windowed sinc), estimates/applies A440 retuning
+`./mp3tomidi-independent INPUT.{mp3|wav} -o OUTPUT.mid [--no-cc74]` decodes MP3 (`vendor/dr_mp3.h`,
+float32) or native RIFF/WAVE (8/16/24/32-bit PCM & 32/64-bit IEEE float, auto-detected from header), resamples to 16 kHz (`resample.c`, Kaiser-windowed sinc), estimates/applies A440 retuning
 (`retune.c`), runs the pure-DSP transcriber (`independent.c`: native-rate dual-resolution `2048/1024`
 HPSS drum transcription with pitch-drop kick flux, `p995` scale anchoring, drumless ambient energy/wire-snap
 guard, pure-sub kick rejection, and sub-thump/hat-bleed snare gating; unsupervised median kick/snare
@@ -67,8 +67,9 @@ baseline and Dettato Enhanced reference; staged in `scratch/mp3tomidi-listen/sym
     `0.680`, beats Enhanced `0.522` by `+0.173`), FrameChroma F1 **`0.726`** (vs Enhanced `0.685`), Bass
     **`0.62`** (vs Enhanced `0.00`), High Riff **`0.85`** (up from `0.83`, vs Enhanced `0.79`), Drums F1
     **`0.969`** (up from `0.951` & `0.788`, beats Enhanced `0.928`: Snare **`0.80`** vs `0.50`, Hats
-    **`0.99`** vs `0.96`). WIN == WSL **byte-identical** (`3,712` bytes, sha256 `b6433ab9279bfd0a`; APE
-    sha256 `2878c936d7080b10`).
+    **`0.99`** vs `0.96`). WIN == WSL **byte-identical** on both `.mp3` (`3,712` bytes, sha256
+    `b6433ab9279bfd0a`) and native `.wav` (`3,725` bytes, sha256 `80e6506bbd75451c`; APE sha256
+    `eab78eae7ec300e3`).
 - **Private 4:19 test recording — Bars 104–113 (`192.03–210.50 s`, `130 BPM`, vs acoustic CQT ridges):**
   - Independent (`7.93 s` full track, `129.998 BPM`): NotePitch F1 `0.177` (vs Enhanced `0.132`),
     FramePitch F1 **`0.482`** (up from `0.480` & `0.409`, beats Enhanced `0.394` by `+0.088`), FrameChroma
@@ -91,8 +92,9 @@ Remaining symbolic gaps on `demo2/iron_relay.yaml`, `demo4/vantage.yaml`, and th
 2. **Quiet ghost-snare & dense breakbeat kick recall:** raise `iron_relay` ghost-snare recall (`S 0.51`) and
    the private 4:19 track's busy-breakbeat kick recall (`K 0.35`) while keeping `iron_relay` Kick (`0.92`),
    `vantage` Drums (`0.969`), and drumless ambient cues (`0` false hits) rock-solid.
-3. **Optional native `.wav` input support in `mp3tomidi/main.c`:** allow transcribing `.wav` files directly
-   without needing `ffmpeg` even in local dev scripts.
+3. **Optional WAV format edge cases / CI test coverage:** native `.wav` decoding (8/16/24/32-bit PCM &
+   32/64-bit float, including `WAVE_FORMAT_EXTENSIBLE`) is now live in `mp3tomidi/main.c` and verified
+   WIN == WSL byte-identical alongside `.mp3` in `mp3tomidi/check_independent.py`.
 Keep copyrighted game audio strictly in ignored `scratch/`, leave `Listen to current preview.lnk` and
 `suite/rift/variants/build.log` untouched, and commit only when instructed by the owner.
 

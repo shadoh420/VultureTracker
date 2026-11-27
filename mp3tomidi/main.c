@@ -82,15 +82,187 @@ static int decode_mp3_mono(const char *path, struct decoded_audio *out) {
     return 1;
 }
 
+static uint16_t rd_u16le(const uint8_t *p) {
+    return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint32_t rd_u32le(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static int is_wav_file(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (!fp) return 0;
+    uint8_t hdr[12];
+    size_t got = fread(hdr, 1, sizeof(hdr), fp);
+    fclose(fp);
+    return (got == sizeof(hdr) &&
+            memcmp(hdr, "RIFF", 4) == 0 &&
+            memcmp(hdr + 8, "WAVE", 4) == 0);
+}
+
+static int decode_wav_mono(const char *path, struct decoded_audio *out) {
+    memset(out, 0, sizeof(*out));
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        fprintf(stderr, "Cannot open WAV: %s\n", path);
+        return 0;
+    }
+    uint8_t hdr[12];
+    if (fread(hdr, 1, 12, fp) != 12 ||
+        memcmp(hdr, "RIFF", 4) != 0 || memcmp(hdr + 8, "WAVE", 4) != 0) {
+        fprintf(stderr, "Invalid WAV header: %s\n", path);
+        fclose(fp);
+        return 0;
+    }
+
+    int have_fmt = 0;
+    uint16_t fmt_tag = 0, channels = 0, bits = 0, block_align = 0;
+    uint32_t sample_rate = 0;
+    uint32_t data_bytes = 0;
+    int have_data = 0;
+
+    uint8_t chdr[8];
+    while (fread(chdr, 1, 8, fp) == 8) {
+        uint32_t csz = rd_u32le(chdr + 4);
+        if (memcmp(chdr, "fmt ", 4) == 0) {
+            if (csz < 16 || csz > 4096) {
+                fputs("Unsupported WAV fmt chunk size.\n", stderr);
+                fclose(fp);
+                return 0;
+            }
+            uint8_t fbuf[4096];
+            if (fread(fbuf, 1, csz, fp) != csz) {
+                fputs("Truncated WAV fmt chunk.\n", stderr);
+                fclose(fp);
+                return 0;
+            }
+            fmt_tag = rd_u16le(fbuf + 0);
+            channels = rd_u16le(fbuf + 2);
+            sample_rate = rd_u32le(fbuf + 4);
+            block_align = rd_u16le(fbuf + 12);
+            bits = rd_u16le(fbuf + 14);
+            if (fmt_tag == 0xFFFE && csz >= 40) {
+                fmt_tag = rd_u16le(fbuf + 24); /* WAVE_FORMAT_EXTENSIBLE SubFormat tag */
+            }
+            have_fmt = 1;
+            if (csz & 1u) fseek(fp, 1, SEEK_CUR);
+        } else if (memcmp(chdr, "data", 4) == 0) {
+            data_bytes = csz;
+            have_data = 1;
+            break;
+        } else {
+            long skip = (long)csz + (long)(csz & 1u);
+            if (skip < 0 || fseek(fp, skip, SEEK_CUR) != 0) break;
+        }
+    }
+
+    if (!have_fmt || !have_data || channels < 1 || channels > 16 || !sample_rate) {
+        fprintf(stderr, "Unsupported or incomplete WAV: %s\n", path);
+        fclose(fp);
+        return 0;
+    }
+    int is_pcm = (fmt_tag == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32));
+    int is_flt = (fmt_tag == 3 && (bits == 32 || bits == 64));
+    if (!is_pcm && !is_flt) {
+        fprintf(stderr, "Unsupported WAV format tag=%u bits=%u: %s\n",
+                (unsigned)fmt_tag, (unsigned)bits, path);
+        fclose(fp);
+        return 0;
+    }
+    unsigned bps = bits / 8u;
+    unsigned frame_bytes = (block_align >= bps * channels) ? (unsigned)block_align : (bps * channels);
+    if (!frame_bytes) {
+        fclose(fp);
+        return 0;
+    }
+    size_t n_frames = (size_t)(data_bytes / frame_bytes);
+    if (!n_frames) {
+        fputs("WAV contains no audio frames.\n", stderr);
+        fclose(fp);
+        return 0;
+    }
+
+    float *mono = (float *)malloc(n_frames * sizeof(float));
+    enum { WAV_CHUNK = 2048 };
+    uint8_t *raw = (uint8_t *)malloc((size_t)WAV_CHUNK * (size_t)frame_bytes);
+    if (!mono || !raw) {
+        perror("wav buffer");
+        free(mono);
+        free(raw);
+        fclose(fp);
+        return 0;
+    }
+
+    size_t total = 0;
+    const float inv_ch = 1.0f / (float)channels;
+    while (total < n_frames) {
+        size_t want = n_frames - total;
+        if (want > WAV_CHUNK) want = WAV_CHUNK;
+        size_t got = fread(raw, frame_bytes, want, fp);
+        if (!got) break;
+        for (size_t i = 0; i < got; ++i) {
+            const uint8_t *fr = raw + i * frame_bytes;
+            float sum = 0.0f;
+            for (unsigned c = 0; c < channels; ++c) {
+                const uint8_t *s = fr + (size_t)c * bps;
+                float v = 0.0f;
+                if (fmt_tag == 1) {
+                    if (bits == 8) {
+                        v = ((float)s[0] - 128.0f) * (1.0f / 128.0f);
+                    } else if (bits == 16) {
+                        int16_t iv = (int16_t)rd_u16le(s);
+                        v = (float)iv * (1.0f / 32768.0f);
+                    } else if (bits == 24) {
+                        int32_t iv = (int32_t)((uint32_t)s[0] | ((uint32_t)s[1] << 8) | ((uint32_t)s[2] << 16));
+                        if (iv & 0x800000) iv |= (int32_t)0xFF000000u;
+                        v = (float)iv * (1.0f / 8388608.0f);
+                    } else {
+                        int32_t iv = (int32_t)rd_u32le(s);
+                        v = (float)((double)iv * (1.0 / 2147483648.0));
+                    }
+                } else if (bits == 32) {
+                    memcpy(&v, s, 4);
+                } else {
+                    double dv = 0.0;
+                    memcpy(&dv, s, 8);
+                    v = (float)dv;
+                }
+                sum += v;
+            }
+            mono[total + i] = sum * inv_ch;
+        }
+        total += got;
+    }
+    free(raw);
+    fclose(fp);
+    if (!total) {
+        fputs("WAV contains no readable frames.\n", stderr);
+        free(mono);
+        return 0;
+    }
+    out->mono = mono;
+    out->frames = total;
+    out->sample_rate = sample_rate;
+    out->channels = channels;
+    return 1;
+}
+
+static int decode_audio_mono(const char *path, struct decoded_audio *out) {
+    if (is_wav_file(path)) return decode_wav_mono(path, out);
+    return decode_mp3_mono(path, out);
+}
+
 static double now_s(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-static int run_independent_cli(const char *input_mp3, const char *output_mid, int emit_cc74) {
+static int run_independent_cli(const char *input_audio, const char *output_mid, int emit_cc74) {
     struct decoded_audio audio;
-    if (!decode_mp3_mono(input_mp3, &audio)) return 1;
+    if (!decode_audio_mono(input_audio, &audio)) return 1;
 
     nn_init(0);
     int status = 1;
@@ -209,10 +381,10 @@ done:
     return status;
 }
 
-static int run_enhance_midi_cli(const char *input_mp3, const char *in_mid, const char *out_mid,
+static int run_enhance_midi_cli(const char *input_audio, const char *in_mid, const char *out_mid,
                                 int emit_cc74, int use_hybrid) {
     struct decoded_audio audio;
-    if (!decode_mp3_mono(input_mp3, &audio)) return 1;
+    if (!decode_audio_mono(input_audio, &audio)) return 1;
     struct midi_loaded_track *loaded = NULL;
     size_t n_loaded = 0;
     if (!midi_read_file(in_mid, &loaded, &n_loaded)) {
@@ -315,9 +487,9 @@ done:
     return status;
 }
 
-static int run_tempo_test(const char *input_mp3) {
+static int run_tempo_test(const char *input_audio) {
     struct decoded_audio audio;
-    if (!decode_mp3_mono(input_mp3, &audio)) return 1;
+    if (!decode_audio_mono(input_audio, &audio)) return 1;
     float *a16 = NULL; size_t n16 = 0;
     int ok = resample_mono(audio.mono, audio.frames, (double)audio.sample_rate, (double)MODEL_RATE, &a16, &n16);
     free(audio.mono);
@@ -331,12 +503,12 @@ static int run_tempo_test(const char *input_mp3) {
 }
 
 static void usage(FILE *out) {
-    fputs("Usage: mp3tomidi-independent INPUT.mp3 -o OUTPUT.mid [--mode independent] [--no-cc74]\n"
-          "       mp3tomidi-independent --enhance-midi INPUT.mp3 BASE.mid -o OUTPUT.mid [--no-cc74]\n"
-          "       mp3tomidi-independent --hybrid-midi INPUT.mp3 BASE.mid -o OUTPUT.mid [--no-cc74]\n"
-          "       mp3tomidi-independent --tempo-test INPUT.mp3\n"
-          "       mp3tomidi-independent --retune-test INPUT.mp3\n"
-          "       mp3tomidi-independent --inspect INPUT.mp3\n"
+    fputs("Usage: mp3tomidi-independent INPUT.{mp3|wav} -o OUTPUT.mid [--mode independent] [--no-cc74]\n"
+          "       mp3tomidi-independent --enhance-midi INPUT.{mp3|wav} BASE.mid -o OUTPUT.mid [--no-cc74]\n"
+          "       mp3tomidi-independent --hybrid-midi INPUT.{mp3|wav} BASE.mid -o OUTPUT.mid [--no-cc74]\n"
+          "       mp3tomidi-independent --tempo-test INPUT.{mp3|wav}\n"
+          "       mp3tomidi-independent --retune-test INPUT.{mp3|wav}\n"
+          "       mp3tomidi-independent --inspect INPUT.{mp3|wav}\n"
           "  -o PATH              Write transcribed Standard MIDI File to PATH.\n"
           "  --mode independent   Zero-weight pure-DSP transcriber (default).\n"
           "  --no-cc74            Disable CC74 Brightness controller emission.\n"
@@ -350,7 +522,7 @@ int main(int argc, char **argv) {
     }
     if (argc >= 6 && (strcmp(argv[1], "--enhance-midi") == 0 || strcmp(argv[1], "--hybrid-midi") == 0)) {
         int use_hybrid = (strcmp(argv[1], "--hybrid-midi") == 0);
-        const char *in_mp3 = argv[2];
+        const char *in_audio = argv[2];
         const char *in_mid = argv[3];
         const char *out_mid = NULL;
         int emit_cc74 = 1;
@@ -360,11 +532,11 @@ int main(int argc, char **argv) {
             else { usage(stderr); return 2; }
         }
         if (!out_mid) { usage(stderr); return 2; }
-        return run_enhance_midi_cli(in_mp3, in_mid, out_mid, emit_cc74, use_hybrid);
+        return run_enhance_midi_cli(in_audio, in_mid, out_mid, emit_cc74, use_hybrid);
     }
     if (argc == 3 && strcmp(argv[1], "--retune-test") == 0) {
         struct decoded_audio audio;
-        if (!decode_mp3_mono(argv[2], &audio)) return 1;
+        if (!decode_audio_mono(argv[2], &audio)) return 1;
         float *a16 = NULL; size_t n16 = 0;
         int ok = resample_mono(audio.mono, audio.frames, (double)audio.sample_rate, (double)MODEL_RATE, &a16, &n16);
         free(audio.mono);
@@ -378,7 +550,7 @@ int main(int argc, char **argv) {
     }
     if (argc == 3 && strcmp(argv[1], "--inspect") == 0) {
         struct decoded_audio audio;
-        if (!decode_mp3_mono(argv[2], &audio)) return 1;
+        if (!decode_audio_mono(argv[2], &audio)) return 1;
         double squares = 0.0;
         for (size_t i = 0; i < audio.frames; ++i)
             squares += (double)audio.mono[i] * (double)audio.mono[i];

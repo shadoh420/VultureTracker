@@ -1,7 +1,7 @@
 # mp3tomidi-independent — Zero-Dependency Offline Audio-to-MIDI
 
 `mp3tomidi/` builds a single ~`1.05 MB` offline [Cosmopolitan APE](https://justine.lol/ape.html) binary
-(`build/mp3tomidi-independent`) that transcribes an MP3 file into a multi-track Standard MIDI File
+(`build/mp3tomidi-independent`) that transcribes an MP3 or WAV file into a multi-track Standard MIDI File
 (`.mid`) using pure C11 digital signal processing — **zero neural weights, zero PyTorch/Python runtime
 dependencies, and zero external files**. The same compiled binary runs natively on Windows and Linux
 (including WSL) and produces **byte-identical** MIDI output across platforms.
@@ -37,15 +37,17 @@ cosmocc -O2 -std=c11 -Wall -Wextra -pthread \
   mp3tomidi/midi.c mp3tomidi/tempo.c mp3tomidi/enhance.c mp3tomidi/independent.c
 ```
 
-### 2. Transcribe an MP3
+### 2. Transcribe an MP3 or WAV
 
 ```bash
 ./build/mp3tomidi-independent input.mp3 -o output.mid
+./build/mp3tomidi-independent input.wav -o output.mid
 ```
 
 On Windows PowerShell, either invoke via `bash` or Python `subprocess.run(..., executable=...)`, or
 copy/rename the APE binary with a `.exe` extension (`mp3tomidi-independent.exe`) to run directly from
-`cmd.exe` / PowerShell.
+`cmd.exe` / PowerShell. Native WAV decoding supports 8/16/24/32-bit PCM and 32/64-bit IEEE float
+(including `WAVE_FORMAT_EXTENSIBLE`) automatically by inspecting the `RIFF`/`WAVE` header.
 
 The CLI writes a Type-1 SMF to `output.mid` and prints a single JSON summary line to stdout containing
 detected BPM, tuning offset, note/drum counts, track list, GM program assignments, and wall-clock time.
@@ -54,13 +56,13 @@ detected BPM, tuning offset, note/drum counts, track list, GM program assignment
 
 | Command / Flag | Description |
 |---|---|
-| `INPUT.mp3 -o OUTPUT.mid` | Transcribe MP3 to multi-track MIDI (default `--mode independent`). |
+| `INPUT.{mp3\|wav} -o OUTPUT.mid` | Transcribe MP3 or WAV to multi-track MIDI (default `--mode independent`). |
 | `--no-cc74` | Disable `CC74` (Brightness) controller automation. |
-| `--enhance-midi INPUT.mp3 BASE.mid -o OUT.mid` | Apply audio-driven dynamics/CC calibration and cleanup to an existing MIDI. |
-| `--hybrid-midi INPUT.mp3 BASE.mid -o OUT.mid` | Fuse an existing MIDI with pure-DSP HPSS verification and bass/mid rescue. |
-| `--tempo-test INPUT.mp3` | Estimate BPM, initial BPM, row-0 phase, clarity, and grid steadiness (JSON). |
-| `--retune-test INPUT.mp3` | Estimate A440 tuning deviation in cents and resample ratio (JSON). |
-| `--inspect INPUT.mp3` | Report source sample rate, channels, decoded frame count, and mono RMS (JSON). |
+| `--enhance-midi INPUT.{mp3\|wav} BASE.mid -o OUT.mid` | Apply audio-driven dynamics/CC calibration and cleanup to an existing MIDI. |
+| `--hybrid-midi INPUT.{mp3\|wav} BASE.mid -o OUT.mid` | Fuse an existing MIDI with pure-DSP HPSS verification and bass/mid rescue. |
+| `--tempo-test INPUT.{mp3\|wav}` | Estimate BPM, initial BPM, row-0 phase, clarity, and grid steadiness (JSON). |
+| `--retune-test INPUT.{mp3\|wav}` | Estimate A440 tuning deviation in cents and resample ratio (JSON). |
+| `--inspect INPUT.{mp3\|wav}` | Report source sample rate, channels, decoded frame count, and mono RMS (JSON). |
 | `--help` | Show CLI usage help. |
 
 Environment variable: `MP3TOMIDI_THREADS=<N>` overrides automatic CPU thread-pool sizing.
@@ -119,19 +121,20 @@ Environment variable: `MP3TOMIDI_THREADS=<N>` overrides automatic CPU thread-poo
 ## Verification & Timbre-Free Symbolic Benchmarking
 
 > **Runtime vs. Developer Test Tools:** Running `mp3tomidi-independent` itself to transcribe an `.mp3`
-> into `.mid` has **zero runtime dependencies** — no Python, no `ffmpeg`, no DLLs, and no external files
-> (MP3 decoding is compiled into the binary via `vendor/dr_mp3.h`). Python (and optional `ffmpeg` when
-> slicing a `.wav` into a temporary `.mp3` fixture) is used **only** by the optional developer verification
-> and grading harnesses listed below.
+> or `.wav` into `.mid` has **zero runtime dependencies** — no Python, no `ffmpeg`, no DLLs, and no
+> external files (MP3 decoding is compiled in via `vendor/dr_mp3.h`, and RIFF/WAVE decoding is built into
+> `main.c`). Python (and optional `ffmpeg` only if also testing `.mp3` re-encoding from a `.wav`) is used
+> **only** by the optional developer verification and grading harnesses listed below.
 
 SoundFont GM audio renders mix MIDI instrument timbre mismatch into audio comparisons and obscure real
 note/drum errors. Evaluate changes strictly in **timbre-free symbolic form** using:
 
 - **`mp3tomidi/check_independent.py`** — verifies JSON metadata, MIDI structure, and Windows vs WSL Linux
-  byte-for-byte determinism (`--ffmpeg` is only needed when creating a test `.mp3` slice from a `.wav`):
+  byte-for-byte determinism on native `.wav` directly (zero `ffmpeg` needed; automatically also tests
+  `.mp3` when `dist/ffmpeg.exe` is present or `--ffmpeg` is passed):
   ```powershell
   tools/transcribe-env/bp/Scripts/python.exe mp3tomidi/check_independent.py build/mp3tomidi-independent `
-    --wav demo4/vantage.wav --start-s 12.0 --seconds 12.0 --ffmpeg dist/ffmpeg.exe
+    --wav demo4/vantage.wav --start-s 12.0 --seconds 12.0
   ```
 - **`tools/symbolic_diff.py`** — renders canonical 16th-note tracker patterns (`.pat.txt`,
   `side-by-side.pat.txt`, unified `.pat.diff`), bar-aligned ASCII bass/guitar/drum tablature (`.tab.txt`),
@@ -159,8 +162,9 @@ note/drum errors. Evaluate changes strictly in **timbre-free symbolic form** usi
 
 ## Verified Benchmark Snapshot (2026-11-27, Pass 2)
 
-Measured on `build/mp3tomidi-independent` (`1.05 MB` / `1,105,782` bytes, APE sha256 `2878c936d7080b10`,
-WIN == WSL byte-identical `3,712` bytes on `demo4/vantage.yaml` 12–24 s, sha256 `b6433ab9279bfd0a`):
+Measured on `build/mp3tomidi-independent` (`1.07 MB` / `1,124,550` bytes, APE sha256 `eab78eae7ec300e3`,
+WIN == WSL byte-identical on `demo4/vantage.yaml` 12–24 s for both `.mp3` [`3,712` bytes, sha256
+`b6433ab9279bfd0a`] and native `.wav` [`3,725` bytes, sha256 `80e6506bbd75451c`]):
 
 | Target | Ground Truth | NotePitch F1 (R) | FrmPitch F1 | FrmChroma F1 | Bass / Mid / High | Drums F1 (K / S / H) | CPU |
 |---|---|---|---|---|---|---|---|
