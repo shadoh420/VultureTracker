@@ -1,5 +1,90 @@
 # VultureTracker handoff
 
+## In progress — zero-dependency Cosmopolitan mp3tomidi-independent (2026-11-27)
+
+Branch `cosmopolitan-mp3tomidi-independent` (clean branch off `main` `e120718`, zero Dettato source code,
+zero neural weights, zero PyTorch/model build dependencies). Source in `mp3tomidi/`; timbre-free symbolic
+benchmark & diff tools in `tools/symbolic_diff.py` and `tools/mp3tomidi_bench.py`. (The Dettato + Enhanced
++ Hybrid branch remains separate on `cosmopolitan-mp3tomidi-enhanced`, with Checkpoint 3 hybrid backup in
+ignored `scratch/mp3tomidi-listen/cp3-enhanced-backup/`.)
+
+**Working candidate:** `build/mp3tomidi-independent` (`1.05 MB` / `1,102,584` bytes single offline
+Cosmopolitan APE, zero warnings under `cosmocc -O2 -std=c11 -Wall -Wextra -pthread`, Windows == Linux WSL
+byte-identical). Runs with zero external files or runtime dependencies:
+`./mp3tomidi-independent INPUT.mp3 -o OUTPUT.mid [--no-cc74]` decodes the MP3 (`vendor/dr_mp3.h`,
+float32), resamples to 16 kHz (`resample.c`, Kaiser-windowed sinc), estimates/applies A440 retuning
+(`retune.c`), runs the pure-DSP transcriber (`independent.c`: native-rate dual-resolution `2048/1024`
+HPSS drum transcription with pitch-drop kick flux, `p995` scale anchoring and sub-thump/hat-bleed snare
+gating; unsupervised median kick/snare spectral template subtraction on low/mid STFTs; tri-resolution
+`8192/2048/1024` STFT + 2D median HPSS with harmonic-floor subtraction; low-first Klapuri-style iterative
+harmonic cancellation with per-pass perceptual gating, `1/h`-bounded bass/octave cancellation, `285 Hz`
+`r_lo` crossover and adjacent-semitone guard; 2-state Viterbi HMM note tracking with short-window un-HPSS
+tonal-excess repeated-note re-articulation and bass edge sharpening; adaptive register clustering and
+timbral GM patch assignment), estimates tempo (`tempo.c`, duple-subdivision comb prior `sigma=0.80` +
+phase-fold refinement), calibrates orthogonal audio-driven `CC7`/`CC11`/velocity/`CC74` dynamics
+(`enhance.c`), and writes a Type-1 SMF (`midi.c`). Diagnostic flags: `--enhance-midi`, `--hybrid-midi`,
+`--tempo-test`, `--retune-test`, `--inspect`.
+
+**Build and verify from the repository root** (Cosmopolitan SDK 4.0.2 unpacked under ignored
+`build/mp3tomidi-sdk/`; always compile with `-O2`, never `-O3`):
+
+```powershell
+$env:TMPDIR="$PWD/build/mp3tomidi-sdk/tmp"
+$env:Path='C:\msys64\usr\bin;'+$env:Path
+C:\msys64\usr\bin\bash.exe build/mp3tomidi-sdk/bin/cosmocc -O2 -std=c11 -Wall -Wextra -pthread -o build/mp3tomidi-independent mp3tomidi/main.c mp3tomidi/resample.c mp3tomidi/nn.c mp3tomidi/retune.c mp3tomidi/midi.c mp3tomidi/tempo.c mp3tomidi/enhance.c mp3tomidi/independent.c
+tools/transcribe-env/bp/Scripts/python.exe mp3tomidi/check_independent.py build/mp3tomidi-independent --wav demo4/vantage.wav --start-s 12.0 --seconds 12.0 --ffmpeg dist/ffmpeg.exe
+tools/transcribe-env/bp/Scripts/python.exe tools/symbolic_diff.py --yaml demo2/iron_relay.yaml --bpm 140.083 --skip-channels "arp,arp echo,stab,fx" --midi independent=scratch/mp3tomidi-listen/demos/iron_relay/independent.mid --out-dir scratch/mp3tomidi-listen/symbolic-diff/iron_relay_full
+```
+
+**Evaluation method — Timbre-free symbolic diff (`tools/symbolic_diff.py`):**
+SoundFont GM audio renders mix MIDI timbre mismatch into acoustic metrics and hide real note/drum errors.
+Evaluate transcription quality directly in diffable, timbre-free formats:
+1. Canonical 16th-note tracker patterns (`.pat.txt`, `side-by-side.pat.txt`, unified `.pat.diff`),
+2. Bar-aligned ASCII tablature (`.tab.txt`: 4-str Bass, 6-str Mid/Lead via Viterbi, 5-line Drums),
+3. Multi-voice ABC music notation (`.abc`),
+4. Exact symbolic MIR metrics (`symbolic-metrics.json`: Note Onset+Pitch F1 @ 50 ms, 20 ms Piano-Roll
+   Frame Pitch & Chroma F1 overall and by Bass/Mid/High register, Drum Onset F1 @ 35 ms overall & K/S/H).
+
+**Verified symbolic results (pure-DSP `build/mp3tomidi-independent`, 2026-11-27 DSP iteration vs prior
+baseline and Dettato Enhanced reference; staged in `scratch/mp3tomidi-listen/symbolic-diff/`):**
+- **`demo2/iron_relay.yaml` (full 54.92 s vs exact YAML ground truth; `1.70 s` CPU vs `89.5 s` Dettato,
+  exact `140.083 BPM`):**
+  - Independent: NotePitch F1 **`0.256`** (`R 0.41`, up from `0.159` / `R 0.22`), FramePitch F1 **`0.666`**
+    (up from `0.588`, vs Enhanced `0.690`), FrameChroma F1 **`0.759`** (up from `0.740`; Bass **`0.74`**
+    vs Enhanced `0.65`, Mid **`0.68`** up from `0.57` vs Enhanced `0.74`, High **`0.54`** up from `0.52` vs
+    `0.57`), Drums F1 **`0.898`** (up from `0.812`, beats Enhanced `0.884`: Kick **`0.89`** up from `0.45`,
+    Snare **`0.49`** up from `0.35` vs `0.50`, Hats **`0.98`** vs `0.96`).
+  - Bars 7–14 slice: NotePitch F1 **`0.222`** (`R 0.39`, up from `0.101` / `R 0.15`), FramePitch F1
+    **`0.616`** (up from `0.511`, vs Enhanced `0.633`; Bass **`0.70`**, Mid **`0.65`** up from `0.52`,
+    High **`0.26`** vs `0.17`), Drums F1 **`0.886`** (Kick **`0.85`**, Snare **`0.52`** vs `0.47`, Hats
+    **`0.97`**).
+- **`demo4/vantage.yaml` (`12..24 s` vs exact YAML ground truth; `0.38 s` CPU, exact `168.117 BPM`):**
+  - Independent: NotePitch F1 `0.435` (baseline `0.442`), FramePitch F1 **`0.692`** (up from `0.680`, vs
+    Enhanced `0.522`), FrameChroma F1 `0.719` (vs Enhanced `0.685`), Bass **`0.63`** (up from `0.57` vs
+    Enhanced `0.00`), High Riff **`0.83`** (vs Enhanced `0.79`), Drums F1 **`0.951`** (up from `0.788`,
+    beats Enhanced `0.928`: Snare **`0.80`** up from `0.10` vs Enhanced `0.50`, Hats **`0.99`** vs `0.96`).
+    WIN == WSL **byte-identical** (`3,713` bytes, sha256 `63c892a00450cdcf`; APE sha256 `c641bfe83fa41baa`).
+- **Private 4:19 test recording — Bars 104–113 (`192.03–210.50 s`, `130 BPM`, vs acoustic CQT ridges):**
+  - Independent (`7.97 s` full track, `129.998 BPM`): NotePitch F1 **`0.191`** (up from `0.146`, vs
+    Enhanced `0.132`), FramePitch F1 **`0.480`** (up from `0.409`, vs Enhanced `0.394`), FrameChroma F1
+    **`0.578`** (up from `0.550`, vs Enhanced `0.517`), Bass **`0.48`**, Mid **`0.56`** (up from `0.39` vs
+    Enhanced `0.34`, sustained `C#4(61)` and `G#1/G1` preserved), Drums F1 **`0.604`** (vs Enhanced `0.562`,
+    Snare `0.50`, Hats `0.84`).
+
+**Resume here (next symbolic DSP iteration on `cosmopolitan-mp3tomidi-independent`):**
+Remaining symbolic gaps vs Dettato Enhanced on `demo2/iron_relay.yaml`, `demo4/vantage.yaml`, and the
+private 4:19 Bars 104–113 passage (evaluated exclusively with `tools/symbolic_diff.py`):
+1. **Bass & lead NotePitch precision/recall (`iron_relay` `0.256` / `R 0.41` vs Enhanced `0.433` / `R 0.81`):**
+   reduce remaining short ghost note onsets (`P 0.18`) and tighten repeated-note attack timing on 16th-note
+   bass grooves (`C-2`, `A-1`, `D-2`, `A#1`) and high leads without over-splitting sustained pads.
+2. **Remaining pitched-kick & ghost-snare separation:** trim residual `B-2` kick-body frames (`~500` FP
+   frames left on `iron_relay`) and improve quiet ghost-snare recall (`0.49`) + the private 4:19 track's
+   kick recall (`0.35`) without regressing Hats (`0.98–0.99`) or `vantage` Snare (`0.80`).
+3. **Mid-register chord sustain (`iron_relay` Mid `0.68` -> `0.74`):** bridge short mid-chord dropouts
+   across dense drum fills (`A#3`, `G-3`, `C-4`) while keeping high-register precision crisp.
+Keep copyrighted game audio strictly in ignored `scratch/`, leave `Listen to current preview.lnk` and
+`suite/rift/variants/build.log` untouched, and commit only when instructed by the owner.
+
 ## Current release: 1.11.0 published (2026-11-22)
 
 [Release and downloads](https://github.com/shadoh420/VultureTracker/releases/tag/v1.11.0).
