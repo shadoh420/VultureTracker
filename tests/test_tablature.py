@@ -8991,7 +8991,7 @@ class TestPercussion(unittest.TestCase):
 
         # 3. _repeat_timeline disambiguates tied chords whose notes have string=None by channel.
         source = {
-            'step': [1, 12],
+            'step': Fraction(1, 12),
             'occurrences': [{'id': 'oa', 'pattern': 'A', 'at': [0, 1]}],
             'measures': [],
             'beats': [],

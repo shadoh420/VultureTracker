@@ -2648,7 +2648,8 @@ console.log(JSON.stringify({{
         with tempfile.TemporaryDirectory() as tmp:
             js = Path(tmp) / "worklet_test.js"
             js.write_text(script, encoding="utf-8")
-            result = subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30)
+            # node writes UTF-8; without encoding= Windows decodes the pipe with its ANSI code page
+            result = subprocess.run([NODE, str(js)], capture_output=True, encoding="utf-8", timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             out = json.loads(result.stdout)
         self.assertEqual(out["decoded"][0], "A\u00e9B")
