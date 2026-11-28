@@ -365,20 +365,33 @@ def reference_align(render, ref, offset_ms, start, reach=30.0):
     return round((start - (at + k * hop) / rate) * 1000), round(max(0.0, corr), 2)
 
 
+def _wav_stereo(path):
+    """A 16-bit WAV as (float32 shape [2, frames], rate)."""
+    import numpy as np
+    with wave.open(str(path), "rb") as w:
+        if w.getsampwidth() != 2 or w.getnchannels() < 1:
+            raise ValueError(f"{path}: expected 16-bit PCM WAV")
+        nch = w.getnchannels()
+        pcm = np.frombuffer(w.readframes(w.getnframes()), "<i2").reshape(-1, nch).T.astype(np.float32) / 32768
+        if nch == 1:
+            pcm = np.repeat(pcm, 2, axis=0)
+        elif nch > 2:
+            pcm = pcm[:2]
+        return pcm, w.getframerate()
+
+
 @functools.lru_cache(maxsize=32)
 def _mix_numbers(path, stamp):
-    import numpy as np
     from . import dsp
-    pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
-    return dsp.measure_mix(pcm, RATE)
+    pcm, rate = _wav_stereo(path)
+    return dsp.measure_mix(pcm, rate)
 
 
 @functools.lru_cache(maxsize=8)
 def _meters(path, stamp):
-    import numpy as np
     from . import dsp
-    pcm = np.frombuffer(Path(path).read_bytes()[44:], "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
-    return dsp.meter_series(pcm, RATE)
+    pcm, rate = _wav_stereo(path)
+    return dsp.meter_series(pcm, rate)
 
 
 def mix_numbers(path):
@@ -387,7 +400,7 @@ def mix_numbers(path):
     try:
         st = os.stat(path)
         return _mix_numbers(str(path), (st.st_mtime_ns, st.st_size))
-    except (OSError, ValueError, ImportError):
+    except (OSError, ValueError, ImportError, wave.Error):
         return None
 
 

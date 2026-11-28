@@ -155,6 +155,14 @@ class TestRelease080Dsp(unittest.TestCase):
             self.assertEqual(y.shape[1], round(n * ratio))
             self.assertLess(abs(20 * np.log10(np.abs(y).max() / 0.5)), 1.0, (ms, ratio))
 
+    def test_granular_domain_and_small_grain_clamping(self):
+        with self.assertRaises(ValueError):
+            dsp.granular(np.zeros((1, 1), dtype=np.float32), R)
+        x = 0.4 * np.sin(2 * np.pi * 220 * np.arange(500) / R)[None].astype(np.float32)
+        y = dsp.granular(x, 200, grain_ms=5.0)  # g = int(1.0) -> clamped to >= 2 without shape mismatch
+        self.assertEqual(y.shape, x.shape)
+        self.assertTrue(np.isfinite(y).all())
+
 
 if __name__ == "__main__":
     unittest.main()

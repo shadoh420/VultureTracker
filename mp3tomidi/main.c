@@ -7,6 +7,7 @@
 #include "resample.h"
 #include "retune.h"
 #include "tempo.h"
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,6 +24,10 @@ struct decoded_audio {
     unsigned sample_rate;
     unsigned channels;
 };
+
+static float sanitize_f32(float v) {
+    return isfinite(v) ? v : 0.0f;
+}
 
 static int decode_mp3_mono(const char *path, struct decoded_audio *out) {
     memset(out, 0, sizeof(*out));
@@ -48,9 +53,25 @@ static int decode_mp3_mono(const char *path, struct decoded_audio *out) {
     for (;;) {
         unsigned count = (unsigned)drmp3_read_pcm_frames_f32(&mp3, 2048, pcm);
         if (!count) break;
-        if (total + count > cap) {
+        if ((size_t)count > SIZE_MAX - total) {
+            fputs("MP3 too large.\n", stderr);
+            free(mono);
+            drmp3_uninit(&mp3);
+            return 0;
+        }
+        size_t need = total + count;
+        if (need > cap) {
             size_t next_cap = cap;
-            while (next_cap < total + count) next_cap *= 2;
+            while (next_cap < need) {
+                if (next_cap > SIZE_MAX / 2) { next_cap = need; break; }
+                next_cap *= 2;
+            }
+            if (next_cap > SIZE_MAX / sizeof(*mono)) {
+                fputs("MP3 buffer overflow.\n", stderr);
+                free(mono);
+                drmp3_uninit(&mp3);
+                return 0;
+            }
             float *grown = (float *)realloc(mono, next_cap * sizeof(*mono));
             if (!grown) {
                 perror("audio buffer");
@@ -62,10 +83,11 @@ static int decode_mp3_mono(const char *path, struct decoded_audio *out) {
             cap = next_cap;
         }
         if (mp3.channels == 1) {
-            memcpy(mono + total, pcm, count * sizeof(float));
+            for (unsigned i = 0; i < count; ++i)
+                mono[total + i] = sanitize_f32(pcm[i]);
         } else {
             for (unsigned i = 0; i < count; ++i)
-                mono[total + i] = (pcm[2 * i] + pcm[2 * i + 1]) * 0.5f;
+                mono[total + i] = sanitize_f32((pcm[2 * i] + pcm[2 * i + 1]) * 0.5f);
         }
         total += count;
     }
@@ -89,6 +111,28 @@ static uint16_t rd_u16le(const uint8_t *p) {
 static uint32_t rd_u32le(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static uint64_t rd_u64le(const uint8_t *p) {
+    return (uint64_t)rd_u32le(p) | ((uint64_t)rd_u32le(p + 4) << 32);
+}
+
+static void print_json_str(const char *s) {
+    putchar('"');
+    if (s) {
+        for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+            unsigned char c = *p;
+            if (c == '"' || c == '\\') { putchar('\\'); putchar(c); }
+            else if (c == '\b') fputs("\\b", stdout);
+            else if (c == '\f') fputs("\\f", stdout);
+            else if (c == '\n') fputs("\\n", stdout);
+            else if (c == '\r') fputs("\\r", stdout);
+            else if (c == '\t') fputs("\\t", stdout);
+            else if (c < 0x20) printf("\\u%04x", (unsigned)c);
+            else putchar(c);
+        }
+    }
+    putchar('"');
 }
 
 static int is_wav_file(const char *path) {
@@ -153,8 +197,8 @@ static int decode_wav_mono(const char *path, struct decoded_audio *out) {
             have_data = 1;
             break;
         } else {
-            long skip = (long)csz + (long)(csz & 1u);
-            if (skip < 0 || fseek(fp, skip, SEEK_CUR) != 0) break;
+            uint64_t skip = (uint64_t)csz + (uint64_t)(csz & 1u);
+            if (skip > (uint64_t)LONG_MAX || fseek(fp, (long)skip, SEEK_CUR) != 0) break;
         }
     }
 
@@ -177,9 +221,18 @@ static int decode_wav_mono(const char *path, struct decoded_audio *out) {
         fclose(fp);
         return 0;
     }
+    long data_pos = ftell(fp);
+    if (data_pos >= 0 && fseek(fp, 0, SEEK_END) == 0) {
+        long end_pos = ftell(fp);
+        fseek(fp, data_pos, SEEK_SET);
+        if (end_pos >= data_pos) {
+            uint64_t rem = (uint64_t)(end_pos - data_pos);
+            if ((uint64_t)data_bytes > rem) data_bytes = (uint32_t)rem;
+        }
+    }
     size_t n_frames = (size_t)(data_bytes / frame_bytes);
-    if (!n_frames) {
-        fputs("WAV contains no audio frames.\n", stderr);
+    if (!n_frames || n_frames > SIZE_MAX / sizeof(float)) {
+        fputs("WAV contains no readable audio frames.\n", stderr);
         fclose(fp);
         return 0;
     }
@@ -223,15 +276,17 @@ static int decode_wav_mono(const char *path, struct decoded_audio *out) {
                         v = (float)((double)iv * (1.0 / 2147483648.0));
                     }
                 } else if (bits == 32) {
-                    memcpy(&v, s, 4);
+                    uint32_t u = rd_u32le(s);
+                    memcpy(&v, &u, 4);
                 } else {
+                    uint64_t u = rd_u64le(s);
                     double dv = 0.0;
-                    memcpy(&dv, s, 8);
+                    memcpy(&dv, &u, 8);
                     v = (float)dv;
                 }
-                sum += v;
+                sum += sanitize_f32(v);
             }
-            mono[total + i] = sum * inv_ch;
+            mono[total + i] = sanitize_f32(sum * inv_ch);
         }
         total += got;
     }
@@ -361,8 +416,10 @@ static int run_independent_cli(const char *input_audio, const char *output_mid, 
            istats.split_bass_mid, istats.split_mid_high, istats.harmonic_ratio,
            estats.cc_events_total);
     for (size_t i = 0; i < n_enh_tracks; ++i) {
-        printf("%s{\"name\":\"%s\",\"program\":%d,\"is_drum\":%s,\"notes\":%zu,\"ccs\":%zu}",
-               i ? "," : "", enh_tracks[i].name, enh_tracks[i].program,
+        printf("%s{\"name\":", i ? "," : "");
+        print_json_str(enh_tracks[i].name);
+        printf(",\"program\":%d,\"is_drum\":%s,\"notes\":%zu,\"ccs\":%zu}",
+               enh_tracks[i].program,
                enh_tracks[i].is_drum ? "true" : "false",
                enh_tracks[i].count, enh_tracks[i].n_ccs);
     }
@@ -466,8 +523,10 @@ static int run_enhance_midi_cli(const char *input_audio, const char *in_mid, con
            estats.tracks_dropped, estats.drums_out, estats.drums_in, estats.drum_bleed_dropped,
            estats.programs_refined, estats.cc_events_total);
     for (size_t i = 0; i < n_enh; ++i) {
-        printf("%s{\"name\":\"%s\",\"program\":%d,\"is_drum\":%s,\"notes\":%zu,\"ccs\":%zu}",
-               i ? "," : "", enh[i].name, enh[i].program, enh[i].is_drum ? "true" : "false",
+        printf("%s{\"name\":", i ? "," : "");
+        print_json_str(enh[i].name);
+        printf(",\"program\":%d,\"is_drum\":%s,\"notes\":%zu,\"ccs\":%zu}",
+               enh[i].program, enh[i].is_drum ? "true" : "false",
                enh[i].count, enh[i].n_ccs);
     }
     printf("],\"elapsed_s\":%.3f}\n", elapsed);

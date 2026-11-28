@@ -21,17 +21,28 @@ if (typeof crypto === 'undefined') {
 // nor a TextDecoder, which the glue uses for C strings: a UTF-8 decoder for it
 if (typeof TextDecoder === 'undefined') {
   globalThis.TextDecoder = class {
-    decode(b) {
+    decode(input) {
       let s = '';
-      b = b || new Uint8Array(0);
+      const b = input == null ? new Uint8Array(0)
+        : input instanceof Uint8Array ? input
+        : ArrayBuffer.isView(input) ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength)
+        : new Uint8Array(input);
       for (let i = 0; i < b.length;) {
-        let c = b[i++];
-        if (c > 0x7f) {
-          const n = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : 1;
-          c &= 0x3f >> n;
-          for (let k = 0; k < n; k++) c = (c << 6) | (b[i++] & 0x3f);
+        const c0 = b[i++];
+        if (c0 < 0x80) { s += String.fromCharCode(c0); continue; }
+        const n = c0 >= 0xf0 && c0 <= 0xf4 ? 3 : c0 >= 0xe0 && c0 <= 0xef ? 2 : c0 >= 0xc2 && c0 <= 0xdf ? 1 : 0;
+        if (!n || i + n > b.length) { s += '\uFFFD'; continue; }
+        let cp = c0 & (0x3f >> n), ok = true;
+        for (let k = 0; k < n; k++) {
+          const cont = b[i + k];
+          if ((cont & 0xc0) !== 0x80) { i += k; ok = false; break; }
+          cp = (cp << 6) | (cont & 0x3f);
         }
-        s += String.fromCodePoint(c);
+        if (!ok) { s += '\uFFFD'; continue; }
+        i += n;
+        const minCp = n === 1 ? 0x80 : n === 2 ? 0x800 : 0x10000;
+        if (cp < minCp || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) s += '\uFFFD';
+        else s += String.fromCodePoint(cp);
       }
       return s;
     }
@@ -148,11 +159,14 @@ class VTEngine extends AudioWorkletProcessor {
         if (source?.score) {
           if (m.order != null) {
             const target = source.scoreFrameAt(m.order, m.row ?? 0), replay = source.fresh();
+            let time;
+            try { time = replay.scoreTimeAtRow(m.order, m.row ?? 0); }
+            catch (err) { replay.free(); throw err; }
             this.clearLoopReplay();
             const id = this.pending?.id ?? this.loadId;
             if (this.pending) this.pending.song.free();
             this.playing = false;
-            this.stageScore(replay, target, id, false, true, replay.scoreTimeAtRow(m.order, m.row ?? 0));
+            this.stageScore(replay, target, id, false, true, time);
           } else if (this.pending) this.pending.play = true;
           else this.playing = true;
           this.lastRow = null;
@@ -192,11 +206,11 @@ class VTEngine extends AudioWorkletProcessor {
         this.loop = m.span;
         this.clearLoopReplay();
       } else if (m.type === 'tempo') {
-        this.practice = null;
-        this.clearLoopReplay();
         const q = this.E.factorQ(m.factor), source = this.pending?.song || this.song;
         if (source?.score) {
           if (source.factorQ === q) { this.factor = m.factor; return; }
+          this.practice = null;
+          this.clearLoopReplay();
           const candidate = source.fresh(m.factor);
           let target, time;
           try {
@@ -214,6 +228,8 @@ class VTEngine extends AudioWorkletProcessor {
           this.stageScore(candidate, target, id, follow, play, time);
           if (this.pending) this.port.postMessage({type: 'preparing', reason: 'tempo', factorQ: q});
         } else {
+          if (m.factor !== this.factor) this.practice = null;
+          this.clearLoopReplay();
           this.song?.tempoFactor(m.factor);
           this.pending?.song.tempoFactor(m.factor);
           this.factor = m.factor;
@@ -260,7 +276,10 @@ class VTEngine extends AudioWorkletProcessor {
     }
     if (!this.loopReplay) {
       const candidate = this.song.fresh(nextFactor);
-      this.loopReplay = {song: candidate, target: this.scoreLoop(candidate).from};
+      let target;
+      try { target = this.scoreLoop(candidate).from; }
+      catch (err) { candidate.free(); throw err; }
+      this.loopReplay = {song: candidate, target};
     }
     const replay = this.loopReplay;
     replay.ready = replay.song.advanceTo(replay.target, max, this.sL, this.sR);
@@ -330,6 +349,11 @@ class VTEngine extends AudioWorkletProcessor {
       this.pending?.song.free(); this.pending = null;
       this.clearLoopReplay();
       this.song?.free(); this.song = null;
+      this.previewQuiet = -1;
+      this.held.clear();
+      this.countIn = null;
+      this.practice = null;
+      this.metroFrames = null;
       this.click = null;
       for (const channel of outputs[0]) channel.fill(0);
       this.port.postMessage({type: 'error', id, fatal: true, text: String(error.message || error)});
@@ -399,8 +423,12 @@ class VTEngine extends AudioWorkletProcessor {
               this.pending.resume = true;
             } else {
               const candidate = replay?.song || this.song.fresh(this.factor);
-              this.stageScore(candidate, this.scoreLoop(candidate).from, this.loadId, false, true,
-                              this.loop?.fromAt?.map(BigInt) ?? this.song.scoreTimeAtRow(...(this.loop?.from ?? [0, 0])));
+              let from, time;
+              try {
+                from = this.scoreLoop(candidate).from;
+                time = this.loop?.fromAt?.map(BigInt) ?? this.song.scoreTimeAtRow(...(this.loop?.from ?? [0, 0]));
+              } catch (err) { candidate.free(); throw err; }
+              this.stageScore(candidate, from, this.loadId, false, true, time);
             }
             this.port.postMessage({type: 'preparing', reason: 'loop'});
             break;

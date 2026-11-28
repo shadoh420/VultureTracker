@@ -184,6 +184,24 @@ class ProjectToolsTests(unittest.TestCase):
         self.assertIn('error', agent.run(st, 'relink_samples', {'links': {'1': 'b.wav'}}))
         self.assertTrue(st.song['samples'][1]['approved'])
 
+    def test_project_path_and_recipe_collect_guards(self):
+        from vulturetracker.project import collect
+        with tempfile.TemporaryDirectory() as outer:
+            outer = Path(outer)
+            outside_song = outer / 'escape.yaml'
+            self.assertIn('error', agent.run(self.st, 'create_project', {'path': str(outside_song)}))
+            self.assertFalse(outside_song.exists())
+            self.assertIn('error', agent.run(self.st, 'collect_project', {'destination': r'\\server\share\out'}))
+
+            ext_wav = outer / 'secret.wav'
+            write_wav(ext_wav, RATE, [sine(330)])
+            rec = self.dir / 'sounds.yaml'
+            rec.write_text(f"out_dir: .\nsamples:\n  a: {{file: '{ext_wav.as_posix()}', note: C-5}}\n", encoding='utf-8')
+            self.st.meta.setdefault('recipe_of', {})['1'] = {'recipe': str(rec), 'entry': 'a'}
+            self.st.save_meta()
+            with self.assertRaisesRegex(ValueError, 'outside project/library roots'):
+                collect(self.st, outer / 'collected')
+
 
 if __name__ == '__main__':
     unittest.main()

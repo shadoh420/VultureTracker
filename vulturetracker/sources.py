@@ -584,8 +584,11 @@ def drum(spec, base, rate, vary=None):
         lv = v(band, "level", 128, int)
         levels[band] = lv
         bf, df = w(v(band, "f", 1000.0)), v(band, "df", 50, int)
-        bq = df * df / (10000 - 6600 * (math.sqrt(max(bf, 0)) - 0.19))
-        step = max(1, 1 + int((40 - df / 2.5) / (bq + 1 + bf)))
+        denom = 10000 - 6600 * (math.sqrt(max(bf, 0)) - 0.19)
+        if abs(denom) < 1e-6:
+            denom = math.copysign(1e-6, denom) if denom else 1e-6
+        bq = df * df / denom
+        step = max(1, 1 + int((40 - df / 2.5) / max(bq + 1 + bf, 1e-6)))
         jitter = np.repeat(rng.random(n // step + 1) - 0.5, step)[:n]  # a new random offset every `step` frames
         out += np.cos(np.fmod(_TWO_PI / 8 + np.cumsum(bf + bq * jitter), _TWO_PI)) * env(band, "block") * lv * lv
     ot = np.zeros(n)
@@ -617,6 +620,8 @@ def drum(spec, base, rate, vary=None):
         elif mode == 2:  # ring modulation
             ot = ol * e1 * _waveform(ph1, w1) * ((1 - drive / 8) + drive / 8 * e2 * _waveform(ph2, w2))
         else:  # the 808 cymbal: six pulse trains between the two periods, through a band-pass swept by envelope 2
+            if of1 <= 0 or of2 <= 0:
+                raise SourceError("drum: overtones f1 and f2 must be positive for cymbal mode")
             ca = 0.28 + bal1 * bal1
             cq, cf = ca * ca, (1.8 - 0.7 * ca * ca) * 0.92
             p1, p2 = _TWO_PI / of1, _TWO_PI / of2
@@ -648,6 +653,8 @@ def drum(spec, base, rate, vary=None):
         fin = fout = 0.0
         for i in range(n):  # ponytail: a Python loop over the drum's frames
             k = fb[i]
+            if abs(k) < 1e-6:
+                k = math.copysign(1e-6, k) if k else 1e-6
             tmp = src[i] + res * (1 + 1 / k) * (fin - fout)
             fin = k * (fin - tmp) + tmp
             fout = k * (fout - fin) + fin
@@ -732,7 +739,8 @@ def _xml_text(node, tag, default=None):
 
 def _xml_float(node, tag, default):
     try:
-        return float(_xml_text(node, tag, default))
+        val = float(_xml_text(node, tag, default))
+        return val if math.isfinite(val) else default
     except (TypeError, ValueError):
         return default
 
@@ -814,4 +822,9 @@ def h2kit_member(path, kit, layer):
             member = tar.getmember(name)
         except KeyError:
             raise SourceError(f"{path}: the kit names {layer['file']}, which the archive does not hold")
-        return tar.extractfile(member).read()
+        if not member.isfile():
+            raise SourceError(f"{path}: {layer['file']} is not a regular file in the archive")
+        f = tar.extractfile(member)
+        if f is None:
+            raise SourceError(f"{path}: could not read {layer['file']} from the archive")
+        return f.read()

@@ -213,6 +213,8 @@ def read_it(data: bytes):
     pos = 0xC0
     orders = list(data[pos: pos + ordnum])
     pos += ordnum
+    if pos + 4 * (insnum + smpnum + patnum) > len(data):
+        raise ITReadError("truncated IT header pointer tables")
     ins_ptrs = struct.unpack_from(f"<{insnum}I", data, pos)
     pos += 4 * insnum
     smp_ptrs = struct.unpack_from(f"<{smpnum}I", data, pos)
@@ -269,7 +271,8 @@ def read_it(data: bytes):
         smp.c5_speed = c5 if c5 >= 256 else 8363
         if sflags & 1 and length:
             smp.bits = 16 if sflags & 2 else 8
-            frames += min(length, len(data)) * (2 if sflags & 4 else 1)  # a read stops at the file's end
+            est = length if (sflags & 8) else min(length, len(data))
+            frames += est * (2 if sflags & 4 else 1)  # compressed blocks can expand up to full length
             if frames > MAX_FRAMES:
                 raise ITReadError(f"the sample headers claim over {MAX_FRAMES // 1_000_000} million frames of sample data "
                                   f"(sample {len(mod.samples) + 1}): more than the reader holds")
@@ -320,6 +323,8 @@ def read_it(data: bytes):
 
     # the grid every pattern will take (64 wide while reading; a zero pointer or a bad row count an empty 64-row one),
     # summed before any is made so a header claiming thousands is refused at once
+    if any(p and p + 8 > len(data) for p in pat_ptrs):
+        raise ITReadError("truncated IT pattern header")
     claimed = sum(64 * (rows if 1 <= rows <= 1024 else 64)
                   for rows in (struct.unpack_from("<H", data, p + 2)[0] if p else 64 for p in pat_ptrs))
     if claimed > MAX_CELLS:
@@ -348,20 +353,30 @@ def read_it(data: bytes):
                 continue
             ch = (cv - 1) & 63
             if cv & 0x80:
+                if i >= len(pd):
+                    break
                 masks[ch] = pd[i]
                 i += 1
             m = masks[ch]
             c = grid[row][ch]
             if m & 1:
+                if i >= len(pd):
+                    break
                 last[ch].note = pd[i]
                 i += 1
             if m & 2:
+                if i >= len(pd):
+                    break
                 last[ch].instrument = pd[i]
                 i += 1
             if m & 4:
+                if i >= len(pd):
+                    break
                 last[ch].volcmd = pd[i]
                 i += 1
             if m & 8:
+                if i + 1 >= len(pd):
+                    break
                 last[ch].effect, last[ch].param = pd[i], pd[i + 1]
                 i += 2
             if m & 0x11:

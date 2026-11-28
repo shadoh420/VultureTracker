@@ -223,6 +223,7 @@ class Handler(BaseHTTPRequestHandler):
     transcription = TranscriptionReview()
     collection_cancel = threading.Event()
     collection_lock = threading.RLock()
+    singleton_lock = threading.Lock()
 
     @classmethod
     def collection(cls, body=None):
@@ -264,27 +265,35 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def fetch_faust(cls):
         from . import faust
-        if cls.faust_job and cls.faust_job["status"] == "fetching":
-            return cls.faust_job
-        job = cls.faust_job = {"status": "fetching", "got": 0, "size": 0, "error": None}
+        with cls.singleton_lock:
+            if cls.faust_job and cls.faust_job["status"] == "fetching":
+                return dict(cls.faust_job)
+            job = cls.faust_job = {"status": "fetching", "got": 0, "size": 0, "error": None}
+
+        def on_progress(got, size):
+            with cls.singleton_lock:
+                job.update(got=got, size=size)
 
         def run():
             try:
-                faust.fetch(lambda got, size: job.update(got=got, size=size))
-                job["status"] = "done"
+                faust.fetch(on_progress)
+                with cls.singleton_lock:
+                    job["status"] = "done"
             except (OSError, ValueError) as e:
-                job.update(status="failed", error=f"{type(e).__name__}: {e}")
+                with cls.singleton_lock:
+                    job.update(status="failed", error=f"{type(e).__name__}: {e}")
         threading.Thread(target=run, daemon=True).start()
         return job
 
     @classmethod
     def rec(cls):
-        if cls.recorder is None:
-            from .record import Recorder
-            if gui._read_json(gui.REC_SETTINGS, {}, []).get("asio"):  # sounddevice loads its ASIO build only when this is set first
-                os.environ.setdefault("SD_ENABLE_ASIO", "1")
-            cls.recorder = Recorder()
-        return cls.recorder
+        with cls.singleton_lock:
+            if cls.recorder is None:
+                from .record import Recorder
+                if gui._read_json(gui.REC_SETTINGS, {}, []).get("asio"):  # sounddevice loads its ASIO build only when this is set first
+                    os.environ.setdefault("SD_ENABLE_ASIO", "1")
+                cls.recorder = Recorder()
+            return cls.recorder
 
     @classmethod
     def rec_snapshot(cls, devices=False, spill=True):
@@ -292,6 +301,8 @@ class Handler(BaseHTTPRequestHandler):
         finished passes not saved yet are first kept on disk (record.spill), so GET /api/rec passes False: no GET
         writes."""
         from .record import MODE_NAMES, RecordError
+        with cls.song_lock:
+            st = cls.state
         r = cls.rec()
         out = {"available": True, "error": None, "fake": bool(os.environ.get("VT_FAKE_AUDIO")),
                "asio": bool(os.environ.get("SD_ENABLE_ASIO")), "asio_saved": bool(gui._read_json(gui.REC_SETTINGS, {}, []).get("asio")),
@@ -305,14 +316,14 @@ class Handler(BaseHTTPRequestHandler):
         except RecordError as e:
             out.update(available=False, error=str(e), devices=[])
         out["status"] = r.status()
-        out["takes"] = cls.state.takes if cls.state else []
+        out["takes"] = st.takes if st else []
         out["status"]["pending_save"] = bool(cls.pending_recording)
         from . import record
-        if spill and out["status"]["finished"] and not r.spill_id and cls.state is not None:  # backing passes done, not saved yet
+        if spill and out["status"]["finished"] and not r.spill_id and st is not None:  # backing passes done, not saved yet
             try:
                 takes, plan = r.peek_takes()
                 if takes:
-                    r.spill_id = record.spill(takes, r.rate, cls.state.song_path, plan["loops"] if plan else 0)
+                    r.spill_id = record.spill(takes, r.rate, st.song_path, plan["loops"] if plan else 0)
             except OSError:
                 pass
         live = {r.spill_id, (cls.pending_recording or {}).get("spill")}
@@ -461,10 +472,11 @@ class Handler(BaseHTTPRequestHandler):
     @classmethod
     def lib(cls):
         """The sample library's index (library.py), read on first use."""
-        if cls.library is None:
-            from .library import Library, default_index
-            cls.library = Library(default_index())
-        return cls.library
+        with cls.singleton_lock:
+            if cls.library is None:
+                from .library import Library, default_index
+                cls.library = Library(default_index())
+            return cls.library
 
     @classmethod
     def lib_snapshot(cls):
@@ -715,7 +727,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self._foreign():
             return self._send(403, {"error": "not this app's page"})
-        st = self.state
+        with self.song_lock:
+            st = self.state
         path = self.path.split("?")[0]
         if not (path in self.OPEN_PATHS or path.startswith(("/web/", "/faust/")) or self._authorized()):
             if path == "/":
@@ -849,10 +862,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": str(exc) or "no such order"})
         if path.startswith("/wav/"):
             k = path[5:]
-            r = st.renders.get(k)
-            return self._send_file(r["file"], "audio/wav") if r and r["status"] == "ready" else self._send(404, {"error": "not rendered"})
+            with st.lock:
+                r = dict(st.renders[k]) if k in st.renders else None
+            if not r or r["status"] != "ready":
+                return self._send(404, {"error": "not rendered"})
+            try:
+                return self._send_file(r["file"], "audio/wav")
+            except FileNotFoundError:
+                return self._send(404, {"error": "not rendered"})
         if path.startswith("/spec/"):
-            r = st.renders.get(path[6:])
+            k = path[6:]
+            with st.lock:
+                r = dict(st.renders[k]) if k in st.renders else None
             if not r or r["status"] != "ready":
                 return self._send(404, {"error": "not rendered"})
             p = Path(r["file"])
@@ -862,13 +883,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"error": f"{type(e).__name__}: {e}"})
             return self._send(200, png, "image/png")
         if path.startswith("/api/meters/"):  # a render's short-term loudness and stereo sums every 0.1 s (dsp.meter_series)
-            r = st.renders.get(path[12:])
+            k = path[12:]
+            with st.lock:
+                r = dict(st.renders[k]) if k in st.renders else None
             if not r or r["status"] != "ready":
                 return self._send(404, {"error": "not rendered"})
             p = Path(r["file"])
             try:
                 return self._send(200, _meters(str(p), (p.stat().st_mtime_ns, p.stat().st_size)))
-            except (OSError, ImportError, ValueError) as e:
+            except (OSError, ImportError, wave.Error, ValueError) as e:
                 return self._send(500, {"error": f"{type(e).__name__}: {e}"})
         if path.startswith("/refspec/"):  # ?view=ref|delta&scale=log|lin
             try:
@@ -919,8 +942,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {"error": "not this app's page"})
         if not self._authorized():
             return self._send(401, {"error": "no token: this app's page and its MCP bridge send this launch's"})
-        st = self.state
-        n = int(self.headers.get("Content-Length") or 0)
+        with self.song_lock:
+            st = self.state
+        raw_len = self.headers.get("Content-Length")
+        try:
+            n = 0 if raw_len is None or not raw_len.strip() else int(raw_len)
+        except ValueError:
+            return self._send(400, {"error": "invalid Content-Length"})
+        if n < 0:
+            return self._send(400, {"error": "invalid Content-Length"})
         act = self.path.split("?")[0].rsplit("/", 1)[-1]
         cap = UPLOAD_BYTES if act == "upload" else BODY_BYTES
         if act == 'score_export':
@@ -1009,9 +1039,11 @@ class Handler(BaseHTTPRequestHandler):
             elif act == "agentallow":  # ALLOW REPLACE: the agent's next export_song may replace earlier exports
                 if body.get("what") != "replace":
                     raise ValueError("only replace can be allowed")
-                st.agent_allow["replace"] = time.monotonic() + 120
+                with st.lock:
+                    st.agent_allow["replace"] = time.monotonic() + 120
             elif act == "selection":
-                st.selection = body.get("selection")
+                with st.lock:
+                    st.selection = body.get("selection")
                 return self._send(200, {"ok": True})
             elif act == "uistate":
                 if body.get("song") != str(st.song_path):
@@ -1034,18 +1066,24 @@ class Handler(BaseHTTPRequestHandler):
             elif act == "slot":
                 if not 1 <= int(body["slot"]) <= 99:
                     raise ValueError("a slot is 1-99")
-                st.meta["slot"] = int(body["slot"])
-                st.save_meta()
-                st.queue_all()
+                with st.lock:
+                    if st.closed:
+                        raise ValueError("song was closed")
+                    st.meta["slot"] = int(body["slot"])
+                    st.save_meta()
+                    st.queue_all()
             elif act == "orders":
                 o = body.get("orders")
                 if o is not None and not (isinstance(o, list) and len(o) == 2 and all(type(x) is int for x in o) and 0 <= o[0] < o[1]):
                     raise ValueError("the section is null or [first order, last order + 1]")
-                if o is not None and st.mod is not None and st.mod.native_score is not None:
-                    st._order_region(o)
-                st.meta["orders"] = o
-                st.save_meta()
-                st.queue_all()
+                with st.lock:
+                    if st.closed:
+                        raise ValueError("song was closed")
+                    if o is not None and st.mod is not None and st.mod.native_score is not None:
+                        st._order_region(o)
+                    st.meta["orders"] = o
+                    st.save_meta()
+                    st.queue_all()
             elif act == "loop":
                 st.set_loop(body)
             elif act == "reference":  # path or browse sets it, offset (ms) moves it, align (with key) lines it up, clear
@@ -1054,22 +1092,28 @@ class Handler(BaseHTTPRequestHandler):
                 muted, solo = sorted({int(i) for i in body.get("muted", [])}), None if body.get("solo") is None else int(body["solo"])
                 if any(not 0 <= i < 64 for i in muted + ([solo] if solo is not None else [])):  # patch_it writes header byte 0x40 + i
                     raise ValueError("a channel is 0-63")
-                st.meta["muted"], st.meta["solo"] = muted, solo
-                st.save_meta()
-                st.queue_all()
+                with st.lock:
+                    if st.closed:
+                        raise ValueError("song was closed")
+                    st.meta["muted"], st.meta["solo"] = muted, solo
+                    st.save_meta()
+                    st.queue_all()
             elif act == "add":
                 return self._send(200, {"added": st.add_candidates(body["globs"])})
             elif act == "remove":
                 st.remove_candidate(st.cand(body["id"]))
             elif act == "rate":
-                c = st.cand(body["id"])
                 if "stars" in body and (type(body["stars"]) is not int or not 0 <= body["stars"] <= 5):
                     raise ValueError("stars are a whole number 0-5")
-                r = st.meta["ratings"].setdefault(c, {})
-                for k, kind in (("stars", int), ("rejected", bool), ("note", str)):
-                    if k in body:
-                        r[k] = kind(body[k])
-                st.save_meta()
+                with st.lock:
+                    if st.closed:
+                        raise ValueError("song was closed")
+                    c = st.cand(body["id"])
+                    r = st.meta["ratings"].setdefault(c, {})
+                    for k, kind in (("stars", int), ("rejected", bool), ("note", str)):
+                        if k in body:
+                            r[k] = kind(body[k])
+                    st.save_meta()
             elif act == "similar":  # the slot's WAV, a candidate (id) or any WAV (path): its nearest become candidates
                 q = body.get("path") or (st.cand(body["id"]) if body.get("id") is not None else st.current_file())
                 if not q or not Path(q).exists():
@@ -1093,8 +1137,11 @@ class Handler(BaseHTTPRequestHandler):
                     report += st.faust_recipe(f, body["faust"])
                 return self._send(200, {"report": report})
             elif act == "faustcode":  # the FAUST tab's code as it is typed, kept with the song
-                st.meta["faust_code"] = str(body.get("code") or "")[:200000]
-                st.save_meta()
+                with st.lock:
+                    if st.closed:
+                        raise ValueError("song was closed")
+                    st.meta["faust_code"] = str(body.get("code") or "")[:200000]
+                    st.save_meta()
             elif act == "want":
                 st.set_want(st.cand(body["id"]) if body.get("id") is not None else None)
             elif act == "match":  # MATCH LEVEL: playback only
@@ -1189,8 +1236,11 @@ class Handler(BaseHTTPRequestHandler):
                 settings = body.get('settings')
                 if not isinstance(settings, dict) or len(json.dumps(settings)) > 2 * 1024 * 1024:
                     raise ValueError('Project browser settings must be an object under 2 MiB')
-                st.meta['project_settings'] = settings
-                st.save_meta()
+                with st.lock:
+                    if st.closed:
+                        raise ValueError("song was closed")
+                    st.meta['project_settings'] = settings
+                    st.save_meta()
             elif act == "materialize":
                 st.materialize_pattern(body['pattern'])
             elif act == "trimhistory":

@@ -39,6 +39,32 @@ class TestBandDelivery(unittest.TestCase):
             st.close()
         self.unchanged()
 
+    def test_write_pdf_serves_config_route_without_inline_script_json(self):
+        import json, urllib.request
+        from types import SimpleNamespace
+        from vulturetracker import score_pdf
+        seen = {}
+        def inspect_browser(args, **kwargs):
+            url = args[-1]
+            with urllib.request.urlopen(url, timeout=5) as r:
+                seen['html'] = r.read().decode('utf-8')
+            with urllib.request.urlopen(url + '/config', timeout=5) as r:
+                seen['config'] = json.loads(r.read().decode('utf-8'))
+            kwargs['stderr'].write(b'done')
+            return SimpleNamespace(returncode=1, poll=lambda: 1, wait=lambda: 1)
+        st = gui.State(self.path, headless=True)
+        try:
+            with patch.object(score_pdf, 'browser_executable', return_value='test-browser'), \
+                    patch.object(score_pdf.subprocess, 'Popen', side_effect=inspect_browser), \
+                    self.assertRaises(ValueError):
+                score_pdf.write_pdf(st.score_view(), self.root / 'out.pdf',
+                                    dict(paper='a4', notation='both', scale=65),
+                                    threading.Event(), track='</script><script>alert(1)</script>')
+            self.assertNotIn('alert(1)', seen['html'])
+            self.assertEqual(seen['config']['track'], '</script><script>alert(1)</script>')
+        finally:
+            st.close()
+
     def test_grouped_part_stems_and_real_audio(self):
         st = gui.State(self.path, headless=True)
         try:

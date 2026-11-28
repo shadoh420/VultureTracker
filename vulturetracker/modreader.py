@@ -212,7 +212,7 @@ S3M_SHARED = set("DEFIJKLQRS")
 def read_s3m(data: bytes):
     """A Scream Tracker 3 module -> (Module, warnings). Sample mode; Amiga pitch slides; IT's old effects; ST3's shared
     effect memory written out as explicit parameters; AdLib instruments dropped."""
-    if data[0x2C:0x30] != b"SCRM":
+    if len(data) < 0x60 or data[0x2C:0x30] != b"SCRM":
         raise ModReadError("not an S3M (no SCRM signature)")
     warn = _Warn()
     nord, nins, npat, flags, cwt, ffi = struct.unpack_from("<6H", data, 0x20)
@@ -232,6 +232,8 @@ def read_s3m(data: bytes):
     mod.mix_volume = round((mv & 0x7F) * (1 if stereo or uc else 0.73))
     mod.old_effects = True  # IT's old effects play ST3's vibrato and tremolo (measured)
     p = 0x60 + nord
+    if p + 2 * nins + 2 * npat > len(data):
+        raise ModReadError("truncated S3M header")
     insptr = struct.unpack_from(f"<{nins}H", data, p)
     patptr = struct.unpack_from(f"<{npat}H", data, p + 2 * nins)
     pans = data[p + 2 * nins + 2 * npat: p + 2 * nins + 2 * npat + 32] if dp == 0xFC else b""
@@ -368,7 +370,7 @@ def read_xm(data: bytes):
     """A FastTracker 2 module -> (Module, warnings). Instrument mode: XM's per-instrument samples become one global
     list, each with its relative note and finetune in its c5 speed and its panning as the sample's pan; a key-off on an
     instrument without a volume envelope cuts the note, as in FT2."""
-    if data[:17] != b"Extended Module: ":
+    if len(data) < 80 or data[:17] != b"Extended Module: ":
         raise ModReadError("not an XM (no 'Extended Module: ' header)")
     warn = _Warn()
     ver = struct.unpack_from("<H", data, 58)[0]
@@ -388,7 +390,11 @@ def read_xm(data: bytes):
     pos = 60 + hsize
     cells = 0
     for p in range(npat):
+        if pos + 9 > len(data):
+            raise ModReadError(f"truncated XM pattern {p}")
         plen, _pack, nrows, psize = struct.unpack_from("<IBHH", data, pos)
+        if plen < 9 or pos + plen > len(data):
+            raise ModReadError(f"invalid XM pattern header length at pattern {p}")
         pd = data[pos + plen: pos + plen + psize]
         pos += plen + psize
         if nrows > 1024:  # no tracker plays it (FT2 stops at 256, libopenmpt at 1024): left empty, not allocated
@@ -421,9 +427,14 @@ def read_xm(data: bytes):
                     _xm_cell(rows[r][c], *vals, warn)
         mod.patterns.append(Pattern(f"p{p:02d}", rows))
     mod.instruments = []
+    frames = 0
     for n in range(nins):
+        if pos + 4 > len(data):
+            raise ModReadError(f"truncated XM instrument {n + 1}")
         isize = struct.unpack_from("<I", data, pos)[0]
-        ins = Instrument(name=_cstr(data[pos + 4:pos + 26], cs)[:25])
+        if isize < 4 or pos + isize > len(data):
+            raise ModReadError(f"invalid XM instrument header size ({isize}) at instrument {n + 1}")
+        ins = Instrument(name=_cstr(data[pos + 4:pos + min(isize, 26)], cs)[:25] if isize > 4 else "")
         mod.instruments.append(ins)
         nsmp = struct.unpack_from("<H", data, pos + 27)[0] if isize >= 29 else 0
         if not nsmp:
@@ -433,7 +444,11 @@ def read_xm(data: bytes):
         if len(mod.samples) + nsmp > MAX_SAMPLES:
             raise ModReadError(f"instrument {n + 1} claims {nsmp} samples, {len(mod.samples) + nsmp} in all; FastTracker 2 "
                                f"holds 16 an instrument (the reader stops at {MAX_SAMPLES})")
+        if isize < 241 or pos + 241 > len(data):
+            raise ModReadError(f"truncated XM instrument {n + 1} header")
         shsize = struct.unpack_from("<I", data, pos + 29)[0]
+        if shsize < 40:
+            raise ModReadError(f"invalid XM sample header size ({shsize}) at instrument {n + 1}")
         o = pos
         keys = data[o + 33:o + 129]
         venv, penv = struct.unpack_from("<24H", data, o + 129), struct.unpack_from("<24H", data, o + 177)
@@ -442,6 +457,8 @@ def read_xm(data: bytes):
         pos += isize
         heads = []
         for s in range(nsmp):
+            if pos + shsize > len(data):
+                raise ModReadError(f"truncated XM sample header at instrument {n + 1}")
             length, lstart, llen, vol, fine, typ, pan, rel = struct.unpack_from("<IIIBbBBb", data, pos)
             heads.append((length, lstart, llen, vol, fine, typ, pan, rel, _cstr(data[pos + 18:pos + 40], cs), data[pos + 17]))
             pos += shsize
@@ -455,6 +472,10 @@ def read_xm(data: bytes):
                 warn("ADPCM-packed XM samples dropped")
                 continue
             is16 = bool(typ & 16)
+            frames += len(raw) // (2 if is16 else 1)
+            if frames > MAX_FRAMES:
+                raise ModReadError(f"the sample headers claim over {MAX_FRAMES // 1_000_000} million frames of sample "
+                                   f"data (instrument {n + 1}): more than the reader holds")
             if is16:
                 vals, acc = [], 0
                 for (d,) in struct.iter_unpack("<h", raw[:len(raw) // 2 * 2]):

@@ -825,7 +825,7 @@ option.hascand{color:var(--acc);font-weight:700}
 // this launch's API token (the server writes it into the meta tag): every fetch of the app's own paths sends it, and
 // tok() adds it to what an <audio> or <img> loads by URL, since those send no header
 const TOKEN=document.querySelector('meta[name=vt-token]').content,tok=u=>u+(u.includes('?')?'&':'?')+'token='+TOKEN;
-{const f=window.fetch;window.fetch=(u,o={})=>typeof u==='string'&&u.startsWith('/')?f(u,{...o,headers:{...o.headers,'X-VT-Token':TOKEN}}):f(u,o)}
+{const f=window.fetch;window.fetch=(u,o={})=>typeof u==='string'&&u.startsWith('/')&&!u.startsWith('//')?f(u,{...o,headers:{...o.headers,'X-VT-Token':TOKEN}}):f(u,o)}
 let S=null,sel=null,solo=false,filter='all',sort='added',diffId=null,focus=null,PAT={key:null,rows:null,order:-1,active:[],row:-2};
 let hexRows=false;try{hexRows=localStorage.hexrows==='1'}catch(e){}
 // UI SCALE: the whole page zoomed (CSS zoom: the fonts are fixed px and the app window has no Ctrl+wheel or Ctrl+= zoom)
@@ -1647,11 +1647,11 @@ async function rehearsalStart(){
 function lvStart(){if(LV.ready){if(!LV.broken)return LV.ready;
   return LV.recovering||(LV.recovering=LV.ready.then(()=>lvLoad(false)).then(()=>{if(LV.broken)throw new Error(LV.err||'Playback reload failed')}).finally(()=>LV.recovering=null))}
   LV.ready=(async()=>{const ctx=LV.ctx=new AudioContext({latencyHint:lvLatency==='0'?0:lvLatency});
-    await ctx.audioWorklet.addModule('/engine-worklet.js');const wasm=await (await fetch('/web/libopenmpt.wasm')).arrayBuffer();
+    await ctx.audioWorklet.addModule('/engine-worklet.js');const wr=await fetch('/web/libopenmpt.wasm');if(!wr.ok)throw new Error('libopenmpt.wasm HTTP '+wr.status);const wasm=await wr.arrayBuffer();
     const node=new AudioWorkletNode(ctx,'vt-engine',{numberOfInputs:0,outputChannelCount:[2],processorOptions:{wasm}});node.connect(ctx.destination);LV.an=ctx.createAnalyser();LV.an.fftSize=2048;node.connect(LV.an);
     await new Promise((ok,fail)=>{node.port.onmessage=e=>{if(e.data.type==='ready'){LV.version=e.data.version;ok()}else if(e.data.type==='error')fail(new Error(e.data.text))}});
     LV.node=node;node.port.onmessage=e=>lvMsg(e.data);await lvLoad(false)})();
-  LV.ready.catch(e=>{LV.err=String(e.message||e);LV.ready=null;renderLiveBar()});return LV.ready}
+  LV.ready.catch(e=>{if(LV.ctx){LV.ctx.close().catch(()=>{});LV.ctx=null}LV.node=null;LV.an=null;LV.held={};LV.err=String(e.message||e);LV.ready=null;renderLiveBar()});return LV.ready}
 // each load carries an id: its 'loaded' ends the wait for it and every earlier load (a pending swap replaced by a newer
 // one never reports), its 'error' ends the wait with the reason; the key then names the failure, so the next change retries
 async function lvLoad(keep){const key=lvKey(),id=LV.loadId=(LV.loadId||0)+1,r=await fetch('/api/playback?sample_rate='+LV.ctx.sampleRate);
@@ -1689,7 +1689,7 @@ function lvMsg(m){if(m.type==='pos'){LV.pos=m;LV.playing=m.playing;LV.oi=S?.song
   else if(m.type==='preparing'){LV.preparing=true;renderLiveBar()}
   else if(m.type==='loaded'){LV.preparing=false;for(const id in LV.loads||{})if(+id<=m.id){LV.loads[id].ok();delete LV.loads[id]}renderLiveBar()}
   else if(m.type==='note'){const h=LV.held[m.id];if(h&&h.release){LV.node.port.postMessage({type:'noteoff',ch:m.ch,on:m.on});delete LV.held[m.id]}else if(h)LV.held[m.id]=m}
-  else if(m.type==='error'){LV.preparing=false;if(m.fatal){LV.broken=true;LV.playing=false;LV.pos=null;LV.key='failed '+lvKey();LV.err=m.text;
+  else if(m.type==='error'){LV.preparing=false;LV.held={};if(m.fatal){LV.broken=true;LV.playing=false;LV.pos=null;LV.key='failed '+lvKey();LV.err=m.text;
       for(const id in LV.loads||{}){LV.loads[id].fail(new Error(m.text));delete LV.loads[id]}renderLiveBar();return}
     const w=m.id!=null&&LV.loads&&LV.loads[m.id];if(w){delete LV.loads[m.id];w.fail(new Error(m.text))}else{LV.err=m.text;renderLiveBar()}}}
 // what the engine should be doing, sent only when it changes: mutes (solo = every other channel), the loop, the speed; a changed song or mix swaps the song in
@@ -1728,7 +1728,7 @@ function lvPlayCursor(){if(LV.playing)return lvStop();lvPatLoop=false;lvPlay(CUR
 function lvPlayPause(){if(LV.playing)return agCue({action:'pause'});lvPatLoop=false;
   if(pausedTransport&&pausedTransport.engine==='live')agCue({action:'resume'},S.song.path).catch(e=>{LV.err=String(e);renderLiveBar()});else lvPlay(0,0,true)}
 function lvLoopPattern(){lvPatLoop=!(lvPatLoop&&LV.playing);if(lvPatLoop)lvPlay(CUR.o,CUR.row);else lvStop()}
-function lvStop(){if(REHEARSAL.active)$('rehearsal-status').textContent='Practice stopped · written tempo unchanged';REHEARSAL.active=false;pausedTransport=null;playEpoch++;if(PK.srcs.size)pkStop();if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=liveSourceRow()}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar();
+function lvStop(){if(REHEARSAL.active)$('rehearsal-status').textContent='Practice stopped · written tempo unchanged';REHEARSAL.active=false;pausedTransport=null;playEpoch++;LV.held={};if(PK.srcs.size)pkStop();if(LV.node)LV.node.port.postMessage({type:'stop'});if(LV.playing&&LV.pos&&LV.oi>=0){CUR.o=LV.oi;CUR.row=liveSourceRow()}LV.playing=false;lvPatLoop=false;if(LV.node)lvSync();renderLiveBar();
   followScorePlayhead()}  // the TAB stops refusing edits at once, not on the next 100 ms tick
 function lvSetLatency(v){lvLatency=v;try{localStorage.lvlatency=v}catch(e){}if(PK.ctx){pkStop();PK.ctx.close();PK.ctx=FA.node=null}if(LV.ctx){lvStop();LV.ctx.close();Object.assign(LV,{ctx:null,node:null,ready:null,key:'',pos:null,oi:-1,sent:{}})}renderLiveBar()}
 function renderLiveBar(){if(!S||!S.song||!S.song.facts)return;const f=S.song.facts,ins=f.instruments&&f.instruments.length?f.instruments.map((n,i)=>[i,`${pad(i+1)} ${n}`]):f.samples.map((s,i)=>[i,`${pad(s.num)} ${s.name}`]);
@@ -2022,7 +2022,7 @@ function renderIns(){if(!$('ins-edit')||!S.song.facts)return;const f=S.song.fact
   if(!EDQ.n&&(INS_SEL==null||!ins[INS_SEL]))INS_SEL=nums[0]||null;  // a selection made by NEW or CLONE waits for its write
   $('ins-n').textContent=nums.length;$('ins-sn').textContent=f.samples.length;put('ins-newslot',slotOpts(null));
   put('ins-list',nums.map(n=>{const e=ins[n]||{},what=e.keymap?`keymap · ${e.keymap.length}`:e.sample!=null?`slot ${pad(slotNum(e.sample)||0)}`:'no notes';
-    return `<div class="stem ${n===INS_SEL?'solo':''}" style="cursor:pointer" onclick="INS_SEL='${n}';renderIns()"><span class="n">${pad(+n)}</span><span class="nm">${esc(e.name||'')}</span><span class="smp">${esc(what)}</span></div>`}).join('')||'<div style="padding:8px;color:var(--dim)">no instruments: the song plays samples directly</div>');
+    return `<div class="stem ${n===INS_SEL?'solo':''}" style="cursor:pointer" onclick="INS_SEL=${attr(n)};renderIns()"><span class="n">${pad(+n)}</span><span class="nm">${esc(e.name||'')}</span><span class="smp">${esc(what)}</span></div>`}).join('')||'<div style="padding:8px;color:var(--dim)">no instruments: the song plays samples directly</div>');
   put('ins-slots',f.samples.map(s=>`<div class="row"><span class="mono">${pad(s.num)} ${esc(s.name)}</span><span style="font-size:9.5px">${s.length.toFixed(2)} s${s.loop?' · loop':''}</span></div>`).join(''));
   $('ins-msg').style.color=EDQ.err?'var(--red)':'var(--dim)';$('ins-msg').textContent=EDQ.err?'refused (the song is unchanged): '+EDQ.err:EDQ.n?'writing…':INS_REPORT||'written into the song file in place · the piano keys (Z–M, Q–U, OCT in the Pattern tab) play it · Ctrl+Z in the Pattern tab undoes';$('ins-msg').title=$('ins-msg').textContent;
   const e=insEntry();$('ins-title').textContent=e?`INSTRUMENT ${pad(+INS_SEL)} · ${e.name||''}`:INS_SEL!=null&&EDQ.n?`INSTRUMENT ${pad(+INS_SEL)} · writing…`:'INSTRUMENT';$('ins-del').classList.toggle('dimb',!e);if(!e){put('ins-edit','');return}
@@ -2039,7 +2039,7 @@ function renderIns(){if(!$('ins-edit')||!S.song.facts)return;const f=S.song.fact
     :`<div style="color:var(--amber)">no notes mapped: the instrument is silent</div><span class="btn sm" onclick="insSet(x=>{x.sample=${f.samples[0]?f.samples[0].num:1}})">PLAY ONE SLOT</span>`;
   const envs=ENVS.map(([k,label,lo,hi])=>{const env=ENVD&&ENVD.kind===k?ENVD.env:e[k],on=env&&env.enabled!==false;
     const head=`<div style="display:flex;align-items:center;gap:8px;margin:14px 0 4px;font:9.5px var(--mono);color:var(--dim)"><span class="k">${label}</span><label><input type="checkbox" ${on?'checked':''} onchange="insSet(x=>{if(!x['${k}'])x['${k}']={nodes:[[0,${k==='volume_envelope'?64:0}],[16,${k==='volume_envelope'?64:0}]]};else if(this.checked)delete x['${k}'].enabled;else x['${k}'].enabled=false})"> on</label>`+
-      (env&&env.lfo?`<span class="lfo-note" title="lfo: in the song file; the compiler writes it as envelope nodes and a loop">LFO ${esc(Object.entries(env.lfo).map(([a,b])=>a+' '+b).join(', ')||'sine')} · edit it in the song file</span><span class="btn sm" onclick="insSet(x=>{delete x['${k}']})" title="remove the envelope">✕</span>`:env?`<span>SUSTAIN <span class="tv" style="color:#d9a441" onclick="typeIn(this,0,0,v=>{const s=spanParse(v,false);if(s===undefined)return;insSet(x=>{if(s==null)delete x['${k}'].sustain;else x['${k}'].sustain=s})},'${spanTxt(env.sustain)}',s=>s)" title="a node (2) held until note-off, or a span (1-3) looped until then; empty: none">${spanTxt(env.sustain)}</span></span><span>LOOP <span class="tv" style="color:#8fb0c4" onclick="typeIn(this,0,0,v=>{const s=spanParse(v,true);if(s===undefined)return;insSet(x=>{if(s==null)delete x['${k}'].loop;else x['${k}'].loop=s})},'${spanTxt(env.loop)}',s=>s)" title="a span of nodes (0-3) looped for good; empty: none">${spanTxt(env.loop)}</span></span>`+
+      (env&&env.lfo?`<span class="lfo-note" title="lfo: in the song file; the compiler writes it as envelope nodes and a loop">LFO ${esc(Object.entries(env.lfo).map(([a,b])=>a+' '+b).join(', ')||'sine')} · edit it in the song file</span><span class="btn sm" onclick="insSet(x=>{delete x['${k}']})" title="remove the envelope">✕</span>`:env?`<span>SUSTAIN <span class="tv" style="color:#d9a441" onclick="typeIn(this,0,0,v=>{const s=spanParse(v,false);if(s===undefined)return;insSet(x=>{if(s==null)delete x['${k}'].sustain;else x['${k}'].sustain=s})},${attr(spanTxt(env.sustain))},s=>s)" title="a node (2) held until note-off, or a span (1-3) looped until then; empty: none">${esc(spanTxt(env.sustain))}</span></span><span>LOOP <span class="tv" style="color:#8fb0c4" onclick="typeIn(this,0,0,v=>{const s=spanParse(v,true);if(s===undefined)return;insSet(x=>{if(s==null)delete x['${k}'].loop;else x['${k}'].loop=s})},${attr(spanTxt(env.loop))},s=>s)" title="a span of nodes (0-3) looped for good; empty: none">${esc(spanTxt(env.loop))}</span></span>`+
       `<label><input type="checkbox" ${env.carry?'checked':''} onchange="insSet(x=>{if(this.checked)x['${k}'].carry=true;else delete x['${k}'].carry})"> carry</label>`+(k==='pitch_envelope'?`<label title="the envelope moves the filter cutoff instead of the pitch"><input type="checkbox" ${env.filter?'checked':''} onchange="insSet(x=>{if(this.checked)x['${k}'].filter=true;else delete x['${k}'].filter})"> filter</label>`:'')+
       `<span class="btn sm" onclick="insSet(x=>{delete x['${k}']})" title="remove the envelope">✕</span><span>${env.nodes.length} nodes · drag · click to add · right-click to remove</span>`:'')+`</div>`;
     return head+(env&&!env.lfo?`<div onmousedown="envDown(event,'${k}',${lo},${hi})" oncontextmenu="envCtx(event,'${k}')">${envSvg(k,env,lo,hi)}</div>`:'')}).join('');

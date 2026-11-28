@@ -837,6 +837,23 @@ class TestDemo(unittest.TestCase):
                           "pattern 'a', row 8, channel 2: sample 02"])
         self.assertEqual(res["libopenmpt"]["channels"], 16)
 
+    def test_itwriter_bounds_and_openmpt_closed_module_guard(self):
+        from vulturetracker.itwriter import write_it
+        from vulturetracker.model import Channel, Envelope, Instrument, Module
+        from vulturetracker.openmpt import LoadedModule, OpenMPTError
+        bad_env = Module(channels=[Channel()], instruments=[Instrument(volume_envelope=Envelope([(i, 32) for i in range(26)]))])
+        with self.assertRaisesRegex(ValueError, "25 nodes"):
+            write_it(bad_env)
+        bad_ch = Module(channels=[Channel() for _ in range(65)])
+        with self.assertRaisesRegex(ValueError, "64 channels"):
+            write_it(bad_ch)
+        ok_blob = write_it(Module(channels=[Channel()]))
+        lm = LoadedModule(ok_blob)
+        lm.close()
+        for call in (lm.duration, lm.info, lm.render, lambda: lm.metadata("title"), lambda: lm.cell_text(0, 0, 0)):
+            with self.assertRaises(OpenMPTError):
+                call()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -819,7 +819,7 @@ class State:
                 self.error = None
             except SongError as e:
                 self.error = e.errors
-                self.it = None
+                self.mod = self.it = self.facts = self.sound_table = None
             try:
                 self.song = api.from_yaml(self.text)
             except yaml.YAMLError:  # a syntax error: it is in self.error already, and the app opens on it
@@ -882,9 +882,10 @@ class State:
             return True
 
     def save_meta(self):
-        if self.read_only:  # the settings stay in this window (the notice says so)
-            return
-        _atomic_text(self.meta_path, json.dumps(relative_meta(self.meta, self.base_dir), indent=1))
+        with self.lock:
+            if self.read_only or self.closed:  # the settings stay in this window (the notice says so)
+                return
+            _atomic_text(self.meta_path, json.dumps(relative_meta(self.meta, self.base_dir), indent=1))
 
     def _writable(self):
         if self.read_only:
@@ -1132,13 +1133,17 @@ class State:
             stamp = (st.st_mtime, st.st_size)
         except OSError:
             stamp = None
-        if path not in self.meas or self.meas_stamp.get(path) != stamp:
+        with self._measure_guard:
+            if path in self.meas and self.meas_stamp.get(path) == stamp:
+                return self.meas[path]
+        try:
+            res = measure(path)
+        except (OSError, ValueError) as e:
+            res = {"error": str(e)}
+        with self._measure_guard:
             self.meas_stamp[path] = stamp
-            try:
-                self.meas[path] = measure(path)
-            except (OSError, ValueError) as e:
-                self.meas[path] = {"error": str(e)}
-        return self.meas[path]
+            self.meas[path] = res
+            return res
 
     def add_candidates(self, globs):
         found = []
@@ -1185,33 +1190,32 @@ class State:
         """The tryout section (`whole`: the whole song) compiled with `cand` in the slot (None: the song as it is), memoised
         per compile key."""
         with self.lock:
-            inst = self.mix().get("instrument") or {}
+            inst = copy.deepcopy(self.mix().get("instrument") or {})
             if whole and not cand and self.it and self.it_stamps == (self._stamps or "|".join(_stamp(f) for f in self.files)) and not any(int(n) in (self.song.get("instruments") or {}) for n in inst):
                 return self.it  # the song as reload compiled it: the same bytes as compiling it again from the dict
-        ck = self.ckey(cand) + ("|whole" if whole else "")
-        if ck not in self.compiled:
-            with self.lock:
-                span = None
-                if not whole and self.orders and self.facts:
-                    a, b = self.orders
-                    playable = self.facts['orders']
-                    if not 0 <= a < b <= len(playable):
-                        raise ValueError('Selected order range is no longer valid')
-                    span = (playable[a]['order'], playable[b-1]['order']+1)
-                base, slot = api.tryout_song(self.song, span, compiled=self.mod), self.slot
-                inst = self.mix().get("instrument") or {}
-            for n, edit in inst.items():
-                if int(n) in (base.get("instruments") or {}):
-                    base["instruments"][int(n)] = voice_entry(base["instruments"][int(n)], edit)
-            if cand:
-                api.swap_sample(base, slot, Path(cand).resolve())
-            it = api.compile_song(base, self.base_dir)[0]
-            with self.lock:  # several workers: the memo changes under the lock only
-                while len(self.compiled) >= 8:
-                    self.compiled.pop(next(iter(self.compiled)))
-                self.compiled[ck] = it
-            return it
-        return self.compiled.get(ck) or self.compiled_it(cand, whole)
+            ck = self.ckey(cand) + ("|whole" if whole else "")
+            hit = self.compiled.get(ck)
+            if hit is not None:
+                return hit
+            span = None
+            if not whole and self.orders and self.facts:
+                a, b = self.orders
+                playable = self.facts['orders']
+                if not 0 <= a < b <= len(playable):
+                    raise ValueError('Selected order range is no longer valid')
+                span = (playable[a]['order'], playable[b-1]['order']+1)
+            base, slot = api.tryout_song(self.song, span, compiled=self.mod), self.slot
+        for n, edit in inst.items():
+            if int(n) in (base.get("instruments") or {}):
+                base["instruments"][int(n)] = voice_entry(base["instruments"][int(n)], edit)
+        if cand:
+            api.swap_sample(base, slot, Path(cand).resolve())
+        it = api.compile_song(base, self.base_dir)[0]
+        with self.lock:  # several workers: the memo changes under the lock only
+            while len(self.compiled) >= 8:
+                self.compiled.pop(next(iter(self.compiled)))
+            self.compiled[ck] = it
+        return it
 
     def live_it(self):
         """What the live engine plays: the whole song as it is now with the unwritten mix (faders patched into the header,
@@ -1421,13 +1425,13 @@ class State:
                     if self.key(cand) != k:
                         self.renders.pop(k, None)
                         continue
-                    self.renders[k].update(status="ready", file=str(out), peak=_peak(pcm))
+                    self.renders.setdefault(k, {"file": str(out), "error": None}).update(status="ready", file=str(out), peak=_peak(pcm))
                 if cand is None or cand == self.want:
                     mix_numbers(out)  # measured now, so the page's next poll does not wait for it
                 self._prune()
             except Exception as e:  # noqa: BLE001 - shown in the UI, worker must survive
                 with self.lock:
-                    self.renders[k].update(status="failed", error=f"{type(e).__name__}: {e}")
+                    self.renders.setdefault(k, {"file": str(self.cache_dir / f"{k}.wav")}).update(status="failed", error=f"{type(e).__name__}: {e}")
 
     def _job_failed(self, job, error):
         """The job ends in its own failed state with the message, as the page shows it."""
@@ -1447,7 +1451,7 @@ class State:
 
     def _meters(self, mk):
         with self.lock:
-            if not self.meters or self.meters["key"] != mk:
+            if not self.meters or self.meters["key"] != mk or not self.facts:
                 return
             self.meters["status"] = "measuring"
             mix, nch = self.meters["mix"], len(self.facts["channels"])
@@ -1480,9 +1484,15 @@ class State:
         than `limit` bytes (CACHE_BYTES; the newest always stays), re-queue what is current."""
         limit = CACHE_BYTES if limit is None else limit
         with self.lock:
+            wavs = []
+            for p in self.cache_dir.glob("*.wav"):
+                try:
+                    s = p.stat()
+                except FileNotFoundError:
+                    continue
+                wavs.append((s.st_mtime, s.st_size, p))
             total = 0
-            for i, (_, size, p) in enumerate(sorted(((s.st_mtime, s.st_size, p) for p in self.cache_dir.glob("*.wav")
-                                                     for s in [p.stat()]), reverse=True)):
+            for i, (_, size, p) in enumerate(sorted(wavs, reverse=True)):
                 total += size
                 if i >= keep or (i and total > limit):
                     p.unlink(missing_ok=True)
@@ -4703,11 +4713,12 @@ class State:
                               "found": (self.meta.get("found") or {}).get(c)})
             ents = self.song.get("samples") or {}
             slot_meas = {}  # per slot: the three numbers the overview table shows (memoised per WAV)
-            for k, v in ents.items():
-                f = (self.base_dir / v["file"]).resolve() if isinstance(v, dict) and v.get("file") else None
-                m = self.meas.get(str(f)) if f else None  # filled in by the warm-up thread; blank until then
-                if m:
-                    slot_meas[str(k)] = {x: m.get(x) for x in ("pitch", "centroid", "decay")}
+            with self._measure_guard:
+                for k, v in ents.items():
+                    f = (self.base_dir / v["file"]).resolve() if isinstance(v, dict) and v.get("file") else None
+                    m = self.meas.get(str(f)) if f else None  # filled in by the warm-up thread; blank until then
+                    if m:
+                        slot_meas[str(k)] = {x: m.get(x) for x in ("pitch", "centroid", "decay")}
             ok = self.key()
             own = self.renders.get(ok, {"status": "queued", "error": None})
             voice = []  # the instruments that play this slot through the `sample:` shorthand (a keymap is the song's to edit)

@@ -486,11 +486,16 @@ class LoadedModule:
             raise ValueError('Native score seek is outside its arrangement')
         return frame
 
+    def _require_open(self):
+        if not self._mod:
+            raise OpenMPTError("module is closed")
+
     def timed_at(self, rate=44100, oversample=2):
         """Positions and durations from here on as a render at `rate` (and `oversample`) plays them. libopenmpt counts each
         tick in whole samples of the rate it mixes at and takes positions and durations at the last rate it mixed at
         (48 kHz before any read): at most tempos (all but those dividing 1500) a position taken at another rate drifts
         from the audio, by 0.07 % at tempo 137 (a game loop 114 frames short in 3.5 s). A read of no frames sets it."""
+        self._require_open()
         if self._native:
             if mix_rate(rate, oversample) != self._native_rate:
                 raise ValueError('Native score plan sample rate must match actual mixer rate (including oversampling)')
@@ -517,21 +522,25 @@ class LoadedModule:
         self.close()
 
     def metadata(self, key):
+        self._require_open()
         return _str(_lib.openmpt_module_get_metadata(self._mod, key.encode()))
 
     def cell_text(self, pattern, row, channel):
         """Pattern cell as libopenmpt formats it, e.g. 'C-5 01 v64 A06'."""
+        self._require_open()
         return _str(_lib.openmpt_module_format_pattern_row_channel(self._mod, pattern, row, channel, 0, 1))
 
     def cell(self, pattern, row, channel):
         """Raw cell values as libopenmpt stores them: note is IT note + 1 (0 = none, 255 = off, 254 = cut),
         volume is the volume-column value; effect letter comes from the formatted text."""
+        self._require_open()
         g = lambda cmd: _lib.openmpt_module_get_pattern_row_channel_command(self._mod, pattern, row, channel, cmd)
         text = self.cell_text(pattern, row, channel)
         return {"note": g(0), "instrument": g(1), "volume": g(4), "effect_text": text[-3:], "param": g(5), "text": text}
 
     def duration(self):
         """Seconds one pass of the song plays for, as libopenmpt computes it (at the rate of timed_at)."""
+        self._require_open()
         return self._native_end / self._native_rate if self._native else _lib.openmpt_module_get_duration_seconds(self._mod)
 
     def order_start(self, order, row=0, *, cancel=None):
@@ -540,14 +549,18 @@ class LoadedModule:
         into the hidden subsong that starts at an order playback never enters) or as the whole duration (a skipped row).
         Native plans instead replay both streams to the exact rational frame; invalid positions refuse.
         Cancellation during native replay leaves this module's old position and voices intact."""
+        self._require_open()
         if self._native:
             target = self._native_order_frame(order, row)
             if cancel is not None and cancel():
                 raise ValueError('Export cancelled')
             with LoadedModule(self._buf.raw, self._native_rate, 1, plan=self._native_plan) as replay:
-                _lib.openmpt_module_set_render_param(replay._mod, 3, 8)
-                _lib.openmpt_module_set_repeat_count(replay._mod, 0)
-                _lib.openmpt_module_ctl_set_integer(replay._mod, b'dither', 0)
+                if not _lib.openmpt_module_set_render_param(replay._mod, 3, 8):
+                    raise OpenMPTError('openmpt_module_set_render_param failed')
+                if not _lib.openmpt_module_set_repeat_count(replay._mod, 0):
+                    raise OpenMPTError('openmpt_module_set_repeat_count failed')
+                if not _lib.openmpt_module_ctl_set_integer(replay._mod, b'dither', 0):
+                    raise OpenMPTError('openmpt_module_ctl_set_integer failed')
                 buf = (C.c_float * (4096 * 2))()
                 while replay._native_frame < target:
                     if cancel is not None and cancel():
@@ -568,11 +581,13 @@ class LoadedModule:
         libopenmpt plays them), at the timing of a render at `rate` and `oversample`: the module is played through in
         blocks of `block` frames and a row is timed where it is first seen (at most a block late: 0.2 ms at 16 frames
         of 88.2 kHz). `bpm` is libopenmpt's estimate while the row plays (OpenMPT's GetCurrentBPM)."""
+        self._require_open()
         if self._native:
             raise ValueError('Native score row scanning requires paired replay and is not supported')
         # ponytail: plays the song through (about 2 s for 3 minutes); a tick-exact time needs a libopenmpt position call
         mixed = mix_rate(rate, oversample)
-        _lib.openmpt_module_set_repeat_count(self._mod, 0)
+        if not _lib.openmpt_module_set_repeat_count(self._mod, 0):
+            raise OpenMPTError('openmpt_module_set_repeat_count failed')
         self.timed_at(rate, oversample)
         end = _lib.openmpt_module_get_duration_seconds(self._mod)  # libopenmpt plays into the row it loops back to
         buf = (C.c_int16 * (block * 2))()
@@ -593,6 +608,7 @@ class LoadedModule:
         return [tuple(r) for r in rows if r[0] < self.end]
 
     def info(self):
+        self._require_open()
         m = self._mod
         return {
             "title": self.metadata("title"),
@@ -631,6 +647,7 @@ class LoadedModule:
         captured voices ring through the finite tail. Default finite native renders discard only digital silence
         after the written endpoint; explicit lengths retain their padding. Oversampled ranges retain per-render
         filter edge handling."""
+        self._require_open()
         if self._native:
             self.timed_at(rate, oversample)
             if type(repeat) is not int or repeat < -1:
@@ -642,9 +659,12 @@ class LoadedModule:
                 self._native_stop = stop
         elif end is not None:
             raise ValueError('Exact range endpoints require a native score plan')
-        _lib.openmpt_module_set_render_param(self._mod, 3, 8)      # OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH
-        _lib.openmpt_module_set_repeat_count(self._mod, 0 if self._native else repeat)
-        _lib.openmpt_module_ctl_set_integer(self._mod, b"dither", dither)
+        if not _lib.openmpt_module_set_render_param(self._mod, 3, 8):      # OPENMPT_MODULE_RENDER_INTERPOLATIONFILTER_LENGTH
+            raise OpenMPTError('openmpt_module_set_render_param failed')
+        if not _lib.openmpt_module_set_repeat_count(self._mod, 0 if self._native else repeat):
+            raise OpenMPTError('openmpt_module_set_repeat_count failed')
+        if not _lib.openmpt_module_ctl_set_integer(self._mod, b"dither", dither):
+            raise OpenMPTError('openmpt_module_ctl_set_integer failed')
         mixed = mix_rate(rate, oversample)
         trim_after = None
         if self._native and max_seconds is None and repeat >= 0:
@@ -683,7 +703,8 @@ class LoadedModule:
             if self._native:
                 if self._native_frame >= self._native_end and remaining_repeats != 0:
                     self.order_start(0, cancel=cancel)
-                    _lib.openmpt_module_ctl_set_integer(self._mod, b'dither', dither)
+                    if not _lib.openmpt_module_ctl_set_integer(self._mod, b'dither', dither):
+                        raise OpenMPTError('openmpt_module_ctl_set_integer failed')
                     if remaining_repeats > 0:
                         remaining_repeats -= 1
                 count = min(chunk, limit - frames)

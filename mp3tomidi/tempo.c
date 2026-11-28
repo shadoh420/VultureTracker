@@ -58,11 +58,12 @@ static void fold_range(const double *env, int i0, int i1, double p_frames, doubl
     if (p_frames <= 1e-6 || i1 <= i0) return;
     for (int i = i0; i < i1; ++i) {
         double v = env[i];
-        if (v <= 0.0) continue;
+        if (!isfinite(v) || v <= 0.0) continue;
         double ph = fmod((double)i, p_frames) / p_frames;
         if (ph < 0.0) ph += 1.0;
         double pos = ph * (double)TP_BINS;
         int b0 = (int)floor(pos) % TP_BINS;
+        if (b0 < 0 || b0 >= TP_BINS) continue;
         int b1 = (b0 + 1) % TP_BINS;
         double f = pos - floor(pos);
         out[b0] += v * (1.0 - f);
@@ -178,6 +179,7 @@ int tempo_estimate(const float *audio_16k, size_t n_16k,
                 else if (p == 42 || p == 44 || p == 46) w = 0.6;
                 w *= (0.4 + 0.6 * (double)drums[i].velocity / 127.0);
                 double fc = drums[i].onset * (double)TP_FPS;
+                if (!isfinite(fc) || fc < -4.0 || fc > (double)nfr + 4.0) continue;
                 int c0 = (int)floor(fc + 0.5);
                 for (int d = -3; d <= 3; ++d) {
                     int idx = c0 + d;

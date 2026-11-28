@@ -380,3 +380,29 @@ class TestH2Kit(unittest.TestCase):
         frames = lambda name: len(read_wav(d / "out" / f"{name}.wav").channels[0])  # noqa: E731
         self.assertLess(abs(frames("soft") - frames("kick") / 2), 50)  # the layer's pitch 12: an octave up, half as long
         self.assertTrue(any("licence: CC0" in line and "pan 16 in a song" in line for line in log), log)
+
+    def test_drum_and_h2kit_domain_guards(self):
+        import io
+        import tarfile
+        import xml.etree.ElementTree as ET
+        # NoiseBand resonance near 20.4 kHz denominator zero and filter k == 0 do not ZeroDivisionError
+        x, _ = sources.drum({"general": {"name": "n", "filter": 1, "resonance": 50,
+                                         "filterenv": [[0, 100], [100, 100]]},
+                             "noiseband": {"on": 1, "f": 20377.0, "df": 50}}, 60, R)
+        self.assertTrue(np.isfinite(x).all())
+        # Cymbal mode rejects non-positive overtone frequencies with SourceError
+        with self.assertRaises(sources.SourceError):
+            sources.drum({"overtones": {"on": 1, "method": 3, "f1": 0, "f2": 100}}, 60, R)
+        # Non-finite XML float falls back to default
+        node = ET.fromstring("<ins><pan>nan</pan><gain>inf</gain></ins>")
+        self.assertEqual(sources._xml_float(node, "pan", 0.25), 0.25)
+        self.assertEqual(sources._xml_float(node, "gain", 1.0), 1.0)
+        # Non-file tar member in h2kit_member raises SourceError instead of AttributeError
+        with tempfile.TemporaryDirectory() as tmp:
+            kit_path = Path(tmp) / "dir.h2drumkit"
+            with tarfile.open(kit_path, "w:gz") as tar:
+                ti = tarfile.TarInfo("folder")
+                ti.type = tarfile.DIRTYPE
+                tar.addfile(ti, io.BytesIO(b""))
+            with self.assertRaises(sources.SourceError):
+                sources.h2kit_member(kit_path, {"xml": ""}, {"file": "folder"})

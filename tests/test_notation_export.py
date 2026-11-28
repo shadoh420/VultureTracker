@@ -433,7 +433,7 @@ GOLDEN = {
         '   \\key bes \\major\n'
         '   \\time 4/4\n'
         '   \\voiceOne\n'
-        '   <a\'\\1>4_"H"-\\tag #\'texts ^\\markup {"let "it" ring"} <b\'\\1>4\\arpeggio <b\'\\1>4_"H" <a\'\\1>4 \n'
+        '   <a\'\\1>4_"H"-\\tag #\'texts ^\\markup {"let \\"it\\" ring"} <b\'\\1>4\\arpeggio <b\'\\1>4_"H" <a\'\\1>4 \n'
         '   \\oneVoice\n'
         '   \\repeat volta 2 {\n'
         "      \\times 2/3 {<d'\\2>8 <e'\\2>8 <ges'\\2>8 } <ges'\\2>4\\glissando <aes'\\2>4\\glissando <e'\\2>4 \n"
@@ -986,7 +986,7 @@ GOLDEN = {
         '   \\key bes \\major\n'
         '   \\time 4/4\n'
         '   \\voiceOne\n'
-        '   <a\'\\1>4_"H"-\\tag #\'texts ^\\markup {"let "it" ring"} <b\'\\1>4\\arpeggio <b\'\\1>4_"H" <a\'\\1>4 \n'
+        '   <a\'\\1>4_"H"-\\tag #\'texts ^\\markup {"let \\"it\\" ring"} <b\'\\1>4\\arpeggio <b\'\\1>4_"H" <a\'\\1>4 \n'
         '   \\oneVoice\n'
         '   \\repeat volta 2 {\n'
         "      \\times 2/3 {<d'\\2>8 <e'\\2>8 <ges'\\2>8 } <ges'\\2>4\\glissando <aes'\\2>4\\glissando <e'\\2>4 \n"
@@ -1270,6 +1270,30 @@ class TestRefusalsAndPurity(unittest.TestCase):
         notation_export.native_to_lilypond(song, raw, settings=dict(trackGroup=True))
         notation_export.native_to_musicxml(song, raw, channels=CHANNELS)
         self.assertEqual((song, [[[repr(c) for c in row] for row in p.rows] for p in raw]), before)
+
+    def test_lilypond_escapes_beat_text_and_neutralizes_lyrics(self):
+        song = rich_fixture()
+        song['score']['patterns']['m1']['beats'][0]['text'] = 'say "hi" \\ #(system "echo")'
+        song['score']['tracks']['t1']['lyrics']['text'] = 'la- la } #(system "id") \\ %comment\nend'
+        lily, _ = export('ly', song)
+        self.assertIn('^\\markup {"say \\"hi\\" \\\\ #(system \\"echo\\")"}', lily)
+        lyric_block = lily.split('\\lyricmode {', 1)[1].split('\\unset ignoreMelismata', 1)[0]
+        user_lyrics = '\n'.join(ln for ln in lyric_block.splitlines() if '\\set ' not in ln and '\\skip ' not in ln)
+        for bad in ('\\', '#', '{', '}', '"', '%'):
+            self.assertNotIn(bad, user_lyrics)
+        self.assertIn('la- la', user_lyrics)
+
+    def test_per_measure_staff_clef_and_key_changes_export_and_report_minor_loss(self):
+        song = rich_fixture()
+        song['score']['measures'][1]['staff'] = {'t1': {'clef': 'bass', 'key': {'fifths': -2, 'mode': 'minor'}}}
+        lily, lrep = export('ly', song)
+        self.assertIn('\\clef #(if inTab "tab" "bass_8")', lily)
+        self.assertIn('\\key bes \\major', lily)
+        mxml, mrep = export('xml', song)
+        self.assertIn('<sign>F</sign>', mxml)
+        self.assertIn('<fifths>-2</fifths>', mxml)
+        for rep in (lrep, mrep):
+            self.assertTrue(any(item['feature'] == 'minor' and 'measure m2 track t1' in item['first'] for item in rep['losses']), rep['losses'])
 
 
 if __name__ == '__main__':

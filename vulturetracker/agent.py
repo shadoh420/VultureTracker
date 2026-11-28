@@ -329,10 +329,15 @@ def _edit_voice(st, a, kind, fields):
             raise ValueError("unknown or owner-controlled field; mixer volume, static pan and approval are not editable here")
         if set(changes) & set(clear) or not (changes or clear):
             raise ValueError("give changes or clear, without setting and clearing the same field")
+        if kind == "samples" and "file" in changes and changes["file"] is not None:
+            reach(st, changes["file"], "audio file path")
         for key, suffix in (("tuning", ".scl"), ("keymap_file", ".kbm")):  # Scala files beside the song, nothing else
             v = changes.get(key)
-            if v is not None and (not isinstance(v, str) or not v.lower().endswith(suffix) or Path(v).is_absolute() or ".." in Path(v).parts):
-                raise ValueError(f"{key} is a {suffix} file beside the song (a relative path inside its folder)")
+            if v is not None:
+                if (not isinstance(v, str) or not v.lower().endswith(suffix) or Path(v).is_absolute()
+                        or Path(v).drive or Path(v).anchor or ".." in Path(v).parts):
+                    raise ValueError(f"{key} is a {suffix} file beside the song (a relative path inside its folder)")
+                reach(st, v, f"{suffix} file", roots=False)
         entry = copy.deepcopy(st.song[kind][n])
         for key in clear:
             entry.pop(key, None)
@@ -1560,47 +1565,65 @@ def measure(st, a):
     from . import dsp
     from .measure import RATE, patch_it
     from .openmpt import LoadedModule
-    st._need_compiled()
-    o = st.facts["orders"]
-    s, e = (int(a["orders"][0]), int(a["orders"][1])) if a.get("orders") else (0, len(o))
-    if not 0 <= s < e <= len(o):
-        raise ValueError(f"orders: a span within 0..{len(o)}")
-    nch = len(st.facts["channels"])
-    chans = [c - 1 for c in a["channels"]] if a.get("channels") else None
-    silenced = [c for c in range(nch) if c not in chans] if chans else st.silenced()
-    selected_native = bool(st.mod.native_score and a.get('orders'))
+    with st.lock:
+        st._need_compiled()
+        o = copy.deepcopy(st.facts["orders"])
+        nch = len(st.facts["channels"])
+        orders_arg = a.get("orders")
+        if orders_arg is not None:
+            if not isinstance(orders_arg, list) or len(orders_arg) != 2:
+                raise ValueError(f"orders: a span [start, stop) within 0..{len(o)}")
+            s = _integer(orders_arg[0], 0, len(o), "orders[0]")
+            e = _integer(orders_arg[1], 0, len(o), "orders[1]")
+            if not 0 <= s < e <= len(o):
+                raise ValueError(f"orders: a span within 0..{len(o)}")
+        else:
+            s, e = 0, len(o)
+        ch_arg = a.get("channels")
+        if ch_arg is not None:
+            if not isinstance(ch_arg, list):
+                raise ValueError("channels must be a list of 1-based channel numbers")
+            chans = [_channel(st, c) for c in ch_arg] if ch_arg else None
+        else:
+            chans = None
+        silenced = [c for c in range(nch) if c not in chans] if chans else st.silenced()
+        is_native = bool(st.mod.native_score)
+        selected_native = bool(is_native and orders_arg)
+        playback_orders = copy.deepcopy(st.facts.get('playback_orders'))
+        if selected_native:
+            base, mix, region = copy.deepcopy(st.song), copy.deepcopy(st.mix()), st._order_region((s, e))
+            offset = st._resolved_playback_span(region)['start'] if playback_orders else o[s]['start']
+        else:
+            mix = copy.deepcopy(st.mix())
+            offset = 0
     if selected_native:
         from .export import snapshot, render
-        with st.lock:
-            base, mix, region = copy.deepcopy(st.song), copy.deepcopy(st.mix()), st._order_region((s, e))
         snap = snapshot(base, st.base_dir, region=region, mix=mix, muted=silenced, tail=0)
         pcm = render(snap, cancel=lambda: st.closed)
-    elif st.mod.native_score:
+    elif is_native:
         bundle = st.prepared_playback(RATE * 2, whole=True)
         data, plan = patch_it(bundle['backing_it'], silenced), bundle['plan']
     else:
-        data, plan = patch_it(st.compiled_it(whole=True), silenced, st.mix()), None
+        data, plan = patch_it(st.compiled_it(whole=True), silenced, mix), None
     if not selected_native:
         with LoadedModule(data, rate=RATE, oversample=2, plan=plan) as lm:
             pcm = lm.render(RATE)
     x = np.frombuffer(pcm, "<i2").reshape(-1, 2).T.astype(np.float32) / 32768
     series = dsp.meter_series(x, RATE)
-    if st.facts.get('playback_orders'):
-        visits = st.facts['playback_orders']
-        offset = st._resolved_playback_span(st._order_region((s, e)))['start'] if selected_native else 0
+    if playback_orders:
         per_order = [{'order': v['source_order'], 'play_id': v['id'], 'pass': v['pass'],
                       **dsp.span_numbers(series, v['start'] - offset, v['start'] - offset + v['seconds'])}
-                     for v in visits if o[s]['order'] <= v['source_order'] <= o[e - 1]['order']]
+                     for v in playback_orders if o[s]['order'] <= v['source_order'] <= o[e - 1]['order']]
     else:
-        offset = o[s]['start'] if selected_native else 0
-        per_order = [{"order": i, **dsp.span_numbers(series, o[i]["start"]-offset,
-                      o[i]["start"]-offset + o[i]["seconds"])} for i in range(s, e)]
-    if a.get("orders") and not selected_native:
+        per_order = [{"order": i, **dsp.span_numbers(series, o[i]["start"] - offset,
+                      o[i]["start"] - offset + o[i]["seconds"])} for i in range(s, e)]
+    if orders_arg and not selected_native:
         x = x[:, int(o[s]["start"] * RATE): int((o[e - 1]["start"] + o[e - 1]["seconds"]) * RATE)]
     m = dsp.measure_mix(x, RATE)
-    scope = json.dumps({"channels": a.get("channels"), "orders": a.get("orders")}, sort_keys=True)
-    prev = st.agent_measures.get(scope)
-    st.agent_measures[scope] = m
+    scope = json.dumps({"channels": ch_arg, "orders": orders_arg}, sort_keys=True)
+    with st.lock:
+        prev = st.agent_measures.get(scope)
+        st.agent_measures[scope] = m
     out = {"numbers": m, "per_order": per_order, "scope": json.loads(scope)}
     if prev:
         out["change_since_last"] = {k: round(m[k] - prev[k], 2) for k in ("lufs", "true_peak_dbtp", "peak_dbfs", "correlation")
@@ -1633,20 +1656,17 @@ def cue(st, a):
       "the owner hears, rates and picks one (U writes it). Nothing in the song changes. Refused for an approved slot.",
       {"slot": {"type": "integer"}, "files": {"type": "array", "items": {"type": "string"}}}, ["slot", "files"])
 def offer_samples(st, a):
-    slot = int(a["slot"])
-    entry = (st.song.get("samples") or {}).get(slot)
-    if not isinstance(entry, dict):
-        raise ValueError(f"no sample slot {slot}")
-    if entry.get("approved"):
-        raise ValueError(f"slot {slot} is approved by the owner: its sound stays")
-    if not isinstance(a["files"], list) or not a["files"]:
+    if not isinstance(a.get("files"), list) or not a["files"] or not all(isinstance(f, str) for f in a["files"]):
         raise ValueError("files must be a nonempty list of WAV paths")
-    for f in a["files"]:
-        reach(st, f, "WAV path")
-    if st.slot != slot:
-        st.meta["slot"] = slot
-        st.save_meta()
-    added = st.add_candidates("\n".join(a["files"]))
+    with st.lock:
+        st._writable()
+        slot = _slot(st, "samples", a["slot"])
+        _voice_guard(st, "samples", slot)
+        resolved = [str(reach(st, f, "WAV path")) for f in a["files"]]
+        if st.slot != slot:
+            st.meta["slot"] = slot
+            st.save_meta()
+    added = st.add_candidates("\n".join(resolved))
     return {"ok": True, "added": added, "summary": f"{len(added)} candidates for slot {slot}: the owner picks"}
 
 
@@ -1951,13 +1971,27 @@ def load_settings():
     s = _read_file()
     acct = _account(s)
     key, store = _keyring_get(acct)
+    changed = False
     if store == "keyring" and s.get("api_key"):
         if key or _keyring_set(acct, s["api_key"]):
             key = key or s["api_key"]
             del s["api_key"]
-            _write_file(s)
+            changed = True
         else:
             store = "file"  # a backend that drops the key: the file keeps it
+    if store == "keyring" and isinstance(s.get("provider_keys"), dict):
+        migrated = []
+        for p_acct, p_key in s["provider_keys"].items():
+            if not p_key or _keyring_set(p_acct, p_key):
+                migrated.append(p_acct)
+        for p_acct in migrated:
+            s["provider_keys"].pop(p_acct, None)
+        if migrated:
+            if not s["provider_keys"]:
+                s.pop("provider_keys", None)
+            changed = True
+    if changed:
+        _write_file(s)
     if key:
         s["api_key"] = key
     s["key_store"] = store
@@ -1970,12 +2004,18 @@ def save_settings(new):
     stored one; `clear_key` drops it."""
     cur = _read_file()
     if "provider" in new and new["provider"] != cur.get("provider", ""):
-        # Keep inactive file-backed keys separate, just as the OS credential store does.
+        # Keep inactive keys in keyring when available, falling back to provider_keys only when file-backed.
         keys = cur.setdefault("provider_keys", {})
         if cur.get("api_key"):
-            keys[_account(cur)] = cur.pop("api_key")
+            old_acct = _account(cur)
+            _, old_store = _keyring_get(old_acct)
+            if not (old_store == "keyring" and _keyring_set(old_acct, cur["api_key"])):
+                keys[old_acct] = cur["api_key"]
+            cur.pop("api_key", None)
         if new.get("provider") in keys:
             cur["api_key"] = keys.pop(new["provider"])
+        if not keys:
+            cur.pop("provider_keys", None)
         for k in ("model", "base_url", "effort"):
             cur.pop(k, None)
     for k in ("provider", "model", "base_url", "effort", "notice_seen"):  # notice_seen: the provider the notice was read for
@@ -1985,6 +2025,10 @@ def save_settings(new):
     _, store = _keyring_get(acct)
     if new.get("clear_key"):
         cur.pop("api_key", None)
+        if isinstance(cur.get("provider_keys"), dict):
+            cur["provider_keys"].pop(acct, None)
+            if not cur["provider_keys"]:
+                cur.pop("provider_keys", None)
         if store == "keyring":
             try:
                 keyring.delete_password(KEYRING_SERVICE, acct)
@@ -2044,6 +2088,18 @@ def connection(s):
     return base, s.get("model") or preset["model"], key
 
 
+_MAX_API_RESPONSE = 16 << 20
+_STDLIB_URLOPEN = urllib.request.urlopen
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "redirects are not followed", headers, fp)
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler())
+
+
 def compatible_request(s, path, body=None, timeout=600):
     base, _, key = connection(s)
     req = urllib.request.Request(base + path, None if body is None else json.dumps(body).encode("utf-8"),
@@ -2051,8 +2107,12 @@ def compatible_request(s, path, body=None, timeout=600):
     if key:
         req.add_header("Authorization", "Bearer " + key)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
+        opener = _NO_REDIRECT_OPENER.open if urllib.request.urlopen is _STDLIB_URLOPEN else urllib.request.urlopen
+        with opener(req, timeout=timeout) as r:
+            raw = r.read(_MAX_API_RESPONSE + 1)
+            if len(raw) > _MAX_API_RESPONSE:
+                raise RuntimeError("provider response exceeded 16 MiB")
+            return json.loads(raw)
     except urllib.error.HTTPError as e:
         code = e.code
         detail = ""
@@ -2068,6 +2128,8 @@ def compatible_request(s, path, body=None, timeout=600):
             pass
         finally:
             e.close()
+        if 300 <= code < 400:
+            raise RuntimeError("provider attempted an HTTP redirect; redirects are refused to protect credentials") from None
         if code == 429:
             raise RuntimeError("rate limit or quota reached; wait and check your provider's quota. "
                                "No paid fallback was used") from None
@@ -2368,7 +2430,7 @@ class Chat:
         server = {"command": sys.executable, "args": (["mcp"] if frozen else ["-m", "vulturetracker", "mcp"]) + ["--port", str(PORT)]}
         if not frozen:
             server["env"] = {"PYTHONPATH": str(Path(__file__).resolve().parent.parent)}
-        server.setdefault("env", {}).update(VT_AGENT_RUN_ID=self.run_id, VT_TOKEN=TOKEN or "")
+        server.setdefault("env", {}).update(VT_AGENT_RUN_ID=self.run_id)
         args = cmd + ["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config",
                       "--mcp-config", json.dumps({"mcpServers": {} if self.compacting else {"vulturetracker": server}}),
                       "--tools", "", "--allowedTools", "" if self.compacting else "mcp__vulturetracker",
@@ -2393,6 +2455,7 @@ class Chat:
             p = self.process = subprocess.Popen(
                 args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                 encoding="utf-8", errors="replace", cwd=str(Path(__file__).resolve().parent.parent),
+                env={**os.environ, "VT_TOKEN": TOKEN or ""},
                 start_new_session=os.name != "nt", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         err = []
         threading.Thread(target=lambda: err.extend(p.stderr), daemon=True).start()

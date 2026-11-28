@@ -59,7 +59,7 @@ def read_wav(path) -> WavData:
         tag = struct.unpack_from("<H", fmt, 24)[0]  # sub-format GUID starts with the real tag
     if tag not in (1, 3):
         raise WavError(f"{path}: unsupported WAV encoding (format tag {tag}); save as PCM or float")
-    if nch < 1 or align < nch or rate < 1:
+    if nch < 1 or align < nch or align % nch != 0 or rate < 1:
         raise WavError(f"{path}: the fmt chunk gives {nch} channels, {align} bytes per frame and {rate} Hz")
     width = align // nch
     frames = len(data) // align

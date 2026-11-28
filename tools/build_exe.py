@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument('--unpinned', action='store_true', help='Allow a trial build with packages differing from the release pins')
 parser.add_argument('--output-dir', type=Path, help='Write a local candidate here instead of replacing dist; keep its build cache inside this folder')
+parser.add_argument('--allow-missing-ffmpeg', action='store_true', help='Do not fail the build when imageio-ffmpeg cannot provide ffmpeg.exe')
 args = parser.parse_args()
 DIST = args.output_dir.resolve() if args.output_dir else ROOT / 'dist'
 BUILD = DIST / '.build' if args.output_dir else ROOT / 'build'
@@ -54,7 +55,10 @@ sep = ";" if sys.platform == "win32" else ":"
 ICO = ROOT / "assets" / "vulturetracker.ico"
 try:  # refresh the exe icon from the master PNG when Pillow is installed (build-time only)
     from PIL import Image
-    Image.open(ROOT / "assets" / "vulturetracker.png").save(ICO, sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
+    BUILD.mkdir(parents=True, exist_ok=True)
+    ico_out = BUILD / "vulturetracker.ico"
+    Image.open(ROOT / "assets" / "vulturetracker.png").save(ico_out, sizes=[(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (16, 16)])
+    ICO = ico_out
 except ImportError:
     pass
 cmd = [
@@ -88,15 +92,17 @@ if importlib.util.find_spec("guitarpro"):
     cmd += ["--collect-submodules", "guitarpro", "--hidden-import", "attr"]
 print(" ".join(cmd))
 code = subprocess.call(cmd, cwd=ROOT)
-try:
-    import shutil
-    import imageio_ffmpeg
-    if code == 0:
+if code == 0:
+    try:
+        import shutil
+        import imageio_ffmpeg
         shutil.copyfile(imageio_ffmpeg.get_ffmpeg_exe(), DIST / "ffmpeg.exe")
         print(f"copied ffmpeg beside the exe: {DIST / 'ffmpeg.exe'}")
-except (ImportError, RuntimeError, OSError) as e:
-    print(f"no ffmpeg beside the exe ({e}): the exe exports MP3/OGG/FLAC only with ffmpeg on PATH")
-if code == 0:
+    except (ImportError, RuntimeError, OSError) as e:
+        msg = f"no ffmpeg beside the exe ({e}): the exe exports MP3/OGG/FLAC only with ffmpeg on PATH"
+        if not args.allow_missing_ffmpeg:
+            sys.exit(msg + " (pass --allow-missing-ffmpeg to build anyway)")
+        print(msg)
     import zipfile
     files = subprocess.run(["git", "ls-files", "demo", "demo2", ":(glob)samples/*.*", "samples/surge", "LICENSE", "THIRD_PARTY.md"],
                            cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
@@ -110,9 +116,11 @@ if code == 0:
             z.write(f, f"VultureTracker/source/chord-tools/licenses/{f.name}")
         for name in ("chord_tools.py", "_java_priority_sort.py"):
             z.write(ROOT / "vulturetracker" / name, f"VultureTracker/source/chord-tools/{name}")
-        for name in ("ptb.py", "tef.py", "tab_binary.py"):
+        for name in ("ptb.py", "tef.py", "tab_binary.py", "notation_export.py", "asciitab.py",
+                     "tgimport.py", "tglegacy.py", "gplegacy.py"):
             z.write(ROOT / "vulturetracker" / name, f"VultureTracker/source/vulturetracker/{name}")
         for name in ("web/tablature.js", "web/licenses/TuxGuitar-scales-NOTICE.txt",
+                     "licenses/TuxGuitar-notation-NOTICE.txt",
                      "licenses/TuxGuitar-LGPL-2.1.txt", "licenses/TuxGuitar-AUTHORS.txt"):
             z.write(ROOT / "vulturetracker" / name, f"VultureTracker/source/vulturetracker/{name}")
     print(f"{DIST / 'vulturetracker-win64.zip'}: the exe, ffmpeg and {len(files)} demo, sample and licence files")

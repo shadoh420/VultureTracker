@@ -211,9 +211,17 @@ def _xml(data):
                 _fail('archive', 'requires exactly version.txt and content.xml')
             if any(i.file_size > MAX_XML or i.flag_bits & 1 for i in members):
                 _fail('archive', 'oversized or encrypted member')
-            if z.read('version.txt') != VERSION:
+            with z.open('version.txt') as vf:
+                ver_bytes = vf.read(len(VERSION) + 1)
+            if len(ver_bytes) > len(VERSION):
+                _fail('archive', 'oversized or encrypted member')
+            if ver_bytes != VERSION:
                 _fail('version', 'only TuxGuitar_file_format 2.0 is supported')
-            text = z.read('content.xml').decode('utf-8-sig')
+            with z.open('content.xml') as cf:
+                xml_bytes = cf.read(MAX_XML + 1)
+            if len(xml_bytes) > MAX_XML:
+                _fail('archive', 'oversized or encrypted member')
+            text = xml_bytes.decode('utf-8-sig')
         # ElementTree can auto-detect UTF-16 again even after decoding to str.
         # Reject NUL-containing alternate encodings before declaration checks.
         if '\0' in text:

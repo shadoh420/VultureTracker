@@ -2602,6 +2602,61 @@ PAGE
                                ["edit", 0, [{"row": 15, "ch": 0, "cell": "D#5 03 ... ..."}]],
                                ["cell", 5, "E-5 03 ... ..."]])
 
+    def test_worklet_textdecoder_bounds_and_noop_tempo_keeps_practice(self):
+        src = (ROOT / "vulturetracker" / "web" / "engine-worklet.js").read_text(encoding="utf-8")
+        a = src.index("  globalThis.TextDecoder = class {")
+        b = src.index("const PRE = 4;")
+        poly = src[a:b].strip()[:-1].strip()
+        poly = "class PolyDecoder " + poly.split("globalThis.TextDecoder = class", 1)[1].strip()
+        c = src.index("class VTEngine extends AudioWorkletProcessor {")
+        vt_cls = src[c:]
+        script = f"""
+globalThis.AudioWorkletProcessor = class {{ constructor() {{ this.port = {{ postMessage() {{}} }}; }} }};
+globalThis.registerProcessor = () => {{}};
+globalThis.sampleRate = 48000;
+globalThis.loadOpenmpt = () => new Promise(() => {{}});
+globalThis.loadGlue = () => {{}};
+{poly}
+{vt_cls}
+const dec = new PolyDecoder();
+const decoded = [
+  dec.decode(new Uint8Array([0x41, 0xc3, 0xa9, 0x42])),
+  dec.decode(new Uint8Array([0xe2, 0x82])),
+  dec.decode(new Uint8Array([0xff, 0x80, 0xc0, 0xaf])),
+  dec.decode(new Uint8Array([0xed, 0xa0, 0x80])),
+  dec.decode(new Uint8Array([0xf4, 0x90, 0x80, 0x80])),
+];
+const eng = new VTEngine({{ processorOptions: {{ wasm: new ArrayBuffer(0) }} }});
+eng.E = {{ factorQ: f => Math.round(65536 / f) }};
+let freed = false;
+eng.song = {{ score: {{ frame: 0, end: 100 }}, factorQ: 65536, clearCheckpoint() {{}}, free() {{ freed = true; }} }};
+eng.practice = {{ from: 80, to: 100, step: 5, percent: 80, pass: 1 }};
+eng.command({{ type: 'tempo', factor: 1 }});
+const practiceKept = !!eng.practice && eng.practice.percent === 80;
+eng.loopReplay = {{ song: {{ free() {{}} }} }};
+eng.pending = {{ song: {{ free() {{}} }}, id: 7 }};
+eng.render = () => {{ throw new Error('boom'); }};
+eng.held.add(1); eng.previewQuiet = 5; eng.countIn = {{}};
+eng.process(null, [[new Float32Array(128), new Float32Array(128)]]);
+console.log(JSON.stringify({{
+  decoded,
+  practiceKept,
+  cleaned: freed && eng.song === null && eng.pending === null && eng.loopReplay === null &&
+           eng.previewQuiet === -1 && eng.held.size === 0 && eng.countIn === null && eng.practice === null && eng.metroFrames === null
+}}));
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            js = Path(tmp) / "worklet_test.js"
+            js.write_text(script, encoding="utf-8")
+            result = subprocess.run([NODE, str(js)], capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            out = json.loads(result.stdout)
+        self.assertEqual(out["decoded"][0], "A\u00e9B")
+        for s in out["decoded"][1:]:
+            self.assertIn("\ufffd", s)
+        self.assertTrue(out["practiceKept"])
+        self.assertTrue(out["cleaned"])
+
 
 if __name__ == "__main__":
     unittest.main()

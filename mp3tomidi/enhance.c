@@ -169,15 +169,19 @@ struct p16_ctx {
     const struct pitch_bin_spec *bins;
     float *e_raw_db, *e_dba;
     double *rms_db;
+    int oom;
 };
 
 static void p16_worker(int start, int end, void *arg) {
-    const struct p16_ctx *c = (const struct p16_ctx *)arg;
+    struct p16_ctx *c = (struct p16_ctx *)arg;
     double *re_lo = (double *)malloc(EN_NFFT_LO * sizeof(double));
     double *im_lo = (double *)malloc(EN_NFFT_LO * sizeof(double));
     double *pw_lo = (double *)malloc((EN_NFFT_LO / 2 + 1) * sizeof(double));
     double re_hi[EN_NFFT_HI], im_hi[EN_NFFT_HI], pw_hi[EN_NFFT_HI / 2 + 1];
-    if (!re_lo || !im_lo || !pw_lo) { free(re_lo); free(im_lo); free(pw_lo); return; }
+    if (!re_lo || !im_lo || !pw_lo) {
+        __atomic_store_n(&c->oom, 1, __ATOMIC_RELAXED);
+        free(re_lo); free(im_lo); free(pw_lo); return;
+    }
 
     const double norm_lo = 4.0 / ((double)EN_NFFT_LO * (double)EN_NFFT_LO * 0.25);
     const double norm_hi = 4.0 / ((double)EN_NFFT_HI * (double)EN_NFFT_HI * 0.25);
@@ -355,8 +359,14 @@ static int build_acoustic_grid(const float *audio_native, size_t n_native, unsig
         bins[p] = (struct pitch_bin_spec){ use_lo, k0, k1, center, rad, a_weight_db(f) };
     }
 
-    struct p16_ctx c16 = { audio_16k, n_16k, T, win_lo, win_hi, bins, g->e_raw_db, g->e_dba, rms_db };
+    struct p16_ctx c16 = { audio_16k, n_16k, T, win_lo, win_hi, bins, g->e_raw_db, g->e_dba, rms_db, 0 };
     nn_parallel_for(T, 32, p16_worker, &c16);
+    if (c16.oom) {
+        free(rms_db); free(dba_raw); free(blo_raw); free(bmd_raw);
+        free(bhi_raw); free(cent_raw); free(hat_lp); free(macro_raw);
+        acoustic_grid_free(g);
+        return 0;
+    }
 
     double freqs_nat[EN_NFFT_NAT / 2 + 1], a_lin_nat[EN_NFFT_NAT / 2 + 1];
     for (int k = 0; k <= EN_NFFT_NAT / 2; ++k) {
@@ -447,14 +457,22 @@ static double mean_pitch_db(const float *mat, int f0, int f1, int k) {
     return s / (double)(f1 - f0);
 }
 
+static int double_to_frame(double v, int lo, int hi) {
+    if (!isfinite(v)) return lo;
+    double f = floor(v);
+    if (f <= (double)lo) return lo;
+    if (f >= (double)hi) return hi;
+    return (int)f;
+}
+
 static void measure_note(const struct acoustic_grid *g, const struct midi_note *nt, struct note_meas *m) {
     memset(m, 0, sizeof(*m));
     m->keep = 1;
     m->sustain = -1.0;
     m->conf = clamp_d(((double)nt->velocity - 20.0) / 107.0, 0.0, 1.0);
 
-    int f0 = clamp_i((int)floor(nt->onset / 0.02 + 0.5), 0, g->T - 1);
-    int f1 = clamp_i((int)floor(nt->offset / 0.02 + 0.5), f0 + 1, g->T);
+    int f0 = double_to_frame(nt->onset / 0.02 + 0.5, 0, g->T - 1);
+    int f1 = double_to_frame(nt->offset / 0.02 + 0.5, f0 + 1, g->T);
     if (f1 <= f0) f1 = f0 + 1 <= g->T ? f0 + 1 : g->T;
     m->macro_at_on = g->macro_db[f0];
 
@@ -522,6 +540,7 @@ static void measure_note(const struct acoustic_grid *g, const struct midi_note *
 }
 
 static char *dup_str(const char *s) {
+    if (!s) s = "";
     size_t len = strlen(s);
     char *p = (char *)malloc(len + 1);
     if (p) memcpy(p, s, len + 1);
@@ -560,8 +579,8 @@ static int build_track_ccs(const struct acoustic_grid *g,
     uint8_t *active = (uint8_t *)calloc((size_t)g->T, 1);
     if (!active) return 0;
     for (size_t i = 0; i < count; ++i) {
-        int a = clamp_i((int)floor((notes[i].onset - 0.16) / 0.02), 0, g->T - 1);
-        int b = clamp_i((int)ceil((notes[i].offset + 0.16) / 0.02), 0, g->T - 1);
+        int a = double_to_frame((notes[i].onset - 0.16) / 0.02, 0, g->T - 1);
+        int b = double_to_frame(ceil((notes[i].offset + 0.16) / 0.02), 0, g->T - 1);
         for (int t = a; t <= b; ++t) active[t] = 1;
     }
 
@@ -719,6 +738,7 @@ int enhance_tracks(const struct midi_track *in_tracks, size_t n_in_tracks,
             if (in_tracks[ti].is_drum || !meas[ti] || in_tracks[ti].count == 0) continue;
             size_t cnt = in_tracks[ti].count;
             double *snrs = (double *)malloc(cnt * sizeof(double));
+            if (!snrs) goto cleanup;
             size_t n_pk = 0, n_alive = 0;
             for (size_t i = 0; i < cnt; ++i) {
                 if (!meas[ti][i].keep) continue;
@@ -827,8 +847,13 @@ int enhance_tracks(const struct midi_track *in_tracks, size_t n_in_tracks,
             if (new_p != orig_p) {
                 track_prog[ti] = new_p;
                 if (new_nm) {
+                    char *nm = dup_str(new_nm);
+                    if (!nm) {
+                        free(pitches); free(durs); free(susts); free(eors); free(brts);
+                        goto cleanup;
+                    }
                     free(track_name[ti]);
-                    track_name[ti] = dup_str(new_nm);
+                    track_name[ti] = nm;
                 }
                 if (stats) stats->programs_refined++;
             }
@@ -934,8 +959,10 @@ int enhance_tracks(const struct midi_track *in_tracks, size_t n_in_tracks,
                     free(notes); enhance_tracks_free(out, n_out); goto cleanup;
                 }
             }
+            char *nm = dup_str(track_name[ti]);
+            if (!nm) { free(notes); free(ccs); enhance_tracks_free(out, n_out); goto cleanup; }
             out[n_out++] = (struct enhance_track){
-                dup_str(track_name[ti]), track_prog[ti], 0, notes, w, ccs, n_ccs
+                nm, track_prog[ti], 0, notes, w, ccs, n_ccs
             };
             if (stats) { stats->pitched_out += w; stats->cc_events_total += n_ccs; }
         } else {
@@ -954,7 +981,7 @@ int enhance_tracks(const struct midi_track *in_tracks, size_t n_in_tracks,
                 size_t nk = 0, ns = 0, nh = 0;
                 if (karr && sarr && harr) {
                     for (size_t i = 0; i < in_t->count; ++i) {
-                        int tf = clamp_i((int)floor(in_t->notes[i].onset / 0.02 + 0.5), 0, grid.T - 1);
+                        int tf = double_to_frame(in_t->notes[i].onset / 0.02 + 0.5, 0, grid.T - 1);
                         int p = in_t->notes[i].pitch;
                         if (p == 35 || p == 36) karr[nk++] = grid.kick_db[tf] - grid.macro_db[tf];
                         else if (p >= 37 && p <= 40) sarr[ns++] = grid.snare_db[tf] - grid.macro_db[tf];
@@ -970,7 +997,7 @@ int enhance_tracks(const struct midi_track *in_tracks, size_t n_in_tracks,
             size_t w = 0;
             for (size_t i = 0; i < in_t->count; ++i) {
                 struct midi_note nt = in_t->notes[i];
-                int tf = clamp_i((int)floor(nt.onset / 0.02 + 0.5), 0, grid.T - 1);
+                int tf = double_to_frame(nt.onset / 0.02 + 0.5, 0, grid.T - 1);
                 int p = nt.pitch;
 
                 if (opts.prune_ghosts) {
@@ -1022,8 +1049,10 @@ int enhance_tracks(const struct midi_track *in_tracks, size_t n_in_tracks,
                     free(notes); enhance_tracks_free(out, n_out); goto cleanup;
                 }
             }
+            char *nm = dup_str(track_name[ti]);
+            if (!nm) { free(notes); free(ccs); enhance_tracks_free(out, n_out); goto cleanup; }
             out[n_out++] = (struct enhance_track){
-                dup_str(track_name[ti]), 0, 1, notes, w, ccs, n_ccs
+                nm, 0, 1, notes, w, ccs, n_ccs
             };
             if (stats) { stats->drums_out += w; stats->cc_events_total += n_ccs; }
         }

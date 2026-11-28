@@ -36,8 +36,12 @@ def save_beside(folder, stem, suffix, data):
         if p.exists() and p.read_bytes() == data:
             return p, False
         if not p.exists():
-            atomic_write(p, data, replace=False)
-            return p, True
+            try:
+                atomic_write(p, data, replace=False)
+                return p, True
+            except FileExistsError:
+                if p.exists() and p.read_bytes() == data:
+                    return p, False
 
 
 def atomic_write(path, data, *, replace=True):
@@ -81,28 +85,33 @@ def link_new(src, dst):
             shutil.copyfileobj(s, d)
 
 
-def fetch_verified(url, sha256, dest, progress=lambda done, total: None):
-    """`url` streamed into `dest` in 1 MiB chunks and hashed on the way (never whole in memory), then checked against
-    the SHA-256 pinned beside the URL: a mismatch (or a failed download) deletes `dest` and raises. Returns `dest`."""
+def fetch_verified(url, sha256, dest, progress=lambda done, total: None, timeout=60):
+    """`url` streamed into a sibling temporary file in 1 MiB chunks and hashed on the way (never whole in memory),
+    then checked against the SHA-256 pinned beside the URL before replacing `dest`: a mismatch (or a failed download)
+    removes the temporary file, preserves any existing `dest`, and raises. Returns `dest`."""
     import hashlib
     import urllib.request
     dest, h, done = Path(dest), hashlib.sha256(), 0
+    dest.parent.mkdir(parents=True, exist_ok=True)
     req = urllib.request.Request(url, headers={'User-Agent': 'vulturetracker'})
-    try:
-        with urllib.request.urlopen(req) as r, open(dest, 'wb') as f:
-            total = int(r.headers.get('Content-Length') or 0)
-            while chunk := r.read(1 << 20):
-                f.write(chunk)
-                h.update(chunk)
-                done += len(chunk)
-                progress(done, total)
-        if h.hexdigest() != sha256:
-            name = url.rsplit('/', 1)[-1]
-            raise ValueError(f'{name} from {url} does not match the expected digest; the download may be corrupt or '
-                             'the release replaced')
-    except BaseException:
-        dest.unlink(missing_ok=True)
-        raise
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        total = int(r.headers.get('Content-Length') or 0)
+        fd, tmp_name = tempfile.mkstemp(prefix=f'.{dest.name}.', suffix='.part', dir=dest.parent)
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, 'wb') as f:
+                while chunk := r.read(1 << 20):
+                    f.write(chunk)
+                    h.update(chunk)
+                    done += len(chunk)
+                    progress(done, total)
+            if h.hexdigest() != sha256:
+                name = url.rsplit('/', 1)[-1]
+                raise ValueError(f'{name} from {url} does not match the expected digest; the download may be corrupt or '
+                                 'the release replaced')
+            os.replace(tmp, dest)
+        finally:
+            tmp.unlink(missing_ok=True)
     return dest
 
 
@@ -134,11 +143,13 @@ def lock_file(path):
 
 
 def unlock_file(f):
-    if os.name == 'nt':
-        import msvcrt
-        f.seek(0)
-        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-    f.close()
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    finally:
+        f.close()
 
 
 def protect_outputs(outputs, sources):

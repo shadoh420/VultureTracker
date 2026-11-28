@@ -190,6 +190,18 @@ def collect(state, destination, make_zip=False, browser=None):
     def recipe_text(source, text):
         doc = api.from_yaml(text)
         updates = []
+        allowed_roots = [state.base_dir.resolve(), source.parent.resolve()]
+        try:
+            from .server import Handler
+            allowed_roots.extend(Path(r).resolve() for r in Handler.lib().roots)
+        except Exception:
+            pass
+
+        def check_recipe_input(p):
+            resolved = Path(p).resolve()
+            if not any(resolved.is_relative_to(r) for r in allowed_roots):
+                raise ValueError(f'Recipe input outside project/library roots: {p}')
+            return resolved
 
         def visit(value, keys=()):
             if isinstance(value, dict):
@@ -199,20 +211,28 @@ def collect(state, destination, make_zip=False, browser=None):
                         patterns = val if isinstance(val, list) else [val]
                         paths = []
                         for pat in patterns:
-                            src = source.parent / str(pat)
+                            src = check_recipe_input(source.parent / str(pat))
                             if src.is_dir():
                                 matches = sorted(src.rglob('*.wav'))
                             else:  # the recipe's folder is a path, not a pattern; a file named like a pattern is that file
                                 found = glob.glob(os.path.join(glob.escape(str(source.parent)), str(pat)), recursive=True)
-                                matches = [Path(p) for p in sorted(found)] or ([src] if src.is_file() else [])
+                                matches = [check_recipe_input(p) for p in sorted(found)] or ([src] if src.is_file() else [])
                             if not matches:
                                 raise ValueError(f'Missing recipe input: {src}')
                             paths.extend(copy_file(p, 'sources') for p in matches if p.is_file())
                         updates.append((path, paths if isinstance(val, list) or len(paths) != 1 else paths[0]))
                     elif key == 'faust' and isinstance(val, str) and val.strip().endswith('.dsp'):
-                        updates.append((path, copy_file(source.parent / val, 'sources')))
-                    elif key == 'patch' and isinstance(val, str) and (source.parent / val).is_file():
-                        updates.append((path, copy_file(source.parent / val, 'sources')))
+                        updates.append((path, copy_file(check_recipe_input(source.parent / val), 'sources')))
+                    elif key == 'patch' and isinstance(val, str):
+                        p = source.parent / val
+                        try:
+                            resolved = check_recipe_input(p)
+                        except ValueError:
+                            if any(s in val for s in ('/', '\\')) or Path(val).drive or Path(val).anchor or '..' in Path(val).parts:
+                                raise
+                            resolved = None
+                        if resolved is not None and resolved.is_file():
+                            updates.append((path, copy_file(resolved, 'sources')))
                     else:
                         visit(val, path)
             elif isinstance(value, list):

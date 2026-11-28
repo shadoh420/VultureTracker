@@ -33,7 +33,16 @@ static double clamp_d(double v, double lo, double hi) {
     return v < lo ? lo : (v > hi ? hi : v);
 }
 
+static int double_to_frame(double v, int lo, int hi) {
+    if (!isfinite(v)) return lo;
+    double f = floor(v);
+    if (f <= (double)lo) return lo;
+    if (f >= (double)hi) return hi;
+    return (int)f;
+}
+
 static char *ind_dup_str(const char *s) {
+    if (!s) s = "";
     size_t len = strlen(s);
     char *p = (char *)malloc(len + 1);
     if (p) memcpy(p, s, len + 1);
@@ -42,6 +51,8 @@ static char *ind_dup_str(const char *s) {
 
 static int cmp_double(const void *pa, const void *pb) {
     double a = *(const double *)pa, b = *(const double *)pb;
+    int na = isnan(a), nb = isnan(b);
+    if (na || nb) return na - nb;
     return (a > b) - (a < b);
 }
 
@@ -153,13 +164,17 @@ struct stft_ctx {
     const double *win;
     double norm;
     float *mag; /* [T, nb] */
+    int oom;
 };
 
 static void stft_worker(int start, int end, void *arg) {
-    const struct stft_ctx *c = (const struct stft_ctx *)arg;
+    struct stft_ctx *c = (struct stft_ctx *)arg;
     double *re = (double *)malloc((size_t)c->nfft * sizeof(double));
     double *im = (double *)malloc((size_t)c->nfft * sizeof(double));
-    if (!re || !im) { free(re); free(im); return; }
+    if (!re || !im) {
+        __atomic_store_n(&c->oom, 1, __ATOMIC_RELAXED);
+        free(re); free(im); return;
+    }
 
     int half = c->nfft / 2;
     for (int t = start; t < end; ++t) {
@@ -190,10 +205,11 @@ static int compute_mag_stft(const float *x, size_t n_x, int T, int hop,
         win[i] = 0.5 - 0.5 * cos(IND_TAU * (double)i / (double)(nfft - 1));
         wsum += win[i];
     }
-    struct stft_ctx ctx = { x, n_x, T, hop, nfft, nb, win, 2.0 / wsum, *mag_out };
+    struct stft_ctx ctx = { x, n_x, T, hop, nfft, nb, win, 2.0 / wsum, *mag_out, 0 };
     int grain = (nfft >= 4096) ? 16 : 64;
     nn_parallel_for(T, grain, stft_worker, &ctx);
     free(win);
+    if (ctx.oom) { free(*mag_out); *mag_out = NULL; return 0; }
     return 1;
 }
 
@@ -1604,6 +1620,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
 
     float *mag = NULL, *perc = NULL;
     float *mag_lo = NULL, *perc_lo = NULL;
+    struct drum_cand *kc = NULL, *sc = NULL;
     if (!compute_mag_stft(audio, n_frames, T, hop, nfft, nb, &mag)) return 0;
     perc = (float *)malloc((size_t)T * (size_t)nb * sizeof(float));
     if (!perc) { free(mag); return 0; }
@@ -1853,7 +1870,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     if (e995_k > 1e-8 && e995_k > e995_tot * 0.015 && f99_k > 0.055 &&
         e995_k > m95_all * 0.12 && e995_tot > m95_all * 0.22) {
         size_t kc_cap = 128, n_kc = 0;
-        struct drum_cand *kc = (struct drum_cand *)malloc(kc_cap * sizeof(*kc));
+        kc = (struct drum_cand *)malloc(kc_cap * sizeof(*kc));
         if (!kc) { free(hits); free(kick_at); free(snare_at); goto cleanup; }
 
         int last_k = -100;
@@ -1989,7 +2006,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
                     if (n_kc == kc_cap) {
                         kc_cap *= 2;
                         struct drum_cand *g = (struct drum_cand *)realloc(kc, kc_cap * sizeof(*kc));
-                        if (!g) { free(ksim); free(kc); free(hits); free(kick_at); free(snare_at); goto cleanup; }
+                        if (!g) { free(ksim); free(kc); kc = NULL; free(hits); free(kick_at); free(snare_at); goto cleanup; }
                         kc = g;
                     }
                     kc[n_kc++] = (struct drum_cand){ t, on_s, e_post, vel, 1 };
@@ -2009,12 +2026,13 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
             if (stats) stats->kick_hits++;
         }
         free(kc);
+        kc = NULL;
     }
 
     /* ---- 2. Snare (GM 38): Pass 1 anchors + Pass 2 self-bootstrapped template refine ---- */
     if (e995_sn > 1e-8 && f99_sn > 0.035 && e995_sh > m95_all * 0.025) {
         size_t sc_cap = 128, n_sc = 0;
-        struct drum_cand *sc = (struct drum_cand *)malloc(sc_cap * sizeof(*sc));
+        sc = (struct drum_cand *)malloc(sc_cap * sizeof(*sc));
         if (!sc) { free(hits); free(kick_at); free(snare_at); goto cleanup; }
 
         int last_s = -100;
@@ -2165,7 +2183,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
                     if (n_sc == sc_cap) {
                         sc_cap *= 2;
                         struct drum_cand *g = (struct drum_cand *)realloc(sc, sc_cap * sizeof(*sc));
-                        if (!g) { free(slin); free(ssq); free(sc); free(hits); free(kick_at); free(snare_at); goto cleanup; }
+                        if (!g) { free(slin); free(ssq); free(sc); sc = NULL; free(hits); free(kick_at); free(snare_at); goto cleanup; }
                         sc = g;
                     }
                     sc[n_sc++] = (struct drum_cand){ t, on_s, e_post, vel, 1 };
@@ -2186,6 +2204,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
             if (stats) stats->snare_hits++;
         }
         free(sc);
+        sc = NULL;
     }
 
     free(perc_lo); perc_lo = NULL;
@@ -2256,6 +2275,7 @@ static int transcribe_drums_dsp(const float *audio, size_t n_frames, unsigned sr
     ok = 1;
 
 cleanup:
+    free(kc); free(sc);
     free(perc_lo); free(mag_lo); free(perc); free(mag);
     free(e_kick); free(e_ksub); free(e_kmid); free(e_kbod); free(e_kraw);
     free(e_snlo); free(e_snhi); free(e_hat); free(e_hat6); free(e_tot); free(e_mtot);
@@ -2360,7 +2380,7 @@ static void subtract_drum_class_template(float *mag, int T, int nb, int nfft,
     size_t nh = 0;
     for (size_t i = 0; i < n_drums; ++i) {
         if (drums[i].pitch != target_pitch) continue;
-        int fk = (int)floor(drums[i].onset / hop_scale + 0.5);
+        int fk = double_to_frame(drums[i].onset / hop_scale + 0.5, 0, T);
         if (fk >= 2 && fk < T - 2) {
             h_fr[nh] = fk;
             h_vel[nh] = (double)drums[i].velocity;
@@ -2801,15 +2821,19 @@ int independent_transcribe(const float *audio_native, size_t n_native, unsigned 
 
         free(pitches); free(durs); free(susts); free(brts); free(eors); free(amps); free(rc);
 
+        char *nm = ind_dup_str(rname);
+        if (!nm) { free(mn); independent_tracks_free(out, n_out); goto cleanup; }
         out[n_out++] = (struct independent_track){
-            ind_dup_str(rname), prog, 0, mn, mw
+            nm, prog, 0, mn, mw
         };
         if (stats) stats->pitched_notes += mw;
     }
 
     if (n_drums > 0) {
+        char *dnm = ind_dup_str("Drums");
+        if (!dnm) { independent_tracks_free(out, n_out); goto cleanup; }
         out[n_out++] = (struct independent_track){
-            ind_dup_str("Drums"), 0, 1, drum_notes, n_drums
+            dnm, 0, 1, drum_notes, n_drums
         };
         drum_notes = NULL;
         if (stats) stats->drum_hits = n_drums;
@@ -2856,8 +2880,8 @@ static void check_pitch_hpss(const float *h1_db, const float *h1_dba, int T,
     if (pi < 0 || pi >= IND_NP || T <= 0) return;
 
     double hop_s = ((double)IND_HOP16 / (double)IND_SR16) * retune_ratio;
-    int f0 = clamp_i((int)floor(onset / hop_s + 0.5), 0, T - 1);
-    int f1 = clamp_i((int)floor(offset / hop_s + 0.5), f0 + 1, T);
+    int f0 = double_to_frame(onset / hop_s + 0.5, 0, T - 1);
+    int f1 = double_to_frame(offset / hop_s + 0.5, f0 + 1, T);
     if (f1 <= f0) f1 = (f0 + 1 <= T) ? (f0 + 1) : T;
 
     double vr = mean_grid_db(h1_db, f0, f1, pi);
@@ -3167,8 +3191,10 @@ int independent_hybrid_fuse(const struct midi_track *base_tracks, size_t n_base_
             struct midi_note *dn = (struct midi_note *)malloc(bt->count * sizeof(*dn));
             if (!dn) { independent_tracks_free(out, n_out); goto cleanup; }
             memcpy(dn, bt->notes, bt->count * sizeof(*dn));
+            char *dnm = ind_dup_str(bt->name ? bt->name : "Drums");
+            if (!dnm) { free(dn); independent_tracks_free(out, n_out); goto cleanup; }
             out[n_out++] = (struct independent_track){
-                ind_dup_str(bt->name ? bt->name : "Drums"), 0, 1, dn, bt->count
+                dnm, 0, 1, dn, bt->count
             };
             continue;
         }
@@ -3192,8 +3218,10 @@ int independent_hybrid_fuse(const struct midi_track *base_tracks, size_t n_base_
             if (stats) stats->bass_rescued += n_rb;
         }
         w = dedup_same_pitch(mn, w);
+        char *nm = ind_dup_str(bt->name ? bt->name : "Track");
+        if (!nm) { free(mn); independent_tracks_free(out, n_out); goto cleanup; }
         out[n_out++] = (struct independent_track){
-            ind_dup_str(bt->name ? bt->name : "Track"), bt->program, 0, mn, w
+            nm, bt->program, 0, mn, w
         };
     }
 
@@ -3204,8 +3232,10 @@ int independent_hybrid_fuse(const struct midi_track *base_tracks, size_t n_base_
         size_t w = dedup_same_pitch(mn, n_rb);
         double mb = ind_percentile(resc_bass_br, n_rb, 0.50);
         int prog = (mb >= 0.30) ? 39 : 38;
+        char *nm = ind_dup_str("synth bass rescue");
+        if (!nm) { free(mn); independent_tracks_free(out, n_out); goto cleanup; }
         out[n_out++] = (struct independent_track){
-            ind_dup_str("synth bass rescue"), prog, 0, mn, w
+            nm, prog, 0, mn, w
         };
         if (stats) { stats->bass_rescued += w; stats->rescue_tracks_added++; }
     }
@@ -3218,8 +3248,10 @@ int independent_hybrid_fuse(const struct midi_track *base_tracks, size_t n_base_
         double mb = ind_percentile(resc_mid_br, n_rm, 0.50);
         double me = ind_percentile(resc_mid_eo, n_rm, 0.50);
         int prog = (mb >= 0.14 || me >= 0.20) ? 81 : 90;
+        char *nm = ind_dup_str("synth lead rescue");
+        if (!nm) { free(mn); independent_tracks_free(out, n_out); goto cleanup; }
         out[n_out++] = (struct independent_track){
-            ind_dup_str("synth lead rescue"), prog, 0, mn, w
+            nm, prog, 0, mn, w
         };
         if (stats) { stats->mid_high_rescued += w; stats->rescue_tracks_added++; }
     }

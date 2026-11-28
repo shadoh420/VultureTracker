@@ -86,6 +86,21 @@ class TestRecipeValues(unittest.TestCase):
             self.assertEqual(synth.tools_dir(Path(tmp)).parts[-2:], ("VultureTracker", "tools"))
             self.assertNotEqual(synth.tools_dir(Path(tmp)).parent.parent, Path(tmp))
 
+    def test_post_empty_nonfinite_and_recipe_types_raise_recipe_error(self):
+        if np is not None:
+            for arr in (np.zeros((1, 0), dtype=np.float32), np.array([[0.0, np.nan]], dtype=np.float32), np.array([[0.0, np.inf]], dtype=np.float32)):
+                with self.assertRaises(RecipeError):
+                    _post(arr, {"trim": False}, 44100)
+        for bad in ({"defaults": [], "samples": {}}, {"samples": ["not-a-map"]}):
+            with self.assertRaises(RecipeError):
+                list(expand(bad))
+        with tempfile.TemporaryDirectory() as tmp:
+            r = Path(tmp) / "r.yaml"
+            r.write_text("defaults: [1]\nsamples: {}\n", encoding="utf-8")
+            with self.assertRaises(RecipeError):
+                from vulturetracker.synth import _load_recipe
+                _load_recipe(r)
+
 
 try:
     import pedalboard

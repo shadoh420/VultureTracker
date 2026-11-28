@@ -41,20 +41,20 @@ def write_pdf(view, output, settings, cancel, track=None):
     token = secrets.token_urlsafe(32)
     web = Path(__file__).parent / 'web'
     payload = json.dumps(view).encode('utf-8')
-    config = json.dumps(dict(paper=settings['paper'], notation=settings['notation'], scale=settings['scale'], track=track))
+    config = json.dumps(dict(paper=settings['paper'], notation=settings['notation'], scale=settings['scale'], track=track)).encode('utf-8')
     page = ('''<!doctype html><html><head><meta charset="utf-8">
 <link rel="stylesheet" href="/web/tablature.css">
 <script src="/web/alphaTab.min.js"></script><script src="/web/engine-core.js"></script>
 <script src="/web/tablature.js"></script></head><body><main id="score-print"></main><script>
 (async()=>{try{
-const view=await (await fetch('/SNAPSHOT')).json(),cfg=CONFIG,root=document.getElementById('score-print');
+const [view,cfg]=await Promise.all([fetch('/SNAPSHOT').then(r=>r.json()),fetch('/CONFIG').then(r=>r.json())]),root=document.getElementById('score-print');
 VultureTab.mountPrint(root,view);
 const form=root.querySelector('form');
 for(const key of ['paper','notation','scale'])form.elements.namedItem(key).value=cfg[key];
 if(cfg.track!==null)for(const input of form.querySelectorAll('[name=track]'))input.checked=input.value===cfg.track;
 form.dispatchEvent(new Event('submit',{cancelable:true}));
 }catch(e){document.body.dataset.failure=e.message}})();
-</script></body></html>'''.replace('SNAPSHOT', token + '/snapshot').replace('CONFIG', config)).encode('utf-8')
+</script></body></html>'''.replace('SNAPSHOT', token + '/snapshot').replace('CONFIG', token + '/config')).encode('utf-8')
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -66,6 +66,8 @@ form.dispatchEvent(new Event('submit',{cancelable:true}));
                 data, mime = page, 'text/html; charset=utf-8'
             elif route == '/' + token + '/snapshot':
                 data, mime = payload, 'application/json'
+            elif route == '/' + token + '/config':
+                data, mime = config, 'application/json'
             elif route.startswith('/web/'):
                 path = (web / route[5:]).resolve()
                 if not path.is_relative_to(web.resolve()) or not path.is_file():
@@ -129,9 +131,9 @@ form.dispatchEvent(new Event('submit',{cancelable:true}));
                     proc.wait()
             dom = (root / 'dom.html').read_text(encoding='utf-8', errors='replace')
             # Chromium may print an error/unfinished page successfully: only publish completed engraving.
-            if proc.returncode or 'data-pages="' not in dom or 'Cannot print:' in dom or 'data-failure=' in dom:
+            if proc.returncode or 'data-pages="' not in dom or 'data-failure=' in dom or 'class="vt-print-status">Cannot print:' in dom:
                 import re
-                reason = re.search(r'Cannot print: ([^<]+)|data-failure="([^"]+)"', dom)
+                reason = re.search(r'data-failure="([^"]+)"|class="vt-print-status">Cannot print: ([^<]+)', dom)
                 detail = (reason[1] or reason[2]) if reason else f'browser exit {proc.returncode}; no completed score'
                 if not reason:
                     with (root / 'browser.log').open('rb') as log:

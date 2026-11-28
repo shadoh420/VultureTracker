@@ -170,6 +170,9 @@ class History:
         except Newer:
             self.newer = True
             return None
+        except OSError as e:
+            self.notices.append(f'{self.path.name} could not be read: {e}')
+            return None
         except (ValueError, TypeError, KeyError, UnicodeError, zlib.error):
             if self.passive:
                 self.notices.append(f'{self.path.name} could not be read; left as it is')
@@ -230,6 +233,8 @@ class History:
                 self._restore(path, pair[side])
             self.journal.unlink()
             self.notices.append('Recovered an interrupted save; history and settings match the song on disk.')
+        except OSError as e:
+            self.notices.append(f'Interrupted save could not be recovered ({e}); leaving {self.journal.name} in place.')
         except (ValueError, TypeError, KeyError, UnicodeError, zlib.error):
             quarantine(self.journal, 'corrupt', self.notices)
 

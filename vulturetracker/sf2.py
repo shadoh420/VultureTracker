@@ -421,7 +421,7 @@ def pat_module(data):
         pan = (balance * 256 + 8) // 15
         if pan <= 256:
             smp.pan = min(pan // 4, 64)
-        if scale:
+        if scale and root_f > 0:
             smp.c5_speed = max(1, round(freq * 2.0 ** ((84.0 - _patch_note(root_f)) / 12.0)))
         if flags & 4 and min(le, len(frames)) > ls:
             smp.loop = Loop(start=ls, end=min(le, len(frames)), pingpong=bool(flags & 8))

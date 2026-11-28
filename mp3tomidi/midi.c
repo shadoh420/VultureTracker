@@ -15,9 +15,14 @@ struct byte_buf {
 };
 
 static int bb_reserve(struct byte_buf *b, size_t add) {
-    if (b->len + add <= b->cap) return 1;
-    size_t next = b->cap ? b->cap * 2 : 1024;
-    while (next < b->len + add) next *= 2;
+    if (add > SIZE_MAX - b->len) return 0;
+    size_t need = b->len + add;
+    if (need <= b->cap) return 1;
+    size_t next = b->cap ? b->cap : 1024;
+    while (next < need) {
+        if (next > SIZE_MAX / 2) { next = need; break; }
+        next *= 2;
+    }
     uint8_t *p = (uint8_t *)realloc(b->data, next);
     if (!p) return 0;
     b->data = p;
@@ -137,7 +142,11 @@ int midi_write_file_bpm(const char *path, const struct midi_track *tracks, size_
             uint8_t pc[3] = { 0x00, (uint8_t)(0xC0 | ch), (uint8_t)clamp_int(t->program, 0, 127) };
             if (!bb_bytes(&trk, pc, 3)) goto done;
         }
-        size_t n_ev = t->count * 2 + (t->ccs ? t->n_ccs : 0);
+        if (t->count > SIZE_MAX / 2) goto done;
+        size_t n_ccs = t->ccs ? t->n_ccs : 0;
+        if (n_ccs > SIZE_MAX - t->count * 2) goto done;
+        size_t n_ev = t->count * 2 + n_ccs;
+        if (n_ev > SIZE_MAX / sizeof(*evs)) goto done;
         if (n_ev > 0) {
             evs = (struct midi_ev *)malloc(n_ev * sizeof(*evs));
             if (!evs) goto done;
@@ -226,12 +235,14 @@ struct tempo_pt {
     uint64_t tick;
     uint32_t us_per_beat;
     double sec_at_tick;
+    size_t seq;
 };
 
 static int cmp_tempo_pt(const void *pa, const void *pb) {
     const struct tempo_pt *a = (const struct tempo_pt *)pa;
     const struct tempo_pt *b = (const struct tempo_pt *)pb;
-    return (a->tick > b->tick) - (a->tick < b->tick);
+    if (a->tick != b->tick) return (a->tick > b->tick) - (a->tick < b->tick);
+    return (a->seq > b->seq) - (a->seq < b->seq);
 }
 
 static double tick_to_sec(const struct tempo_pt *tmap, size_t n_tmap, uint16_t tpb, uint64_t tick) {
@@ -261,6 +272,21 @@ void midi_loaded_tracks_free(struct midi_loaded_track *tracks, size_t n_tracks) 
     free(tracks);
 }
 
+static int push_loaded_note(struct midi_note **notes, size_t *count, size_t *cap,
+                            double on, double off, int pitch, int vel) {
+    if (*count == *cap) {
+        if (*cap > SIZE_MAX / 2) return 0;
+        size_t next = *cap ? (*cap * 2) : 128;
+        if (next > SIZE_MAX / sizeof(**notes)) return 0;
+        struct midi_note *tmp = (struct midi_note *)realloc(*notes, next * sizeof(**notes));
+        if (!tmp) return 0;
+        *notes = tmp;
+        *cap = next;
+    }
+    (*notes)[(*count)++] = (struct midi_note){ on, off, pitch, vel };
+    return 1;
+}
+
 int midi_read_file(const char *path, struct midi_loaded_track **tracks_out, size_t *n_tracks_out) {
     *tracks_out = NULL;
     *n_tracks_out = 0;
@@ -279,6 +305,7 @@ int midi_read_file(const char *path, struct midi_loaded_track **tracks_out, size
 
     if (memcmp(buf, "MThd", 4) != 0 || rd_u32be(buf + 4) < 6) { free(buf); return 0; }
     uint32_t hdr_len = rd_u32be(buf + 4);
+    if (hdr_len > len - 8) { free(buf); return 0; }
     uint16_t n_chunks = rd_u16be(buf + 10);
     uint16_t tpb = rd_u16be(buf + 12);
     if (tpb == 0 || (tpb & 0x8000u)) { free(buf); return 0; }
@@ -286,26 +313,26 @@ int midi_read_file(const char *path, struct midi_loaded_track **tracks_out, size
     /* Collect all MTrk byte ranges */
     const uint8_t **trk_ptr = (const uint8_t **)calloc(n_chunks ? n_chunks : 1, sizeof(*trk_ptr));
     size_t *trk_len = (size_t *)calloc(n_chunks ? n_chunks : 1, sizeof(*trk_len));
+    struct tempo_pt *tmap = (struct tempo_pt *)malloc(16 * sizeof(*tmap));
+    if (!trk_ptr || !trk_len || !tmap) {
+        free(trk_ptr); free(trk_len); free(tmap); free(buf); return 0;
+    }
     size_t found = 0;
-    size_t pos = 8 + hdr_len;
-    while (pos + 8 <= len && found < n_chunks) {
+    size_t pos = 8 + (size_t)hdr_len;
+    while (pos <= len && len - pos >= 8 && found < n_chunks) {
         uint32_t clen = rd_u32be(buf + pos + 4);
-        if (pos + 8 + clen > len) break;
+        if ((size_t)clen > len - pos - 8) break;
         if (memcmp(buf + pos, "MTrk", 4) == 0) {
             trk_ptr[found] = buf + pos + 8;
             trk_len[found] = clen;
             found++;
         }
-        pos += 8 + clen;
+        pos += 8 + (size_t)clen;
     }
 
     /* Pass 1: collect tempo map across all tracks */
-    struct tempo_pt *tmap = (struct tempo_pt *)malloc(16 * sizeof(*tmap));
     size_t n_tmap = 0, cap_tmap = 16;
-    if (!trk_ptr || !trk_len || !tmap) {
-        free(trk_ptr); free(trk_len); free(tmap); free(buf); return 0;
-    }
-    tmap[n_tmap++] = (struct tempo_pt){ 0, 500000u, 0.0 };
+    tmap[n_tmap++] = (struct tempo_pt){ 0, 500000u, 0.0, 0 };
 
     for (size_t ti = 0; ti < found; ++ti) {
         const uint8_t *d = trk_ptr[ti];
@@ -332,7 +359,8 @@ int midi_read_file(const char *path, struct midi_loaded_track **tracks_out, size
                         if (!g) { free(trk_ptr); free(trk_len); free(tmap); free(buf); return 0; }
                         tmap = g;
                     }
-                    tmap[n_tmap++] = (struct tempo_pt){ tick, us ? us : 500000u, 0.0 };
+                    tmap[n_tmap] = (struct tempo_pt){ tick, us ? us : 500000u, 0.0, n_tmap };
+                    n_tmap++;
                 }
                 p += (size_t)mlen;
             } else if (st == 0xF0u || st == 0xF7u) {
@@ -417,25 +445,21 @@ int midi_read_file(const char *path, struct midi_loaded_track **tracks_out, size
                     if (ch == 9) is_drum = 1;
                     if (vel > 0) {
                         if (active_vel[ch][pitch] > 0) {
-                            if (count == cap) {
-                                cap = cap ? cap * 2 : 128;
-                                notes = (struct midi_note *)realloc(notes, cap * sizeof(*notes));
-                            }
-                            if (notes) {
-                                double off = sec > active_on[ch][pitch] + 0.01 ? sec : active_on[ch][pitch] + 0.01;
-                                notes[count++] = (struct midi_note){ active_on[ch][pitch], off, pitch, active_vel[ch][pitch] };
+                            double off = sec > active_on[ch][pitch] + 0.01 ? sec : active_on[ch][pitch] + 0.01;
+                            if (!push_loaded_note(&notes, &count, &cap, active_on[ch][pitch], off, pitch, active_vel[ch][pitch])) {
+                                free(tname); free(notes); midi_loaded_tracks_free(out, n_out);
+                                free(trk_ptr); free(trk_len); free(tmap); free(buf);
+                                return 0;
                             }
                         }
                         active_vel[ch][pitch] = vel;
                         active_on[ch][pitch] = sec;
                     } else if (active_vel[ch][pitch] > 0) {
-                        if (count == cap) {
-                            cap = cap ? cap * 2 : 128;
-                            notes = (struct midi_note *)realloc(notes, cap * sizeof(*notes));
-                        }
-                        if (notes) {
-                            double off = sec > active_on[ch][pitch] + 0.01 ? sec : active_on[ch][pitch] + 0.01;
-                            notes[count++] = (struct midi_note){ active_on[ch][pitch], off, pitch, active_vel[ch][pitch] };
+                        double off = sec > active_on[ch][pitch] + 0.01 ? sec : active_on[ch][pitch] + 0.01;
+                        if (!push_loaded_note(&notes, &count, &cap, active_on[ch][pitch], off, pitch, active_vel[ch][pitch])) {
+                            free(tname); free(notes); midi_loaded_tracks_free(out, n_out);
+                            free(trk_ptr); free(trk_len); free(tmap); free(buf);
+                            return 0;
                         }
                         active_vel[ch][pitch] = 0;
                     }
@@ -447,23 +471,26 @@ int midi_read_file(const char *path, struct midi_loaded_track **tracks_out, size
         for (int ch = 0; ch < 16; ++ch) {
             for (int pitch = 0; pitch < 128; ++pitch) {
                 if (active_vel[ch][pitch] > 0) {
-                    if (count == cap) {
-                        cap = cap ? cap * 2 : 128;
-                        notes = (struct midi_note *)realloc(notes, cap * sizeof(*notes));
-                    }
-                    if (notes) {
-                        double off = end_sec > active_on[ch][pitch] + 0.05 ? end_sec : active_on[ch][pitch] + 0.05;
-                        notes[count++] = (struct midi_note){ active_on[ch][pitch], off, pitch, active_vel[ch][pitch] };
+                    double off = end_sec > active_on[ch][pitch] + 0.05 ? end_sec : active_on[ch][pitch] + 0.05;
+                    if (!push_loaded_note(&notes, &count, &cap, active_on[ch][pitch], off, pitch, active_vel[ch][pitch])) {
+                        free(tname); free(notes); midi_loaded_tracks_free(out, n_out);
+                        free(trk_ptr); free(trk_len); free(tmap); free(buf);
+                        return 0;
                     }
                 }
             }
         }
         if (count > 0) {
-            qsort(notes, count, sizeof(*notes), cmp_loaded_note);
+            if (count > 1) qsort(notes, count, sizeof(*notes), cmp_loaded_note);
             if (!tname) {
                 const char *def = is_drum ? "Drums" : "Track";
                 tname = (char *)malloc(strlen(def) + 1);
-                if (tname) strcpy(tname, def);
+                if (!tname) {
+                    free(notes); midi_loaded_tracks_free(out, n_out);
+                    free(trk_ptr); free(trk_len); free(tmap); free(buf);
+                    return 0;
+                }
+                strcpy(tname, def);
             }
             out[n_out++] = (struct midi_loaded_track){ tname, prog, is_drum, notes, count };
         } else {

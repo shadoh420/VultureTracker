@@ -1,7 +1,9 @@
 /* Kaiser-windowed sinc resampler matching soxr HQ (~115 dB stopband, ~95% passband,
  * zero-phase alignment, output length llround(in_len * dst_rate / src_rate)). */
 #include "resample.h"
+#include <limits.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -68,7 +70,9 @@ int resample_mono(const float *in, size_t in_len, double src_rate, double dst_ra
     if (!ensure_sinc_table()) return 0;
 
     double ratio = dst_rate / src_rate;
-    long long n_out_ll = (long long)floor((double)in_len * ratio + 0.5);
+    double est = floor((double)in_len * ratio + 0.5);
+    if (!isfinite(est) || est > (double)(SIZE_MAX / sizeof(float)) || est > (double)LLONG_MAX) return 0;
+    long long n_out_ll = (long long)est;
     if (n_out_ll <= 0) return 1;
     size_t n_out = (size_t)n_out_ll;
 

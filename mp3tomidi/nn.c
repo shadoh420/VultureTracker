@@ -22,6 +22,7 @@ enum { NN_MAX_THREADS = 16 };
 
 struct nn_pool {
     int initialized;
+    int sync_initialized;
     int n_threads;
     int shutdown;
     pthread_t workers[NN_MAX_THREADS];
@@ -102,14 +103,21 @@ void nn_init(int num_threads) {
     g_pool.n_threads = num_threads;
     g_pool.initialized = 1;
     if (num_threads > 1) {
-        pthread_mutex_init(&g_pool.mu, NULL);
-        pthread_cond_init(&g_pool.work_cv, NULL);
-        pthread_cond_init(&g_pool.done_cv, NULL);
-        for (int i = 1; i < num_threads; ++i) {
-            g_wargs[i].id = i;
-            if (pthread_create(&g_pool.workers[i], NULL, worker_loop, &g_wargs[i]) != 0) {
-                g_pool.n_threads = i;
-                break;
+        int have_mu = (pthread_mutex_init(&g_pool.mu, NULL) == 0);
+        int have_wcv = have_mu && (pthread_cond_init(&g_pool.work_cv, NULL) == 0);
+        int have_dcv = have_wcv && (pthread_cond_init(&g_pool.done_cv, NULL) == 0);
+        if (!have_dcv) {
+            if (have_wcv) pthread_cond_destroy(&g_pool.work_cv);
+            if (have_mu) pthread_mutex_destroy(&g_pool.mu);
+            g_pool.n_threads = 1;
+        } else {
+            g_pool.sync_initialized = 1;
+            for (int i = 1; i < num_threads; ++i) {
+                g_wargs[i].id = i;
+                if (pthread_create(&g_pool.workers[i], NULL, worker_loop, &g_wargs[i]) != 0) {
+                    g_pool.n_threads = i;
+                    break;
+                }
             }
         }
     }
@@ -117,16 +125,19 @@ void nn_init(int num_threads) {
 
 void nn_shutdown(void) {
     if (!g_pool.initialized) return;
-    if (g_pool.n_threads > 1) {
-        pthread_mutex_lock(&g_pool.mu);
-        g_pool.shutdown = 1;
-        pthread_cond_broadcast(&g_pool.work_cv);
-        pthread_mutex_unlock(&g_pool.mu);
-        for (int i = 1; i < g_pool.n_threads; ++i)
-            pthread_join(g_pool.workers[i], NULL);
+    if (g_pool.sync_initialized) {
+        if (g_pool.n_threads > 1) {
+            pthread_mutex_lock(&g_pool.mu);
+            g_pool.shutdown = 1;
+            pthread_cond_broadcast(&g_pool.work_cv);
+            pthread_mutex_unlock(&g_pool.mu);
+            for (int i = 1; i < g_pool.n_threads; ++i)
+                pthread_join(g_pool.workers[i], NULL);
+        }
         pthread_mutex_destroy(&g_pool.mu);
         pthread_cond_destroy(&g_pool.work_cv);
         pthread_cond_destroy(&g_pool.done_cv);
+        g_pool.sync_initialized = 0;
     }
     g_pool.initialized = 0;
     g_pool.n_threads = 0;

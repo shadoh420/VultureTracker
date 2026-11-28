@@ -92,7 +92,10 @@ def import_midi(src, song_path, samples_dir):
             if msg.type == "set_tempo" and msg.tempo > 0:  # a tempo of 0 us a quarter is no tempo
                 tempos.append((t, msg.tempo))
             elif msg.type == "time_signature":
-                sigs.append((t, msg.numerator, msg.denominator))
+                if msg.numerator > 0 and msg.denominator > 0:
+                    sigs.append((t, msg.numerator, msg.denominator))
+                else:
+                    skip("invalid time signatures")
             elif msg.type == "track_name" and not names[ti]:
                 names[ti] = _name(msg.name)
             elif msg.type in ("marker", "cue_marker") and _name(msg.text):

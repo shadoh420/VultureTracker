@@ -4,6 +4,7 @@ Preserves written measures, tracks, exact durations and supported techniques.
 Unknown musical components refuse; unrepresented presentation fields produce
 explicit notices. Uses no installed TablEdit, Java, or external converter.
 """
+from bisect import bisect_right
 from fractions import Fraction
 from pathlib import Path
 import struct
@@ -250,7 +251,7 @@ def read_v2(data):
             shift = 4 * c[3]
             den = (2 ** (c[2] >> 5)) // 2
             num = ((size // 4 - c[3]) * den) // 64
-            if den not in (1, 2, 4, 8, 16, 32, 64) or not num:
+            if den not in (1, 2, 4, 8, 16, 32, 64) or num <= 0:
                 r.fail('invalid changed meter')
             headers[mi]['meter'] = [num, den]
         elif c[2] == 254:
@@ -337,22 +338,25 @@ def read_v3(data):
     if len(data) - r.pos < 4 or (len(data) - r.pos - 4) % 12:
         r.fail('invalid component block length')
     total_strings = sum(len(t['tuning']) for t in tracks)
+    stride = 32 * total_strings
+    if stride <= 0:
+        r.fail('invalid track string count')
+    starts, cursor = [], Fraction(0)
+    for header in headers:
+        num, den = header['meter']
+        if num <= 0 or den not in (1, 2, 4, 8, 16, 32, 64):
+            r.fail('invalid time signature')
+        starts.append(cursor)
+        cursor += Fraction(num * 16, den) * stride
     anchors = []
     last_notes = {}
     while len(data) - r.pos > 4:
         c = r.take(12)
         location = int.from_bytes(c[:4], 'little')
-        stride = 32 * total_strings
-        for mi, header in enumerate(headers):
-            num, den = header['meter']
-            if not num or den not in (1, 2, 4, 8, 16, 32, 64):
-                r.fail('invalid time signature')
-            size = Fraction(num * 16, den) * stride
-            if location < size:
-                break
-            location -= size
-        else:
+        if location >= cursor:
             r.fail('component outside measures')
+        mi = bisect_right(starts, location) - 1
+        location -= starts[mi]
         position, offset = divmod(location, stride)
         if offset % 8:
             r.fail('component has an unrepresentable sub-grid location')
@@ -397,7 +401,7 @@ def read_v3(data):
                 notices.append('Grace fingering, spacing, spelling and slash/slur/stem appearance are not retained.')
         elif kind == 0x33:
             tracks[ti]['measures'][mi].append(dict(at=at, voice=1 if c[6] & 48 == 48 else 0,
-                                                  written=duration(c[5]), notes=[]))
+                                                  written=duration(c[5] & 31), notes=[]))
         elif kind == 0xfe:
             if at or c[7] & 15:
                 r.fail('mid-measure or gradual tempo changes are not yet representable')

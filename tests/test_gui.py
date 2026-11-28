@@ -2661,6 +2661,135 @@ class TestSongDeliveryServer(unittest.TestCase):
                     server.Handler.save_score_export(dict(song='song.yaml', revision='current', format=fmt, data=data))
             window.create_file_dialog.assert_not_called()
 
+    def test_invalid_or_negative_content_length_returns_400(self):
+        import socket, threading
+        from vulturetracker import server
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            for cl in ('-1', 'abc'):
+                with socket.create_connection(srv.server_address, timeout=5) as sock:
+                    req = (f"POST /api/score HTTP/1.1\r\nHost: 127.0.0.1:{srv.server_port}\r\n"
+                           f"X-VT-Token: {srv.token}\r\nContent-Length: {cl}\r\nConnection: close\r\n\r\n").encode()
+                    sock.sendall(req)
+                    chunks = []
+                    while chunk := sock.recv(4096):
+                        chunks.append(chunk)
+                    resp = b"".join(chunks).decode("utf-8", errors="replace")
+                    self.assertIn("400", resp.splitlines()[0], resp)
+                    self.assertIn("invalid Content-Length", resp)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+    def test_state_reload_clears_stale_mod_on_song_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "s.yaml"
+            write_wav(Path(tmp) / "a.wav", 44100, [[1000] * 1000])
+            p.write_text("module: {title: ok, channels: 1}\nsamples:\n  1: {file: a.wav}\n"
+                         "patterns:\n  p:\n    rows: 16\n    data: |\n      00: C-5 01 ... ...\norders: [p]\n",
+                         encoding="utf-8", newline="\n")
+            st = gui.State(p, headless=True)
+            try:
+                self.assertIsNotNone(st.mod)
+                self.assertIsNotNone(st.facts)
+                p.write_text("module: [broken\n", encoding="utf-8", newline="\n")
+                st.reload()
+                self.assertTrue(st.error)
+                self.assertIsNone(st.mod)
+                self.assertIsNone(st.facts)
+                self.assertIsNone(st.sound_table)
+                snap = st.snapshot()
+                self.assertIsNone(snap["song"]["facts"])
+            finally:
+                st.close()
+
+    def test_history_oserror_does_not_quarantine_or_crash(self):
+        from vulturetracker.history import History
+        with tempfile.TemporaryDirectory() as tmp:
+            song = Path(tmp) / "s.yaml"
+            song.write_text("x", encoding="utf-8")
+            h = History(song, [])
+            h.path.write_bytes(b"corrupt")
+            h.journal.write_bytes(b"corrupt")
+            real_read_bytes = Path.read_bytes
+            def blocked_read(self_p):
+                if self_p in (h.path, h.journal):
+                    raise OSError("locked")
+                return real_read_bytes(self_p)
+            with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=blocked_read):
+                self.assertIsNone(h.load())
+                h.recover()
+            self.assertTrue(h.path.exists())
+            self.assertTrue(h.journal.exists())
+            self.assertEqual(len(h.notices), 2)
+
+    def test_worker_and_prune_tolerate_concurrent_eviction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "s.yaml"
+            write_wav(Path(tmp) / "a.wav", 44100, [[1000] * 1000])
+            p.write_text("module: {title: ok, channels: 1}\nsamples:\n  1: {file: a.wav}\n"
+                         "patterns:\n  p:\n    rows: 16\n    data: |\n      00: C-5 01 ... ...\norders: [p]\n",
+                         encoding="utf-8", newline="\n")
+            st = gui.State(p, headless=True)
+            try:
+                while not st.jobs.empty():
+                    st.jobs.get_nowait()
+                k = st.key(None)
+                st.renders[k] = {"status": "queued", "file": str(st.cache_dir / f"{k}.wav"), "error": None}
+                with mock.patch.object(st, "compiled_it", side_effect=lambda *_: (st.renders.pop(k, None), RuntimeError("boom"))[1]):
+                    st._put(1, (k, None))
+                    st._put(10, ("close",))
+                    st._worker()
+                self.assertEqual(st.renders[k]["status"], "failed")
+                st.cache_dir.mkdir(exist_ok=True)
+                ghost = st.cache_dir / "vanished.wav"
+                ghost.write_bytes(b"x")
+                real_stat = Path.stat
+                with mock.patch.object(Path, "stat", autospec=True, side_effect=lambda self_p: (_ for _ in ()).throw(FileNotFoundError()) if self_p == ghost else real_stat(self_p)):
+                    st._prune(keep=60)
+            finally:
+                st.close()
+
+    def test_fileio_fetch_verified_save_beside_and_unlock_cleanup(self):
+        from vulturetracker import fileio
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            dest = d / "tool.bin"
+            dest.write_bytes(b"existing-good")
+            class _Resp:
+                headers = {"Content-Length": "4"}
+                def __init__(self, data): self._chunks = [data, b""]
+                def read(self, _n): return self._chunks.pop(0)
+                def __enter__(self): return self
+                def __exit__(self, *_): pass
+            with mock.patch("urllib.request.urlopen", return_value=_Resp(b"evil")):
+                with self.assertRaises(ValueError):
+                    fileio.fetch_verified("https://example.invalid/t", "0" * 64, dest)
+            self.assertEqual(dest.read_bytes(), b"existing-good")
+            self.assertEqual([p.name for p in d.iterdir()], ["tool.bin"])
+            digest = hashlib.sha256(b"good").hexdigest()
+            with mock.patch("urllib.request.urlopen", return_value=_Resp(b"good")):
+                fileio.fetch_verified("https://example.invalid/t", digest, dest, timeout=12)
+            self.assertEqual(dest.read_bytes(), b"good")
+            real_atomic = fileio.atomic_write
+            calls = [0]
+            def flaky_write(path, data, **kw):
+                calls[0] += 1
+                if calls[0] == 1:
+                    raise FileExistsError("race")
+                return real_atomic(path, data, **kw)
+            with mock.patch.object(fileio, "atomic_write", side_effect=flaky_write):
+                saved, wrote = fileio.save_beside(d, "item", ".wav", b"abc")
+            self.assertTrue(wrote and saved.name == "item-2.wav")
+            f = mock.Mock()
+            if os.name == "nt":
+                with mock.patch("msvcrt.locking", side_effect=OSError("bad fd")):
+                    with self.assertRaises(OSError):
+                        fileio.unlock_file(f)
+                f.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
