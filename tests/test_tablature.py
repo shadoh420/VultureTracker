@@ -8956,6 +8956,69 @@ class TestPercussion(unittest.TestCase):
         n = promoted['score']['patterns']['B']['beats'][0]['notes'][0]
         self.assertEqual((n['pitch'], n['string'], n['fret'], n['channel']), (46, 5, 46, 4))
 
+    def test_repeat_reset_skips_lane_stroke_overflow_refused_and_unresolved_tie_disambiguated(self):
+        # 1. _performed_releases refuses stroke release that overflows arrangement bounds.
+        song, raw = plan_fixture()
+        song['score']['patterns']['A']['beats'] = []
+        song['score']['patterns']['B']['beats'] = [
+            {'id': 's1', 'track': 'guitar', 'voice': 0, 'at': [31, 8],
+             'written': {'value': 32, 'dots': 0, 'tuplet': [1, 1]},
+             'stroke': {'direction': 'down', 'value': 4},
+             'notes': [{**note(f'sn{s}', p, s, 0), 'staccato': True}
+                       for s, p in zip(range(1, 7), (64, 59, 55, 50, 45, 40))]},
+        ]
+        song['score']['ties'] = []
+        with self.assertRaisesRegex(ValueError, 'stroke release exceeds arrangement bounds'):
+            tab.playback_plan(song, raw)
+
+        # 2. _repeat_backing skips automation-owned row-0 cells when placing repeat tempo reset.
+        song, raw = plan_fixture()
+        song['score']['measures'] = [
+            {'id': 'm1', 'from': {'occurrence': 'oa', 'at': [0, 1]}, 'to': {'occurrence': 'oa', 'at': [4, 1]},
+             'meter': [4, 4], 'repeat_open': True},
+            {'id': 'm2', 'from': {'occurrence': 'ob', 'at': [0, 1]}, 'to': {'occurrence': 'ob', 'at': [4, 1]},
+             'meter': [4, 4], 'repeat_close': 1},
+        ]
+        raw[1].rows[12][0].effect, raw[1].rows[12][0].param = 20, 140
+        for ch in range(6):
+            raw[0].lanes[(0, ch)] = ('e', 'vol', None)
+        source_tl = tab._score_timeline(song, raw)
+        visits = tab._repeat_visits(source_tl)
+        patterns, _ = tab._repeat_backing(song, raw, source_tl, visits)
+        reset_pat = next(p for p in patterns if p.name.startswith('repeat_backing_'))
+        self.assertEqual((reset_pat.rows[0][6].effect, reset_pat.rows[0][6].param), (20, 120))
+        self.assertEqual((reset_pat.rows[0][0].effect, reset_pat.rows[0][0].param), (0, 0))
+
+        # 3. _repeat_timeline disambiguates tied chords whose notes have string=None by channel.
+        source = {
+            'step': Fraction(1, 12),
+            'occurrences': [{'id': 'oa', 'pattern': 'A', 'at': [0, 1]}],
+            'measures': [],
+            'beats': [],
+            'records': [
+                {'id': 'oa/n1', 'note': 'n1', 'beat': 'b1', 'occurrence': 'oa', 'track': 'guitar', 'voice': 0,
+                 'string': None, 'ch': 0, 'start': Fraction(0), 'end': Fraction(1), 'local_at': Fraction(0),
+                 'row': Fraction(0), 'end_row': Fraction(12)},
+                {'id': 'oa/n2', 'note': 'n2', 'beat': 'b1', 'occurrence': 'oa', 'track': 'guitar', 'voice': 0,
+                 'string': None, 'ch': 1, 'start': Fraction(0), 'end': Fraction(1), 'local_at': Fraction(0),
+                 'row': Fraction(0), 'end_row': Fraction(12)},
+                {'id': 'oa/m1', 'note': 'm1', 'beat': 'b2', 'occurrence': 'oa', 'track': 'guitar', 'voice': 0,
+                 'string': None, 'ch': 0, 'start': Fraction(1), 'end': Fraction(2), 'local_at': Fraction(1),
+                 'row': Fraction(12), 'end_row': Fraction(24)},
+                {'id': 'oa/m2', 'note': 'm2', 'beat': 'b2', 'occurrence': 'oa', 'track': 'guitar', 'voice': 0,
+                 'string': None, 'ch': 1, 'start': Fraction(1), 'end': Fraction(2), 'local_at': Fraction(1),
+                 'row': Fraction(12), 'end_row': Fraction(24)},
+            ],
+            'track_order': ['guitar'],
+            'incoming': {'oa/m1': 'oa/n1', 'oa/m2': 'oa/n2'},
+            'outgoing': {'oa/n1': 'oa/m1', 'oa/n2': 'oa/m2'},
+        }
+        visits = [{'id': 'p1', 'source_occurrence': 'oa', 'pattern': 'A', 'at': [0, 1], 'source_at': [0, 1],
+                   'source_from': [0, 1], 'source_to': [4, 1], 'duration': [4, 1], 'measure_play_id': 'mp1',
+                   'source_order': 0, 'source_measure': 'm1', 'source_pattern': 'A', 'repeat_close': 0}]
+        rep = tab._repeat_timeline(source, visits, [Pattern('A', [[Cell() for _ in range(7)] for _ in range(48)])])
+        self.assertEqual(rep['incoming'], {'p1/m1': 'p1/n1', 'p1/m2': 'p1/n2'})
+
 
 if __name__ == '__main__':
     unittest.main()

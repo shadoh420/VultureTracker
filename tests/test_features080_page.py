@@ -65,7 +65,8 @@ class TestFeatures080Page(unittest.TestCase):
                     page.evaluate("t=>navigator.clipboard.writeText(t)", 'ModPlug Tracker  IT\r\nOrders: 0,1\r\nRows: 2\r\n'
                                   '|D-502v32...|...........\r\n|===........|E-501...B..\r\nRows: 1\r\n|F-501......|...........\r\n')
                     page.keyboard.press('Control+V')
-                    page.wait_for_function("!EDQ.n && PAT.rows[1][1].startsWith('E-5')")
+                    # PAT.key: the pattern has reloaded after the edit (until then PAT.revision is unset and Ctrl+C copies nothing)
+                    page.wait_for_function("!EDQ.n && PAT.key !== null && PAT.rows[1][1].startsWith('E-5')")
                     self.assertEqual(page.evaluate('PAT.rows.slice(0,3).map(r=>r.join(" | "))'),
                                      ['D-5 02 v32 ... | ... .. ... ...', '=== .. ... ... | E-5 01 ... B00',
                                       '... .. ... ... | C-5 02 ... ...'])
@@ -74,13 +75,15 @@ class TestFeatures080Page(unittest.TestCase):
                     page.evaluate("t=>navigator.clipboard.writeText(t)", 'ModPlug Tracker  IT\r\n|F-501v10...|G-502......\r\n')
                     page.evaluate('CUR.row=2;CUR.ch=0;renderPat()')
                     page.keyboard.press('Control+Shift+V')
-                    page.wait_for_function("!EDQ.n && PAT.rows[2][0].startsWith('F-5')")
+                    page.wait_for_function("!EDQ.n && PAT.key !== null && PAT.rows[2][0].startsWith('F-5')")
                     self.assertIn('F-5 01 v10 ... | C-5 02 ... ...', song.read_text())
                     # and back: Ctrl+C puts OpenMPT's format on the system clipboard
                     page.evaluate("SEL={o:0,a:{row:0,ch:0,col:0},b:{row:1,ch:1,col:4}};renderPat()")
                     page.keyboard.press('Control+C')
-                    page.wait_for_function("async()=> (await navigator.clipboard.readText()).includes('|D-502v32...|')")
-                    self.assertEqual(page.evaluate('navigator.clipboard.readText()'),
+                    # wait_for_function does not await an async predicate (a Promise is truthy), so poll in one evaluate
+                    self.assertEqual(page.evaluate("""async()=>{for(let i=0;i<100;i++){const t=await navigator.clipboard.readText();
+                        if(t.includes('|D-502v32...|'))return t;await new Promise(r=>setTimeout(r,50))}
+                        return navigator.clipboard.readText()}"""),
                                      'ModPlug Tracker  IT\r\n|D-502v32...|...........\r\n|===........|E-501...B..\r\n')
                     # the computer's piano keys with CHORD (OpenMPT's way): keys struck together go in as one chord, written
                     # 60 ms after the last, while they are still held

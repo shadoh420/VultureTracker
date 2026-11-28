@@ -50,7 +50,11 @@ def _zip_entry(data, name):
             return None
         if info[-1].file_size > LIMIT:
             raise Refused(f'GP7 {name} exceeds {LIMIT} bytes')
-        return z.read(info[-1])
+        with z.open(info[-1]) as f:
+            out = f.read(LIMIT + 1)
+        if len(out) > LIMIT:
+            raise Refused(f'GP7 {name} exceeds {LIMIT} bytes')
+        return out
 
 
 class _Bits:  # GPXByteBuffer
@@ -120,7 +124,7 @@ def _bcfs(data):
     files, sector, offset, scans = {}, 0x1000, 0, 0
 
     def int_at(i):
-        if i + 4 > len(data):
+        if i < 0 or i + 4 > len(data):
             raise Refused('GPX: truncated BCFS index')
         return _int32(data, i)
 
@@ -135,12 +139,16 @@ def _bcfs(data):
             name_at, size_at, blocks_at = offset + 4, offset + 0x8C, offset + 0x94
             chunks, count = [], 0
             while (block := int_at(blocks_at + 4 * count)) != 0:
+                if block < 0:
+                    raise Refused('GPX: negative BCFS block index')
                 count += 1
                 offset = block * sector  # TG continues its scan from the last block read
                 chunks.append(data[offset:offset + sector].ljust(sector, b'\0'))
                 if count * sector > LIMIT:
                     raise Refused(f'GPX: file exceeds {LIMIT} bytes')
             size, body = int_at(size_at), b''.join(chunks)
+            if size < 0:
+                raise Refused('GPX: negative BCFS file size')
             if len(body) >= size:
                 raw = data[name_at:name_at + 127]
                 name = raw.split(b'\0', 1)[0].decode('latin-1')
@@ -309,7 +317,10 @@ def _read(xml, version):
                              base=_attr_int(diagram, 'baseFret') if diagram.get('baseFret') is not None else None)
                 if count is None:
                     continue
-                frets = [None] * _attr_int(diagram, 'fretCount')
+                fret_count = _attr_int(diagram, 'fretCount')
+                if not 0 <= fret_count <= 32:
+                    raise Refused(f'GPX: chord diagram fretCount {fret_count} out of range')
+                frets = [None] * fret_count
                 for f in diagram:
                     string = _attr_int(f, 'string') if f.get('string') is not None else None
                     if f.tag == 'Fret' and string is not None and 0 < string <= len(frets):

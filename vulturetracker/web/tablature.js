@@ -4451,7 +4451,7 @@
     field('subtitle').value = [credits.artist, credits.album, credits.date, credits.transcriber && `Transcribed by ${credits.transcriber}`].filter(Boolean).join(' · ');
     field('composer').value = credits.author || '';
     let timeline, tracks;
-    function failed(error) { printButton.disabled = true; imagesReady(false); pages.replaceChildren(); status.textContent = `Cannot print: ${error.message || error}`; }
+    function failed(error) { printButton.disabled = true; imagesReady(false); pages.replaceChildren(); document.body.dataset.failure = String(error.message || error); status.textContent = `Cannot print: ${error.message || error}`; }
     try {
       if (!Number.isInteger(previewChannel) || previewChannel < -2 || previewChannel >= view.channels.length) throw new Error('Invalid preview channel.');
       timeline = !view.native && !Object.keys(view.score?.tracks || {}).length ? trackerTimeline(view, previewChannel) : printTimeline(view);

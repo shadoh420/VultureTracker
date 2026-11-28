@@ -1980,7 +1980,8 @@ def _repeat_backing(song, raw_patterns, source, visits):
                     variant.name = f'repeat_backing_{suffix}'
                 if reset is not None:
                     slot = next((ch for ch, cell in enumerate(variant.rows[0])
-                                 if not cell.effect and not cell.param), None)
+                                 if not cell.effect and not cell.param and
+                                 variant.lanes.get((0, ch), (None,))[0] != 'e'), None)
                     if slot is None:
                         raise ValueError(f'{name}: repeat entry tempo reset has no free row-zero effect slot')
                     variant.rows[0][slot].effect, variant.rows[0][slot].param = 20, reset
@@ -2042,7 +2043,8 @@ def _repeat_timeline(source, visits, patterns):
     result['duration'] = Fraction(*visits[-1]['at']) + Fraction(*visits[-1]['duration'])
     previous = {}
     for record in sorted(result['records'], key=lambda r: (r['start'], r['id'])):
-        key = record['track'], record['voice'], record['string']
+        key = (record['track'], record['voice'], record['string'],
+               record.get('ch') if record['string'] is None else None)
         if record['source_note_id'] in source['incoming']:
             prior = previous.get(key)
             if (prior is None or prior['source_note_id'] != source['incoming'][record['source_note_id']] or
@@ -2491,6 +2493,8 @@ def _performed_releases(timeline, clock):
             if ticks > stroke:
                 ticks -= stroke
             end = start + Fraction(ticks, 960)
+            if end > timeline['duration']:
+                raise ValueError(f"{head['id']}: stroke release exceeds arrangement bounds")
         # TG mixer expression uses the real gate after stroke but before grace.
         # This descriptor is export-only; it must not alter native audio events.
         midi_fade = dict(at=_pair(start), ticks=ticks) if head.get('fade_in') else None

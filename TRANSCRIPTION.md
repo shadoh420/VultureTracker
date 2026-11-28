@@ -152,3 +152,14 @@ When delivering clips for listening evaluation:
 | Track plays one octave off in VultureTracker | Confusing scientific pitch `C4` with IT `C-4` | Remember IT `C-5` = MIDI 60 = `C4 (261.63 Hz)`; `C-3` = `C2`; `C-2` = `C1` |
 | Automated drums fire phantom snares or miss ghost hats | Model bleed between kick/snare/hat or missing drum stem isolation | Extract from `drums.wav` using split frequency bands (`30–140`, `220–1600`, `3500–12000 Hz`) with cross-band rejection and round-robin pairs |
 | High `1.5–4 kHz` deficit on one specific bar | Missed amp feedback harmonic series or subtle upper accent present only in certain bars | Compare per-bar `1.5–4 kHz` energy; measure exact harmonic peaks and add a clean band-limited loop or isolated accent on those bars only |
+
+---
+
+## Standalone zero-dependency transcriber & symbolic diffing
+
+On branch `cosmopolitan-mp3tomidi-independent`, `mp3tomidi/` provides a standalone ~`1.05 MB` offline
+pure-DSP audio-to-MIDI binary (`build/mp3tomidi-independent`, zero neural weights or Python runtime)
+alongside timbre-free symbolic evaluation tools (`tools/symbolic_diff.py` and `tools/mp3tomidi_bench.py`)
+that compare MIDI output directly in tracker patterns, ASCII tab, ABC notation, and MIR note/frame/drum
+F1 without SoundFont timbre mismatch. See [mp3tomidi/README.md](mp3tomidi/README.md) for build, CLI,
+parity verification, and benchmarking instructions.

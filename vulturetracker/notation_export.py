@@ -155,6 +155,12 @@ def _model(song, raw_patterns):
         fifths = spec.get('key', {}).get('fifths', 0)
         key = fifths if fifths >= 0 else 7 - fifths
         for mi, (a, _, m) in enumerate(spans):
+            change = m.get('staff', {}).get(tid) or {}
+            if 'clef' in change:
+                clef = 'treble' if change['clef'] == 'percussion' else change['clef']
+            if 'key' in change:
+                fifths = change['key'].get('fifths', 0)
+                key = fifths if fifths >= 0 else 7 - fifths
             measure = _Measure(mi + 1, QUARTER_TIME + int(a * QUARTER_TIME), m['meter'][0], m['meter'][1],
                                clock.tempo_at(a), clef, key, bool(m.get('repeat_open')), m.get('repeat_close', 0),
                                sum(1 << (n - 1) for n in m.get('endings', [])),
@@ -283,6 +289,14 @@ def _losses(model, fmt, raw_patterns):
             lose(where, 'marker')
         if m.get('swing', 'none') != 'none':
             out.add(where, 'swing', _REASONS['swing'])
+        for tid, change in m.get('staff', {}).items():
+            cwhere = f"{where} track {tid}"
+            if change.get('key', {}).get('mode') == 'minor':
+                out.add(cwhere, 'minor', _REASONS['minor'])
+            if change.get('key', {}).get('fifths', 0):
+                lose(cwhere, 'key')
+            if 'clef' in change and change['clef'] != 'treble':
+                lose(cwhere, 'clef')
     lose('song', 'tempo')
     for tid, spec in score['tracks'].items():
         where = f'track {tid}'
@@ -426,6 +440,11 @@ def _older(version, than):
 def _lily_string(value):
     """Keep user-supplied header text inside one LilyPond quoted string."""
     return str(value).replace('\\', '\\\\').replace('"', '\\"').replace('\r', ' ').replace('\n', ' ')
+
+
+def _lily_lyrics(value):
+    """Strip LilyPond/Scheme syntax delimiters from lyric mode text while keeping syllables, hyphens, extenders, and newlines."""
+    return str(value).translate(str.maketrans({ch: ' ' for ch in '\\#{}"%'}))
 
 
 class _Lily:
@@ -597,7 +616,7 @@ class _Lily:
         if self.skipped:
             self.p(ind(1) + ''.join('\\skip ' + d + ' ' for d in self.skipped))
             self.ln()
-        self.ln(ind(1) + track.lyrics)
+        self.ln(ind(1) + _lily_lyrics(track.lyrics))
         self.ln(ind(1) + '\\unset ignoreMelismata')
         self.ln('}')
 
@@ -780,7 +799,7 @@ class _Lily:
                     f"{i + 1}-{'x' if f < 0 else 'o' if f == 0 else f};" for i, f in enumerate(beat.chord['frets']))
                     + '"')
         if beat.text is not None and not any(not beat.voices[v].empty for v in range(voice.index)):
-            self.p("-\\tag #'texts ^\\markup {\"" + beat.text + '"}')
+            self.p("-\\tag #'texts ^\\markup {\"" + _lily_string(beat.text) + '"}')
         if voice.index == 0 and not voice.is_rest() and measure.track.lyrics_from > measure.number:
             self.skipped.append(self.duration(voice))
         self.p(' ')

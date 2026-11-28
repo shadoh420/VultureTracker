@@ -230,5 +230,113 @@ class TestGuitarPro(Clean):
         self.assertTrue(any("tempo is 0" in w for w in warnings), warnings)
 
 
+class TestPhaseABounds(Clean):
+    def test_yaml_alias_bomb_and_stream_depth_rejected(self):
+        import io, yaml
+        from vulturetracker import api, song
+        bomb = "a: &a [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n"
+        prev = "a"
+        for i in range(1, 8):
+            nxt = f"b{i}"
+            bomb += f"{nxt}: &{nxt} [*{prev}, *{prev}, *{prev}, *{prev}, *{prev}, *{prev}, *{prev}, *{prev}, *{prev}, *{prev}]\n"
+            prev = nxt
+        self.assertClean(song.load_song_text, bomb, kind=song.SongError)
+        with self.assertRaises(yaml.YAMLError):
+            api.from_yaml(bomb)
+        deep = io.StringIO("[" * 120 + "1" + "]" * 120)
+        with self.assertRaises(yaml.YAMLError):
+            yaml.load(deep, Loader=song.BoundedLoader)
+
+    def test_gpx_and_tg_zip_and_bounds(self):
+        import io, zipfile
+        from vulturetracker import gpx, tgimport
+        # Spoofed ZipInfo.file_size bypassing central directory cap
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("VERSION", b"7.0")
+            z.writestr("Content/score.gpif", b"<GPIF/>")
+        raw = buf.getvalue()
+        orig_infolist = zipfile.ZipFile.infolist
+        def spoofed_infolist(zf):
+            items = orig_infolist(zf)
+            for item in items:
+                item.file_size = 1
+            return items
+        with mock.patch.object(zipfile.ZipFile, "infolist", spoofed_infolist), \
+                mock.patch.object(gpx, "LIMIT", 4), self.assertRaises(gpx.Refused):
+            gpx.gpif(raw)
+        with self.assertRaises(gpx.Refused):
+            gpx._bcfs(b"\0" * 0x1000 + struct.pack("<I", 2) + b"x".ljust(0x88, b"\0") +
+                      struct.pack("<I", 10) + b"\0" * 4 + struct.pack("<i", -1))
+        import xml.etree.ElementTree as ET
+        xml = ("<GPIF><Tracks><Track id='0'><Name>T</Name><Properties><Property name='DiagramCollection'>"
+               "<Items><Item id='0' name='C'><Diagram fretCount='1000000000'/></Item></Items>"
+               "</Property></Properties></Track></Tracks></GPIF>").encode("utf-8")
+        with self.assertRaises(gpx.Refused):
+            gpx._read(ET.fromstring(xml), 6)
+        tbuf = io.BytesIO()
+        with zipfile.ZipFile(tbuf, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("version.txt", tgimport.VERSION)
+            z.writestr("content.xml", b"<TuxGuitarFile>" + b" " * 200 + b"</TuxGuitarFile>")
+        with mock.patch.object(zipfile.ZipFile, "infolist", spoofed_infolist), \
+                mock.patch.object(tgimport, "MAX_XML", 100), self.assertRaises(ValueError):
+            tgimport._xml(tbuf.getvalue())
+
+    def test_it_xm_s3m_midi_and_tef_bounds(self):
+        from vulturetracker import tef
+        # Truncated IT pointer table & pattern header & compressed sample MAX_FRAMES
+        self.assertClean(read_module, it_header(insnum=10), kind=ITReadError)
+        self.assertClean(read_module, it_header(patnum=1) + struct.pack("<I", 0xC4), kind=ITReadError)
+        n = 2000
+        head = it_header(smpnum=n)
+        p = len(head) + 4 * n
+        smp = bytearray(0x50)
+        smp[:4], smp[0x12] = b"IMPS", 1 | 8  # compressed sample
+        struct.pack_into("<7I", smp, 0x30, 20000, 0, 0, 8363, 0, 0, p + 0x50)
+        self.assertClean(read_module, head + struct.pack(f"<{n}I", *([p] * n)) + bytes(smp), kind=ITReadError)
+
+        # XM zero isize / shsize
+        self.assertClean(read_module, xm_header(nins=1) + struct.pack("<I", 0) + bytes(32), kind=ModReadError)
+        ins_bad_sh = struct.pack("<I", 263) + b"i".ljust(22, b"\0") + b"\0" + struct.pack("<HI", 1, 0) + bytes(263 - 33)
+        self.assertClean(read_module, xm_header(nins=1) + ins_bad_sh, kind=ModReadError)
+
+        # TEF2 negative meter numerator & TEF3 unmasked rest duration code
+        self.assertEqual(tef.duration(0), tef.duration(0 & 31))
+        if mido is not None:
+            from types import SimpleNamespace
+            from vulturetracker import midiimport
+            fake_mid = SimpleNamespace(
+                type=1, ticks_per_beat=480,
+                tracks=[[
+                    SimpleNamespace(type="time_signature", time=0, numerator=4, denominator=0),
+                    SimpleNamespace(type="note_on", time=0, channel=0, note=60, velocity=100),
+                    SimpleNamespace(type="note_off", time=240, channel=0, note=60, velocity=0),
+                ]],
+            )
+            with mock.patch.object(mido, "MidiFile", return_value=fake_mid):
+                _, warnings = midiimport.import_midi(self.file("z.mid", b"MThd"), self.dir / "z.yaml", self.dir / "z_s")
+            self.assertTrue(any("time signatures" in w for w in warnings), warnings)
+
+        # wavload: align not divisible by nch is rejected cleanly
+        fmt_bad = struct.pack("<HHIIHH", 1, 2, 44100, 44100 * 3, 3, 16)
+        wav_bad = b"RIFF" + struct.pack("<I", 4 + 8 + 16 + 8 + 6) + b"WAVE" + b"fmt " + struct.pack("<I", 16) + fmt_bad + b"data" + struct.pack("<I", 6) + b"\x00" * 6
+        self.assertClean(read_wav, self.file("bad_align.wav", wav_bad), kind=WavError)
+
+        # sf2: GUS .pat with scale != 0 and root_f == 0 does not fail with math domain error
+        from vulturetracker import sf2
+        pat_hdr = bytearray(239 + 96 + 8)
+        pat_hdr[0:8] = b"GF1PATCH"
+        pat_hdr[8:12] = b"110\0"
+        pat_hdr[12:22] = b"ID#000002\0"
+        pat_hdr[82] = 1
+        struct.pack_into("<H", pat_hdr, 85, 1)
+        pat_hdr[129 + 63 + 6] = 1
+        struct.pack_into("<7sBIIIHIIIhB6B6BBBBBBBBhH", pat_hdr, 239,
+                         b"smp", 0, 8, 0, 0, 44100, 0, 0, 0, 0, 7,
+                         *([0] * 12), *([0] * 7), 0, 1)
+        mod, _ = sf2.pat_module(bytes(pat_hdr))
+        self.assertEqual(mod.samples[0].c5_speed, 44100)
+
+
 if __name__ == "__main__":
     unittest.main()

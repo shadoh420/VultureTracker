@@ -245,12 +245,23 @@ def _spec(st, a):
                 raise ValueError(f'resynth {key} must be {low}..{high}')
     if 'faust' in spec and '\n' not in str(spec['faust']) and str(spec['faust']).strip().lower().endswith('.dsp'):
         name = spec['faust'].strip()
-        f = base / name  # beside the song, else one of the examples shipped with the app, as synth._faust looks
-        if not f.is_file() and (synth.FAUST_EXAMPLES / name).is_file() and Path(name).name == name:
+        if Path(name).name == name and (synth.FAUST_EXAMPLES / name).is_file() and not (base / name).exists():
             f = synth.FAUST_EXAMPLES / name
+        else:
+            f = _path(st, str(base / name))
+            if not f.is_file() and Path(name).name == name and (synth.FAUST_EXAMPLES / name).is_file():
+                f = synth.FAUST_EXAMPLES / name
         spec['faust'] = f.read_text(encoding='utf-8')
-    if 'patch' in spec and (base / spec['patch']).is_file():
-        spec['patch'] = str(_path(st, str(base / spec['patch'])))
+    if 'patch' in spec and isinstance(spec['patch'], str):
+        pv = spec['patch']
+        try:
+            cand = _path(st, str(base / pv))
+        except ValueError:
+            if any(s in pv for s in ('/', '\\')) or Path(pv).drive or Path(pv).anchor or '..' in Path(pv).parts:
+                raise
+            cand = None
+        if cand is not None and cand.is_file():
+            spec['patch'] = str(cand)
     return spec, rate
 
 

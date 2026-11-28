@@ -201,7 +201,7 @@ class AgentTests(unittest.TestCase):
         self.assertIn('pluck.dsp', cat['faust_examples'])
         spec, _ = agent_sounds._spec(st, {'spec': {'faust': 'pluck.dsp', 'note': 'C-5', 'hold': 0.5}})
         self.assertEqual(spec['faust'], (synth.FAUST_EXAMPLES / 'pluck.dsp').read_text(encoding='utf-8'))
-        with self.assertRaises(OSError):  # only an example's own name, never a path into the app's folder
+        with self.assertRaises((ValueError, OSError)):  # only an example's own name, never a path into the app's folder
             agent_sounds._spec(st, {'spec': {'faust': '../faust_examples/pluck.dsp', 'note': 'C-5'}})
         out = self.sound_job(st, 'render_synthesis', spec={'wave': {'shape': 'saw'}, 'note': 'C-3', 'hold': 0.5,
                                                             'mip': {'octaves': 2}}, name='saw')
@@ -1458,9 +1458,9 @@ class AgentTests(unittest.TestCase):
         # events Claude Code prints (init, a tool call, its result, the answer, the result line)
         fake = self.dir / "fake_claude.py"
         fake.write_text(
-            "import json, sys\n"
+            "import json, os, sys\n"
             "from pathlib import Path\n"
-            "Path(sys.argv[1]).write_text(json.dumps({'argv': sys.argv[2:], 'stdin': sys.stdin.read()}))\n"
+            "Path(sys.argv[1]).write_text(json.dumps({'argv': sys.argv[2:], 'stdin': sys.stdin.read(), 'vt_token': os.environ.get('VT_TOKEN', '')}))\n"
             "for ev in [{'type': 'system', 'subtype': 'init', 'session_id': 's1', 'mcp_servers': [{'name': 'vulturetracker', 'status': 'connected'}]},\n"
             "           {'type': 'assistant', 'message': {'content': [{'type': 'tool_use', 'id': 't1', 'name': 'mcp__vulturetracker__song_overview', 'input': {}}]}},\n"
             "           {'type': 'user', 'message': {'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': [{'type': 'text', 'text': json.dumps({'title': 'T', 'summary': 'two channels'})}]}]}},\n"
@@ -1468,9 +1468,10 @@ class AgentTests(unittest.TestCase):
             "           {'type': 'result', 'subtype': 'success', 'is_error': False, 'session_id': 's1', 'result': 'It has two channels.'}]:\n"
             "    print(json.dumps(ev), flush=True)\n", encoding="utf-8")
         seen = self.dir / "seen.json"
-        old = agent.claude_command, agent.PORT
+        old = agent.claude_command, agent.PORT, agent.TOKEN
         agent.claude_command = lambda: [sys.executable, str(fake), str(seen)]
         agent.PORT = 8765
+        agent.TOKEN = "launch-secret"
         try:
             st = self.state()
             agent.save_settings({"provider": "claude_code", "model": "sonnet", "effort": "low"})
@@ -1499,7 +1500,9 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(settings, {"claudeMdExcludes": ["**"], "autoMemoryEnabled": False, "disableAllHooks": True})
             cfg = json.loads(argv[argv.index("--mcp-config") + 1])["mcpServers"]["vulturetracker"]
             self.assertEqual(cfg["args"][-2:], ["--port", "8765"])
-            self.assertIn("VT_TOKEN", cfg["env"])  # the bridge's token for the app's API (server._Server.token)
+            self.assertNotIn("VT_TOKEN", cfg.get("env", {}))  # token stays out of CLI args and travels via process env
+            self.assertNotIn("launch-secret", argv[argv.index("--mcp-config") + 1])
+            self.assertEqual(got["vt_token"], "launch-secret")
             self.assertNotIn("--resume", argv)
             self.assertEqual(chat.session, "s1")
             chat.send(st, "and the tempo?")                                   # the next message resumes the session
@@ -1524,7 +1527,7 @@ class AgentTests(unittest.TestCase):
             self.assertNotIn('--resume',got['argv'])
             self.assertIn('Summary of earlier conversation',got['stdin'])
         finally:
-            agent.claude_command, agent.PORT = old
+            agent.claude_command, agent.PORT, agent.TOKEN = old
 
     def test_claude_process_stop_and_resume_controls(self):
         fake=self.dir/'slow_claude.py'
@@ -1723,6 +1726,89 @@ class AgentTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, text) as ctx:
                     agent.compatible_request(s, "/chat/completions", {})
                 self.assertNotIn("secret", str(ctx.exception))
+
+    def test_phase_a_security_boundaries(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+        from vulturetracker import mcp
+
+        st = self.state()
+        with tempfile.TemporaryDirectory() as outside:
+            outside = Path(outside)
+            ext_wav = outside / "ext.wav"
+            ext_wav.write_bytes((self.dir / "a.wav").read_bytes())
+            ext_dsp = outside / "evil.dsp"
+            ext_dsp.write_text("process = _;", encoding="utf-8")
+            ext_patch = outside / "preset.fxp"
+            ext_patch.write_bytes(b"fxp")
+
+            # edit_sample must enforce reach() on changes["file"]
+            res = agent.run(st, "edit_sample", {"number": 1, "changes": {"file": str(ext_wav)}})
+            self.assertIn("error", res)
+
+            # edit_instrument must reject drive-relative / traversal / symlink .scl paths
+            for bad_scl in ("C:scale.scl", "\\scale.scl", "../outside.scl"):
+                self.assertIn("error", agent.run(st, "edit_instrument", {"number": 1, "changes": {"tuning": bad_scl}}))
+
+            # save_sound_recipe / _spec must reject out-of-root .dsp and patch paths
+            self.assertIn("error", agent.run(st, "save_sound_recipe", {"spec": {"faust": str(ext_dsp)}}))
+            self.assertIn("error", agent.run(st, "save_sound_recipe", {"spec": {"patch": str(ext_patch)}}))
+
+        # mcp.handle must return JSON-RPC errors cleanly on non-object JSON and invalid params
+        for bad in (None, [], 123, "hello"):
+            ans = mcp.handle(bad)
+            self.assertEqual(ans["error"]["code"], -32600)
+        self.assertEqual(mcp.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": []})["error"]["code"], -32602)
+        self.assertEqual(mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "undo", "arguments": []}})["error"]["code"], -32602)
+
+        # compatible_request must refuse HTTP redirects and cap oversized responses
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def log_message(self, *_):
+                pass
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 0:
+                    self.rfile.read(n)
+                if self.path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "http://127.0.0.1:1/steal")
+                    self.end_headers()
+                else:
+                    body = b"x" * 64
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+
+        srv = HTTPServer(("127.0.0.1", 0), RedirectHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            s = {"provider": "openai", "base_url": f"http://127.0.0.1:{srv.server_port}", "api_key": "secret"}
+            with self.assertRaisesRegex(RuntimeError, "redirect"):
+                agent.compatible_request(s, "/redirect", {})
+            with mock.patch.object(agent, "_MAX_API_RESPONSE", 16), \
+                    self.assertRaisesRegex(RuntimeError, "exceeded"):
+                agent.compatible_request(s, "/big", {})
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+        # load_settings migrates inactive provider_keys to keyring and clear_key removes provider_keys
+        fk = FakeKeyring()
+        with mock.patch.object(agent, "keyring", fk):
+            agent.save_settings({"provider": "anthropic", "api_key": "k-anth"})
+            agent.save_settings({"provider": "openai", "base_url": "http://127.0.0.1:1234/v1", "api_key": "k-oai"})
+            raw = json.loads(agent.settings_path().read_text(encoding="utf-8"))
+            self.assertNotIn("provider_keys", raw)
+            # Simulate legacy file-backed provider_keys still on disk
+            raw["provider_keys"] = {"gemini": "k-gem"}
+            agent.settings_path().write_text(json.dumps(raw), encoding="utf-8")
+            agent.load_settings()
+            self.assertEqual(fk.store[(agent.KEYRING_SERVICE, "gemini")], "k-gem")
+            self.assertNotIn("provider_keys", json.loads(agent.settings_path().read_text(encoding="utf-8")))
+            agent.save_settings({"provider": "openai", "clear_key": True})
+            self.assertNotIn((agent.KEYRING_SERVICE, "openai"), fk.store)
 
 
 class ContextTests(unittest.TestCase):
@@ -1962,6 +2048,26 @@ class NativeScoreAgentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'approved pattern'):
             agent._guard_restore(st, {'text': api.to_yaml(target)},
                                  gui.load_for_state(api.to_yaml(target), self.base)[0])
+
+    def test_measure_validation_and_offer_samples_guards(self):
+        st = self.state(self.song())
+        for bad in ({"orders": [0]}, {"orders": [True, 1]}, {"channels": [99]}):
+            err = agent.run(st, "measure", bad)
+            self.assertIn("error", err, bad)
+        cand = self.base / "cand.wav"
+        write_wav(cand, 44100, [[100] * 500])
+        st.meta["mix"]["sample_volume"] = {"1": 0.5}
+        err = agent.run(st, "offer_samples", {"slot": 1, "files": [str(cand)]})
+        self.assertIn("unwritten owner settings", err.get("error", ""))
+        st.meta["mix"]["sample_volume"] = {}
+        st.read_only = "locked elsewhere"
+        err = agent.run(st, "offer_samples", {"slot": 1, "files": [str(cand)]})
+        self.assertIn("locked elsewhere", err.get("error", ""))
+        st.read_only = None
+        with mock.patch.object(st, "add_candidates", return_value=[str(cand)]) as add_mock:
+            res = agent.run(st, "offer_samples", {"slot": 1, "files": ["cand.wav"]})
+        self.assertTrue(res.get("ok"), res)
+        add_mock.assert_called_once_with(str(cand))
 
 
 if __name__ == "__main__":

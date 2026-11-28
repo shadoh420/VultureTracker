@@ -1250,7 +1250,10 @@ class TestTablaturePage(unittest.TestCase):
             # Adjacent patterns share exact column geometry and musical row highlights.
             page.locator('#patscroll').evaluate('(e)=>e.scrollTop=550')
             page.wait_for_selector('.pat-preview[data-order="1"] .pat-preview-row')
-            self.assertEqual(page.locator('.pat-preview[data-order="1"] .pat-preview-cell').first.evaluate('(e)=>e.offsetWidth'), 132)
+            # find and measure in one step: the previews are redrawn on scroll frames and as other orders load, and a
+            # replaced node measures 0
+            self.assertEqual(page.evaluate("""document.querySelector('.pat-preview[data-order="1"] .pat-preview-cell')
+                .offsetWidth"""), 132)
             self.assertTrue(page.locator('.pat-preview[data-order="1"] [data-row="0"]').evaluate('(e)=>e.classList.contains("b16")'))
             self.assertEqual(page.evaluate('PAT_SONG.heights[0]'), 60+25*22)
             self.assertEqual((folder/'song.yaml').read_bytes(), original)

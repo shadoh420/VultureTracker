@@ -226,7 +226,8 @@ class TestPage(unittest.TestCase):
                     page.wait_for_function("typeof S !== 'undefined' && S && S.song && S.song.facts")
                     page.evaluate("tab('pattern')")
                     page.wait_for_function("PAT.rows && PAT.rows.length === 4")
-                    settle = lambda: page.wait_for_function("EDQ.n === 0 && PAT.key !== null")  # noqa: E731
+                    # PASTEKEY: Ctrl+V waits for the browser's paste event (or 300 ms) before it edits anything
+                    settle = lambda: page.wait_for_function("EDQ.n === 0 && PAT.key !== null && !PASTEKEY")  # noqa: E731
                     page.evaluate("document.activeElement && document.activeElement.blur()")
                     page.keyboard.press("Control+Space")  # edit mode
                     page.evaluate("$('lv-oct').value = 5; setCursor(0, 1, 0, 0)")

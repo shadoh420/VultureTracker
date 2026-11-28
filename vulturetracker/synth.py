@@ -514,6 +514,10 @@ def _post(audio, spec, rate, log=lambda s: None, cycle=None):
     own loop in frames (start, end, pingpong): kept exact, never trimmed or faded. Returns (pcm, loop)."""
     import numpy as np
     x = np.asarray(audio, dtype=np.float64)
+    if x.ndim != 2 or x.shape[0] == 0 or x.shape[1] == 0:
+        raise RecipeError("rendered audio is empty")
+    if not np.isfinite(x).all():
+        raise RecipeError("rendered audio contains NaN or infinite samples")
     if spec.get("fx"):
         # Effects run on the take peak-normalized to -1 dBFS (so bitcrush and distortion act the same at any
         # recording level) plus fx_tail seconds of silence, so reverb and delay tails ring out; trimming below
@@ -524,6 +528,8 @@ def _post(audio, spec, rate, log=lambda s: None, cycle=None):
         if x.shape[0] == 1 and not spec.get("mono", False):
             x = np.repeat(x, 2, axis=0)  # stereo effects (reverb width, chorus) need two channels
         x = chain(x.astype(np.float32), rate).astype(np.float64)
+        if x.ndim != 2 or x.shape[0] == 0 or x.shape[1] == 0 or not np.isfinite(x).all():
+            raise RecipeError("fx chain produced empty or non-finite audio")
     if spec.get("mono", False):
         x = x.mean(axis=0, keepdims=True)
     if spec.get("reverse", False):
@@ -572,8 +578,17 @@ def _post(audio, spec, rate, log=lambda s: None, cycle=None):
 
 def expand(recipe):
     """Yield (output name, merged spec) for every sample, expanding `notes:` lists."""
-    defaults = recipe.get("defaults") or {}
-    for name, spec in (recipe.get("samples") or {}).items():
+    defaults = recipe.get("defaults")
+    if defaults is None:
+        defaults = {}
+    elif not isinstance(defaults, dict):
+        raise RecipeError("recipe defaults must be a mapping")
+    samples = recipe.get("samples")
+    if samples is None:
+        samples = {}
+    elif not isinstance(samples, dict):
+        raise RecipeError("recipe samples must be a mapping")
+    for name, spec in samples.items():
         where = f"sample '{name}'"
         if not isinstance(spec, dict):
             raise RecipeError(f"{where} must be a mapping")
@@ -695,7 +710,12 @@ def _load_recipe(path):
     recipe = yaml.load(text, Loader=_Loader) or {}
     if not isinstance(recipe, dict):
         raise RecipeError("a recipe is a mapping with out_dir, sample_rate, defaults and samples")
+    defaults = recipe.get("defaults")
+    if defaults is not None and not isinstance(defaults, dict):
+        raise RecipeError("recipe defaults must be a mapping")
     samples = recipe.get("samples")
+    if samples is not None and not isinstance(samples, dict):
+        raise RecipeError("recipe samples must be a mapping")
     if isinstance(samples, dict) and not all(isinstance(k, str) for k in samples):
         node = next(v for k, v in yaml.compose(text, Loader=_Loader).value if k.value == "samples")
         if len(node.value) != len(samples):

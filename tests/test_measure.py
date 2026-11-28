@@ -74,6 +74,26 @@ class MeasureTests(unittest.TestCase):
             self.assertGreater(both["correlation"], 0)
             self.assertIsNotNone(api.measure(d / "a.wav")["lufs"])
 
+    def test_mix_numbers_and_meters_tolerate_extra_wav_chunks(self):
+        import os
+        from vulturetracker import measure
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "chunks.wav"
+            write_wav(p, measure.RATE, [[int(12000 * x) for x in sine(440, measure.RATE, 0.5)]] * 2, loop=(100, 400, False))
+            raw = p.read_bytes()
+            # Insert a JUNK chunk before `data` so audio bytes do not begin at offset 44
+            junk = b"JUNK" + b"\x10\x00\x00\x00" + (b"\xff" * 16)
+            idx = raw.index(b"data")
+            patched = bytearray(raw[:idx] + junk + raw[idx:])
+            patched[4:8] = int.to_bytes(len(patched) - 8, 4, "little")
+            p.write_bytes(bytes(patched))
+            m = measure.mix_numbers(p)
+            self.assertIsNotNone(m)
+            self.assertIsNotNone(m["lufs"])
+            st = os.stat(p)
+            series = measure._meters(str(p), (st.st_mtime_ns, st.st_size))
+            self.assertTrue(series["short"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -767,7 +767,8 @@ def granular(x, rate, grain_ms=80.0, density=4.0, pitch_st=0.0, jitter=0.0, spra
     either side at random), played `pitch_st` semitones up or down (each `jitter` semitones more or less at random),
     shaped by a `shape` window and overlap-added; the length stays. Linear interpolation between frames: low-pass
     what a pitch up would lift over the ceiling first. `seed` makes the cloud repeatable."""
-    g = int(float(grain_ms) * rate / 1000)
+    if rate <= 0:
+        raise ValueError("granular: rate must be positive")
     if not (5 <= float(grain_ms) <= 1000 and 1 <= float(density) <= 32 and -24 <= float(pitch_st) <= 24
             and 0 <= float(jitter) <= 24 and 0 <= float(spray_ms) <= 2000):
         raise ValueError("granular: grain_ms 5 to 1000, density 1 to 32, pitch_st -24 to 24, jitter 0 to 24, "
@@ -775,7 +776,10 @@ def granular(x, rate, grain_ms=80.0, density=4.0, pitch_st=0.0, jitter=0.0, spra
     if shape not in GRAIN_SHAPES:
         raise ValueError(f"granular: shape is one of {', '.join(GRAIN_SHAPES)}")
     n = x.shape[1]
-    win = GRAIN_SHAPES[shape](g) if g > 1 else np.ones(1)
+    if n < 2:
+        raise ValueError("granular: needs at least 2 frames")
+    g = max(3, int(float(grain_ms) * rate / 1000))
+    win = GRAIN_SHAPES[shape](g)
     hop = max(1, int(g / float(density)))
     rng = np.random.default_rng(int(seed))
     src = x.astype(np.float64)
@@ -790,7 +794,7 @@ def granular(x, rate, grain_ms=80.0, density=4.0, pitch_st=0.0, jitter=0.0, spra
         grain = (src[:, i] * (1 - frac) + src[:, i + 1] * frac) * (win * ok)
         out[:, t:t + g] += grain
         norm[t:t + g] += win
-    return (out[:, :n] / np.maximum(norm[:n], 1e-3 * win.max())).astype(x.dtype)
+    return (out[:, :n] / np.maximum(norm[:n], max(1e-3 * float(win.max()), 1e-6))).astype(x.dtype)
 
 
 def bandlimit(x, rate, hz):

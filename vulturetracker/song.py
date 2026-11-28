@@ -66,7 +66,12 @@ class LStr(str):
 _constructor = yaml.SafeLoader("")
 
 
-def _convert(node, ctx):
+def _convert(node, ctx, budget=None):
+    if budget is None:
+        budget = [0]
+    budget[0] += 1
+    if budget[0] > MAX_YAML_NODES:
+        raise yaml.composer.ComposerError(None, None, f"the YAML has too many nodes (more than {MAX_YAML_NODES})", node.start_mark)
     line = node.start_mark.line + 1
     if isinstance(node, yaml.ScalarNode):
         raw = node.value
@@ -82,20 +87,20 @@ def _convert(node, ctx):
         seq = LSeq()
         seq.line = line
         for item in node.value:
-            seq.append(_convert(item, ctx))
+            seq.append(_convert(item, ctx, budget))
             seq.lines.append(item.start_mark.line + 1)
         return seq
     m = LMap()
     m.line = line
     for knode, vnode in node.value:
-        key = _convert(knode, ctx)
+        key = _convert(knode, ctx, budget)
         if isinstance(key, (LMap, LSeq)):
             ctx.error(knode.start_mark.line + 1, "mapping keys must be plain values")
             continue
         key = str(key) if isinstance(key, LStr) else key
         if key in m:
             ctx.error(knode.start_mark.line + 1, f"duplicate key '{key}' (first defined on line {m.lines[key]})")
-        m[key] = _convert(vnode, ctx)
+        m[key] = _convert(vnode, ctx, budget)
         m.lines[key] = knode.start_mark.line + 1
     return m
 
@@ -1284,6 +1289,8 @@ def compile_tree(tree, ctx, base_dir, *, native_score_rate=None, render_timing=F
                     sample_numbers.update(range(old_samples + 1, len(mod.samples) + 1))
                     instrument_numbers.update(range(old_instruments + 1, len(mod.instruments or []) + 1))
                 mod.patterns = mod.score_projection.patterns
+                if len(mod.channels) + len(mod.score_projection.channel_parents) > MAX_CHANNELS:
+                    raise ValueError(f"score harmonic channels exceed IT's {MAX_CHANNELS}-channel limit")
                 for channel, parent in mod.score_projection.channel_parents.items():
                     assert channel == len(mod.channels)
                     mod.channels.append(copy.deepcopy(mod.channels[parent]))
@@ -1423,25 +1430,56 @@ def _check_rings(ctx, mod, lowest, highest):
 
 
 MAX_YAML_DEPTH = 100  # real songs nest six levels
+MAX_YAML_NODES = 200_000
 
 
 class BoundedLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
     """libyaml's loader when PyYAML has it (about ten times faster; the same nodes, marks and styles, so the same module),
-    refusing text nested deeper than MAX_YAML_DEPTH before composing it: libyaml's composer recurses on the C stack once
-    per level, and on Windows under Python 3.10-3.13 a song 5000 levels deep overflows the main thread's 1 MB stack and
-    kills the process before any RecursionError. Its parser does not recurse, so the depth is counted from its events."""
+    refusing text nested deeper than MAX_YAML_DEPTH or expanding past MAX_YAML_NODES before composing it: libyaml's
+    composer recurses on the C stack once per level, and on Windows under Python 3.10-3.13 a song 5000 levels deep
+    overflows the main thread's 1 MB stack and kills the process before any RecursionError."""
 
     def __init__(self, stream):
-        if hasattr(yaml, "CSafeLoader") and isinstance(stream, (str, bytes)):  # pure Python raises RecursionError itself
-            depth = 0
-            for event in yaml.parse(stream, Loader=yaml.CSafeLoader):
-                if isinstance(event, (yaml.SequenceStartEvent, yaml.MappingStartEvent)):
-                    depth += 1
-                    if depth > MAX_YAML_DEPTH:
-                        raise yaml.composer.ComposerError(None, None, f"the YAML nests too deeply (more than "
-                                                          f"{MAX_YAML_DEPTH} levels)", event.start_mark)
-                elif isinstance(event, (yaml.SequenceEndEvent, yaml.MappingEndEvent)):
-                    depth -= 1
+        if not isinstance(stream, (str, bytes)) and hasattr(stream, "read"):
+            stream = stream.read()
+        parser_loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+        depth = nodes = 0
+        stack, anchors = [], {}
+        for event in yaml.parse(stream, Loader=parser_loader):
+            if isinstance(event, (yaml.SequenceStartEvent, yaml.MappingStartEvent)):
+                depth += 1
+                if depth > MAX_YAML_DEPTH:
+                    raise yaml.composer.ComposerError(None, None, f"the YAML nests too deeply (more than "
+                                                      f"{MAX_YAML_DEPTH} levels)", event.start_mark)
+                nodes += 1
+                if nodes > MAX_YAML_NODES:
+                    raise yaml.composer.ComposerError(None, None, f"the YAML has too many nodes (more than "
+                                                      f"{MAX_YAML_NODES})", event.start_mark)
+                stack.append([event.anchor, 1])
+            elif isinstance(event, (yaml.SequenceEndEvent, yaml.MappingEndEvent)):
+                depth -= 1
+                anchor, size = stack.pop()
+                if anchor:
+                    anchors[anchor] = size
+                if stack:
+                    stack[-1][1] += size
+            elif isinstance(event, yaml.ScalarEvent):
+                nodes += 1
+                if nodes > MAX_YAML_NODES:
+                    raise yaml.composer.ComposerError(None, None, f"the YAML has too many nodes (more than "
+                                                      f"{MAX_YAML_NODES})", event.start_mark)
+                if event.anchor:
+                    anchors[event.anchor] = 1
+                if stack:
+                    stack[-1][1] += 1
+            elif isinstance(event, yaml.AliasEvent):
+                size = anchors.get(event.anchor, 1)
+                nodes += size
+                if nodes > MAX_YAML_NODES:
+                    raise yaml.composer.ComposerError(None, None, f"the YAML has too many nodes (more than "
+                                                      f"{MAX_YAML_NODES})", event.start_mark)
+                if stack:
+                    stack[-1][1] += size
         super().__init__(stream)
 
 

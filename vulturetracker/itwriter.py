@@ -24,6 +24,8 @@ def _envelope(env: Envelope | None, offset: int) -> bytes:
     if env is None or not env.nodes:
         # IT always stores two nodes, even for an unused envelope.
         env = Envelope([(0, 64 - offset), (10, 64 - offset)] if offset == 0 else [(0, 0), (10, 0)], enabled=False)
+    if len(env.nodes) > 25:
+        raise ValueError(f"IT envelopes hold at most 25 nodes (got {len(env.nodes)})")
     flags = (1 if env.enabled else 0) | (2 if env.loop else 0) | (4 if env.sustain else 0)         | (8 if env.carry else 0) | (0x80 if env.filter else 0)
     lpb, lpe = env.loop or (0, 0)
     slb, sle = env.sustain or (0, 0)
@@ -223,6 +225,8 @@ def write_it(mod: Module, *, _native_backing=False) -> bytes:
         | (0x10 if mod.old_effects else 0) | (0x20 if mod.compatible_gxx else 0) | (0x80 if mod.macros else 0)
     special = (1 if message else 0) | (4 if all(mod.row_highlight) else 0) | (8 if mod.macros else 0)  # 4: the
     #                                     highlight bytes are set; 8 (and flag 0x80): the MIDI configuration is embedded
+    if len(mod.channels) > 64:
+        raise ValueError(f"IT modules hold at most 64 channels (got {len(mod.channels)})")
     chnpan = bytearray([32 | 0x80] * 64)
     chnvol = bytearray([64] * 64)
     for i, ch in enumerate(mod.channels):

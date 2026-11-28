@@ -11,11 +11,13 @@ def _path(st, value):
 
 
 def _new_path(st, value):
-    """Where create_project and collect_project write: anywhere, since both make only new files and folders (an existing
-    destination is refused) and collect must go outside the song's folder; everything else they read is the project's."""
+    """Where collect_project (and start-screen create_project) write: anywhere local, refusing UNC/network paths."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError('give a file or folder path')
-    return ((st.base_dir if st else Path.cwd()) / Path(value).expanduser()).resolve()
+    raw = value.strip()
+    if raw.startswith(('\\\\', '//')) or Path(raw).drive.startswith('\\\\'):
+        raise ValueError('network or UNC paths are not allowed')
+    return ((st.base_dir if st else Path.cwd()) / Path(raw).expanduser()).resolve()
 
 
 def _phrase(st, a):
@@ -170,7 +172,8 @@ def create_project(st, a):
     if sample:
         from .wavload import read_wav
         read_wav(sample)
-    path = create_song(_new_path(st, a['path']), _integer(a.get('channels', 8), 1, 64, 'channels'), sample)
+    dest = reach(st, a['path'], 'new project path', roots=False) if st is not None else _new_path(None, a['path'])
+    path = create_song(dest, _integer(a.get('channels', 8), 1, 64, 'channels'), sample)
     return {'path': str(path), 'summary': 'new project created; use open_project to switch to it'}
 
 

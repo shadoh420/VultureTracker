@@ -58,12 +58,17 @@ def _http(port, path, body=None):
 
 def handle(msg, port=None):
     """The JSON-RPC answer to one request (None for a notification)."""
+    if not isinstance(msg, dict):
+        return {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "invalid request"}}
     method, mid = msg.get("method"), msg.get("id")
     if mid is None:
         return None  # notifications/initialized and the like
     try:
         if method == "initialize":
-            result = {"protocolVersion": (msg.get("params") or {}).get("protocolVersion") or PROTOCOL,
+            params = msg.get("params")
+            if params is not None and not isinstance(params, dict):
+                return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "invalid params"}}
+            result = {"protocolVersion": (params or {}).get("protocolVersion") or PROTOCOL,
                       "capabilities": {"tools": {}},
                       "serverInfo": {"name": "vulturetracker", "version": __version__},
                       "instructions": "Tools for the song open in the VultureTracker app. The owner decides by ear: "
@@ -82,9 +87,15 @@ def handle(msg, port=None):
             result = {"tools": [{"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
                                 for t in tools]}
         elif method == "tools/call":
-            p = msg.get("params") or {}
+            p = msg.get("params")
+            if p is not None and not isinstance(p, dict):
+                return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "invalid params"}}
+            p = p or {}
+            args = p.get("arguments")
+            if args is not None and not isinstance(args, dict):
+                return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32602, "message": "invalid params"}}
             try:
-                body = {"name": p.get("name"), "args": p.get("arguments") or {}}
+                body = {"name": p.get("name"), "args": args or {}}
                 if os.environ.get("VT_AGENT_RUN_ID"):
                     body["run_id"] = os.environ["VT_AGENT_RUN_ID"]
                 out = _http(_port(port), "/api/tool", body)
